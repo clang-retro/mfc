@@ -3,7 +3,6 @@
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 #include "afximpl.h"
-#include <tchar.h>
 
 IMPLEMENT_DYNAMIC(CWinApp, CWinThread)
 

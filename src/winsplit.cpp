@@ -74,10 +74,11 @@ BOOL CSplitterWnd::CreateCommon(CWnd* pParentWnd, SIZE sizeMin, DWORD dwStyle, U
   dwStyle &= ~(WS_HSCROLL | WS_VSCROLL | SPLS_DYNAMIC_SPLIT | SPLS_INVERT_TRACKER);
   dwStyle |= WS_CHILD;
 
-  CRect rect;
-  pParentWnd->GetClientRect(&rect);
+  // Created empty: the frame's layout gives the splitter its size after
+  // the panes exist, and the WM_SIZE that brings lays them out.
   if (!AfxDeferRegisterClass(AFX_WND_REG)) return FALSE;
-  if (!CreateEx(0, _afxWnd, NULL, dwStyle, rect, pParentWnd, nID, NULL)) return FALSE;
+  if (!CreateEx(0, _afxWnd, NULL, dwStyle, CRect(0, 0, 0, 0), pParentWnd, nID, NULL))
+    return FALSE;
 
   // Each pane draws its own sunken edge, so the frame does not need one.
   if (pParentWnd->GetExStyle() & WS_EX_CLIENTEDGE)

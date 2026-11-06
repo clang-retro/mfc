@@ -33,6 +33,8 @@ BOOL CMDIFrameWnd::PreCreateWindow(CREATESTRUCT& cs) {
   if (!CFrameWnd::PreCreateWindow(cs)) return FALSE;
   // The MDI client draws the sunken edge.
   cs.dwExStyle &= ~WS_EX_CLIENTEDGE;
+  // An MDI frame's title puts the application first: "App - Doc".
+  cs.style &= ~FWS_PREFIXTITLE;
   return TRUE;
 }
 

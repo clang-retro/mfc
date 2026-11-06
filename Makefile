@@ -1,6 +1,10 @@
 # Builds the MFC libraries with clang-retro.
 #
 #   make BIN=/path/to/llvm/bin SYSROOT=/path/to/sysroot TARGET=<triple>
+#   make BIN=/path/to/llvm/bin CFG=/path/to/win32-sdk/cfg/win32-picolibc.cfg
+#
+# With CFG, the clang config file gives the target, sysroot and libraries
+# (as win32-sdk's config files do), and the output goes to build/<name>.
 #
 # Produces $(OUT)/libmfc.a (ANSI) and $(OUT)/libmfcu.a (Unicode).
 # `make install PREFIX=dir` copies the headers to dir/include/mfc and the
@@ -8,16 +12,23 @@
 # for the GUI tests; see tests/run-tests.sh).
 
 BIN ?=
+CFG ?=
 TARGET ?= i586-pc-windows5.1-gnu
 SYSROOT ?=
+ifneq ($(CFG),)
+OUT ?= build/$(basename $(notdir $(CFG)))
+TARGET_FLAGS = --config=$(CFG)
+else
 OUT ?= build/$(TARGET)
+TARGET_FLAGS = --target=$(TARGET) $(if $(SYSROOT),--sysroot=$(SYSROOT),)
+endif
 PREFIX ?= $(SYSROOT)
 
 CXX = $(if $(BIN),$(BIN)/,)clang++
 AR = $(if $(BIN),$(BIN)/,)llvm-ar
 
 CXXFLAGS ?= -O2
-ALL_CXXFLAGS = --target=$(TARGET) $(if $(SYSROOT),--sysroot=$(SYSROOT),) -stdlib=libc++ \
+ALL_CXXFLAGS = $(TARGET_FLAGS) -stdlib=libc++ \
   -std=c++17 -Wall -Wno-invalid-offsetof -Wno-overloaded-virtual -Wno-unused-private-field \
   -Iinclude -Isrc $(CXXFLAGS)
 
@@ -50,7 +61,7 @@ install: all
 	cp $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PREFIX)/lib/
 
 check: all
-	BIN=$(BIN) SYSROOT=$(SYSROOT) TARGET=$(TARGET) OUT=$(OUT) sh tests/run-tests.sh
+	BIN=$(BIN) CFG=$(CFG) SYSROOT=$(SYSROOT) TARGET=$(TARGET) OUT=$(OUT) sh tests/run-tests.sh
 
 clean:
 	rm -rf $(OUT)

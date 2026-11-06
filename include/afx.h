@@ -22,8 +22,14 @@
 #endif
 
 #include <windows.h>
+#if !defined(__has_include) || __has_include(<tchar.h>)
 #include <tchar.h>
+#else
+#include "afxtchar.h"  // C libraries without one, such as picolibc
+#endif
 #include <stddef.h>
+#include <limits.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
@@ -37,10 +43,10 @@
 // std::max still win overload resolution for same-type arguments.)
 #if !defined(NOMINMAX) && !defined(min) && !defined(max)
 #include <type_traits>
-template <class _A, class _B>
-inline typename std::common_type<_A, _B>::type min(_A a, _B b) { return b < a ? b : a; }
-template <class _A, class _B>
-inline typename std::common_type<_A, _B>::type max(_A a, _B b) { return a < b ? b : a; }
+template <class _AfxT1, class _AfxT2>
+inline typename std::common_type<_AfxT1, _AfxT2>::type min(_AfxT1 a, _AfxT2 b) { return b < a ? b : a; }
+template <class _AfxT1, class _AfxT2>
+inline typename std::common_type<_AfxT1, _AfxT2>::type max(_AfxT1 a, _AfxT2 b) { return a < b ? b : a; }
 #endif
 
 // Link the MFC library and the system libraries it uses, as Visual C++

@@ -1,7 +1,7 @@
 #!/bin/sh
 # run-tests.sh - builds the tests against the libraries and runs them.
 #
-# Called by `make check`, which sets BIN, SYSROOT, TARGET and OUT. The
+# Called by `make check`, which sets BIN, CFG or SYSROOT and TARGET, and OUT. The
 # programs run under Wine; the GUI tests also need an X display, so the
 # script starts itself under xvfb-run when there is none. Without Wine the
 # tests are only built.
@@ -13,6 +13,7 @@ set -u
 TARGET=${TARGET:-i586-pc-windows5.1-gnu}
 OUT=${OUT:-build/$TARGET}
 SYSROOT=${SYSROOT:-}
+CFG=${CFG:-}
 BIN=${BIN:-}
 CXX=${BIN:+$BIN/}clang++
 RC=${BIN:+$BIN/}llvm-windres
@@ -30,7 +31,14 @@ T=$OUT/tests
 mkdir -p "$T/a" "$T/u"
 python3 tests/gen-toolbar-bmp.py "$T/toolbar.bmp" 6 || exit 1
 
-CXXFLAGS="--target=$TARGET ${SYSROOT:+--sysroot=$SYSROOT} -fuse-ld=lld -stdlib=libc++ -std=c++17"
+if [ -n "$CFG" ]; then
+  CXXFLAGS="--config=$CFG"
+  # The resources need the sysroot's headers; the config file names it.
+  [ -z "$SYSROOT" ] && SYSROOT=$(sed -n 's/^--sysroot=//p' "$CFG" | sed "s|<CFGDIR>|$(dirname "$CFG")|")
+else
+  CXXFLAGS="--target=$TARGET ${SYSROOT:+--sysroot=$SYSROOT}"
+fi
+CXXFLAGS="$CXXFLAGS -fuse-ld=lld -stdlib=libc++ -std=c++17"
 CXXFLAGS="$CXXFLAGS -Wall -Wno-unused-function -Wno-overloaded-virtual -Iinclude -Itests"
 RCFLAGS="--target=i686-w64-mingw32 -I tests -I include -I $T ${SYSROOT:+-I $SYSROOT/include}"
 
