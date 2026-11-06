@@ -369,12 +369,11 @@ void AFXAPI AfxDeleteObject(HGDIOBJ* pObject) {
   }
 }
 
-// OLE, sockets and rich edit are not part of this library yet; these let
+// Sockets and control containment are not part of this library yet; these let
 // programs that call them start up.
 BOOL AFXAPI AfxInitRichEdit() { return ::LoadLibraryA("riched32.dll") != NULL; }
 BOOL AFXAPI AfxInitRichEdit2() { return ::LoadLibraryA("riched20.dll") != NULL; }
 BOOL AFXAPI AfxEnableControlContainer(void*) { return TRUE; }
-BOOL AFXAPI AfxOleInit() { return TRUE; }
 BOOL AFXAPI AfxSocketInit(void*) {
   return FALSE;
 }

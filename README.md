@@ -36,7 +36,8 @@ clang++ --config=winxp.cfg -Ipath/to/mfc/include app.cpp app-res.o \
 
 As with Visual C++, `afx.h` names the libraries to link, so no `-l`
 options are needed: `mfc` or `mfcu` by `_UNICODE`, and `user32`, `gdi32`,
-`comdlg32`, `comctl32`, `shell32`, `advapi32`, `winspool` and `ole32`.
+`comdlg32`, `comctl32`, `shell32`, `advapi32`, `winspool`, `ole32`,
+`oleaut32` and `uuid`.
 Define `_AFX_NOFORCE_LIBS` to turn that off. The library provides
 `WinMain` (and `wWinMain`), so Unicode programs link with or without
 `-municode`.
@@ -49,6 +50,10 @@ when there is no display:
 
 * `core`: CString, collections, CFile, CArchive and serialization,
   CTime, exceptions and run-time classes, on the console.
+* `disptest`: the automation helpers in `afxdisp.h` (COleDateTime and
+  its span, COleCurrency, COleVariant, COleSafeArray) and a
+  COleDispatchDriver calling an IDispatch written in the test, on the
+  console.
 * `dlgtest`: a dialog with data exchange and validation, common
   controls, and a property sheet.
 * `sditest`: a single-document program with a toolbar, a status bar and
@@ -109,8 +114,11 @@ request with the stock MinGW-w64 toolchain.
   the OLE container classes, which are not there yet.
 * Wine's rich edit control does not implement EM_FORMATRANGE yet, so
   under Wine a CRichEditView prints blank pages; Windows prints them.
-* OLE/COM automation, ActiveX control
-  containment, database classes and sockets are not implemented yet.
+* `afxdisp.h` has the automation client side: the date, currency,
+  variant and safe array classes and COleDispatchDriver. Automation
+  servers (COleDispatchImpl, dispatch maps, COleObjectFactory), the OLE
+  document classes, ActiveX control containment, database classes and
+  sockets are not implemented yet.
 * `llvm-rc` (and `llvm-windres`, which uses it) has no `TOOLBAR`
   statement yet; write toolbar resources as raw resource type 241, as
   `tests/sditest.rc` does.

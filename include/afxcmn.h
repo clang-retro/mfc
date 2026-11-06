@@ -891,6 +891,8 @@ public:
 // ---------------------------------------------------------------------
 // Date, time, IP address, extended combo box and rebar
 
+class COleDateTime;
+
 class CDateTimeCtrl : public CWnd {
   DECLARE_DYNAMIC(CDateTimeCtrl)
 public:
@@ -910,6 +912,11 @@ public:
   BOOL SetRange(DWORD dwFlags, LPSYSTEMTIME pRange) {
     return (BOOL)::SendMessage(m_hWnd, DTM_SETRANGE, dwFlags, (LPARAM)pRange);
   }
+  // With dates (afxdisp.h).
+  BOOL GetTime(COleDateTime& timeDest) const;
+  BOOL SetTime(const COleDateTime& timeNew);
+  DWORD GetRange(COleDateTime* pMinRange, COleDateTime* pMaxRange) const;
+  BOOL SetRange(const COleDateTime* pMinRange, const COleDateTime* pMaxRange);
 };
 
 class CMonthCalCtrl : public CWnd {
@@ -926,6 +933,11 @@ public:
   BOOL GetMinReqRect(RECT* pRect) const {
     return (BOOL)::SendMessage(m_hWnd, MCM_GETMINREQRECT, 0, (LPARAM)pRect);
   }
+  // With dates (afxdisp.h).
+  BOOL GetCurSel(COleDateTime& refDateTime) const;
+  BOOL SetCurSel(const COleDateTime& refDateTime);
+  BOOL GetToday(COleDateTime& refDateTime) const;
+  void SetToday(const COleDateTime& refDateTime);
 };
 
 class CIPAddressCtrl : public CWnd {
