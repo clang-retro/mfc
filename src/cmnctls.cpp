@@ -713,6 +713,22 @@ CString CRichEditCtrl::GetSelText() const {
   return str;
 }
 
+long CRichEditCtrl::GetTextRange(int nFirst, int nLast, CString& refString) const {
+  TEXTRANGE tr;
+  tr.chrg.cpMin = nFirst;
+  tr.chrg.cpMax = nLast;
+  int nLen = nLast - nFirst;
+  if (nLast < 0 || nLen < 0) nLen = (int)::SendMessage(m_hWnd, WM_GETTEXTLENGTH, 0, 0) - nFirst;
+  if (nLen <= 0) {
+    refString.Empty();
+    return 0;
+  }
+  tr.lpstrText = refString.GetBuffer(nLen + 1);
+  long n = (long)::SendMessage(m_hWnd, EM_GETTEXTRANGE, 0, (LPARAM)&tr);
+  refString.ReleaseBuffer(n);
+  return n;
+}
+
 // ---------------------------------------------------------------------
 // CComboBoxEx
 

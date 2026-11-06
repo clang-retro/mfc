@@ -19,17 +19,48 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      # The packages' .debs are cached between runs, so an install only
+      # downloads what changed. The key names the package list; bump the
+      # number to start a fresh cache.
+      - name: Restore the package cache
+        id: apt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/apt-cache
+          key: apt-v1-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-v1-${{ runner.os }}-
       - name: Install clang, MinGW-w64, Wine and Xvfb
         timeout-minutes: 15
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
+          if [ -d ~/apt-cache ]; then
+            sudo cp ~/apt-cache/*.deb /var/cache/apt/archives/ 2>/dev/null || true
+          fi
           sudo apt-get install -y --no-install-recommends clang-18 lld-18 llvm-18 \
             g++-mingw-w64-i686-posix wine wine32:i386 xvfb xauth imagemagick python3
+          mkdir -p ~/apt-cache
+          cp /var/cache/apt/archives/*.deb ~/apt-cache/ 2>/dev/null || true
+      - name: Save the package cache
+        if: steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/apt-cache
+          key: ${{ steps.apt-cache.outputs.cache-primary-key }}
+      # The Wine prefix takes a while to create; keep it too, per Wine version.
+      - name: Find the Wine version
+        id: wine
+        run: echo "version=$(wine --version)" >> "$GITHUB_OUTPUT"
+      - name: Restore the Wine prefix
+        uses: actions/cache@v4
+        with:
+          path: ~/wineprefix
+          key: wineprefix-v1-${{ runner.os }}-${{ steps.wine.outputs.version }}
       - name: Build
         run: make -j"$(nproc)" TARGET=i686-w64-mingw32 STDLIB= BIN=/usr/lib/llvm-18/bin
       - name: Test
         run: |
+          export MFC_TEST_WINEPREFIX="$HOME/wineprefix"
           make check TARGET=i686-w64-mingw32 STDLIB= BIN=/usr/lib/llvm-18/bin \
             TEST_RC=/usr/lib/llvm-18/bin/llvm-windres LDFLAGS="-static -lpthread"
       - uses: actions/upload-artifact@v4

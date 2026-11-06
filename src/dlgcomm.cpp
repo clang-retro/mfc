@@ -199,6 +199,86 @@ CFontDialog::CFontDialog(LPLOGFONT lplfInitial, DWORD dwFlags, CDC* pdcPrinter,
   }
 }
 
+CFontDialog::CFontDialog(const CHARFORMAT& charformat, DWORD dwFlags, CDC* pdcPrinter,
+                         CWnd* pParentWnd)
+    : CCommonDialog(pParentWnd) {
+  memset(&m_cf, 0, sizeof(m_cf));
+  memset(&m_lf, 0, sizeof(m_lf));
+  m_szStyleName[0] = 0;
+  m_cf.lStructSize = sizeof(m_cf);
+  m_cf.lpLogFont = &m_lf;
+  m_cf.lpszStyle = m_szStyleName;
+  m_cf.Flags = dwFlags | CF_INITTOLOGFONTSTRUCT;
+  m_cf.Flags |= FillInLogFont(charformat);
+  if (charformat.dwMask & CFM_COLOR) m_cf.rgbColors = charformat.crTextColor;
+  if (pdcPrinter != NULL) {
+    m_cf.hDC = pdcPrinter->m_hAttribDC;
+    m_cf.Flags |= CF_PRINTERFONTS;
+  }
+}
+
+// Fills m_lf from what cf knows, and returns the flags that leave the
+// rest of the dialog blank.
+DWORD CFontDialog::FillInLogFont(const CHARFORMAT& cf) {
+  DWORD dwFlags = 0;
+  if (cf.dwMask & CFM_SIZE) {
+    HDC hDC = ::GetDC(NULL);
+    m_lf.lfHeight = -::MulDiv(cf.yHeight, ::GetDeviceCaps(hDC, LOGPIXELSY), 1440);
+    ::ReleaseDC(NULL, hDC);
+  } else {
+    dwFlags |= CF_NOSIZESEL;
+  }
+  if ((cf.dwMask & (CFM_BOLD | CFM_ITALIC)) == (CFM_BOLD | CFM_ITALIC)) {
+    m_lf.lfWeight = (cf.dwEffects & CFE_BOLD) ? FW_BOLD : FW_NORMAL;
+    m_lf.lfItalic = (BYTE)((cf.dwEffects & CFE_ITALIC) != 0);
+  } else {
+    dwFlags |= CF_NOSTYLESEL;
+  }
+  m_lf.lfUnderline = (BYTE)((cf.dwMask & CFM_UNDERLINE) && (cf.dwEffects & CFE_UNDERLINE));
+  m_lf.lfStrikeOut = (BYTE)((cf.dwMask & CFM_STRIKEOUT) && (cf.dwEffects & CFE_STRIKEOUT));
+  if (cf.dwMask & CFM_CHARSET)
+    m_lf.lfCharSet = cf.bCharSet;
+  else
+    dwFlags |= CF_NOSCRIPTSEL;
+  if (cf.dwMask & CFM_FACE) {
+    m_lf.lfPitchAndFamily = cf.bPitchAndFamily;
+    lstrcpyn(m_lf.lfFaceName, cf.szFaceName, LF_FACESIZE);
+  } else {
+    dwFlags |= CF_NOFACESEL;
+  }
+  return dwFlags;
+}
+
+void CFontDialog::GetCharFormat(CHARFORMAT& cf) const {
+  cf.dwEffects = 0;
+  cf.dwMask = 0;
+  DWORD dwFlags = m_cf.Flags;
+  if (!(dwFlags & CF_NOSTYLESEL)) {
+    cf.dwMask |= CFM_BOLD | CFM_ITALIC;
+    if (m_lf.lfWeight >= FW_BOLD) cf.dwEffects |= CFE_BOLD;
+    if (m_lf.lfItalic) cf.dwEffects |= CFE_ITALIC;
+  }
+  if (!(dwFlags & CF_NOSIZESEL)) {
+    cf.dwMask |= CFM_SIZE;
+    cf.yHeight = m_cf.iPointSize * 2;  // tenths of a point to twips
+  }
+  if (!(dwFlags & CF_NOFACESEL)) {
+    cf.dwMask |= CFM_FACE;
+    cf.bPitchAndFamily = m_lf.lfPitchAndFamily;
+    lstrcpyn(cf.szFaceName, m_lf.lfFaceName, LF_FACESIZE);
+  }
+  if (dwFlags & CF_EFFECTS) {
+    cf.dwMask |= CFM_UNDERLINE | CFM_STRIKEOUT | CFM_COLOR;
+    if (m_lf.lfUnderline) cf.dwEffects |= CFE_UNDERLINE;
+    if (m_lf.lfStrikeOut) cf.dwEffects |= CFE_STRIKEOUT;
+    cf.crTextColor = m_cf.rgbColors;
+  }
+  if (!(dwFlags & CF_NOSCRIPTSEL)) {
+    cf.dwMask |= CFM_CHARSET;
+    cf.bCharSet = m_lf.lfCharSet;
+  }
+}
+
 INT_PTR CFontDialog::DoModal() {
   return _AfxRunCommonDialog(m_pParentWnd, &m_cf.hwndOwner,
                              [this]() { return ::ChooseFont(&m_cf); });
