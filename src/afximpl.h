@@ -51,6 +51,8 @@ struct AFX_THREAD_STATE {
   UINT m_nMsgLast;
   int m_nDisablePumpCount;
   HWND m_hLockoutNotifyWindow;  // set during UpdateData
+  void* m_pSockState;            // made by afxsock's sockets
+  void (*m_pfnSockTerm)(void*);  // frees m_pSockState
 };
 
 AFX_THREAD_STATE* AFXAPI AfxGetThreadState();
