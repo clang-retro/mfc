@@ -13,6 +13,8 @@
 #ifndef __AFXEXT_H__
 #include <afxext.h>
 #endif
+#include <afxconv.h>
+#include <afxadv.h>
 
 // ---------------------------------------------------------------------
 // CPreviewDC: draws on the screen what a printer would print. The

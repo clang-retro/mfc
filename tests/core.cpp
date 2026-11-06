@@ -2,6 +2,8 @@
 #include <afx.h>
 #include <afxcoll.h>
 #include <afxtempl.h>
+#include <afxconv.h>
+#include <afxadv.h>
 #include <stdio.h>
 
 static int g_failures = 0;
@@ -201,7 +203,55 @@ static void TestTime() {
   CHECK((t2 - t).GetTotalSeconds() == span.GetTotalSeconds());
 }
 
+static void TestConversion() {
+  USES_CONVERSION;
+  LPCWSTR pszW = A2W("caf\xe9");  // e-acute in Windows-1252
+  CHECK(lstrlenW(pszW) == 4 && pszW[3] == 0xE9);
+  CHECK(lstrcmpA(W2A(L"plain"), "plain") == 0);
+  CHECK(lstrcmp(A2T("abc"), _T("abc")) == 0);
+  CHECK(lstrcmpA(T2A(_T("xyz")), "xyz") == 0);
+  CHECK(lstrcmp(OLE2T(L"ole"), _T("ole")) == 0);
+  CHECK(A2W((LPCSTR)NULL) == NULL);
+
+  // The classes, including code pages and strings longer than the buffer.
+  CHECK(lstrcmpA(CW2A(L"\x20AC", CP_UTF8), "\xE2\x82\xAC") == 0);
+  CHECK(lstrcmpW(CA2W("\xE2\x82\xAC", CP_UTF8), L"\x20AC") == 0);
+  CStringA strLong('x', 500);
+  CHECK(lstrlenW(CA2W(strLong)) == 500);
+  CHECK(lstrcmp(CA2T("t"), _T("t")) == 0);
+  CHECK(lstrcmpA(CT2A(_T("u")), "u") == 0);
+  CHECK(lstrcmpW(CT2W(_T("w")), L"w") == 0);
+  BSTR bstr = A2BSTR("bstr");
+  CHECK(bstr != NULL && ::SysStringLen(bstr) == 4);
+  ::SysFreeString(bstr);
+}
+
+static void TestSharedFile() {
+  CSharedFile file;
+  CArchive ar(&file, CArchive::store);
+  ar << (DWORD)0x12345678 << CString(_T("shared"));
+  ar.Close();
+  ULONGLONG nLength = file.GetLength();
+  HGLOBAL hMem = file.Detach();
+  CHECK(hMem != NULL && ::GlobalSize(hMem) >= nLength);
+  CHECK(file.GetLength() == 0);
+
+  // Read it back from the handle, as a clipboard reader would.
+  CSharedFile file2;
+  file2.SetHandle(hMem, FALSE);
+  CArchive ar2(&file2, CArchive::load);
+  DWORD dw = 0;
+  CString str;
+  ar2 >> dw >> str;
+  ar2.Close();
+  CHECK(dw == 0x12345678 && str == _T("shared"));
+  file2.Close();
+  ::GlobalFree(hMem);  // SetHandle leaves the memory the caller's
+}
+
 int main() {
+  TestConversion();
+  TestSharedFile();
   TestString();
   TestCollections();
   TestRuntimeClass();

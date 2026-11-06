@@ -69,3 +69,7 @@ BEGIN
   ID_EDIT_COPY "Copy the selection and put it on the Clipboard\nCopy"
   ID_EDIT_PASTE "Insert Clipboard contents\nPaste"
 END
+
+// The framework's own resources, as AppWizard programs include them.
+#include "afxres.rc"
+#include "afxprint.rc"
