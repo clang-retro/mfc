@@ -753,37 +753,7 @@ typedef CString CAfxString;
 template <typename T> class CSimpleStringT;
 typedef CString CSimpleString;
 
-// String conversion helpers in the style of ATL's CA2T and friends.
-class CA2W {
-public:
-  CA2W(LPCSTR psz, UINT = CP_ACP) : m_s(psz) {}
-  operator LPWSTR() const { return (LPWSTR)m_s.GetString(); }
-  CStringW m_s;
-};
-class CW2A {
-public:
-  CW2A(LPCWSTR psz, UINT = CP_ACP) : m_s(psz) {}
-  operator LPSTR() const { return (LPSTR)m_s.GetString(); }
-  CStringA m_s;
-};
-#ifdef _UNICODE
-typedef CA2W CA2T;
-typedef CW2A CT2A;
-class CW2T { public: CW2T(LPCWSTR p, UINT = 0) : m(p) {} operator LPWSTR() const { return (LPWSTR)m; } LPCWSTR m; };
-typedef CW2T CT2W;
-typedef CW2T CT2CW;
-typedef CW2T CW2CT;
-typedef CA2W CA2CT;
-typedef CW2A CT2CA;
-#else
-typedef CW2A CW2T;
-typedef CA2W CT2W;
-class CA2T { public: CA2T(LPCSTR p, UINT = 0) : m(p) {} operator LPSTR() const { return (LPSTR)m; } LPCSTR m; };
-typedef CA2T CT2A;
-typedef CA2T CT2CA;
-typedef CA2T CA2CT;
-typedef CW2A CW2CT;
-typedef CA2W CT2CW;
-#endif
+// String conversion classes (CA2W, CT2A, ...) and macros.
+#include <atlconv.h>
 
 #endif // __AFXSTR_H__

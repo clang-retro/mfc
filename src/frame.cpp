@@ -541,11 +541,6 @@ BOOL CFrameWnd::NegotiateBorderSpace(UINT nBorderCmd, LPRECT lpRectBorder) {
   return FALSE;
 }
 
-void CFrameWnd::OnSetPreviewMode(BOOL bPreview, void* pState) {
-  (void)bPreview;
-  (void)pState;
-}
-
 void CFrameWnd::AddControlBar(CControlBar* pBar) { m_listControlBars.AddTail(pBar); }
 
 void CFrameWnd::RemoveControlBar(CControlBar* pBar) {

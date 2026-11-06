@@ -290,6 +290,8 @@ public:
   virtual CSize CalcFixedLayout(BOOL bStretch, BOOL bHorz);
   virtual void OnUpdateCmdUI(CFrameWnd* pTarget, BOOL bDisableIfNoHndler);
 
+  friend BOOL AFXAPI _AfxCreateDialogBarIndirect(CDialogBar*, CWnd*, LPCDLGTEMPLATE, UINT, UINT);
+
 };
 
 // ---------------------------------------------------------------------
@@ -558,6 +560,17 @@ public:
 #define PRINTFLAG_USERSUPPLIEDPRINTER 0x0004
 #define PRINTFLAG_FORCEALLPAGES 0x0008
 #define PRINTFLAG_RECTPAGES 0x0010
+
+// What a frame saves while it shows print preview (CFrameWnd::OnSetPreviewMode).
+struct CPrintPreviewState : public CObject {
+  UINT nIDMainPane;
+  HMENU hMenu;
+  DWORD dwStates;
+  CView* pViewActiveOld;
+  BOOL(CALLBACK* lpfnCloseProc)(CFrameWnd* pFrameWnd);
+  HACCEL hAccelTable;
+  CPrintPreviewState();
+};
 
 class CPrintInfo {
 public:

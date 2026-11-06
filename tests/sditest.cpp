@@ -3,6 +3,7 @@
 #include <afxwin.h>
 #include <afxext.h>
 #include "sditest.h"
+#include <afxpriv.h>
 #include "testutil.h"
 
 class CSdiDoc : public CDocument {
@@ -25,8 +26,13 @@ class CSdiView : public CEditView {
   DECLARE_DYNCREATE(CSdiView)
 public:
   CSdiDoc* GetDocument() const { return (CSdiDoc*)m_pDocument; }
+  DECLARE_MESSAGE_MAP()
 };
 IMPLEMENT_DYNCREATE(CSdiView, CEditView)
+BEGIN_MESSAGE_MAP(CSdiView, CEditView)
+  ON_COMMAND(ID_FILE_PRINT, CEditView::OnFilePrint)
+  ON_COMMAND(ID_FILE_PRINT_PREVIEW, CEditView::OnFilePrintPreview)
+END_MESSAGE_MAP()
 
 static const UINT indicators[] = {ID_SEPARATOR, ID_INDICATOR_CAPS, ID_INDICATOR_NUM,
                                   ID_INDICATOR_SCRL};
@@ -38,8 +44,9 @@ public:
   CStatusBar m_wndStatusBar;
   int m_nStep;
   CString m_strPath;
+  CView* m_pOrigView;
 
-  CMainFrame() : m_nStep(0) {}
+  CMainFrame() : m_nStep(0), m_pOrigView(NULL) {}
 
   afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct) {
     if (CFrameWnd::OnCreate(lpCreateStruct) == -1) return -1;
@@ -178,7 +185,77 @@ public:
         CHECK(m_wndStatusBar.IsWindowVisible());
         break;
       }
-      case 3:
+      case 3: {
+        // Print preview of enough text for several pages.
+        CString strText;
+        for (int i = 1; i <= 150; i++) {
+          CString strLine;
+          strLine.Format(_T("Line %d of the print preview test.\r\n"), i);
+          strText += strLine;
+        }
+        GetView()->SetWindowText(strText);
+        m_pOrigView = GetView();
+        SendMessage(WM_COMMAND, ID_FILE_PRINT_PREVIEW);
+        CView* pView = GetActiveView();
+        CHECK(pView != NULL && pView->IsKindOf(RUNTIME_CLASS(CPreviewView)));
+        if (pView == NULL || !pView->IsKindOf(RUNTIME_CLASS(CPreviewView))) {
+          m_nStep = 6;  // skip the rest of preview
+          break;
+        }
+        CPreviewView* pPreview = (CPreviewView*)pView;
+        CHECK(::GetMenu(m_hWnd) == NULL);
+        CHECK(!m_wndToolBar.IsWindowVisible());
+        CHECK(m_wndStatusBar.IsWindowVisible());
+        CControlBar* pBar = GetControlBar(AFX_IDW_PREVIEW_BAR);
+        CHECK(pBar != NULL && pBar->IsWindowVisible());
+        CHECK(GetDlgItem(AFX_IDW_PANE_SAVE) == m_pOrigView);
+        CHECK(!m_pOrigView->IsWindowVisible());
+        CHECK(pPreview->m_nCurrentPage == 1);
+        TestLog("preview: page text '%s'", (LPCSTR)CStringA(m_wndStatusBar.GetPaneText(0)));
+        CHECK(m_wndStatusBar.GetPaneText(0) == _T("Page 1"));
+        CRect rcPage = pPreview->m_pPageInfo[0].rectScreen;
+        TestLog("preview: page %ld,%ld-%ld,%ld", rcPage.left, rcPage.top, rcPage.right,
+                rcPage.bottom);
+        CHECK(rcPage.Width() > 50 && rcPage.Height() > rcPage.Width());
+        break;
+      }
+      case 4: {
+        // The toolbar's buttons were updated at idle time.
+        CControlBar* pBar = GetControlBar(AFX_IDW_PREVIEW_BAR);
+        CPreviewView* pPreview = (CPreviewView*)GetActiveView();
+        CWnd* pNext = pBar != NULL ? pBar->GetDlgItem(AFX_ID_PREVIEW_NEXT) : NULL;
+        CWnd* pPrev = pBar != NULL ? pBar->GetDlgItem(AFX_ID_PREVIEW_PREV) : NULL;
+        CHECK(pNext != NULL && pNext->IsWindowEnabled());
+        CHECK(pPrev != NULL && !pPrev->IsWindowEnabled());
+        TestSaveWindowBitmap(m_hWnd, _T("sditest-preview.bmp"));
+        pBar->GetDlgItem(AFX_ID_PREVIEW_NEXT)->SendMessage(BM_CLICK);
+        CHECK(pPreview->m_nCurrentPage == 2);
+        CHECK(m_wndStatusBar.GetPaneText(0) == _T("Page 2"));
+        SendMessage(WM_COMMAND, AFX_ID_PREVIEW_NUMPAGE);
+        CHECK(pPreview->m_nPages == 2);
+        CHECK(m_wndStatusBar.GetPaneText(0) == _T("Pages 2-3"));
+        SendMessage(WM_COMMAND, AFX_ID_PREVIEW_ZOOMIN);
+        CHECK(pPreview->m_nZoomState == CPreviewView::ZOOM_MIDDLE);
+        CHECK(pPreview->m_nPages == 1);
+        CHECK(pPreview->GetStyle() & WS_VSCROLL);
+        break;
+      }
+      case 5: {
+        TestSaveWindowBitmap(m_hWnd, _T("sditest-zoom.bmp"));
+        // Closing puts everything back.
+        SendMessage(WM_COMMAND, AFX_ID_PREVIEW_CLOSE);
+        CHECK(GetActiveView() == m_pOrigView);
+        CHECK(m_pOrigView->IsWindowVisible());
+        CHECK(m_pOrigView->GetDlgCtrlID() == AFX_IDW_PANE_FIRST);
+        CHECK(GetControlBar(AFX_IDW_PREVIEW_BAR) == NULL);
+        CHECK(m_wndToolBar.IsWindowVisible());
+        CHECK(::GetMenu(m_hWnd) != NULL);
+        CRect rcView;
+        m_pOrigView->GetWindowRect(&rcView);
+        CHECK(rcView.Height() > 100);
+        break;
+      }
+      case 6:
         KillTimer(1);
         GetActiveDocument()->SetModifiedFlag(FALSE);
         PostMessage(WM_CLOSE);

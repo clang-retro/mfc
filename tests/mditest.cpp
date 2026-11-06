@@ -4,6 +4,7 @@
 #include <afxwin.h>
 #include <afxext.h>
 #include "mditest.h"
+#include <afxpriv.h>
 #include "testutil.h"
 
 class CShapeDoc : public CDocument {
@@ -67,6 +68,10 @@ public:
     m_nUpdates++;
     Invalidate();
   }
+  virtual BOOL OnPreparePrinting(CPrintInfo* pInfo) {
+    pInfo->SetMaxPage(2);
+    return DoPreparePrinting(pInfo);
+  }
   virtual void OnDraw(CDC* pDC) {
     CBrush brush(RGB(0, 128, 192));
     CBrush* pOld = pDC->SelectObject(&brush);
@@ -75,8 +80,12 @@ public:
     pDC->SetBkMode(TRANSPARENT);
     pDC->TextOut(40, 150, GetDocument()->m_strCaption);
   }
+  DECLARE_MESSAGE_MAP()
 };
 IMPLEMENT_DYNCREATE(CDrawView, CScrollView)
+BEGIN_MESSAGE_MAP(CDrawView, CScrollView)
+  ON_COMMAND(ID_FILE_PRINT_PREVIEW, CView::OnFilePrintPreview)
+END_MESSAGE_MAP()
 
 class CChildFrame : public CMDIChildWnd {
   DECLARE_DYNCREATE(CChildFrame)
@@ -109,7 +118,8 @@ public:
   CToolBar m_wndToolBar;
   CStatusBar m_wndStatusBar;
   int m_nStep;
-  CMainFrame() : m_nStep(0) {}
+  CView* m_pPrintView;
+  CMainFrame() : m_nStep(0), m_pPrintView(NULL) {}
 
   afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct) {
     if (CMDIFrameWnd::OnCreate(lpCreateStruct) == -1) return -1;
@@ -258,6 +268,41 @@ public:
         break;
       }
       case 3: {
+        // Print preview takes over the main window, MDI client and all.
+        CChildFrame* pChild = (CChildFrame*)MDIGetActive();
+        m_pPrintView = (CView*)pChild->m_wndSplitter.GetPane(0, 1);
+        pChild->SetActiveView(m_pPrintView);
+        SendMessage(WM_COMMAND, ID_FILE_PRINT_PREVIEW);
+        CView* pView = GetActiveView();
+        CHECK(pView != NULL && pView->IsKindOf(RUNTIME_CLASS(CPreviewView)));
+        if (pView == NULL || !pView->IsKindOf(RUNTIME_CLASS(CPreviewView))) {
+          m_nStep = 5;
+          break;
+        }
+        CHECK(pView->GetParent() == this);
+        CHECK(!::IsWindowVisible(m_hWndMDIClient));
+        CHECK(::GetDlgCtrlID(m_hWndMDIClient) == AFX_IDW_PANE_SAVE);
+        CHECK(::GetMenu(m_hWnd) == NULL);
+        CHECK(!m_wndToolBar.IsWindowVisible());
+        CHECK(m_wndStatusBar.GetPaneText(0) == _T("Page 1"));
+        SendMessage(WM_COMMAND, AFX_ID_PREVIEW_NUMPAGE);
+        CHECK(m_wndStatusBar.GetPaneText(0) == _T("Pages 1-2"));
+        break;
+      }
+      case 4: {
+        TestSaveWindowBitmap(m_hWnd, _T("mditest-preview.bmp"));
+        CControlBar* pBar = GetControlBar(AFX_IDW_PREVIEW_BAR);
+        CHECK(pBar != NULL && !pBar->GetDlgItem(AFX_ID_PREVIEW_NEXT)->IsWindowEnabled());
+        SendMessage(WM_COMMAND, AFX_ID_PREVIEW_CLOSE);
+        CHECK(::IsWindowVisible(m_hWndMDIClient));
+        CHECK(::GetDlgCtrlID(m_hWndMDIClient) == AFX_IDW_PANE_FIRST);
+        CHECK(GetMenu() != NULL && GetMenu()->GetMenuItemCount() == 3);
+        CHECK(m_wndToolBar.IsWindowVisible());
+        CHECK(GetActiveView() == NULL);
+        CHECK(MDIGetActive() != NULL && MDIGetActive()->GetActiveView() == m_pPrintView);
+        break;
+      }
+      case 5: {
         // Closing the frame windows closes the documents.
         MDIGetActive()->SendMessage(WM_CLOSE);
         CHECK(CountChildren(m_hWndMDIClient) == 2);
@@ -276,7 +321,7 @@ public:
         CHECK(str == _T("MdiTest"));
         break;
       }
-      case 4:
+      case 6:
         KillTimer(1);
         PostMessage(WM_CLOSE);
         break;

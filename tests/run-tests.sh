@@ -46,6 +46,25 @@ RCFLAGS="--target=i686-w64-mingw32 -I tests -I include -I $T ${SYSROOT:+-I $SYSR
 nfail=0
 npass=0
 
+# The tests run in a Wine prefix of their own, with a printer for the
+# printing and print preview tests (Wine has none without CUPS).
+if [ $HAVE_WINE = 1 ]; then
+  export WINEPREFIX=${MFC_TEST_WINEPREFIX:-$(pwd)/$T/wineprefix}
+  export WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d"
+  if [ ! -f "$WINEPREFIX/system.reg" ]; then
+    wineboot -i >/dev/null 2>&1
+    wineserver -w
+  fi
+  # shellcheck disable=SC2086
+  if "$CXX" $CXXFLAGS tests/addprinter.cpp $LDFLAGS -lwinspool -lgdi32 -o "$T/addprinter.exe" \
+       2>"$T/addprinter-build.log"; then
+    timeout 120 wine "$T/addprinter.exe" > "$T/addprinter.log" 2>&1 ||
+      { echo "note: no test printer (see $T/addprinter.log)"; }
+  else
+    echo "note: addprinter did not build (see $T/addprinter-build.log)"
+  fi
+fi
+
 # Turns a Unix path into the Windows path Wine sees.
 winpath() {
   echo "Z:$(cd "$1" && pwd)" | tr / '\\'

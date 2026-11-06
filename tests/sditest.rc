@@ -13,6 +13,7 @@ BEGIN
     MENUITEM "Save &As...", ID_FILE_SAVE_AS
     MENUITEM SEPARATOR
     MENUITEM "&Print...\tCtrl+P", ID_FILE_PRINT
+    MENUITEM "Print Pre&view", ID_FILE_PRINT_PREVIEW
     MENUITEM SEPARATOR
     MENUITEM "E&xit", ID_APP_EXIT
   END
@@ -68,3 +69,7 @@ BEGIN
   ID_EDIT_COPY "Copy the selection and put it on the Clipboard\nCopy"
   ID_EDIT_PASTE "Insert Clipboard contents\nPaste"
 END
+
+// The framework's own resources, as AppWizard programs include them.
+#include "afxres.rc"
+#include "afxprint.rc"

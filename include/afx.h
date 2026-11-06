@@ -71,7 +71,7 @@ inline typename std::common_type<_AfxT1, _AfxT2>::type max(_AfxT1 a, _AfxT2 b) {
 __asm__(".section .drectve,\"yn\"\n"
         ".ascii \" -defaultlib:" _AFX_LIB_NAME " -defaultlib:user32 -defaultlib:gdi32"
         " -defaultlib:comdlg32 -defaultlib:comctl32 -defaultlib:shell32 -defaultlib:advapi32"
-        " -defaultlib:winspool -defaultlib:ole32\"\n"
+        " -defaultlib:winspool -defaultlib:ole32 -defaultlib:oleaut32\"\n"
         ".text");
 #endif
 
