@@ -18,6 +18,7 @@ BEGIN_MESSAGE_MAP(CFrameWnd, CWnd)
   ON_WM_SIZE()
   ON_WM_ERASEBKGND()
   ON_WM_ACTIVATE()
+  ON_WM_NCACTIVATE()
   ON_WM_QUERYENDSESSION()
   ON_WM_ENDSESSION()
   ON_WM_DROPFILES()
@@ -345,6 +346,7 @@ void CFrameWnd::OnIdleUpdateCmdUI() {
     RecalcLayout(bNotify);
     UpdateWindow();
   }
+  _UpdateFloatingFrames();
 }
 
 LRESULT CFrameWnd::OnIdleUpdateCmdUIMsg(WPARAM, LPARAM) {
@@ -577,7 +579,11 @@ void CFrameWnd::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized) {
   }
 }
 
-BOOL CFrameWnd::OnNcActivate(BOOL bActive) { return CWnd::OnNcActivate(bActive); }
+BOOL CFrameWnd::OnNcActivate(BOOL bActive) {
+  // Floating bars' captions follow this frame's.
+  NotifyFloatingWindows(bActive ? FS_ACTIVATE : FS_DEACTIVATE);
+  return CWnd::OnNcActivate(bActive);
+}
 
 void CFrameWnd::OnSysCommand(UINT nID, LPARAM lParam) { CWnd::OnSysCommand(nID, lParam); }
 
@@ -675,6 +681,7 @@ void CFrameWnd::OnDestroy() {
   if (pApp != NULL && pApp->m_pMainWnd == this && pApp->m_pszHelpFilePath != NULL)
     ::WinHelp(m_hWnd, NULL, HELP_QUIT, 0);
 
+  DestroyDockBars();
   CWnd::OnDestroy();
 }
 

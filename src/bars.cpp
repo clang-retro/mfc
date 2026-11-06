@@ -8,12 +8,12 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 #include "afximpl.h"
 #include <afxext.h>
+#include <afxpriv.h>
 
 IMPLEMENT_DYNAMIC(CControlBar, CWnd)
 IMPLEMENT_DYNAMIC(CStatusBar, CControlBar)
 IMPLEMENT_DYNAMIC(CToolBar, CControlBar)
 IMPLEMENT_DYNAMIC(CDialogBar, CControlBar)
-IMPLEMENT_SERIAL(CDockState, CObject, 1)
 
 // Sizes in pixels.
 static const int CX_EDGE = 2;           // one etched border side
@@ -34,6 +34,9 @@ BEGIN_MESSAGE_MAP(CControlBar, CWnd)
   ON_WM_NCPAINT()
   ON_WM_TIMER()
   ON_WM_MOUSEMOVE()
+  ON_WM_LBUTTONDOWN()
+  ON_WM_LBUTTONDBLCLK()
+  ON_WM_NCHITTEST()
   ON_MESSAGE(WM_SIZEPARENT, OnSizeParent)
   ON_MESSAGE(WM_IDLEUPDATECMDUI, OnIdleUpdateCmdUI)
 END_MESSAGE_MAP()
@@ -57,6 +60,7 @@ CControlBar::CControlBar() {
 
 CControlBar::~CControlBar() {
   DestroyWindow();
+  delete m_pDockContext;
   if (m_pData != NULL) ::free(m_pData);
 }
 
@@ -95,7 +99,14 @@ void CControlBar::OnBarStyleChange(DWORD dwOldStyle, DWORD dwNewStyle) {
   (void)dwNewStyle;
 }
 
-void CControlBar::EnableDocking(DWORD dwDockStyle) { m_dwDockStyle = dwDockStyle; }
+void CControlBar::EnableDocking(DWORD dwDockStyle) {
+  m_dwDockStyle = dwDockStyle;
+  if (m_pDockContext == NULL && dwDockStyle != 0) m_pDockContext = new CDockContext(this);
+  // Commands and updates keep going to the frame wherever the bar moves.
+  if (m_hWndOwner == NULL && m_hWnd != NULL) m_hWndOwner = ::GetParent(m_hWnd);
+}
+
+BOOL CControlBar::IsFloating() const { return m_pDockBar != NULL && m_pDockBar->m_bFloating; }
 
 CFrameWnd* CControlBar::GetDockingFrame() const {
   if (m_pDockSite != NULL) return m_pDockSite;
@@ -107,6 +118,11 @@ BOOL CControlBar::IsVisible() const { return (GetStyle() & WS_VISIBLE) != 0; }
 void CControlBar::DelayShow(BOOL bShow) {
   if (m_hWnd == NULL) return;
   ShowWindow(bShow ? SW_SHOWNA : SW_HIDE);
+  // A floating bar's frame shows and hides with it.
+  if (IsFloating()) {
+    CWnd* pMiniFrame = m_pDockBar->GetParent();
+    if (pMiniFrame != NULL && pMiniFrame->IsFrameWnd()) ((CFrameWnd*)pMiniFrame)->RecalcLayout();
+  }
   CFrameWnd* pFrame = GetDockingFrame();
   if (pFrame != NULL) pFrame->DelayRecalcLayout();
 }
@@ -158,6 +174,8 @@ int CControlBar::OnCreate(LPCREATESTRUCT lpcs) {
 }
 
 void CControlBar::OnDestroy() {
+  if (m_pDockBar != NULL && !IsDockBar()) m_pDockBar->RemoveControlBar(this);
+  m_pDockBar = NULL;
   if (m_pDockSite != NULL) {
     m_pDockSite->RemoveControlBar(this);
     m_pDockSite = NULL;
@@ -377,6 +395,38 @@ void CControlBar::OnMouseMove(UINT nFlags, CPoint point) {
   }
   (void)nFlags;
   Default();
+}
+
+// A press on the bar's background (not on a button or control) drags
+// the bar; a double click docks or floats it.
+void CControlBar::OnLButtonDown(UINT nFlags, CPoint point) {
+  if (m_pDockContext != NULL && OnToolHitTest(point, NULL) == -1) {
+    ClientToScreen(&point);
+    m_pDockContext->StartDrag(point);
+    return;
+  }
+  (void)nFlags;
+  Default();
+}
+
+void CControlBar::OnLButtonDblClk(UINT nFlags, CPoint point) {
+  if (m_pDockContext != NULL && OnToolHitTest(point, NULL) == -1) {
+    m_pDockContext->ToggleDocking();
+    return;
+  }
+  (void)nFlags;
+  Default();
+}
+
+// The gripper and borders are drawn in the non-client area, but they are
+// part of what the mouse can grab.
+LRESULT CControlBar::OnNcHitTest(CPoint point) {
+  if (m_pDockContext != NULL) {
+    CRect rect;
+    GetWindowRect(&rect);
+    if (rect.PtInRect(point)) return HTCLIENT;
+  }
+  return Default();
 }
 
 void CControlBar::OnTimer(UINT_PTR nIDEvent) {
@@ -669,28 +719,94 @@ CString CToolBar::GetButtonText(int nIndex) const {
   return str;
 }
 
-// Lays the buttons out in one row (horizontal) or one column (vertical)
-// and returns the size of the whole bar.
-CSize CToolBar::CalcLayout(DWORD dwMode, int nLength) {
-  (void)nLength;
-  BOOL bHorz = (dwMode & (LM_HORZDOCK | LM_VERTDOCK)) ? (dwMode & LM_HORZDOCK) != 0
-                                                      : (dwMode & LM_HORZ) != 0;
+// Sets which buttons end a row. The control does not lay itself out
+// again when only TBSTATE_WRAP changes, but it does when a button is
+// inserted, so the last button changed goes in again once the rest are
+// set.
+void CToolBar::_ApplyWraps(const BYTE* pWrap) {
   int nCount = (int)DefWindowProc(TB_BUTTONCOUNT, 0, 0);
+  int nReinsert = -1;
+  BOOL bRedraw = FALSE;
   for (int i = 0; i < nCount; i++) {
     TBBUTTON button;
     _GetButton(i, &button);
-    BYTE fsState = button.fsState;
-    if (bHorz)
-      fsState &= ~TBSTATE_WRAP;
-    else
-      fsState |= TBSTATE_WRAP;
-    if (fsState != button.fsState) {
-      button.fsState = fsState;
-      _SetButton(i, &button);
+    BOOL bWrap = (button.fsState & TBSTATE_WRAP) != 0;
+    if (bWrap == (pWrap[i] != 0)) continue;
+    button.fsState ^= TBSTATE_WRAP;
+    if (!bRedraw) {
+      SetRedraw(FALSE);
+      bRedraw = TRUE;
+    }
+    if ((button.fsStyle & TBSTYLE_SEP) || button.idCommand == 0) {
+      DefWindowProc(TB_DELETEBUTTON, i, 0);
+      DefWindowProc(TB_INSERTBUTTON, i, (LPARAM)&button);
+      nReinsert = -1;
+    } else {
+      DefWindowProc(TB_SETSTATE, button.idCommand, MAKELONG(button.fsState, 0));
+      nReinsert = i;
     }
   }
+  if (nReinsert >= 0) {
+    TBBUTTON button;
+    _GetButton(nReinsert, &button);
+    DefWindowProc(TB_DELETEBUTTON, nReinsert, 0);
+    DefWindowProc(TB_INSERTBUTTON, nReinsert, (LPARAM)&button);
+  }
+  if (bRedraw) {
+    SetRedraw(TRUE);
+    Invalidate();
+  }
+}
 
+void CToolBar::_SetWraps(BOOL bAll) {
+  int nCount = (int)DefWindowProc(TB_BUTTONCOUNT, 0, 0);
+  if (nCount == 0) return;
+  BYTE* pWrap = new BYTE[nCount];
+  memset(pWrap, bAll ? 1 : 0, nCount);
+  _ApplyWraps(pWrap);
+  delete[] pWrap;
+}
+
+// Breaks the buttons into rows no wider than nWidth (the client width),
+// breaking at a separator where one falls at the end of a row.
+void CToolBar::_WrapToWidth(int nWidth) {
+  _SetWraps(FALSE);
+  int nCount = (int)DefWindowProc(TB_BUTTONCOUNT, 0, 0);
+  if (nCount == 0) return;
+  int* pWidth = new int[nCount];
+  BYTE* pWrap = new BYTE[nCount];
+  memset(pWrap, 0, nCount);
+  for (int i = 0; i < nCount; i++) {
+    CRect rect;
+    TBBUTTON button;
+    _GetButton(i, &button);
+    if ((button.fsState & TBSTATE_HIDDEN) || !DefWindowProc(TB_GETITEMRECT, i, (LPARAM)&rect))
+      pWidth[i] = 0;
+    else
+      pWidth[i] = rect.Width();
+  }
+  int x = 0;
+  for (int i = 0; i < nCount; i++) {
+    TBBUTTON button;
+    _GetButton(i, &button);
+    BOOL bSep = (button.fsStyle & TBSTYLE_SEP) != 0;
+    if (x > 0 && x + pWidth[i] > nWidth) {
+      // The row is full: end it at this separator, or before this button.
+      pWrap[bSep ? i : i - 1] = 1;
+      x = bSep ? 0 : pWidth[i];
+      continue;
+    }
+    if (x == 0 && bSep) continue;  // no separator at the start of a row
+    x += pWidth[i];
+  }
+  _ApplyWraps(pWrap);
+  delete[] pWrap;
+  delete[] pWidth;
+}
+
+CSize CToolBar::_CalcButtonsSize() {
   CSize size(0, 0);
+  int nCount = (int)DefWindowProc(TB_BUTTONCOUNT, 0, 0);
   for (int i = 0; i < nCount; i++) {
     TBBUTTON button;
     _GetButton(i, &button);
@@ -700,6 +816,51 @@ CSize CToolBar::CalcLayout(DWORD dwMode, int nLength) {
     size.cx = max(size.cx, (LONG)rect.right);
     size.cy = max(size.cy, (LONG)rect.bottom);
   }
+  return size;
+}
+
+// Lays the buttons out and returns the size of the whole bar. Docked
+// along the top or bottom the buttons are in one row, and docked at a
+// side in one column. Otherwise (floating) a bar with CBRS_SIZE_DYNAMIC
+// wraps into rows: nLength is the width wanted, or with LM_LENGTHY the
+// height; LM_MRUWIDTH uses the width last committed with LM_COMMIT.
+CSize CToolBar::CalcLayout(DWORD dwMode, int nLength) {
+  BOOL bDock = (dwMode & (LM_HORZDOCK | LM_VERTDOCK)) != 0;
+  BOOL bHorz = bDock ? (dwMode & LM_HORZDOCK) != 0 : (dwMode & LM_HORZ) != 0;
+  BOOL bWrap = !bDock && ((dwMode & (LM_MRUWIDTH | LM_COMMIT)) || nLength != -1);
+
+  CRect rectInside(0, 0, 0, 0);
+  CalcInsideRect(rectInside, TRUE);
+  int cxExtra = -rectInside.Width(), cyExtra = -rectInside.Height();
+
+  if (bWrap) {
+    bHorz = TRUE;
+    int nWidth;
+    if (dwMode & LM_MRUWIDTH) {
+      nWidth = (int)m_nMRUWidth;
+    } else if (dwMode & LM_LENGTHY) {
+      // The narrowest layout that fits in the height.
+      _WrapToWidth(32767);
+      CSize sizeRow = _CalcButtonsSize();
+      int cxMin = m_sizeButton.cx;
+      nWidth = sizeRow.cx;
+      for (int cx = cxMin; cx < sizeRow.cx; cx += max(1, (int)m_sizeButton.cx / 2)) {
+        _WrapToWidth(cx);
+        if (_CalcButtonsSize().cy + cyExtra <= nLength) {
+          nWidth = cx;
+          break;
+        }
+      }
+      nWidth += cxExtra;
+    } else {
+      nWidth = nLength;
+    }
+    _WrapToWidth(max(nWidth - cxExtra, (int)m_sizeButton.cx));
+  } else {
+    _SetWraps(!bHorz);
+  }
+
+  CSize size = _CalcButtonsSize();
   if (bHorz)
     size.cy = max(size.cy, m_sizeButton.cy);
   else
@@ -709,17 +870,27 @@ CSize CToolBar::CalcLayout(DWORD dwMode, int nLength) {
   CalcInsideRect(rect, bHorz);
   size.cx -= rect.Width();
   size.cy -= rect.Height();
-  if (dwMode & LM_STRETCH) {
+  // A docked toolbar is as long as its buttons; only a bar laid out by
+  // the frame itself (without dock bars) stretches.
+  if ((dwMode & LM_STRETCH) && m_pDockBar == NULL) {
     if (bHorz)
       size.cx = 32767;
     else
       size.cy = 32767;
   }
+  if (bWrap && (dwMode & LM_COMMIT)) m_nMRUWidth = (UINT)size.cx;
   m_bDelayedButtonLayout = FALSE;
   return size;
 }
 
-void CToolBar::Layout() { CalcLayout(IsHorzBar() ? LM_HORZ | LM_HORZDOCK : LM_VERTDOCK); }
+void CToolBar::Layout() {
+  if (IsFloating() && (m_dwStyle & CBRS_SIZE_DYNAMIC))
+    CalcLayout(LM_HORZ | LM_MRUWIDTH);
+  else if (IsFloating())
+    CalcLayout(IsHorzBar() ? LM_HORZ : 0);
+  else
+    CalcLayout(IsHorzBar() ? LM_HORZ | LM_HORZDOCK : LM_VERTDOCK);
+}
 
 CSize CToolBar::CalcFixedLayout(BOOL bStretch, BOOL bHorz) {
   DWORD dwMode = bStretch ? LM_STRETCH : 0;
@@ -1199,54 +1370,6 @@ void CDialogBar::OnUpdateCmdUI(CFrameWnd* pTarget, BOOL bDisableIfNoHndler) {
 
 // ---------------------------------------------------------------------
 // The frame's side of control bars
-
-void CFrameWnd::EnableDocking(DWORD dwDockStyle) { m_dwDockStyle = dwDockStyle & CBRS_ALIGN_ANY; }
-
-void CFrameWnd::DockControlBar(CControlBar* pBar, UINT nDockBarID, LPCRECT lpRect) {
-  (void)lpRect;
-  DWORD dwAlign = 0;
-  switch (nDockBarID) {
-    case AFX_IDW_DOCKBAR_TOP:
-      dwAlign = CBRS_ALIGN_TOP;
-      break;
-    case AFX_IDW_DOCKBAR_BOTTOM:
-      dwAlign = CBRS_ALIGN_BOTTOM;
-      break;
-    case AFX_IDW_DOCKBAR_LEFT:
-      dwAlign = CBRS_ALIGN_LEFT;
-      break;
-    case AFX_IDW_DOCKBAR_RIGHT:
-      dwAlign = CBRS_ALIGN_RIGHT;
-      break;
-    default: {
-      DWORD dwAllowed = pBar->m_dwDockStyle & m_dwDockStyle & CBRS_ALIGN_ANY;
-      if (dwAllowed == 0) dwAllowed = CBRS_ALIGN_ANY;
-      DWORD dwCurrent = pBar->m_dwStyle & CBRS_ALIGN_ANY & dwAllowed;
-      static const DWORD order[] = {CBRS_ALIGN_TOP, CBRS_ALIGN_BOTTOM, CBRS_ALIGN_LEFT,
-                                    CBRS_ALIGN_RIGHT};
-      for (int i = 0; i < 4 && dwAlign == 0; i++)
-        if (dwCurrent & order[i]) dwAlign = order[i];
-      for (int i = 0; i < 4 && dwAlign == 0; i++)
-        if (dwAllowed & order[i]) dwAlign = order[i];
-    }
-  }
-  DWORD dwStyle = pBar->m_dwStyle & ~(CBRS_ALIGN_ANY | CBRS_BORDER_ANY | CBRS_FLOATING);
-  dwStyle |= dwAlign | CBRS_BORDER_3D;
-  if (dwAlign & CBRS_ORIENT_HORZ)
-    dwStyle |= CBRS_BORDER_TOP | CBRS_BORDER_BOTTOM;
-  else
-    dwStyle |= CBRS_BORDER_LEFT | CBRS_BORDER_RIGHT;
-  pBar->m_pDockSite = this;
-  pBar->SetBarStyle(dwStyle);
-  if (m_hWnd != NULL) RecalcLayout();
-}
-
-void CFrameWnd::FloatControlBar(CControlBar* pBar, CPoint point, DWORD dwStyle) {
-  // Floating is not supported: the bar stays docked.
-  (void)pBar;
-  (void)point;
-  (void)dwStyle;
-}
 
 CControlBar* CFrameWnd::GetControlBar(UINT nID) {
   if (nID == 0) return NULL;

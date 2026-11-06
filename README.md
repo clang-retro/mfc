@@ -56,6 +56,9 @@ when there is no display:
 * `mditest`: a multiple-document program whose child frames are split
   into a form view and a scroll view; several documents, the Window menu
   commands, closing.
+* `docktest`: toolbars docked side by side and on each edge, floating,
+  dragged with the mouse, double-clicked, resized while floating, and
+  the layout saved and loaded with SaveBarState and LoadBarState.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -72,8 +75,8 @@ request with the stock MinGW-w64 toolchain.
   command routing and idle updates, GDI objects and device contexts,
   standard controls, CDialog with DDX/DDV, frames, documents and views
   (SDI and MDI), CScrollView, printing.
-* `afxext.h`: CToolBar, CStatusBar, CDialogBar, docking at the frame
-  edges, CSplitterWnd (static and dynamic), CFormView, CEditView,
+* `afxext.h`: CToolBar, CStatusBar, CDialogBar, docking and floating
+  (dock bars, CMiniFrameWnd, drag and drop, CDockState), CSplitterWnd (static and dynamic), CFormView, CEditView,
   CBitmapButton.
 * `afxdlgs.h`: the common dialogs (file, color, font, print, page setup,
   find/replace) and CPropertySheet/CPropertyPage, wizards included.
@@ -89,8 +92,9 @@ request with the stock MinGW-w64 toolchain.
   `_AFX_MSGMAP_MEMBER_POINTERS` defined before `afxwin.h`.
 * `min` and `max` are function templates rather than macros (MinGW-w64
   defines the macros for C only). `NOMINMAX` turns them off.
-* Toolbars dock at the frame's edges but do not float. Print preview,
-  split boxes on scroll bars, OLE/COM automation, ActiveX control
+* Floating bars are tool windows, so the system draws their captions,
+  and they resize with the system's sizing border.
+* Split boxes on scroll bars, OLE/COM automation, ActiveX control
   containment, database classes and sockets are not implemented yet.
 * `llvm-rc` (and `llvm-windres`, which uses it) has no `TOOLBAR`
   statement yet; write toolbar resources as raw resource type 241, as
