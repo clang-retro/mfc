@@ -50,6 +50,11 @@ CDialog::~CDialog() {
 
 BOOL CDialog::CreateDlgIndirect(LPCDLGTEMPLATE lpDialogTemplate, CWnd* pParentWnd,
                                 HINSTANCE hInst) {
+  return CWnd::CreateDlgIndirect(lpDialogTemplate, pParentWnd, hInst);
+}
+
+BOOL CWnd::CreateDlgIndirect(LPCDLGTEMPLATE lpDialogTemplate, CWnd* pParentWnd,
+                             HINSTANCE hInst) {
   if (hInst == NULL) hInst = AfxGetResourceHandle();
   AfxHookWindowCreate(this);
   HWND hWnd = ::CreateDialogIndirectParam(hInst, lpDialogTemplate, pParentWnd->GetSafeHwnd(),
@@ -71,6 +76,13 @@ static LPCDLGTEMPLATE _AfxLoadDialog(LPCTSTR lpszTemplateName, HINSTANCE* phInst
   if (hTemplate == NULL) return NULL;
   if (phInst != NULL) *phInst = hInst;
   return (LPCDLGTEMPLATE)::LockResource(hTemplate);
+}
+
+BOOL CWnd::CreateDlg(LPCTSTR lpszTemplateName, CWnd* pParentWnd) {
+  HINSTANCE hInst = NULL;
+  LPCDLGTEMPLATE lpTemplate = _AfxLoadDialog(lpszTemplateName, &hInst);
+  if (lpTemplate == NULL) return FALSE;
+  return CreateDlgIndirect(lpTemplate, pParentWnd, hInst);
 }
 
 BOOL CDialog::Create(LPCTSTR lpszTemplateName, CWnd* pParentWnd) {

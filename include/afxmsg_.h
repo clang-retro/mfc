@@ -174,6 +174,9 @@ protected: \
 #define ON_MESSAGE(message, memberFxn) \
   {(UINT)(message), 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    _AFX_THUNK(return (LRESULT)_AFX_CALL(memberFxn)(_w, _l);)},
+#define ON_MESSAGE_VOID(message, memberFxn) \
+  {(UINT)(message), 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
+   _AFX_THUNK(_AFX_CALL(memberFxn)(); return 0;)},
 #define ON_REGISTERED_MESSAGE(nMessageVariable, memberFxn) \
   {0xC000, 0, 0, 0, (UINT_PTR)(UINT*)(&nMessageVariable), (AFX_PMSG)0, \
    _AFX_THUNK(return (LRESULT)_AFX_CALL(memberFxn)(_w, _l);)},

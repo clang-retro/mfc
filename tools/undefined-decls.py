@@ -2,12 +2,24 @@
 """List member functions declared in the MFC headers that have no inline body.
 
 Used during development to see what still needs implementing in src/.
-Usage: undefined-decls.py <clang++> <args...>  (args must include -fsyntax-only)
+Usage: undefined-decls.py [--lib libmfc.a --nm llvm-nm] <clang++> <args...>
+With --lib, only declarations the library does not define are listed.
 """
 import json, subprocess, sys
 
 def main():
-    cmd = sys.argv[1:] + ["-Xclang", "-ast-dump=json", "-fsyntax-only"]
+    args = sys.argv[1:]
+    lib = nm = None
+    while args and args[0].startswith("--"):
+        if args[0] == "--lib": lib = args[1]
+        if args[0] == "--nm": nm = args[1]
+        args = args[2:]
+    defined = None
+    if lib:
+        syms = subprocess.run([nm or "llvm-nm", "--defined-only", "-j", lib],
+                              capture_output=True, text=True).stdout.split()
+        defined = set(syms)
+    cmd = args + ["-Xclang", "-ast-dump=json", "-fsyntax-only"]
     out = subprocess.run(cmd, capture_output=True, text=True).stdout
     # filter= with empty prints many top-level json objects; parse them in sequence
     dec = json.JSONDecoder()
@@ -28,6 +40,9 @@ def main():
             if not has_body and not n.get("isImplicit") and not n.get("pure") and not n.get("explicitlyDeleted") and not n.get("explicitlyDefaulted") \
                and fname and ("/mfc/include/" in fname or fname.startswith("include/")):
                 key = f"{cls}::{n.get('name')} {n.get('type',{}).get('qualType')}"
+                mangled = n.get("mangledName", "")
+                if defined is not None and (mangled in defined or "_" + mangled in defined):
+                    return
                 if key not in seen:
                     seen.add(key); print(fname.split('/')[-1], key)
             return

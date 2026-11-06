@@ -80,6 +80,7 @@ class CToolBar;
 class CDockState;
 class CRecentFileList;
 class CPrintInfo;
+class CPrintDialog;
 class CDocManager;
 struct CCreateContext;
 
@@ -761,6 +762,8 @@ public:
 
 protected:
   BOOL m_bPrinting;
+  friend class CView;
+  friend class CPreviewDC;
 };
 
 class CClientDC : public CDC {
@@ -1042,6 +1045,9 @@ public:
   BOOL SubclassDlgItem(UINT nID, CWnd* pParent);
   HWND UnsubclassWindow();
 
+  // Creates this window from a dialog template (dialog bars, form views).
+  BOOL CreateDlg(LPCTSTR lpszTemplateName, CWnd* pParentWnd);
+  BOOL CreateDlgIndirect(LPCDLGTEMPLATE lpDialogTemplate, CWnd* pParentWnd, HINSTANCE hInst);
   BOOL ExecuteDlgInit(LPCTSTR lpszResourceName);
   BOOL ExecuteDlgInit(LPVOID lpResource);
 
@@ -1815,6 +1821,9 @@ struct CCreateContext {
 #define FWS_PREFIXTITLE 0x00004000L
 #define FWS_SNAPTOBARS 0x00002000L
 
+// Style of the view a frame creates for its document
+#define AFX_WS_DEFAULT_VIEW (WS_CHILD | WS_VISIBLE | WS_BORDER)
+
 class CFrameWnd : public CWnd {
   DECLARE_DYNCREATE(CFrameWnd)
 public:
@@ -1905,12 +1914,16 @@ public:
   CString m_strTitle;
   BOOL m_bInRecalcLayout;
   CRuntimeClass* m_pFloatingFrameClass;
+  DWORD m_dwDockStyle;  // sides bars may dock to (EnableDocking)
   UINT m_nIdleFlags;
   enum IdleFlags { idleMenu = 1, idleTitle = 2, idleNotify = 4, idleLayout = 8 };
 
   LPCTSTR GetIconWndClass(DWORD dwDefaultStyle, UINT nIDResource);
-  void UpdateFrameTitleForDocument_(LPCTSTR lpszDocName);
   virtual void OnIdleUpdateCmdUI();
+  int OnCreateHelper(LPCREATESTRUCT lpcs, CCreateContext* pContext);
+  void BringToTop(int nCmdShow);
+
+  afx_msg int OnCreate(LPCREATESTRUCT lpcs);
 
   afx_msg void OnDestroy();
   afx_msg void OnClose();
@@ -1939,6 +1952,7 @@ public:
   afx_msg LRESULT OnSetText(WPARAM wParam, LPARAM lParam);
   afx_msg void OnUpdateControlBarMenu_(CCmdUI* pCmdUI) { OnUpdateControlBarMenu(pCmdUI); }
   afx_msg BOOL OnBarCheck_(UINT nID) { return OnBarCheck(nID); }
+  afx_msg BOOL OnToolTipText(UINT nID, NMHDR* pNMHDR, LRESULT* pResult);
 
   friend class CWinThread;
   friend class CWinApp;
@@ -1988,9 +2002,8 @@ public:
   afx_msg void OnUpdateMDIWindowCmd(CCmdUI* pCmdUI);
   afx_msg BOOL OnMDIWindowCmd(UINT nID);
   afx_msg void OnWindowNew();
-  afx_msg LRESULT OnCommandHelp(WPARAM wParam, LPARAM lParam);
-  afx_msg void OnIdleUpdateCmdUI();
-  afx_msg LRESULT OnMenuChar(UINT nChar, UINT, CMenu*);
+  virtual void OnIdleUpdateCmdUI();
+  virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
   DECLARE_MESSAGE_MAP()
 };
 
@@ -2256,6 +2269,23 @@ public:
   afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
   afx_msg void OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
   afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
+  DECLARE_MESSAGE_MAP()
+};
+
+// A view that is a control: the window is the control itself (an edit,
+// list view, tree view, ...), so it paints itself.
+class CCtrlView : public CView {
+  DECLARE_DYNAMIC(CCtrlView)
+public:
+  CCtrlView(LPCTSTR lpszClass, DWORD dwStyle);
+
+  CString m_strClass;
+  DWORD m_dwDefaultStyle;
+
+  virtual void OnDraw(CDC* pDC);
+  virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
+
+  afx_msg void OnPaint();
   DECLARE_MESSAGE_MAP()
 };
 
@@ -2589,6 +2619,7 @@ public:
   void SelectPrinter(HANDLE hDevNames, HANDLE hDevMode, BOOL bFreeOld = TRUE);
   BOOL CreatePrinterDC(CDC& dc);
   BOOL GetPrinterDeviceDefaults(PRINTDLG* pPrintDlg);
+  int DoPrintDialog(CPrintDialog* pPD);
   void UpdatePrinterSelection(BOOL bForceDefaults);
   void SaveStdProfileSettings();
   void LoadStdProfileSettings(UINT nMaxMRU = 4);
@@ -2704,11 +2735,15 @@ void AFXAPI AfxCancelModes(HWND hWndRcvr);
 BOOL AFXAPI AfxIsDescendant(HWND hWndParent, HWND hWndChild);
 HWND AFXAPI AfxGetParentOwner(HWND hWnd);
 void AFXAPI AfxGlobalFree(HGLOBAL hGlobal);
-CString AFXAPI AfxGetDefaultTitle();
-HMENU AFXAPI AfxMergeMenus(HMENU hMenuShared, HMENU hMenuSource, LONG* lpMenuWidths,
-                           int iWidthIndex, BOOL bMergeHelpMenus = FALSE);
-void AFXAPI AfxUnmergeMenus(HMENU hMenuShared, HMENU hMenuSource, HMENU hHelpMenuPopup = NULL);
 void AFXAPI AfxDeleteObject(HGDIOBJ* pObject);
+
+// Help context bases
+#define HID_BASE_COMMAND 0x00010000UL
+#define HID_BASE_RESOURCE 0x00020000UL
+#define HID_BASE_PROMPT 0x00030000UL
+#define HID_BASE_NCAREAS 0x00040000UL
+#define HID_BASE_CONTROL 0x00050000UL
+#define HID_BASE_DISPATCH 0x00060000UL
 
 // MFC's private messages (also in afxpriv.h)
 #define WM_QUERYAFXWNDPROC 0x0360

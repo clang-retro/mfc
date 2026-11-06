@@ -44,6 +44,7 @@ struct AFX_THREAD_STATE {
   CHandleMap* m_pmapHMENU;
   CHandleMap* m_pmapHDC;
   CHandleMap* m_pmapHGDIOBJ;
+  CHandleMap* m_pmapHIMAGELIST;  // made by afxcmn's CImageList
   CView* m_pRoutingView;
   CFrameWnd* m_pRoutingFrame;
   CPoint m_ptCursorLast;
@@ -130,3 +131,4 @@ BOOL AFXAPI _AfxDeleteMenuItems(HMENU hMenu);
 HWND AFXAPI _AfxChildWindowFromPoint(HWND hWnd, POINT pt);
 LPCTSTR AFXAPI _AfxLoadDefaultString(UINT nID);  // built-in text for AFX_IDS_ ids
 BOOL AFXAPI AfxLoadString(UINT nIDS, CString& rString);  // with that fallback
+BOOL AFXAPI _AfxIsSplitterWnd(CWnd* pWnd);  // defined with CSplitterWnd

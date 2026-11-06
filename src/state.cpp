@@ -76,6 +76,7 @@ void AFXAPI AfxTermThreadState() {
   delete pState->m_pmapHMENU;
   delete pState->m_pmapHDC;
   delete pState->m_pmapHGDIOBJ;
+  delete pState->m_pmapHIMAGELIST;
   ::free(pState);
   ::TlsSetValue(g_tlsIndex, NULL);
 }
@@ -198,6 +199,7 @@ BOOL AFXAPI AfxUnlockTempMaps(BOOL bDeleteTemps) {
       if (pState->m_pmapHMENU != NULL) pState->m_pmapHMENU->DeleteTemp();
       if (pState->m_pmapHDC != NULL) pState->m_pmapHDC->DeleteTemp();
       if (pState->m_pmapHGDIOBJ != NULL) pState->m_pmapHGDIOBJ->DeleteTemp();
+      if (pState->m_pmapHIMAGELIST != NULL) pState->m_pmapHIMAGELIST->DeleteTemp();
     }
   }
   return pState->m_nTempMapLock != 0;

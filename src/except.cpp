@@ -96,8 +96,7 @@ void AFXAPI AfxAbort() {
 // CArchiveException
 
 CArchiveException::CArchiveException(int cause, LPCTSTR lpszArchiveName) : m_cause(cause) {
-  m_strFileName[0] = 0;
-  if (lpszArchiveName) lstrcpyn(m_strFileName, lpszArchiveName, MAX_PATH);
+  if (lpszArchiveName) m_strFileName = lpszArchiveName;
 }
 
 BOOL CArchiveException::GetErrorMessage(LPTSTR lpszError, UINT nMaxError,
@@ -115,7 +114,7 @@ BOOL CArchiveException::GetErrorMessage(LPTSTR lpszError, UINT nMaxError,
   };
   if (pnHelpContext) *pnHelpContext = 0;
   LPCTSTR fmt = texts[(unsigned)m_cause < _countof(texts) ? m_cause : 1];
-  CString name = m_strFileName[0] ? CString(m_strFileName) : CString(_T("an unnamed file"));
+  CString name = !m_strFileName.IsEmpty() ? m_strFileName : CString(_T("an unnamed file"));
   CString s(fmt);
   s.Replace(_T("%1"), name);
   return CopyMessage(lpszError, nMaxError, s);
@@ -134,8 +133,7 @@ void AFXAPI AfxThrowArchiveException(int cause, LPCTSTR lpszArchiveName) {
 
 CFileException::CFileException(int cause, LONG lOsError, LPCTSTR lpszArchiveName)
     : m_cause(cause), m_lOsError(lOsError) {
-  m_strFileName[0] = 0;
-  if (lpszArchiveName) lstrcpyn(m_strFileName, lpszArchiveName, MAX_PATH);
+  if (lpszArchiveName) m_strFileName = lpszArchiveName;
 }
 
 BOOL CFileException::GetErrorMessage(LPTSTR lpszError, UINT nMaxError,
@@ -159,7 +157,7 @@ BOOL CFileException::GetErrorMessage(LPTSTR lpszError, UINT nMaxError,
   };
   if (pnHelpContext) *pnHelpContext = 0;
   LPCTSTR fmt = texts[(unsigned)m_cause < _countof(texts) ? m_cause : 1];
-  CString name = m_strFileName[0] ? CString(m_strFileName) : CString(_T("an unnamed file"));
+  CString name = !m_strFileName.IsEmpty() ? m_strFileName : CString(_T("an unnamed file"));
   CString s(fmt);
   s.Replace(_T("%1"), name);
   return CopyMessage(lpszError, nMaxError, s);
