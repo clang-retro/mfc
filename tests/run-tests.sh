@@ -105,8 +105,14 @@ for v in a u; do
         echo "FAIL   $name-$v (resources)"; cat "$T/$name-rc.log"; nfail=$((nfail + 1)); continue; }
       srcs="$srcs $T/$name-res.o -mwindows"
     fi
+    # The ODBC stand-in uses std::string. With GCC's libstdc++ (STDLIB
+    # empty), clang passes an empty tag argument differently from the
+    # GCC-built library on i686, so unoptimized calls into its
+    # std::string code break the stack; optimizing inlines those calls.
+    opt=
+    case $name in dbtest|rvtest) [ -n "${STDLIB-x}" ] || opt=-O1 ;; esac
     # shellcheck disable=SC2086
-    "$CXX" $CXXFLAGS $flags $srcs -L"$OUT" $LDFLAGS -o "$exe" 2>"$T/$name-$v-build.log" || {
+    "$CXX" $CXXFLAGS $opt $flags $srcs -L"$OUT" $LDFLAGS -o "$exe" 2>"$T/$name-$v-build.log" || {
       echo "FAIL   $name-$v (build)"; cat "$T/$name-$v-build.log"; nfail=$((nfail + 1)); continue; }
     if [ ! -f tests/$name.rc ]; then
       # The console tests (no resources) report on standard output.
