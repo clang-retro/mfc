@@ -1,0 +1,23 @@
+// splittest.rc - resources for splittest.
+#include <windows.h>
+#include <afxres.h>
+#include "splittest.h"
+
+IDR_MAINFRAME MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+  POPUP "&Window"
+  BEGIN
+    MENUITEM "S&plit", ID_WINDOW_SPLIT
+    MENUITEM "&Next Pane", ID_NEXT_PANE
+    MENUITEM "&Previous Pane", ID_PREV_PANE
+  END
+END
+
+STRINGTABLE
+BEGIN
+  IDR_MAINFRAME "SplitTest"
+END

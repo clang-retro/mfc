@@ -1284,19 +1284,15 @@ public:
   void SetDlgItemText(int nID, LPCTSTR lpszString) { ::SetDlgItemText(m_hWnd, nID, lpszString); }
 
   // Scrolling
-  int GetScrollPos(int nBar) const { return ::GetScrollPos(m_hWnd, nBar); }
-  void GetScrollRange(int nBar, LPINT lpMinPos, LPINT lpMaxPos) const {
-    ::GetScrollRange(m_hWnd, nBar, lpMinPos, lpMaxPos);
-  }
+  // The position and range calls go to GetScrollBarCtrl's control when
+  // there is one (a splitter's shared scroll bars).
+  int GetScrollPos(int nBar) const;
+  void GetScrollRange(int nBar, LPINT lpMinPos, LPINT lpMaxPos) const;
   void ScrollWindow(int xAmount, int yAmount, LPCRECT lpRect = NULL, LPCRECT lpClipRect = NULL) {
     ::ScrollWindow(m_hWnd, xAmount, yAmount, lpRect, lpClipRect);
   }
-  int SetScrollPos(int nBar, int nPos, BOOL bRedraw = TRUE) {
-    return ::SetScrollPos(m_hWnd, nBar, nPos, bRedraw);
-  }
-  void SetScrollRange(int nBar, int nMinPos, int nMaxPos, BOOL bRedraw = TRUE) {
-    ::SetScrollRange(m_hWnd, nBar, nMinPos, nMaxPos, bRedraw);
-  }
+  int SetScrollPos(int nBar, int nPos, BOOL bRedraw = TRUE);
+  void SetScrollRange(int nBar, int nMinPos, int nMaxPos, BOOL bRedraw = TRUE);
   void ShowScrollBar(UINT nBar, BOOL bShow = TRUE) { ::ShowScrollBar(m_hWnd, nBar, bShow); }
   void EnableScrollBarCtrl(int nBar, BOOL bEnable = TRUE);
   virtual CScrollBar* GetScrollBarCtrl(int nBar) const;
@@ -2271,6 +2267,10 @@ public:
   afx_msg void OnFilePrint();
   afx_msg void OnFilePrintPreview();
   afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
+  afx_msg void OnUpdateSplitCmd(CCmdUI* pCmdUI);
+  afx_msg BOOL OnSplitCmd(UINT nID);
+  afx_msg void OnUpdateNextPaneMenu(CCmdUI* pCmdUI);
+  afx_msg BOOL OnNextPaneCmd(UINT nID);
 
   friend class CDocument;
   friend class CFrameWnd;

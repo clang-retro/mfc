@@ -237,6 +237,38 @@ CScrollBar* CWnd::GetScrollBarCtrl(int nBar) const {
   return NULL;
 }
 
+// The window and bar a scroll call goes to.
+static HWND _AfxScrollTarget(const CWnd* pWnd, int& nBar) {
+  if (nBar != SB_CTL) {
+    CScrollBar* pScrollBar = pWnd->GetScrollBarCtrl(nBar);
+    if (pScrollBar != NULL) {
+      nBar = SB_CTL;
+      return ((CWnd*)pScrollBar)->m_hWnd;
+    }
+  }
+  return pWnd->m_hWnd;
+}
+
+int CWnd::GetScrollPos(int nBar) const {
+  HWND hWnd = _AfxScrollTarget(this, nBar);
+  return ::GetScrollPos(hWnd, nBar);
+}
+
+int CWnd::SetScrollPos(int nBar, int nPos, BOOL bRedraw) {
+  HWND hWnd = _AfxScrollTarget(this, nBar);
+  return ::SetScrollPos(hWnd, nBar, nPos, bRedraw);
+}
+
+void CWnd::GetScrollRange(int nBar, LPINT lpMinPos, LPINT lpMaxPos) const {
+  HWND hWnd = _AfxScrollTarget(this, nBar);
+  ::GetScrollRange(hWnd, nBar, lpMinPos, lpMaxPos);
+}
+
+void CWnd::SetScrollRange(int nBar, int nMinPos, int nMaxPos, BOOL bRedraw) {
+  HWND hWnd = _AfxScrollTarget(this, nBar);
+  ::SetScrollRange(hWnd, nBar, nMinPos, nMaxPos, bRedraw);
+}
+
 void CWnd::EnableScrollBarCtrl(int nBar, BOOL bEnable) {
   if (nBar == SB_BOTH) {
     EnableScrollBarCtrl(SB_HORZ, bEnable);

@@ -59,6 +59,10 @@ when there is no display:
 * `docktest`: toolbars docked side by side and on each edge, floating,
   dragged with the mouse, double-clicked, resized while floating, and
   the layout saved and loaded with SaveBarState and LoadBarState.
+* `splittest`: a dynamic splitter split by dragging its split boxes and
+  with Window > Split from the keyboard, panes scrolling together on
+  shared scroll bars, next and previous pane, and unsplitting by
+  dragging a bar to the edge.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -76,7 +80,8 @@ request with the stock MinGW-w64 toolchain.
   standard controls, CDialog with DDX/DDV, frames, documents and views
   (SDI and MDI), CScrollView, printing.
 * `afxext.h`: CToolBar, CStatusBar, CDialogBar, docking and floating
-  (dock bars, CMiniFrameWnd, drag and drop, CDockState), CSplitterWnd (static and dynamic), CFormView, CEditView,
+  (dock bars, CMiniFrameWnd, drag and drop, CDockState), CSplitterWnd (static and dynamic, with split boxes and shared
+  scroll bars), CFormView, CEditView,
   CBitmapButton.
 * `afxdlgs.h`: the common dialogs (file, color, font, print, page setup,
   find/replace) and CPropertySheet/CPropertyPage, wizards included.
@@ -94,7 +99,7 @@ request with the stock MinGW-w64 toolchain.
   defines the macros for C only). `NOMINMAX` turns them off.
 * Floating bars are tool windows, so the system draws their captions,
   and they resize with the system's sizing border.
-* Split boxes on scroll bars, OLE/COM automation, ActiveX control
+* OLE/COM automation, ActiveX control
   containment, database classes and sockets are not implemented yet.
 * `llvm-rc` (and `llvm-windres`, which uses it) has no `TOOLBAR`
   statement yet; write toolbar resources as raw resource type 241, as
