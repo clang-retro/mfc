@@ -157,3 +157,7 @@ private:
 // Creates a dialog bar from an in-memory template.
 BOOL AFXAPI _AfxCreateDialogBarIndirect(CDialogBar* pBar, CWnd* pParentWnd,
                                         LPCDLGTEMPLATE lpTemplate, UINT nStyle, UINT nID);
+
+// strftime with the codes MFC programs use (time.cpp).
+struct tm;
+CString AFXAPI _AfxFormatTm(LPCTSTR pszFormat, const struct tm& t);

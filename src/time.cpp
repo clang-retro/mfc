@@ -125,7 +125,7 @@ CTIME_FIELD(GetDayOfWeek, st.wDayOfWeek + 1)
 
 // strftime with the subset of codes MFC programs use, done here so that
 // it does not depend on the C library's locale support.
-static CString FormatTm(LPCTSTR pszFormat, const struct tm& t) {
+CString AFXAPI _AfxFormatTm(LPCTSTR pszFormat, const struct tm& t) {
   static const LPCTSTR days[] = {_T("Sunday"), _T("Monday"), _T("Tuesday"), _T("Wednesday"),
                                  _T("Thursday"), _T("Friday"), _T("Saturday")};
   static const LPCTSTR months[] = {_T("January"), _T("February"), _T("March"),
@@ -185,11 +185,11 @@ static CString FormatTm(LPCTSTR pszFormat, const struct tm& t) {
 
 CString CTime::Format(LPCTSTR pszFormat) const {
   struct tm t;
-  return FormatTm(pszFormat, *GetLocalTm(&t));
+  return _AfxFormatTm(pszFormat, *GetLocalTm(&t));
 }
 CString CTime::FormatGmt(LPCTSTR pszFormat) const {
   struct tm t;
-  return FormatTm(pszFormat, *GetGmtTm(&t));
+  return _AfxFormatTm(pszFormat, *GetGmtTm(&t));
 }
 CString CTime::Format(UINT nFormatID) const {
   CString f;
