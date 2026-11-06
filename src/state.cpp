@@ -77,6 +77,7 @@ void AFXAPI AfxTermThreadState() {
   delete pState->m_pmapHDC;
   delete pState->m_pmapHGDIOBJ;
   delete pState->m_pmapHIMAGELIST;
+  if (pState->m_pSockState != NULL) pState->m_pfnSockTerm(pState->m_pSockState);
   ::free(pState);
   ::TlsSetValue(g_tlsIndex, NULL);
 }
@@ -369,11 +370,5 @@ void AFXAPI AfxDeleteObject(HGDIOBJ* pObject) {
   }
 }
 
-// Sockets and control containment are not part of this library yet; these let
-// programs that call them start up.
 BOOL AFXAPI AfxInitRichEdit() { return ::LoadLibraryA("riched32.dll") != NULL; }
 BOOL AFXAPI AfxInitRichEdit2() { return ::LoadLibraryA("riched20.dll") != NULL; }
-BOOL AFXAPI AfxEnableControlContainer(void*) { return TRUE; }
-BOOL AFXAPI AfxSocketInit(void*) {
-  return FALSE;
-}

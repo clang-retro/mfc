@@ -2755,9 +2755,7 @@ int AFXAPI AfxWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmd
                       int nCmdShow);
 BOOL AFXAPI AfxInitRichEdit();
 BOOL AFXAPI AfxInitRichEdit2();
-BOOL AFXAPI AfxEnableControlContainer(void* = NULL);
 BOOL AFXAPI AfxOleInit();
-BOOL AFXAPI AfxSocketInit(void* = NULL);
 BOOL AFXAPI AfxDeferRegisterClass(LONG fToRegister);
 BOOL AFXAPI AfxRegisterClass(WNDCLASS* lpWndClass);
 LPCTSTR AFXAPI AfxRegisterWndClass(UINT nClassStyle, HCURSOR hCursor = 0,

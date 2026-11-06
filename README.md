@@ -37,7 +37,7 @@ clang++ --config=winxp.cfg -Ipath/to/mfc/include app.cpp app-res.o \
 As with Visual C++, `afx.h` names the libraries to link, so no `-l`
 options are needed: `mfc` or `mfcu` by `_UNICODE`, and `user32`, `gdi32`,
 `comdlg32`, `comctl32`, `shell32`, `advapi32`, `winspool`, `ole32`,
-`oleaut32` and `uuid`.
+`oleaut32` and `uuid` (and `afxsock.h` adds `ws2_32`).
 Define `_AFX_NOFORCE_LIBS` to turn that off. The library provides
 `WinMain` (and `wWinMain`), so Unicode programs link with or without
 `-municode`.
@@ -54,6 +54,10 @@ when there is no display:
   its span, COleCurrency, COleVariant, COleSafeArray) and a
   COleDispatchDriver calling an IDispatch written in the test, on the
   console.
+* `socktest`: `afxsock.h` over the loopback interface: CAsyncSocket
+  events, blocking CSocket calls against a server thread, CArchive
+  through a CSocketFile, datagrams, errors and cancelling a blocking
+  call.
 * `dlgtest`: a dialog with data exchange and validation, common
   controls, and a property sheet.
 * `sditest`: a single-document program with a toolbar, a status bar and
@@ -117,8 +121,11 @@ request with the stock MinGW-w64 toolchain.
 * `afxdisp.h` has the automation client side: the date, currency,
   variant and safe array classes and COleDispatchDriver. Automation
   servers (COleDispatchImpl, dispatch maps, COleObjectFactory), the OLE
-  document classes, ActiveX control containment, database classes and
-  sockets are not implemented yet.
+  document classes, ActiveX control containment and the database classes
+  are not implemented yet.
+* Sockets are IPv4, as in MFC 6. `CAsyncSocket::FromHandle` returns
+  only sockets attached in the calling thread, and NULL for others,
+  rather than making a temporary object.
 * `llvm-rc` (and `llvm-windres`, which uses it) has no `TOOLBAR`
   statement yet; write toolbar resources as raw resource type 241, as
   `tests/sditest.rc` does.

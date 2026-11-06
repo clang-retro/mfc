@@ -18,7 +18,7 @@ BIN=${BIN:-}
 CXX=${BIN:+$BIN/}clang++
 RC=${RC:-${BIN:+$BIN/}llvm-windres}
 LDFLAGS=${LDFLAGS:-}
-TESTS=${TESTS:-"core disptest dlgtest sditest mditest docktest splittest richtest"}
+TESTS=${TESTS:-"core disptest socktest dlgtest sditest mditest docktest splittest richtest"}
 
 if [ -z "${DISPLAY:-}" ] && [ -z "${MFC_TEST_NO_XVFB:-}" ] && command -v xvfb-run >/dev/null 2>&1; then
   MFC_TEST_NO_XVFB=1 exec xvfb-run -a -s "-screen 0 1024x768x24" "$0" "$@"
@@ -108,8 +108,8 @@ for v in a u; do
     # shellcheck disable=SC2086
     "$CXX" $CXXFLAGS $flags $srcs -L"$OUT" $LDFLAGS -o "$exe" 2>"$T/$name-$v-build.log" || {
       echo "FAIL   $name-$v (build)"; cat "$T/$name-$v-build.log"; nfail=$((nfail + 1)); continue; }
-    if [ $name = core ] || [ $name = disptest ]; then
-      # The console tests report on standard output.
+    if [ ! -f tests/$name.rc ]; then
+      # The console tests (no resources) report on standard output.
       if [ $HAVE_WINE = 1 ]; then
         if timeout 120 wine "$exe" > "$T/$v/$name.log" 2>&1; then
           echo "PASS   $name-$v"; npass=$((npass + 1))

@@ -27,6 +27,13 @@
 #endif
 
 #include <windows.h>
+#ifdef WIN32_LEAN_AND_MEAN
+// The headers the library needs that a lean <windows.h> leaves out.
+#include <commdlg.h>
+#include <shellapi.h>
+#include <winspool.h>
+#include <ole2.h>
+#endif
 #if !defined(__has_include) || __has_include(<tchar.h>)
 #include <tchar.h>
 #else

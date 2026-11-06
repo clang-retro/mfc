@@ -58,3 +58,7 @@ void AFXAPI AfxOleTerm(BOOL bJustRevoke) {
   ::OleUninitialize();
   g_bOleInit = FALSE;
 }
+
+// Control containment is not implemented; programs that ask for it start
+// up and get no ActiveX controls.
+void AFXAPI AfxEnableControlContainer(COccManager*) {}

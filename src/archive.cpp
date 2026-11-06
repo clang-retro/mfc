@@ -28,6 +28,8 @@ CArchive::CArchive(CFile* pFile, UINT nMode, int nBufSize, void* lpBuf)
       m_pLoadArray(NULL), m_nLoadArraySize(0), m_pStoreMap(NULL), m_nStoreMapSize(0),
       m_nStoreMapCount(0), m_nGrowSize(1024), m_nHashSize(2053) {
   m_strFileName = pFile->GetFilePath();
+  // A socket can only be read as data arrives, and cannot seek back.
+  m_bBlocking = (pFile->GetBufferPtr(CFile::bufferCheck) & CFile::bufferBlocking) != 0;
   m_lpBufStart = lpBuf ? (BYTE*)lpBuf : (BYTE*)malloc(m_nBufSize);
   if (!m_lpBufStart) AfxThrowMemoryException();
   m_lpBufCur = m_lpBufStart;
@@ -69,7 +71,7 @@ void CArchive::Flush() {
   if (m_pFile == NULL) return;
   if (IsLoading()) {
     // Give back what was read ahead, so the file is where the archive is.
-    if (m_lpBufMax != m_lpBufCur)
+    if (m_lpBufMax != m_lpBufCur && !m_bBlocking)
       m_pFile->Seek(-(LONGLONG)(m_lpBufMax - m_lpBufCur), CFile::current);
     m_lpBufCur = m_lpBufMax;
   } else {

@@ -26,7 +26,9 @@ class COleDispatchDriver;
 
 BOOL AFXAPI AfxOleInit();
 void AFXAPI AfxOleTerm(BOOL bJustRevoke = FALSE);
-inline void AFXAPI AfxEnableControlContainer() {}
+// Control containment is not implemented; this lets programs start up.
+class COccManager;
+void AFXAPI AfxEnableControlContainer(COccManager* pOccManager = NULL);
 inline BOOL AFXAPI AfxOleGetUserCtrl() { return TRUE; }
 inline void AFXAPI AfxOleSetUserCtrl(BOOL) {}
 
