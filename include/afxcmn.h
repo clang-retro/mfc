@@ -810,8 +810,54 @@ public:
     ::SendMessage(m_hWnd, EM_REPLACESEL, bCanUndo, (LPARAM)lpszNewText);
   }
   void HideSelection(BOOL bHide, BOOL bPerm) { ::SendMessage(m_hWnd, EM_HIDESELECTION, bHide, bPerm); }
+  // EM_FINDTEXTEX always takes ANSI text; the W message takes Unicode.
+#ifdef UNICODE
+  long FindText(DWORD dwFlags, FINDTEXTEX* pFindText) const {
+    return (long)::SendMessage(m_hWnd, EM_FINDTEXTEXW, dwFlags, (LPARAM)pFindText);
+  }
+#else
   long FindText(DWORD dwFlags, FINDTEXTEX* pFindText) const {
     return (long)::SendMessage(m_hWnd, EM_FINDTEXTEX, dwFlags, (LPARAM)pFindText);
+  }
+#endif
+  long GetTextRange(int nFirst, int nLast, CString& refString) const;
+  long GetTextLengthEx(DWORD dwFlags = GTL_DEFAULT, UINT uCodePage = (UINT)-1) const {
+    GETTEXTLENGTHEX gtl = {dwFlags, uCodePage};
+    if (uCodePage == (UINT)-1) gtl.codepage = sizeof(TCHAR) == 2 ? 1200 : CP_ACP;
+    return (long)::SendMessage(m_hWnd, EM_GETTEXTLENGTHEX, (WPARAM)&gtl, 0);
+  }
+  UINT GetOptions() const { return (UINT)::SendMessage(m_hWnd, EM_GETOPTIONS, 0, 0); }
+  void SetOptions(WORD wOp, DWORD dwFlags) { ::SendMessage(m_hWnd, EM_SETOPTIONS, wOp, dwFlags); }
+  BOOL SetAutoURLDetect(BOOL bEnable = TRUE) {
+    return !(BOOL)::SendMessage(m_hWnd, EM_AUTOURLDETECT, bEnable, 0);
+  }
+  DWORD GetDefaultCharFormat(CHARFORMAT2& cf) const {
+    cf.cbSize = sizeof(cf);
+    return (DWORD)::SendMessage(m_hWnd, EM_GETCHARFORMAT, 0, (LPARAM)&cf);
+  }
+  DWORD GetSelectionCharFormat(CHARFORMAT2& cf) const {
+    cf.cbSize = sizeof(cf);
+    return (DWORD)::SendMessage(m_hWnd, EM_GETCHARFORMAT, 1, (LPARAM)&cf);
+  }
+  BOOL SetDefaultCharFormat(CHARFORMAT2& cf) {
+    cf.cbSize = sizeof(cf);
+    return (BOOL)::SendMessage(m_hWnd, EM_SETCHARFORMAT, 0, (LPARAM)&cf);
+  }
+  BOOL SetSelectionCharFormat(CHARFORMAT2& cf) {
+    cf.cbSize = sizeof(cf);
+    return (BOOL)::SendMessage(m_hWnd, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+  }
+  BOOL SetWordCharFormat(CHARFORMAT2& cf) {
+    cf.cbSize = sizeof(cf);
+    return (BOOL)::SendMessage(m_hWnd, EM_SETCHARFORMAT, SCF_SELECTION | SCF_WORD, (LPARAM)&cf);
+  }
+  DWORD GetParaFormat(PARAFORMAT2& pf) const {
+    pf.cbSize = sizeof(pf);
+    return (DWORD)::SendMessage(m_hWnd, EM_GETPARAFORMAT, 0, (LPARAM)&pf);
+  }
+  BOOL SetParaFormat(PARAFORMAT2& pf) {
+    pf.cbSize = sizeof(pf);
+    return (BOOL)::SendMessage(m_hWnd, EM_SETPARAFORMAT, 0, (LPARAM)&pf);
   }
   long FormatRange(FORMATRANGE* pfr, BOOL bDisplay = TRUE) {
     return (long)::SendMessage(m_hWnd, EM_FORMATRANGE, bDisplay, (LPARAM)pfr);

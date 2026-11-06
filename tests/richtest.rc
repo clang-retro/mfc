@@ -1,0 +1,28 @@
+// richtest.rc - resources for richtest.
+#include <windows.h>
+#include <afxres.h>
+#include "richtest.h"
+
+IDR_MAINFRAME MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&New", ID_FILE_NEW
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+  POPUP "&Edit"
+  BEGIN
+    MENUITEM "&Undo", ID_EDIT_UNDO
+    MENUITEM "&Find...", ID_EDIT_FIND
+    MENUITEM "Select &All", ID_EDIT_SELECT_ALL
+  END
+  POPUP "F&ormat"
+  BEGIN
+    MENUITEM "&Font...", ID_FORMAT_FONT
+  END
+END
+
+STRINGTABLE
+BEGIN
+  IDR_MAINFRAME "RichTest\n\nRichTest\nRich Text (*.rtf)\n.rtf\nRichTest.Document\nRichTest Document"
+END

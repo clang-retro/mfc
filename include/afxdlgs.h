@@ -7,6 +7,7 @@
 #include "afxwin.h"
 #include <commdlg.h>
 #include <prsht.h>
+#include <richedit.h>
 
 class CCommonDialog : public CDialog {
   DECLARE_DYNAMIC(CCommonDialog)
@@ -83,8 +84,14 @@ public:
   CHOOSEFONT m_cf;
   explicit CFontDialog(LPLOGFONT lplfInitial = NULL, DWORD dwFlags = CF_EFFECTS | CF_SCREENFONTS,
                        CDC* pdcPrinter = NULL, CWnd* pParentWnd = NULL);
+  // For a rich edit selection: the dialog starts from, and gives back,
+  // a CHARFORMAT.
+  CFontDialog(const CHARFORMAT& charformat, DWORD dwFlags = CF_SCREENFONTS,
+              CDC* pdcPrinter = NULL, CWnd* pParentWnd = NULL);
   virtual INT_PTR DoModal();
   void GetCurrentFont(LPLOGFONT lplf);
+  void GetCharFormat(CHARFORMAT& cf) const;
+  DWORD FillInLogFont(const CHARFORMAT& cf);
   CString GetFaceName() const { return m_lf.lfFaceName; }
   CString GetStyleName() const { return m_szStyleName; }
   int GetSize() const { return m_cf.iPointSize; }

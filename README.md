@@ -63,6 +63,9 @@ when there is no display:
   with Window > Split from the keyboard, panes scrolling together on
   shared scroll bars, next and previous pane, and unsplitting by
   dragging a bar to the edge.
+* `richtest`: a rich edit document and view; bold, italic and paragraph
+  alignment on the selection, finding and replacing, saving and loading
+  rich text and plain text, page layout for printing, and word wrap.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -83,6 +86,8 @@ request with the stock MinGW-w64 toolchain.
   (dock bars, CMiniFrameWnd, drag and drop, CDockState), CSplitterWnd (static and dynamic, with split boxes and shared
   scroll bars), CFormView, CEditView,
   CBitmapButton.
+* `afxrich.h`: CRichEditView and CRichEditDoc (rich text or plain text
+  files, formatting the selection, find and replace, printing).
 * `afxdlgs.h`: the common dialogs (file, color, font, print, page setup,
   find/replace) and CPropertySheet/CPropertyPage, wizards included.
 * `afxcmn.h`, `afxcview.h`: the common controls, CImageList, CListView,
@@ -99,6 +104,11 @@ request with the stock MinGW-w64 toolchain.
   defines the macros for C only). `NOMINMAX` turns them off.
 * Floating bars are tool windows, so the system draws their captions,
   and they resize with the system's sizing border.
+* CRichEditDoc derives from CDocument rather than COleServerDoc, and
+  CRichEditCntrItem is a placeholder: objects embedded in rich text need
+  the OLE container classes, which are not there yet.
+* Wine's rich edit control does not implement EM_FORMATRANGE yet, so
+  under Wine a CRichEditView prints blank pages; Windows prints them.
 * OLE/COM automation, ActiveX control
   containment, database classes and sockets are not implemented yet.
 * `llvm-rc` (and `llvm-windres`, which uses it) has no `TOOLBAR`
