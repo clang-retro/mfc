@@ -2,6 +2,7 @@
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 #include "afximpl.h"
+#include <afxext.h>
 
 IMPLEMENT_DYNAMIC(CView, CWnd)
 
@@ -12,6 +13,12 @@ BEGIN_MESSAGE_MAP(CView, CWnd)
   ON_WM_DESTROY()
   ON_MESSAGE_VOID(WM_INITIALUPDATE, OnInitialUpdate)
   ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
+  ON_UPDATE_COMMAND_UI(ID_WINDOW_SPLIT, OnUpdateSplitCmd)
+  ON_COMMAND_EX(ID_WINDOW_SPLIT, OnSplitCmd)
+  ON_UPDATE_COMMAND_UI(ID_NEXT_PANE, OnUpdateNextPaneMenu)
+  ON_COMMAND_EX(ID_NEXT_PANE, OnNextPaneCmd)
+  ON_UPDATE_COMMAND_UI(ID_PREV_PANE, OnUpdateNextPaneMenu)
+  ON_COMMAND_EX(ID_PREV_PANE, OnNextPaneCmd)
 END_MESSAGE_MAP()
 
 CView::CView() : m_pDocument(NULL) {}
@@ -129,9 +136,45 @@ void CView::CalcWindowRect(LPRECT lpClientRect, UINT nAdjustType) {
   CWnd::CalcWindowRect(lpClientRect, nAdjustType);
 }
 
+// A view in a splitter without scroll bars of its own uses the
+// splitter's: one per column along the bottom, one per row on the right.
 CScrollBar* CView::GetScrollBarCtrl(int nBar) const {
-  (void)nBar;
-  return NULL;
+  DWORD dwStyle = GetStyle();
+  if (nBar == SB_HORZ && (dwStyle & WS_HSCROLL)) return NULL;
+  if (nBar == SB_VERT && (dwStyle & WS_VSCROLL)) return NULL;
+  CSplitterWnd* pSplitter = GetParentSplitter(this, TRUE);
+  if (pSplitter == NULL) return NULL;
+  int row, col;
+  if (!pSplitter->IsChildPane((CWnd*)this, &row, &col)) return NULL;
+  UINT nID = nBar == SB_HORZ ? AFX_IDW_HSCROLL_FIRST + col : AFX_IDW_VSCROLL_FIRST + row;
+  return (CScrollBar*)pSplitter->GetDlgItem(nID);
+}
+
+// Window > Split, and the next and previous pane commands.
+void CView::OnUpdateSplitCmd(CCmdUI* pCmdUI) {
+  CSplitterWnd* pSplitter = GetParentSplitter(this, FALSE);
+  pCmdUI->Enable(pSplitter != NULL && pSplitter->m_pDynamicViewClass != NULL &&
+                 !pSplitter->IsTracking());
+}
+
+BOOL CView::OnSplitCmd(UINT nID) {
+  (void)nID;
+  CSplitterWnd* pSplitter = GetParentSplitter(this, FALSE);
+  if (pSplitter == NULL) return FALSE;
+  pSplitter->DoKeyboardSplit();
+  return TRUE;
+}
+
+void CView::OnUpdateNextPaneMenu(CCmdUI* pCmdUI) {
+  CSplitterWnd* pSplitter = GetParentSplitter(this, FALSE);
+  pCmdUI->Enable(pSplitter != NULL && pSplitter->CanActivateNext(pCmdUI->m_nID == ID_PREV_PANE));
+}
+
+BOOL CView::OnNextPaneCmd(UINT nID) {
+  CSplitterWnd* pSplitter = GetParentSplitter(this, FALSE);
+  if (pSplitter == NULL) return FALSE;
+  pSplitter->ActivateNext(nID == ID_PREV_PANE);
+  return TRUE;
 }
 
 CSplitterWnd* PASCAL CView::GetParentSplitter(const CWnd* pWnd, BOOL bAnyState) {
@@ -309,14 +352,15 @@ void CScrollView::CenterOnPoint(CPoint ptCenter) {
   GetClientRect(&rect);
   int xDesired = ptCenter.x - rect.Width() / 2;
   int yDesired = ptCenter.y - rect.Height() / 2;
-  DWORD dwStyle = GetStyle();
-  if (!(dwStyle & WS_HSCROLL) || xDesired < 0) {
+  BOOL bHasHorzBar, bHasVertBar;
+  CheckScrollBars(bHasHorzBar, bHasVertBar);
+  if (!bHasHorzBar || xDesired < 0) {
     xDesired = 0;
   } else {
     int xMax = GetScrollLimit(SB_HORZ);
     if (xDesired > xMax) xDesired = xMax;
   }
-  if (!(dwStyle & WS_VSCROLL) || yDesired < 0) {
+  if (!bHasVertBar || yDesired < 0) {
     yDesired = 0;
   } else {
     int yMax = GetScrollLimit(SB_VERT);
@@ -325,9 +369,10 @@ void CScrollView::CenterOnPoint(CPoint ptCenter) {
   ScrollToDevicePosition(CPoint(xDesired, yDesired));
 }
 
+// A splitter's shared scroll bar takes no room from the view.
 void CScrollView::GetScrollBarSizes(CSize& sizeSb) {
-  sizeSb.cx = ::GetSystemMetrics(SM_CXVSCROLL);
-  sizeSb.cy = ::GetSystemMetrics(SM_CYHSCROLL);
+  sizeSb.cx = GetScrollBarCtrl(SB_VERT) == NULL ? ::GetSystemMetrics(SM_CXVSCROLL) : 0;
+  sizeSb.cy = GetScrollBarCtrl(SB_HORZ) == NULL ? ::GetSystemMetrics(SM_CYHSCROLL) : 0;
 }
 
 BOOL CScrollView::GetTrueClientSize(CSize& size, CSize& sizeSb) {
@@ -339,7 +384,7 @@ BOOL CScrollView::GetTrueClientSize(CSize& size, CSize& sizeSb) {
   DWORD dwStyle = GetStyle();
   if (dwStyle & WS_VSCROLL) size.cx += sizeSb.cx;
   if (dwStyle & WS_HSCROLL) size.cy += sizeSb.cy;
-  return size.cx > sizeSb.cx && size.cy > sizeSb.cy;
+  return size.cx > sizeSb.cx && size.cy > sizeSb.cy && size.cx > 0 && size.cy > 0;
 }
 
 void CScrollView::GetScrollBarState(CSize sizeClient, CSize& needSb, CSize& sizeRange,
@@ -375,7 +420,9 @@ void CScrollView::GetScrollBarState(CSize sizeClient, CSize& needSb, CSize& size
 }
 
 void CScrollView::UpdateBars() {
-  if (m_bInsideUpdate || m_nMapMode == MM_SCALETOFIT) return;
+  // Before SetScrollSizes there is nothing to scroll; leave the bars
+  // alone (a splitter's shared ones belong to the other panes too).
+  if (m_bInsideUpdate || m_nMapMode == MM_SCALETOFIT || m_nMapMode == MM_NONE) return;
   m_bInsideUpdate = TRUE;
 
   CSize sizeClient, sizeSb;
@@ -415,8 +462,10 @@ void CScrollView::UpdateBars() {
 
 void CScrollView::CheckScrollBars(BOOL& bHasHorzBar, BOOL& bHasVertBar) const {
   DWORD dwStyle = GetStyle();
-  bHasHorzBar = (dwStyle & WS_HSCROLL) != 0;
-  bHasVertBar = (dwStyle & WS_VSCROLL) != 0;
+  CScrollBar* pBar = GetScrollBarCtrl(SB_HORZ);
+  bHasHorzBar = pBar != NULL ? pBar->IsWindowEnabled() : (dwStyle & WS_HSCROLL) != 0;
+  pBar = GetScrollBarCtrl(SB_VERT);
+  bHasVertBar = pBar != NULL ? pBar->IsWindowEnabled() : (dwStyle & WS_VSCROLL) != 0;
 }
 
 void CScrollView::CalcWindowRect(LPRECT lpClientRect, UINT nAdjustType) {
@@ -481,12 +530,13 @@ void CScrollView::OnSize(UINT nType, int cx, int cy) {
 }
 
 void CScrollView::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar) {
-  if (pScrollBar != NULL) return;  // a scroll bar control, not ours
+  // A scroll bar control that is not ours is someone else's business.
+  if (pScrollBar != NULL && pScrollBar != GetScrollBarCtrl(SB_HORZ)) return;
   OnScroll(MAKEWORD(nSBCode, 0xFF), nPos);
 }
 
 void CScrollView::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar) {
-  if (pScrollBar != NULL) return;
+  if (pScrollBar != NULL && pScrollBar != GetScrollBarCtrl(SB_VERT)) return;
   OnScroll(MAKEWORD(0xFF, nSBCode), nPos);
 }
 
@@ -501,9 +551,7 @@ static int _AfxScrollCodeToPos(CWnd* pWnd, int nBar, UINT nCode, int nPos, int n
     case SB_THUMBTRACK: {
       // The message only carries 16 bits of position.
       SCROLLINFO info;
-      info.cbSize = sizeof(info);
-      info.fMask = SIF_TRACKPOS;
-      if (::GetScrollInfo(pWnd->m_hWnd, nBar, &info)) return info.nTrackPos;
+      if (pWnd->GetScrollInfo(nBar, &info, SIF_TRACKPOS)) return info.nTrackPos;
       return nPos;
     }
   }
@@ -530,9 +578,10 @@ BOOL CScrollView::OnScroll(UINT nScrollCode, UINT nPos, BOOL bDoScroll) {
 }
 
 BOOL CScrollView::OnScrollBy(CSize sizeScroll, BOOL bDoScroll) {
-  DWORD dwStyle = GetStyle();
-  if (!(dwStyle & WS_VSCROLL)) sizeScroll.cy = 0;
-  if (!(dwStyle & WS_HSCROLL)) sizeScroll.cx = 0;
+  BOOL bHasHorzBar, bHasVertBar;
+  CheckScrollBars(bHasHorzBar, bHasVertBar);
+  if (!bHasVertBar) sizeScroll.cy = 0;
+  if (!bHasHorzBar) sizeScroll.cx = 0;
 
   int xOrig = GetScrollPos(SB_HORZ);
   int x = xOrig + sizeScroll.cx;
@@ -577,8 +626,11 @@ BOOL CScrollView::DoMouseWheel(UINT fFlags, short zDelta, CPoint point) {
     if (nDisplacement > nPage) nDisplacement = nPage;
     if (nDisplacement < -nPage) nDisplacement = -nPage;
   }
-  BOOL bResult = bHasVertBar ? OnScrollBy(CSize(0, nDisplacement), TRUE)
-                             : OnScrollBy(CSize(nDisplacement, 0), TRUE);
+  CSize sizeScroll = bHasVertBar ? CSize(0, nDisplacement) : CSize(nDisplacement, 0);
+  // In a splitter the panes that share the bar scroll too.
+  CSplitterWnd* pSplitter = GetParentSplitter(this, TRUE);
+  BOOL bResult = pSplitter != NULL ? pSplitter->DoScrollBy(this, sizeScroll, TRUE)
+                                   : OnScrollBy(sizeScroll, TRUE);
   if (bResult) UpdateWindow();
   return bResult;
 }

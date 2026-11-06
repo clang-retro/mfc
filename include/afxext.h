@@ -440,6 +440,16 @@ public:
   void SetSplitCursor(int ht);
   CWnd* GetSizingParent();
 
+  // Shared scroll bars and split boxes.
+  BOOL _HasHStrip() const;
+  BOOL _HasVStrip() const;
+  BOOL _ShowVBox() const;
+  BOOL _ShowHBox() const;
+  void _SyncScrollBars();
+  void _MoveTrackers(CPoint pt);
+  void _SyncPanes(CView* pViewFrom, CPoint ptOld);
+  void _AcceptTrack();
+
   afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
   afx_msg void OnMouseMove(UINT nFlags, CPoint pt);
   afx_msg void OnPaint();
