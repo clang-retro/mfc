@@ -152,6 +152,39 @@ BOOL CDC::DeleteDC() {
 
 CWnd* CDC::GetWindow() const { return CWnd::FromHandle(::WindowFromDC(m_hDC)); }
 
+// With two DCs, both are saved; the number returned is the attribute DC's,
+// and restoring by number pops the output DC by the same number of levels.
+int CDC::SaveDC() {
+  int nRetVal = 0;
+  if (m_hAttribDC != NULL) nRetVal = ::SaveDC(m_hAttribDC);
+  if (m_hDC != m_hAttribDC) {
+    int nOut = ::SaveDC(m_hDC);
+    if (m_hAttribDC == NULL) nRetVal = nOut;
+  }
+  return nRetVal;
+}
+
+BOOL CDC::RestoreDC(int nSavedDC) {
+  BOOL bRetVal = TRUE;
+  if (m_hDC != m_hAttribDC && m_hDC != NULL) {
+    int nLevels = 1;
+    if (nSavedDC > 0 && m_hAttribDC != NULL) {
+      // How many levels the attribute DC is above the one asked for.
+      int nCur = ::SaveDC(m_hAttribDC);
+      ::RestoreDC(m_hAttribDC, -1);
+      nLevels = nCur - nSavedDC;
+    } else if (nSavedDC < 0) {
+      nLevels = -nSavedDC;
+    }
+    if (m_hAttribDC == NULL)
+      bRetVal = ::RestoreDC(m_hDC, nSavedDC);
+    else if (nLevels > 0)
+      bRetVal = ::RestoreDC(m_hDC, -nLevels);
+  }
+  if (m_hAttribDC != NULL) bRetVal = ::RestoreDC(m_hAttribDC, nSavedDC);
+  return bRetVal;
+}
+
 // Selecting into both DCs keeps the attribute DC in step with the output DC.
 HGDIOBJ CDC::SelectObject(HGDIOBJ hObject) {
   HGDIOBJ hOldObj = NULL;

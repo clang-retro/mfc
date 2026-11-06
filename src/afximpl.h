@@ -132,3 +132,28 @@ HWND AFXAPI _AfxChildWindowFromPoint(HWND hWnd, POINT pt);
 LPCTSTR AFXAPI _AfxLoadDefaultString(UINT nID);  // built-in text for AFX_IDS_ ids
 BOOL AFXAPI AfxLoadString(UINT nIDS, CString& rString);  // with that fallback
 BOOL AFXAPI _AfxIsSplitterWnd(CWnd* pWnd);  // defined with CSplitterWnd
+
+class CDialogBar;
+
+// Builds a dialog template in memory, for the framework's own dialogs
+// when the program's resources do not have them (programs that do not
+// include afxres.rc or afxprint.rc). Units are dialog units.
+class CAfxDlgTemplate {
+public:
+  CAfxDlgTemplate(DWORD dwStyle, int cx, int cy, LPCWSTR lpszCaption = L"",
+                  LPCWSTR lpszFont = L"MS Shell Dlg", WORD wPointSize = 8);
+  // nClass is a predefined class atom: 0x80 button, 0x81 edit, 0x82 static.
+  void AddItem(WORD nClass, DWORD dwStyle, int x, int y, int cx, int cy, WORD nID,
+               LPCWSTR lpszText);
+  LPCDLGTEMPLATE GetTemplate() const { return (LPCDLGTEMPLATE)m_data.GetData(); }
+
+private:
+  void Align(int n);
+  void AddWord(WORD w);
+  void AddString(LPCWSTR lpsz);
+  CByteArray m_data;
+};
+
+// Creates a dialog bar from an in-memory template.
+BOOL AFXAPI _AfxCreateDialogBarIndirect(CDialogBar* pBar, CWnd* pParentWnd,
+                                        LPCDLGTEMPLATE lpTemplate, UINT nStyle, UINT nID);

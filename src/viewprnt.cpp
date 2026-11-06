@@ -84,13 +84,6 @@ void CView::OnEndPrinting(CDC* pDC, CPrintInfo* pInfo) {
   (void)pInfo;
 }
 
-void CView::OnEndPrintPreview(CDC* pDC, CPrintInfo* pInfo, POINT point, void* pView) {
-  (void)pDC;
-  (void)pInfo;
-  (void)point;
-  (void)pView;
-}
-
 BOOL CView::DoPreparePrinting(CPrintInfo* pInfo) {
   CWinApp* pApp = AfxGetApp();
   PRINTDLG& pd = pInfo->m_pPD->m_pd;
@@ -112,13 +105,51 @@ BOOL CView::DoPreparePrinting(CPrintInfo* pInfo) {
   return pd.hDC != NULL;
 }
 
-// The abort procedure keeps the program responsive while GDI spools.
+// ---------------------------------------------------------------------
+// The "Printing" dialog, with a Cancel button, shown while a job spools
+
+static BOOL _afxUserAbort = FALSE;
+static HWND _afxhWndPrinting = NULL;
+
+class CPrintingDialog : public CDialog {
+public:
+  CPrintingDialog(CWnd* pParent) {
+    HINSTANCE hInst = AfxFindResourceHandle(MAKEINTRESOURCE(AFX_IDD_PRINTDLG), RT_DIALOG);
+    if (::FindResource(hInst, MAKEINTRESOURCE(AFX_IDD_PRINTDLG), RT_DIALOG) != NULL) {
+      Create(AFX_IDD_PRINTDLG, pParent);
+    } else {
+      CAfxDlgTemplate dt(WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_CENTER, 133, 64,
+                         L"Printing");
+      dt.AddItem(0x82, SS_CENTER, 0, 8, 133, 8, AFX_IDC_PRINT_DOCNAME, L"");
+      dt.AddItem(0x82, SS_CENTER, 0, 18, 133, 8, AFX_IDC_PRINT_PRINTERNAME, L"");
+      dt.AddItem(0x82, SS_CENTER, 0, 28, 133, 8, AFX_IDC_PRINT_PAGENUM, L"");
+      dt.AddItem(0x80, BS_DEFPUSHBUTTON | WS_TABSTOP, 44, 42, 45, 15, IDCANCEL, L"Cancel");
+      CreateIndirect(dt.GetTemplate(), pParent);
+    }
+  }
+  virtual BOOL OnInitDialog() {
+    SetWindowText(AfxGetAppName());
+    CenterWindow();
+    return CDialog::OnInitDialog();
+  }
+  virtual void OnCancel() {
+    _afxUserAbort = TRUE;
+    CDialog::OnCancel();
+  }
+};
+
+// The abort procedure keeps the program and the dialog responsive while
+// GDI spools, and stops the job when the user cancels.
 static BOOL CALLBACK _AfxAbortProc(HDC, int) {
   MSG msg;
-  while (::PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE)) {
+  while (!_afxUserAbort && ::PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE)) {
+    if (_afxhWndPrinting != NULL && ::IsDialogMessage(_afxhWndPrinting, &msg)) {
+      ::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE);
+      continue;
+    }
     if (!AfxPumpMessage()) return FALSE;
   }
-  return TRUE;
+  return !_afxUserAbort;
 }
 
 void CView::OnFilePrint() {
@@ -159,7 +190,29 @@ void CView::OnFilePrint() {
   CWnd* pMainWnd = AfxGetMainWnd();
   if (pMainWnd != NULL) pMainWnd->EnableWindow(FALSE);
 
+  // Show the document, the printer and the port while printing.
+  _afxUserAbort = FALSE;
+  CPrintingDialog dlgPrinting(pMainWnd);
+  _afxhWndPrinting = dlgPrinting.m_hWnd;
+  if (dlgPrinting.m_hWnd != NULL) {
+    dlgPrinting.SetDlgItemText(AFX_IDC_PRINT_DOCNAME, strTitle);
+    CString strPrinter = printInfo.m_pPD->GetDeviceName(), strPort = printInfo.m_pPD->GetPortName();
+    if (!strPort.IsEmpty()) {
+      CString strTemp;
+      AfxFormatString1(strTemp, AFX_IDS_PRINTONPORT, strPort);
+      if (dlgPrinting.GetDlgItem(AFX_IDC_PRINT_PORTNAME) != NULL)
+        dlgPrinting.SetDlgItemText(AFX_IDC_PRINT_PORTNAME, strTemp);
+      else
+        strPrinter += _T(" ") + strTemp;
+    }
+    dlgPrinting.SetDlgItemText(AFX_IDC_PRINT_PRINTERNAME, strPrinter);
+    dlgPrinting.ShowWindow(SW_SHOW);
+    dlgPrinting.UpdateWindow();
+  }
+
   if (dcPrint.StartDoc(&docInfo) == SP_ERROR) {
+    _afxhWndPrinting = NULL;
+    dlgPrinting.DestroyWindow();
     if (pMainWnd != NULL) pMainWnd->EnableWindow(TRUE);
     OnEndPrinting(&dcPrint, &printInfo);
     dcPrint.Detach();
@@ -192,6 +245,13 @@ void CView::OnFilePrint() {
       bError = TRUE;
       break;
     }
+    if (dlgPrinting.m_hWnd != NULL) {
+      CString strPage;
+      AfxLoadString(AFX_IDS_PRINTPAGENUM, strPage);
+      CString strText;
+      strText.Format(strPage, printInfo.m_nCurPage);
+      dlgPrinting.SetDlgItemText(AFX_IDC_PRINT_PAGENUM, strText);
+    }
     // StartPage resets the DC on Windows 95, so prepare it again.
     OnPrepareDC(&dcPrint, &printInfo);
     OnPrint(&dcPrint, &printInfo);
@@ -205,12 +265,11 @@ void CView::OnFilePrint() {
   else
     dcPrint.AbortDoc();
 
+  // The main window is enabled before the dialog goes, so activation
+  // returns to it.
   if (pMainWnd != NULL) pMainWnd->EnableWindow(TRUE);
+  _afxhWndPrinting = NULL;
+  dlgPrinting.DestroyWindow();
   OnEndPrinting(&dcPrint, &printInfo);
   dcPrint.Detach();
-}
-
-void CView::OnFilePrintPreview() {
-  // Print preview is not part of this library.
-  AfxMessageBox(_T("Print preview is not available."), MB_ICONINFORMATION);
 }

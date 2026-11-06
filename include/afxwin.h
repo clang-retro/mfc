@@ -80,6 +80,9 @@ class CToolBar;
 class CDockState;
 class CRecentFileList;
 class CPrintInfo;
+struct CPrintPreviewState;
+class CPreviewView;
+class CPreviewDC;
 class CPrintDialog;
 class CDocManager;
 struct CCreateContext;
@@ -339,8 +342,8 @@ public:
   BOOL DeleteDC();
 
   // Device context state
-  virtual int SaveDC() { return ::SaveDC(m_hDC); }
-  virtual BOOL RestoreDC(int nSavedDC) { return ::RestoreDC(m_hDC, nSavedDC); }
+  virtual int SaveDC();
+  virtual BOOL RestoreDC(int nSavedDC);
   int GetDeviceCaps(int nIndex) const { return ::GetDeviceCaps(m_hAttribDC, nIndex); }
   UINT SetBoundsRect(LPCRECT lpRectBounds, UINT flags) { return ::SetBoundsRect(m_hDC, lpRectBounds, flags); }
   UINT GetBoundsRect(LPRECT lpRectBounds, UINT flags) { return ::GetBoundsRect(m_hAttribDC, lpRectBounds, flags); }
@@ -764,6 +767,7 @@ protected:
   BOOL m_bPrinting;
   friend class CView;
   friend class CPreviewDC;
+  friend class CPreviewView;
 };
 
 class CClientDC : public CDC {
@@ -1876,7 +1880,7 @@ public:
   virtual void OnUpdateFrameMenu(HMENU hMenuAlt);
   virtual HACCEL GetDefaultAccelerator();
   virtual BOOL NegotiateBorderSpace(UINT nBorderCmd, LPRECT lpRectBorder);
-  virtual void OnSetPreviewMode(BOOL bPreview, void* pState);
+  virtual void OnSetPreviewMode(BOOL bPreview, CPrintPreviewState* pModeStuff);
   virtual void DelayUpdateFrameMenu(HMENU hMenuAlt);
   void DelayRecalcLayout(BOOL bNotify = TRUE) { m_nIdleFlags |= idleLayout | (bNotify ? idleNotify : 0); }
   void UpdateFrameTitleForDocument(LPCTSTR lpszDocName);
@@ -2197,7 +2201,9 @@ public:
   virtual void OnBeginPrinting(CDC* pDC, CPrintInfo* pInfo);
   virtual void OnPrint(CDC* pDC, CPrintInfo* pInfo);
   virtual void OnEndPrinting(CDC* pDC, CPrintInfo* pInfo);
-  virtual void OnEndPrintPreview(CDC* pDC, CPrintInfo* pInfo, POINT point, void* pView);
+  virtual void OnEndPrintPreview(CDC* pDC, CPrintInfo* pInfo, POINT point, CPreviewView* pView);
+  BOOL DoPrintPreview(UINT nIDResource, CView* pPrintView, CRuntimeClass* pPreviewViewClass,
+                      CPrintPreviewState* pState);
   BOOL DoPreparePrinting(CPrintInfo* pInfo);
 
   virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
@@ -2220,6 +2226,7 @@ public:
 
   friend class CDocument;
   friend class CFrameWnd;
+  friend class CPreviewView;
   DECLARE_MESSAGE_MAP()
 };
 
