@@ -24,6 +24,8 @@ class CEditView;
 class CBitmapButton;
 class CPrintInfo;
 class CDockState;
+class CControlBarInfo;
+class CMiniDockFrameWnd;
 
 #ifndef RT_TOOLBAR
 #define RT_TOOLBAR MAKEINTRESOURCE(241)
@@ -61,7 +63,7 @@ public:
   void SetBarStyle(DWORD dwStyle);
   void EnableDocking(DWORD dwDockStyle);
   CFrameWnd* GetDockingFrame() const;
-  BOOL IsFloating() const { return FALSE; }
+  BOOL IsFloating() const;
   BOOL IsVisible() const;
   virtual BOOL IsDockBar() const { return FALSE; }
   void DelayShow(BOOL bShow);
@@ -76,6 +78,10 @@ public:
   virtual void OnBarStyleChange(DWORD dwOldStyle, DWORD dwNewStyle);
   virtual BOOL SetStatusText(INT_PTR nHit);
   virtual void ResetTimer(UINT nEvent, UINT nTime);
+
+  // Saving and restoring the docking layout (see CDockState).
+  virtual void GetBarInfo(CControlBarInfo* pInfo);
+  virtual void SetBarInfo(CControlBarInfo* pInfo, CFrameWnd* pFrameWnd);
 
   virtual BOOL PreTranslateMessage(MSG* pMsg);
   virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
@@ -111,11 +117,16 @@ public:
   afx_msg void OnNcPaint();
   afx_msg void OnTimer(UINT_PTR nIDEvent);
   afx_msg void OnMouseMove(UINT nFlags, CPoint point);
+  afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+  afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
+  afx_msg LRESULT OnNcHitTest(CPoint point);
   afx_msg LRESULT OnSizeParent(WPARAM wParam, LPARAM lParam);
   afx_msg LRESULT OnIdleUpdateCmdUI(WPARAM wParam, LPARAM lParam);
   DECLARE_MESSAGE_MAP()
 
   friend class CFrameWnd;
+  friend class CDockBar;
+  friend class CDockContext;
 };
 
 // ---------------------------------------------------------------------
@@ -265,6 +276,10 @@ public:
   void _SetButton(int nIndex, TBBUTTON* pButton);
   CSize CalcLayout(DWORD nMode, int nLength = -1);
   void Layout();
+  void _SetWraps(BOOL bAll);         // one row (FALSE) or one column (TRUE)
+  void _ApplyWraps(const BYTE* pWrap);
+  void _WrapToWidth(int nWidth);     // rows no wider than nWidth
+  CSize _CalcButtonsSize();          // the extent of the visible buttons
 
   afx_msg void OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp);
   afx_msg void OnPaint();
@@ -295,18 +310,34 @@ public:
 };
 
 // ---------------------------------------------------------------------
-// Docking state: accepted for compatibility; nothing is saved.
+// CDockState: where a frame's control bars are, which are floating and
+// which are shown. CFrameWnd::SaveBarState and LoadBarState keep it in
+// the application's profile; Serialize keeps it in an archive.
 
 class CDockState : public CObject {
   DECLARE_SERIAL(CDockState)
 public:
-  CDockState() {}
-  CPtrArray m_arrBarInfo;
-  void LoadState(LPCTSTR lpszProfileName) { (void)lpszProfileName; }
-  void SaveState(LPCTSTR lpszProfileName) { (void)lpszProfileName; }
-  void Clear() { m_arrBarInfo.RemoveAll(); }
-  DWORD GetVersion() { return 1; }
-  virtual void Serialize(CArchive& ar) { (void)ar; }
+  CDockState();
+  virtual ~CDockState();
+
+  CPtrArray m_arrBarInfo;  // CControlBarInfo*
+
+  void LoadState(LPCTSTR lpszProfileName);
+  void SaveState(LPCTSTR lpszProfileName);
+  void Clear();
+  DWORD GetVersion() { return m_dwVersion; }
+  virtual void Serialize(CArchive& ar);
+
+  // Positions saved on a screen of another size are scaled to this one.
+  CSize GetScreenSize();
+  void SetScreenSize(CSize& size);
+  void ScalePoint(CPoint& pt);
+  void ScaleRectPos(CRect& rect);
+
+  DWORD m_dwVersion;
+  BOOL m_bScaling;
+  CRect m_rectDevice;
+  CRect m_rectClip;
 };
 
 // ---------------------------------------------------------------------

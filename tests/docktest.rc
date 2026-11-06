@@ -1,0 +1,41 @@
+// docktest.rc - resources for docktest.
+#include <windows.h>
+#include <afxres.h>
+#include "docktest.h"
+
+IDR_MAINFRAME MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+  POPUP "&View"
+  BEGIN
+    MENUITEM "&Toolbar", ID_VIEW_TOOLBAR
+    MENUITEM "T&ools", ID_VIEW_TOOLS
+    MENUITEM "&Status Bar", ID_VIEW_STATUS_BAR
+  END
+END
+
+// The toolbars: version, image width, image height, count, command IDs.
+IDR_MAINFRAME 241
+BEGIN
+  1, 16, 15, 8,
+  ID_FILE_NEW, ID_FILE_OPEN, ID_FILE_SAVE, 0,
+  ID_EDIT_CUT, ID_EDIT_COPY, ID_EDIT_PASTE, 0
+END
+IDR_MAINFRAME BITMAP "toolbar.bmp"
+
+IDR_TOOLS 241
+BEGIN
+  1, 16, 15, 7,
+  ID_TOOL_A, ID_TOOL_B, ID_TOOL_C, 0,
+  ID_TOOL_D, ID_TOOL_E, ID_TOOL_F
+END
+IDR_TOOLS BITMAP "toolbar.bmp"
+
+STRINGTABLE
+BEGIN
+  IDR_MAINFRAME "DockTest"
+  ID_TOOL_A "Tool A\nTool A"
+END

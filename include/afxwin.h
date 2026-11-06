@@ -58,6 +58,9 @@ class CScrollBar;
 class CFrameWnd;
 class CMDIFrameWnd;
 class CMDIChildWnd;
+class CMiniFrameWnd;
+class CMiniDockFrameWnd;
+class CDockBar;
 class CView;
 class CScrollView;
 class CDocument;
@@ -1866,12 +1869,17 @@ public:
   // Control bars (see afxext.h)
   void EnableDocking(DWORD dwDockStyle);
   void DockControlBar(CControlBar* pBar, UINT nDockBarID = 0, LPCRECT lpRect = NULL);
-  void FloatControlBar(CControlBar* pBar, CPoint point, DWORD dwStyle = 0x1000L);
+  void DockControlBar(CControlBar* pBar, CDockBar* pDockBar, LPCRECT lpRect = NULL);
+  void ReDockControlBar(CControlBar* pBar, CDockBar* pDockBar, LPCRECT lpRect = NULL);
+  void FloatControlBar(CControlBar* pBar, CPoint point, DWORD dwStyle = 0x2000L /*CBRS_ALIGN_TOP*/);
+  // The dock style of the frame's dock bar that rect (screen) overlaps.
+  DWORD CanDock(CRect rect, DWORD dwDockStyle, CDockBar** ppDockBar = NULL);
   CControlBar* GetControlBar(UINT nID);
   void ShowControlBar(CControlBar* pBar, BOOL bShow, BOOL bDelay);
-  void LoadBarState(LPCTSTR lpszProfileName) { (void)lpszProfileName; }
-  void SaveBarState(LPCTSTR lpszProfileName) const { (void)lpszProfileName; }
-  void RecalcLayout(BOOL bNotify = TRUE);
+  void LoadBarState(LPCTSTR lpszProfileName);
+  void SaveBarState(LPCTSTR lpszProfileName) const;
+  void NotifyFloatingWindows(DWORD dwFlags);
+  virtual void RecalcLayout(BOOL bNotify = TRUE);
   virtual void ActivateFrame(int nCmdShow = -1);
   void InitialUpdateFrame(CDocument* pDoc, BOOL bMakeVisible);
   void SetTitle(LPCTSTR lpszTitle) { m_strTitle = lpszTitle; }
@@ -1889,8 +1897,8 @@ public:
   virtual BOOL OnCreateClient(LPCREATESTRUCT lpcs, CCreateContext* pContext);
   virtual void OnUpdateControlBarMenu(CCmdUI* pCmdUI);
   virtual BOOL OnBarCheck(UINT nID);
-  void SetDockState(const CDockState&) {}
-  void GetDockState(CDockState&) const {}
+  void SetDockState(const CDockState& state);
+  void GetDockState(CDockState& state) const;
 
   virtual BOOL PreTranslateMessage(MSG* pMsg);
   virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
@@ -1919,6 +1927,10 @@ public:
   BOOL m_bInRecalcLayout;
   CRuntimeClass* m_pFloatingFrameClass;
   DWORD m_dwDockStyle;  // sides bars may dock to (EnableDocking)
+  static const DWORD dwDockBarMap[4][2];  // dock bar IDs and their CBRS_ styles
+  CMiniDockFrameWnd* CreateFloatingFrame(DWORD dwStyle);
+  void DestroyDockBars();
+  void _UpdateFloatingFrames();
   UINT m_nIdleFlags;
   enum IdleFlags { idleMenu = 1, idleTitle = 2, idleNotify = 4, idleLayout = 8 };
 
@@ -2048,6 +2060,42 @@ public:
   afx_msg void OnDestroy();
   afx_msg void OnWindowPosChanging(LPWINDOWPOS lpWndPos);
   afx_msg BOOL OnNcCreate(LPCREATESTRUCT lpCreateStruct);
+  DECLARE_MESSAGE_MAP()
+};
+
+// ---------------------------------------------------------------------
+// CMiniFrameWnd: a frame with a small caption, used for floating
+// toolbars and palettes. It is a tool window, so the system draws its
+// caption the way it draws other palettes.
+
+#define MFS_SYNCACTIVATE 0x00000100L  // caption is active when the owner is
+#define MFS_4THICKFRAME 0x00000200L   // a sizing border without the corners
+#define MFS_THICKFRAME 0x00000400L    // a sizing border
+#define MFS_MOVEFRAME 0x00000800L     // dragging the edge moves the window
+#define MFS_BLOCKSYSMENU 0x00001000L  // no system menu on the caption
+
+class CMiniFrameWnd : public CFrameWnd {
+  DECLARE_DYNCREATE(CMiniFrameWnd)
+public:
+  CMiniFrameWnd();
+  virtual ~CMiniFrameWnd();
+
+  BOOL Create(LPCTSTR lpClassName, LPCTSTR lpWindowName, DWORD dwStyle, const RECT& rect,
+              CWnd* pParentWnd = NULL, UINT nID = 0);
+  BOOL CreateEx(DWORD dwExStyle, LPCTSTR lpClassName, LPCTSTR lpWindowName, DWORD dwStyle,
+                const RECT& rect, CWnd* pParentWnd = NULL, UINT nID = 0);
+
+  virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
+  static void PASCAL CalcBorders(LPRECT lpClientRect, DWORD dwStyle = 0, DWORD dwExStyle = 0);
+
+  BOOL m_bSysTracking;
+  BOOL m_bInSys;
+  BOOL m_bActive;
+  CString m_strCaption;
+
+  afx_msg BOOL OnNcActivate(BOOL bActive);
+  afx_msg LRESULT OnFloatStatus(WPARAM wParam, LPARAM lParam);
+  afx_msg void OnGetMinMaxInfo(MINMAXINFO* pMMI);
   DECLARE_MESSAGE_MAP()
 };
 
@@ -2767,6 +2815,14 @@ void AFXAPI AfxDeleteObject(HGDIOBJ* pObject);
 #define WM_QUERYCENTERWND 0x036B
 #define WM_DISABLEMODAL 0x036C
 #define WM_FLOATSTATUS 0x036D
+// WM_FLOATSTATUS flags
+#define FS_SHOW 0x01
+#define FS_HIDE 0x02
+#define FS_ACTIVATE 0x04
+#define FS_DEACTIVATE 0x08
+#define FS_ENABLE 0x10
+#define FS_DISABLE 0x20
+#define FS_SYNCACTIVE 0x40
 #define WM_ACTIVATETOPLEVEL 0x036E
 #define WM_RESERVED_036F 0x036F
 #define WM_RESERVED_0370 0x0370

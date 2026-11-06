@@ -110,7 +110,13 @@ public:
         CHECK(rcTool.top == rcClient.top && rcTool.Height() >= 22);
         CHECK(rcStatus.bottom == rcClient.bottom && rcStatus.Height() >= 16);
         CHECK(rcView.top == rcTool.bottom && rcView.bottom == rcStatus.top);
-        CHECK(rcTool.Width() == rcClient.Width());
+        // The toolbar is as long as its buttons; its dock bar spans the frame.
+        CHECK(rcTool.Width() < rcClient.Width() && rcTool.Width() > 8 * 16);
+        CWnd* pDockTop = GetDlgItem(AFX_IDW_DOCKBAR_TOP);
+        CHECK(pDockTop != NULL && m_wndToolBar.GetParent() == pDockTop);
+        CRect rcDock;
+        if (pDockTop != NULL) pDockTop->GetWindowRect(&rcDock);
+        CHECK(rcDock.Width() == rcClient.Width() && rcDock.Height() == rcTool.Height());
 
         // Nothing is selected, so the idle update disabled Cut and Copy.
         int nCut = m_wndToolBar.CommandToIndex(ID_EDIT_CUT);

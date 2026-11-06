@@ -17,6 +17,154 @@
 #include <afxadv.h>
 
 // ---------------------------------------------------------------------
+// Docking: the dock bars along the frame's edges, the small frames that
+// hold floating bars, and the drag loop that moves bars between them.
+
+// One saved control bar (or dock bar) in a CDockState.
+class CControlBarInfo {
+public:
+  CControlBarInfo();
+  virtual ~CControlBarInfo() {}
+
+  UINT m_nBarID;
+  BOOL m_bVisible;
+  BOOL m_bFloating;
+  BOOL m_bHorz;
+  BOOL m_bDockBar;
+  CPoint m_pointPos;   // in the dock bar, or the floating frame's on the screen
+  UINT m_nMRUWidth;
+  BOOL m_bDocking;     // the bar has a dock context (it can be dragged)
+  UINT m_uMRUDockID;
+  CRect m_rectMRUDockPos;
+  DWORD m_dwMRUFloatStyle;
+  CPoint m_ptMRUFloatPos;
+  CPtrArray m_arrBarID;  // a dock bar's bars in order; 0 ends a row
+  CControlBar* m_pBar;   // filled in while a state is applied
+
+  virtual BOOL SaveState(LPCTSTR lpszProfileName, int nIndex);
+  virtual BOOL LoadState(LPCTSTR lpszProfileName, int nIndex, CDockState* pDockState);
+  virtual void Serialize(CArchive& ar, CDockState* pDockState);
+};
+
+// A strip along one edge of a frame (or the inside of a floating frame)
+// that lays out the control bars docked in it, in rows.
+class CDockBar : public CControlBar {
+  DECLARE_DYNAMIC(CDockBar)
+public:
+  explicit CDockBar(BOOL bFloating = FALSE);
+  virtual ~CDockBar();
+
+  BOOL Create(CWnd* pParentWnd, DWORD dwStyle, UINT nID);
+
+  BOOL m_bFloating;
+  // The docked bars, row by row. Element 0 is NULL and a NULL ends each
+  // row, so an empty dock bar holds just one NULL.
+  CPtrArray m_arrBars;
+  BOOL m_bLayoutQuery;
+  CRect m_rectLayout;
+
+  virtual BOOL IsDockBar() const { return TRUE; }
+  int GetDockedCount() const;
+  int GetDockedVisibleCount() const;
+  CControlBar* GetDockedControlBar(int nPos) const;
+  int FindBar(CControlBar* pBar, int nPosExclude = -1);
+  void ShowAll(BOOL bShow);
+
+  // lpRect, in screen coordinates, picks the row and the place in it.
+  void DockControlBar(CControlBar* pBar, LPCRECT lpRect = NULL);
+  void ReDockControlBar(CControlBar* pBar, LPCRECT lpRect = NULL);
+  BOOL RemoveControlBar(CControlBar* pBar, int nPosExclude = -1, int nAddPlaceHolder = 0);
+
+  virtual CSize CalcFixedLayout(BOOL bStretch, BOOL bHorz);
+  virtual void OnUpdateCmdUI(CFrameWnd* pTarget, BOOL bDisableIfNoHndler);
+  virtual void DoPaint(CDC* pDC);
+
+  int Insert(CControlBar* pBar, CRect rect, CPoint ptMid);
+  void _AttachBar(CControlBar* pBar);  // style, parent and owner for a new member
+  CSize _CalcBarSize(CControlBar* pBar, BOOL bHorz);
+
+  afx_msg LRESULT OnSizeParent(WPARAM wParam, LPARAM lParam);
+  afx_msg void OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp);
+  afx_msg void OnNcPaint();
+  DECLARE_MESSAGE_MAP()
+};
+
+// The frame a floating control bar lives in.
+class CMiniDockFrameWnd : public CMiniFrameWnd {
+  DECLARE_DYNCREATE(CMiniDockFrameWnd)
+public:
+  CMiniDockFrameWnd();
+  virtual ~CMiniDockFrameWnd();
+
+  virtual BOOL Create(CWnd* pParent, DWORD dwBarStyle);
+  virtual void RecalcLayout(BOOL bNotify = TRUE);
+
+  CDockBar m_wndDockBar;
+
+  CControlBar* _GetBar() const;
+  virtual LRESULT WindowProc(UINT message, WPARAM wParam, LPARAM lParam);
+
+  afx_msg void OnClose();
+  afx_msg void OnNcLButtonDown(UINT nHitTest, CPoint point);
+  afx_msg void OnNcLButtonDblClk(UINT nHitTest, CPoint point);
+  afx_msg int OnMouseActivate(CWnd* pDesktopWnd, UINT nHitTest, UINT message);
+  afx_msg void OnSizing(UINT fwSide, LPRECT pRect);
+  DECLARE_MESSAGE_MAP()
+};
+
+// Moves a control bar with the mouse: an outline follows the pointer,
+// thin where the bar would dock and thick where it would float. Holding
+// Ctrl keeps it from docking; Esc or the right button cancels.
+class CDockContext {
+public:
+  explicit CDockContext(CControlBar* pBar);
+  virtual ~CDockContext();
+
+  virtual void StartDrag(CPoint pt);  // pt in screen coordinates
+  void Move(CPoint pt);
+  void EndDrag();
+  void OnKey(int nChar, BOOL bDown);
+
+  virtual void StartResize(int nHitTest, CPoint pt);
+  virtual void ToggleDocking();
+
+  CControlBar* m_pBar;
+  CFrameWnd* m_pDockSite;
+  DWORD m_dwDockStyle;      // where the bar may dock (its EnableDocking)
+  DWORD m_dwOverDockStyle;  // the side under the outline now, or 0
+  DWORD m_dwStyle;          // the bar's style when the drag began
+  BOOL m_bFlip;
+  BOOL m_bForceFrame;       // Ctrl is down
+  BOOL m_bDragging;
+  BOOL m_bMoved;
+  CPoint m_ptLast;
+  CRect m_rectLast;
+  CSize m_sizeLast;
+  BOOL m_bDitherLast;
+  CRect m_rectDragHorz;
+  CRect m_rectDragVert;
+  CRect m_rectFrameDragHorz;
+  CRect m_rectFrameDragVert;
+  CDC* m_pDC;
+
+  // Where the bar last docked (in its dock bar's coordinates) and
+  // floated, for ToggleDocking.
+  UINT m_uMRUDockID;
+  CRect m_rectMRUDockPos;
+  DWORD m_dwMRUFloatStyle;
+  CPoint m_ptMRUFloatPos;
+
+  void InitLoop();
+  void CancelLoop();
+  BOOL Track();
+  void DrawFocusRect(BOOL bRemoveRect = FALSE);
+  void UpdateState(BOOL* pFlag, BOOL bNewValue);
+  DWORD CanDock();
+  CDockBar* GetDockBar(DWORD dwOverDockStyle);
+  void _RestoreLayout();
+};
+
+// ---------------------------------------------------------------------
 // CPreviewDC: draws on the screen what a printer would print. The
 // attribute DC is the printer's, so a view measures and lays out as it
 // does when printing; the output DC is the preview window's, with every

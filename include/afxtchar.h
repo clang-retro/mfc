@@ -32,6 +32,8 @@ typedef wint_t _TINT;
 #define _tcspbrk wcspbrk
 #define _tcstok wcstok
 #define _tcstol wcstol
+#define _ttoi(s) ((int)wcstol((s), NULL, 10))
+#define _ttol(s) wcstol((s), NULL, 10)
 #define _tcstoul wcstoul
 #define _tcstod wcstod
 #define _stprintf swprintf
@@ -68,6 +70,8 @@ typedef int _TINT;
 #define _tcspbrk strpbrk
 #define _tcstok strtok
 #define _tcstol strtol
+#define _ttoi atoi
+#define _ttol atol
 #define _tcstoul strtoul
 #define _tcstod strtod
 #define _stprintf sprintf
