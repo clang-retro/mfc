@@ -37,7 +37,8 @@ clang++ --config=winxp.cfg -Ipath/to/mfc/include app.cpp app-res.o \
 As with Visual C++, `afx.h` names the libraries to link, so no `-l`
 options are needed: `mfc` or `mfcu` by `_UNICODE`, and `user32`, `gdi32`,
 `comdlg32`, `comctl32`, `shell32`, `advapi32`, `winspool`, `ole32`,
-`oleaut32` and `uuid` (and `afxsock.h` adds `ws2_32`).
+`oleaut32` and `uuid` (`afxsock.h` adds `ws2_32` and `afxdb.h` adds
+`odbc32`).
 Define `_AFX_NOFORCE_LIBS` to turn that off. The library provides
 `WinMain` (and `wWinMain`), so Unicode programs link with or without
 `-municode`.
@@ -75,6 +76,15 @@ when there is no display:
 * `richtest`: a rich edit document and view; bold, italic and paragraph
   alignment on the selection, finding and replacing, saving and loading
   rich text and plain text, page layout for printing, and word wrap.
+* `dbtest`: `afxdb.h` against an in-memory ODBC driver written in the
+  test (`tests/odbcmock.h`), since Wine has no 32-bit ODBC driver to
+  test with: opening, moving, filters, sorts and parameters, nulls,
+  adding, editing and deleting records, transactions, field info and
+  errors, on the console.
+* `rvtest`: a CRecordView over the same driver; the form showing the
+  current record, edits written back when moving, nulls shown as empty
+  fields and indeterminate check boxes, and the record commands enabled
+  at each end.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -97,6 +107,9 @@ request with the stock MinGW-w64 toolchain.
   CBitmapButton.
 * `afxrich.h`: CRichEditView and CRichEditDoc (rich text or plain text
   files, formatting the selection, find and replace, printing).
+* `afxdb.h`: CDatabase, CRecordset (snapshot, dynaset and forward-only,
+  with RFX for the usual types, bookmarks and parameters),
+  CRecordView and the DDX_Field functions, CDBException, CDBVariant.
 * `afxdlgs.h`: the common dialogs (file, color, font, print, page setup,
   find/replace) and CPropertySheet/CPropertyPage, wizards included.
 * `afxcmn.h`, `afxcview.h`: the common controls, CImageList, CListView,
@@ -121,11 +134,18 @@ request with the stock MinGW-w64 toolchain.
 * `afxdisp.h` has the automation client side: the date, currency,
   variant and safe array classes and COleDispatchDriver. Automation
   servers (COleDispatchImpl, dispatch maps, COleObjectFactory), the OLE
-  document classes, ActiveX control containment and the database classes
-  are not implemented yet.
+  document classes and ActiveX control containment are not implemented
+  yet.
 * Sockets are IPv4, as in MFC 6. `CAsyncSocket::FromHandle` returns
   only sockets attached in the calling thread, and NULL for others,
   rather than making a temporary object.
+* CRecordset keeps the rows it has fetched and writes changes with
+  UPDATE, INSERT and DELETE statements that match the record by the
+  values it read, rather than with positioned cursors, so it works with
+  any driver. A dynaset therefore behaves like a snapshot: it does not
+  see other users' changes until Requery. Output parameters of stored
+  procedures are not supported, and the DAO classes (`afxdao.h`) are
+  not there.
 * `llvm-rc` (and `llvm-windres`, which uses it) has no `TOOLBAR`
   statement yet; write toolbar resources as raw resource type 241, as
   `tests/sditest.rc` does.
