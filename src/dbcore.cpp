@@ -8,6 +8,7 @@
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 #include "dbimpl.h"
+#include <wctype.h>
 
 IMPLEMENT_DYNAMIC(CDBException, CException)
 IMPLEMENT_DYNAMIC(CDatabase, CObject)
