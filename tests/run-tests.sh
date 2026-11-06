@@ -16,7 +16,8 @@ SYSROOT=${SYSROOT:-}
 CFG=${CFG:-}
 BIN=${BIN:-}
 CXX=${BIN:+$BIN/}clang++
-RC=${BIN:+$BIN/}llvm-windres
+RC=${RC:-${BIN:+$BIN/}llvm-windres}
+LDFLAGS=${LDFLAGS:-}
 TESTS=${TESTS:-"core dlgtest sditest mditest"}
 
 if [ -z "${DISPLAY:-}" ] && [ -z "${MFC_TEST_NO_XVFB:-}" ] && command -v xvfb-run >/dev/null 2>&1; then
@@ -38,7 +39,7 @@ if [ -n "$CFG" ]; then
 else
   CXXFLAGS="--target=$TARGET ${SYSROOT:+--sysroot=$SYSROOT}"
 fi
-CXXFLAGS="$CXXFLAGS -fuse-ld=lld -stdlib=libc++ -std=c++17"
+CXXFLAGS="$CXXFLAGS -fuse-ld=lld ${STDLIB--stdlib=libc++} -std=c++17"
 CXXFLAGS="$CXXFLAGS -Wall -Wno-unused-function -Wno-overloaded-virtual -Iinclude -Itests"
 RCFLAGS="--target=i686-w64-mingw32 -I tests -I include -I $T ${SYSROOT:+-I $SYSROOT/include}"
 
@@ -86,7 +87,7 @@ for v in a u; do
       srcs="$srcs $T/$name-res.o -mwindows"
     fi
     # shellcheck disable=SC2086
-    "$CXX" $CXXFLAGS $flags $srcs -L"$OUT" -o "$exe" 2>"$T/$name-$v-build.log" || {
+    "$CXX" $CXXFLAGS $flags $srcs -L"$OUT" $LDFLAGS -o "$exe" 2>"$T/$name-$v-build.log" || {
       echo "FAIL   $name-$v (build)"; cat "$T/$name-$v-build.log"; nfail=$((nfail + 1)); continue; }
     if [ $name = core ]; then
       # The console test reports on standard output.

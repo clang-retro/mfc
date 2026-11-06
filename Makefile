@@ -28,7 +28,9 @@ CXX = $(if $(BIN),$(BIN)/,)clang++
 AR = $(if $(BIN),$(BIN)/,)llvm-ar
 
 CXXFLAGS ?= -O2
-ALL_CXXFLAGS = $(TARGET_FLAGS) -stdlib=libc++ \
+STDLIB ?= -stdlib=libc++
+TEST_RC ?=
+ALL_CXXFLAGS = $(TARGET_FLAGS) $(STDLIB) \
   -std=c++17 -Wall -Wno-invalid-offsetof -Wno-overloaded-virtual -Wno-unused-private-field \
   -Iinclude -Isrc $(CXXFLAGS)
 
@@ -61,7 +63,7 @@ install: all
 	cp $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PREFIX)/lib/
 
 check: all
-	BIN=$(BIN) CFG=$(CFG) SYSROOT=$(SYSROOT) TARGET=$(TARGET) OUT=$(OUT) sh tests/run-tests.sh
+	BIN=$(BIN) STDLIB="$(STDLIB)" RC="$(TEST_RC)" LDFLAGS="$(LDFLAGS)" CFG=$(CFG) SYSROOT=$(SYSROOT) TARGET=$(TARGET) OUT=$(OUT) sh tests/run-tests.sh
 
 clean:
 	rm -rf $(OUT)

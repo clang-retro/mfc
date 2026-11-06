@@ -21,6 +21,11 @@
 #define WINVER 0x0400
 #endif
 
+// Decided before any library header: libstdc++ defines NOMINMAX itself.
+#ifndef NOMINMAX
+#define _AFX_MINMAX
+#endif
+
 #include <windows.h>
 #if !defined(__has_include) || __has_include(<tchar.h>)
 #include <tchar.h>
@@ -37,11 +42,15 @@
 #include <time.h>
 #include <new>
 
-// The Windows SDK's min and max macros are C-only in MinGW's headers.
+// The Windows SDK's min and max macros are C-only in most MinGW headers.
 // Programs written for MFC use them freely, so provide function
 // templates that also accept mixed argument types. (std::min and
 // std::max still win overload resolution for same-type arguments.)
-#if !defined(NOMINMAX) && !defined(min) && !defined(max)
+// Where <windows.h> did define them as macros (some MinGW versions do for
+// C++ too), they are replaced, as C++ library headers would #undef them.
+#ifdef _AFX_MINMAX
+#undef min
+#undef max
 #include <type_traits>
 template <class _AfxT1, class _AfxT2>
 inline typename std::common_type<_AfxT1, _AfxT2>::type min(_AfxT1 a, _AfxT2 b) { return b < a ? b : a; }
