@@ -1,0 +1,38 @@
+# Builds the libraries and runs the tests under Wine. clang-retro's own
+# toolchain has no published package yet, so CI uses Ubuntu's clang with
+# the MinGW-w64 headers and libraries (libstdc++ in place of libc++).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mingw-wine:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang, MinGW-w64, Wine and Xvfb
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-18 lld-18 llvm-18 \
+            g++-mingw-w64-i686-posix wine wine32:i386 xvfb xauth imagemagick python3
+      - name: Build
+        run: make -j"$(nproc)" TARGET=i686-w64-mingw32 STDLIB= BIN=/usr/lib/llvm-18/bin
+      - name: Test
+        run: |
+          make check TARGET=i686-w64-mingw32 STDLIB= BIN=/usr/lib/llvm-18/bin \
+            TEST_RC=/usr/lib/llvm-18/bin/llvm-windres LDFLAGS="-static -lpthread"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-output
+          path: |
+            build/i686-w64-mingw32/tests/a
+            build/i686-w64-mingw32/tests/u

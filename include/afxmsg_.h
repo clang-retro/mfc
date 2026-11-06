@@ -93,68 +93,79 @@ protected: \
     (void)_t; (void)_m; (void)_w; (void)_l; body }
 #define _AFX_THIS static_cast<ThisClass*>(_t)
 
+// Handler names. Visual C++ 6 code writes them as plain names
+// (OnAppAbout, CWinApp::OnFileNew); Visual C++ 2005 and later code writes
+// member pointers (&CMyApp::OnAppAbout). Standard C++ has no single
+// expression that accepts both, so the second form needs
+// _AFX_MSGMAP_MEMBER_POINTERS defined before afxwin.h is included.
+#ifdef _AFX_MSGMAP_MEMBER_POINTERS
+#define _AFX_CALL(memberFxn) (_AFX_THIS->*memberFxn)
+#else
+#define _AFX_CALL(memberFxn) _AFX_THIS->memberFxn
+#endif
+
 // ---------------------------------------------------------------------
 // Commands. For these, the thunk gets the command ID in wParam and the
 // CCmdUI* or AFX_NOTIFY* in lParam.
 
 #define ON_COMMAND(id, memberFxn) \
   {WM_COMMAND, CN_COMMAND, (WORD)(id), (WORD)(id), AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(_AFX_THIS->memberFxn(); return TRUE;)},
+   _AFX_THUNK(_AFX_CALL(memberFxn)(); return TRUE;)},
 #define ON_COMMAND_EX(id, memberFxn) \
   {WM_COMMAND, CN_COMMAND, (WORD)(id), (WORD)(id), AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(return (LRESULT)(_AFX_THIS->memberFxn((UINT)_w) != 0);)},
+   _AFX_THUNK(return (LRESULT)(_AFX_CALL(memberFxn)((UINT)_w) != 0);)},
 #define ON_COMMAND_RANGE(id, idLast, memberFxn) \
   {WM_COMMAND, CN_COMMAND, (WORD)(id), (WORD)(idLast), AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(_AFX_THIS->memberFxn((UINT)_w); return TRUE;)},
+   _AFX_THUNK(_AFX_CALL(memberFxn)((UINT)_w); return TRUE;)},
 #define ON_COMMAND_EX_RANGE(id, idLast, memberFxn) \
   {WM_COMMAND, CN_COMMAND, (WORD)(id), (WORD)(idLast), AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(return (LRESULT)(_AFX_THIS->memberFxn((UINT)_w) != 0);)},
+   _AFX_THUNK(return (LRESULT)(_AFX_CALL(memberFxn)((UINT)_w) != 0);)},
 #define ON_UPDATE_COMMAND_UI(id, memberFxn) \
   {WM_COMMAND, CN_UPDATE_COMMAND_UI, (WORD)(id), (WORD)(id), AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(_AFX_THIS->memberFxn((CCmdUI*)_l); return TRUE;)},
+   _AFX_THUNK(_AFX_CALL(memberFxn)((CCmdUI*)_l); return TRUE;)},
 #define ON_UPDATE_COMMAND_UI_RANGE(id, idLast, memberFxn) \
   {WM_COMMAND, CN_UPDATE_COMMAND_UI, (WORD)(id), (WORD)(idLast), AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(_AFX_THIS->memberFxn((CCmdUI*)_l); return TRUE;)},
+   _AFX_THUNK(_AFX_CALL(memberFxn)((CCmdUI*)_l); return TRUE;)},
 #define ON_UPDATE_COMMAND_UI_REFLECT(memberFxn) \
   {WM_COMMAND + WM_REFLECT_BASE, CN_UPDATE_COMMAND_UI, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(_AFX_THIS->memberFxn((CCmdUI*)_l); return TRUE;)},
+   _AFX_THUNK(_AFX_CALL(memberFxn)((CCmdUI*)_l); return TRUE;)},
 
 #define ON_CONTROL(wNotifyCode, id, memberFxn) \
   {WM_COMMAND, (WORD)(wNotifyCode), (WORD)(id), (WORD)(id), AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(_AFX_THIS->memberFxn(); return TRUE;)},
+   _AFX_THUNK(_AFX_CALL(memberFxn)(); return TRUE;)},
 #define ON_CONTROL_RANGE(wNotifyCode, id, idLast, memberFxn) \
   {WM_COMMAND, (WORD)(wNotifyCode), (WORD)(id), (WORD)(idLast), AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(_AFX_THIS->memberFxn((UINT)_w); return TRUE;)},
+   _AFX_THUNK(_AFX_CALL(memberFxn)((UINT)_w); return TRUE;)},
 #define ON_CONTROL_REFLECT(wNotifyCode, memberFxn) \
   {WM_COMMAND + WM_REFLECT_BASE, (WORD)(wNotifyCode), 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(_AFX_THIS->memberFxn(); return TRUE;)},
+   _AFX_THUNK(_AFX_CALL(memberFxn)(); return TRUE;)},
 #define ON_CONTROL_REFLECT_EX(wNotifyCode, memberFxn) \
   {WM_COMMAND + WM_REFLECT_BASE, (WORD)(wNotifyCode), 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(return (LRESULT)(_AFX_THIS->memberFxn() != 0);)},
+   _AFX_THUNK(return (LRESULT)(_AFX_CALL(memberFxn)() != 0);)},
 
 #define ON_NOTIFY(wNotifyCode, id, memberFxn) \
   {WM_NOTIFY, (WORD)(int)(wNotifyCode), (WORD)(id), (WORD)(id), AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(_AFX_THIS->memberFxn(((AFX_NOTIFY*)_l)->pNMHDR, ((AFX_NOTIFY*)_l)->pResult); \
+   _AFX_THUNK(_AFX_CALL(memberFxn)(((AFX_NOTIFY*)_l)->pNMHDR, ((AFX_NOTIFY*)_l)->pResult); \
               return TRUE;)},
 #define ON_NOTIFY_RANGE(wNotifyCode, id, idLast, memberFxn) \
   {WM_NOTIFY, (WORD)(int)(wNotifyCode), (WORD)(id), (WORD)(idLast), AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(_AFX_THIS->memberFxn((UINT)_w, ((AFX_NOTIFY*)_l)->pNMHDR, \
+   _AFX_THUNK(_AFX_CALL(memberFxn)((UINT)_w, ((AFX_NOTIFY*)_l)->pNMHDR, \
                                    ((AFX_NOTIFY*)_l)->pResult); return TRUE;)},
 #define ON_NOTIFY_EX(wNotifyCode, id, memberFxn) \
   {WM_NOTIFY, (WORD)(int)(wNotifyCode), (WORD)(id), (WORD)(id), AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(return (LRESULT)(_AFX_THIS->memberFxn((UINT)_w, ((AFX_NOTIFY*)_l)->pNMHDR, \
+   _AFX_THUNK(return (LRESULT)(_AFX_CALL(memberFxn)((UINT)_w, ((AFX_NOTIFY*)_l)->pNMHDR, \
                                                     ((AFX_NOTIFY*)_l)->pResult) != 0);)},
 #define ON_NOTIFY_EX_RANGE(wNotifyCode, id, idLast, memberFxn) \
   {WM_NOTIFY, (WORD)(int)(wNotifyCode), (WORD)(id), (WORD)(idLast), AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(return (LRESULT)(_AFX_THIS->memberFxn((UINT)_w, ((AFX_NOTIFY*)_l)->pNMHDR, \
+   _AFX_THUNK(return (LRESULT)(_AFX_CALL(memberFxn)((UINT)_w, ((AFX_NOTIFY*)_l)->pNMHDR, \
                                                     ((AFX_NOTIFY*)_l)->pResult) != 0);)},
 #define ON_NOTIFY_REFLECT(wNotifyCode, memberFxn) \
   {WM_NOTIFY + WM_REFLECT_BASE, (WORD)(int)(wNotifyCode), 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(_AFX_THIS->memberFxn(((AFX_NOTIFY*)_l)->pNMHDR, ((AFX_NOTIFY*)_l)->pResult); \
+   _AFX_THUNK(_AFX_CALL(memberFxn)(((AFX_NOTIFY*)_l)->pNMHDR, ((AFX_NOTIFY*)_l)->pResult); \
               return TRUE;)},
 #define ON_NOTIFY_REFLECT_EX(wNotifyCode, memberFxn) \
   {WM_NOTIFY + WM_REFLECT_BASE, (WORD)(int)(wNotifyCode), 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(return (LRESULT)(_AFX_THIS->memberFxn(((AFX_NOTIFY*)_l)->pNMHDR, \
+   _AFX_THUNK(return (LRESULT)(_AFX_CALL(memberFxn)(((AFX_NOTIFY*)_l)->pNMHDR, \
                                                     ((AFX_NOTIFY*)_l)->pResult) != 0);)},
 
 // ---------------------------------------------------------------------
@@ -162,16 +173,19 @@ protected: \
 
 #define ON_MESSAGE(message, memberFxn) \
   {(UINT)(message), 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(return (LRESULT)_AFX_THIS->memberFxn(_w, _l);)},
+   _AFX_THUNK(return (LRESULT)_AFX_CALL(memberFxn)(_w, _l);)},
+#define ON_MESSAGE_VOID(message, memberFxn) \
+  {(UINT)(message), 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
+   _AFX_THUNK(_AFX_CALL(memberFxn)(); return 0;)},
 #define ON_REGISTERED_MESSAGE(nMessageVariable, memberFxn) \
   {0xC000, 0, 0, 0, (UINT_PTR)(UINT*)(&nMessageVariable), (AFX_PMSG)0, \
-   _AFX_THUNK(return (LRESULT)_AFX_THIS->memberFxn(_w, _l);)},
+   _AFX_THUNK(return (LRESULT)_AFX_CALL(memberFxn)(_w, _l);)},
 #define ON_THREAD_MESSAGE(message, memberFxn) \
   {(UINT)(message), 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
-   _AFX_THUNK(_AFX_THIS->memberFxn(_w, _l); return TRUE;)},
+   _AFX_THUNK(_AFX_CALL(memberFxn)(_w, _l); return TRUE;)},
 #define ON_REGISTERED_THREAD_MESSAGE(nMessageVariable, memberFxn) \
   {0xC000, 0, 0, 0, (UINT_PTR)(UINT*)(&nMessageVariable), (AFX_PMSG)0, \
-   _AFX_THUNK(_AFX_THIS->memberFxn(_w, _l); return TRUE;)},
+   _AFX_THUNK(_AFX_CALL(memberFxn)(_w, _l); return TRUE;)},
 
 // ---------------------------------------------------------------------
 // Control notifications

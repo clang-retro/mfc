@@ -21,15 +21,59 @@
 #define WINVER 0x0400
 #endif
 
+// Decided before any library header: libstdc++ defines NOMINMAX itself.
+#ifndef NOMINMAX
+#define _AFX_MINMAX
+#endif
+
 #include <windows.h>
+#if !defined(__has_include) || __has_include(<tchar.h>)
 #include <tchar.h>
+#else
+#include "afxtchar.h"  // C libraries without one, such as picolibc
+#endif
 #include <stddef.h>
+#include <limits.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
 #include <new>
+
+// The Windows SDK's min and max macros are C-only in most MinGW headers.
+// Programs written for MFC use them freely, so provide function
+// templates that also accept mixed argument types. (std::min and
+// std::max still win overload resolution for same-type arguments.)
+// Where <windows.h> did define them as macros (some MinGW versions do for
+// C++ too), they are replaced, as C++ library headers would #undef them.
+#ifdef _AFX_MINMAX
+#undef min
+#undef max
+#include <type_traits>
+template <class _AfxT1, class _AfxT2>
+inline typename std::common_type<_AfxT1, _AfxT2>::type min(_AfxT1 a, _AfxT2 b) { return b < a ? b : a; }
+template <class _AfxT1, class _AfxT2>
+inline typename std::common_type<_AfxT1, _AfxT2>::type max(_AfxT1 a, _AfxT2 b) { return a < b ? b : a; }
+#endif
+
+// Link the MFC library and the system libraries it uses, as Visual C++
+// does, unless _AFX_NOFORCE_LIBS is defined. (clang ignores
+// #pragma comment(lib) for MinGW targets, so the linker directives are
+// written directly.)
+#ifndef _AFX_NOFORCE_LIBS
+#ifdef _UNICODE
+#define _AFX_LIB_NAME "mfcu"
+#else
+#define _AFX_LIB_NAME "mfc"
+#endif
+__asm__(".section .drectve,\"yn\"\n"
+        ".ascii \" -defaultlib:" _AFX_LIB_NAME " -defaultlib:user32 -defaultlib:gdi32"
+        " -defaultlib:comdlg32 -defaultlib:comctl32 -defaultlib:shell32 -defaultlib:advapi32"
+        " -defaultlib:winspool -defaultlib:ole32\"\n"
+        ".text");
+#endif
 
 #define _MFC_VER 0x0600
 #define _CLANG_RETRO_MFC 1
@@ -80,8 +124,9 @@ inline bool _AfxIsNullPtr(const void* p) {
 #define AFX_DEPRECATED(x)
 #endif
 #define AFX_MANAGE_STATE(p)
-#define AFX_MODULE_STATE void
-#define AfxGetStaticModuleState() ((AFX_MODULE_STATE*)0)
+struct AFX_MODULE_STATE;
+AFX_MODULE_STATE* __stdcall AfxGetModuleState();
+#define AfxGetStaticModuleState() AfxGetModuleState()
 #define METHOD_PROLOGUE(theClass, localClass) \
   theClass* pThis = ((theClass*)((BYTE*)this - offsetof(theClass, m_x##localClass)));
 #define METHOD_PROLOGUE_EX(theClass, localClass) METHOD_PROLOGUE(theClass, localClass)
@@ -400,46 +445,6 @@ public:
   explicit CResourceException(BOOL b, UINT = 0) : CSimpleException(b) {}
 };
 
-class CArchiveException : public CException {
-  DECLARE_DYNAMIC(CArchiveException)
-public:
-  enum {
-    none, genericException, readOnly, endOfFile, writeOnly, badIndex,
-    badClass, badSchema, bufferFull
-  };
-  CArchiveException(int cause = none, LPCTSTR lpszArchiveName = NULL);
-  virtual BOOL GetErrorMessage(LPTSTR lpszError, UINT nMaxError,
-                               PUINT pnHelpContext = NULL) const;
-  virtual BOOL GetErrorMessage(LPTSTR lpszError, UINT nMaxError,
-                               PUINT pnHelpContext = NULL);
-  int m_cause;
-  TCHAR m_strFileName[MAX_PATH];
-};
-
-class CFileException : public CException {
-  DECLARE_DYNAMIC(CFileException)
-public:
-  enum {
-    none, genericException, fileNotFound, badPath, tooManyOpenFiles,
-    accessDenied, invalidFile, removeCurrentDir, directoryFull, badSeek,
-    hardIO, sharingViolation, lockViolation, diskFull, endOfFile
-  };
-  CFileException(int cause = CFileException::none, LONG lOsError = -1,
-                 LPCTSTR lpszArchiveName = NULL);
-  void Clear() { m_cause = none; m_lOsError = 0; m_strFileName[0] = 0; }
-  virtual BOOL GetErrorMessage(LPTSTR lpszError, UINT nMaxError,
-                               PUINT pnHelpContext = NULL) const;
-  virtual BOOL GetErrorMessage(LPTSTR lpszError, UINT nMaxError,
-                               PUINT pnHelpContext = NULL);
-  static int PASCAL OsErrorToException(LONG lOsError);
-  static int PASCAL ErrnoToException(int nErrno);
-  static void PASCAL ThrowOsError(LONG lOsError, LPCTSTR lpszFileName = NULL);
-  static void PASCAL ThrowErrno(int nErrno, LPCTSTR lpszFileName = NULL);
-
-  int m_cause;
-  LONG m_lOsError;
-  TCHAR m_strFileName[MAX_PATH];
-};
 
 void AFXAPI AfxThrowMemoryException();
 void AFXAPI AfxThrowNotSupportedException();
@@ -470,6 +475,47 @@ void AFXAPI AfxAbort();
 // Strings
 
 #include "afxstr.h"
+
+class CArchiveException : public CException {
+  DECLARE_DYNAMIC(CArchiveException)
+public:
+  enum {
+    none, genericException, readOnly, endOfFile, writeOnly, badIndex,
+    badClass, badSchema, bufferFull
+  };
+  CArchiveException(int cause = none, LPCTSTR lpszArchiveName = NULL);
+  virtual BOOL GetErrorMessage(LPTSTR lpszError, UINT nMaxError,
+                               PUINT pnHelpContext = NULL) const;
+  virtual BOOL GetErrorMessage(LPTSTR lpszError, UINT nMaxError,
+                               PUINT pnHelpContext = NULL);
+  int m_cause;
+  CString m_strFileName;
+};
+
+class CFileException : public CException {
+  DECLARE_DYNAMIC(CFileException)
+public:
+  enum {
+    none, genericException, fileNotFound, badPath, tooManyOpenFiles,
+    accessDenied, invalidFile, removeCurrentDir, directoryFull, badSeek,
+    hardIO, sharingViolation, lockViolation, diskFull, endOfFile
+  };
+  CFileException(int cause = CFileException::none, LONG lOsError = -1,
+                 LPCTSTR lpszArchiveName = NULL);
+  void Clear() { m_cause = none; m_lOsError = 0; m_strFileName.Empty(); }
+  virtual BOOL GetErrorMessage(LPTSTR lpszError, UINT nMaxError,
+                               PUINT pnHelpContext = NULL) const;
+  virtual BOOL GetErrorMessage(LPTSTR lpszError, UINT nMaxError,
+                               PUINT pnHelpContext = NULL);
+  static int PASCAL OsErrorToException(LONG lOsError);
+  static int PASCAL ErrnoToException(int nErrno);
+  static void PASCAL ThrowOsError(LONG lOsError, LPCTSTR lpszFileName = NULL);
+  static void PASCAL ThrowErrno(int nErrno, LPCTSTR lpszFileName = NULL);
+
+  int m_cause;
+  LONG m_lOsError;
+  CString m_strFileName;
+};
 
 // ---------------------------------------------------------------------
 // CTimeSpan and CTime
@@ -844,7 +890,6 @@ protected:
   template <class T> CArchive& WriteT(const T& v) { Write(&v, sizeof v); return *this; }
   template <class T> CArchive& ReadT(T& v) { EnsureRead(&v, sizeof v); return *this; }
   void FillBuffer(UINT nBytesNeeded);
-  void CheckCount();
 
   UINT m_nMode;
   BOOL m_bUserBuf;

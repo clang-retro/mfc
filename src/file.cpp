@@ -132,7 +132,7 @@ BOOL CFile::Open(LPCTSTR lpszFileName, UINT nOpenFlags, CFileException* pExcepti
     if (pException != NULL) {
       pException->m_lOsError = (LONG)GetLastError();
       pException->m_cause = CFileException::OsErrorToException(pException->m_lOsError);
-      lstrcpyn(pException->m_strFileName, lpszFileName, MAX_PATH);
+      pException->m_strFileName = lpszFileName;
     }
     return FALSE;
   }
@@ -361,7 +361,7 @@ BOOL CStdioFile::Open(LPCTSTR lpszFileName, UINT nOpenFlags, CFileException* pEx
     if (pException) {
       pException->m_lOsError = errno;
       pException->m_cause = CFileException::ErrnoToException(errno);
-      lstrcpyn(pException->m_strFileName, lpszFileName, MAX_PATH);
+      pException->m_strFileName = lpszFileName;
     }
     m_strFileName.Empty();
     return FALSE;
