@@ -1,0 +1,101 @@
+#!/bin/sh
+# run-tests.sh - builds the tests against the libraries and runs them.
+#
+# Called by `make check`, which sets BIN, SYSROOT, TARGET and OUT. The
+# programs run under Wine; the GUI tests also need an X display, so the
+# script starts itself under xvfb-run when there is none. Without Wine the
+# tests are only built.
+#
+# Logs and screenshots go to $OUT/tests/a (ANSI) and $OUT/tests/u
+# (Unicode).
+set -u
+
+TARGET=${TARGET:-i586-pc-windows5.1-gnu}
+OUT=${OUT:-build/$TARGET}
+SYSROOT=${SYSROOT:-}
+BIN=${BIN:-}
+CXX=${BIN:+$BIN/}clang++
+RC=${BIN:+$BIN/}llvm-windres
+TESTS=${TESTS:-"core dlgtest sditest mditest"}
+
+if [ -z "${DISPLAY:-}" ] && [ -z "${MFC_TEST_NO_XVFB:-}" ] && command -v xvfb-run >/dev/null 2>&1; then
+  MFC_TEST_NO_XVFB=1 exec xvfb-run -a -s "-screen 0 1024x768x24" "$0" "$@"
+fi
+
+HAVE_WINE=1
+command -v wine >/dev/null 2>&1 || HAVE_WINE=0
+export WINEDEBUG=${WINEDEBUG:--all}
+
+T=$OUT/tests
+mkdir -p "$T/a" "$T/u"
+python3 tests/gen-toolbar-bmp.py "$T/toolbar.bmp" 6 || exit 1
+
+CXXFLAGS="--target=$TARGET ${SYSROOT:+--sysroot=$SYSROOT} -fuse-ld=lld -stdlib=libc++ -std=c++17"
+CXXFLAGS="$CXXFLAGS -Wall -Wno-unused-function -Wno-overloaded-virtual -Iinclude -Itests"
+RCFLAGS="--target=i686-w64-mingw32 -I tests -I include -I $T ${SYSROOT:+-I $SYSROOT/include}"
+
+nfail=0
+npass=0
+
+# Turns a Unix path into the Windows path Wine sees.
+winpath() {
+  echo "Z:$(cd "$1" && pwd)" | tr / '\\'
+}
+
+run_test() {  # name exe outdir
+  if [ $HAVE_WINE = 0 ]; then
+    echo "built  $1-$v (no wine; not run)"
+    return
+  fi
+  MFC_TEST_OUT=$(winpath "$3") timeout 300 wine "$2" > "$3/$1.out" 2>&1
+  status=$?
+  if [ $status = 0 ]; then
+    echo "PASS   $1-$v"
+    npass=$((npass + 1))
+  else
+    echo "FAIL   $1-$v (exit $status)"
+    [ -f "$3/$1.log" ] && sed 's/^/       /' "$3/$1.log"
+    [ -s "$3/$1.out" ] && sed 's/^/       /' "$3/$1.out"
+    nfail=$((nfail + 1))
+  fi
+  # Screenshots as PNG, when ImageMagick is around.
+  if command -v convert >/dev/null 2>&1; then
+    for bmp in "$3"/*.bmp; do
+      [ -f "$bmp" ] && convert "$bmp" "${bmp%.bmp}.png" && rm -f "$bmp"
+    done
+  fi
+}
+
+for v in a u; do
+  flags=
+  [ $v = u ] && flags="-DUNICODE -D_UNICODE"
+  for name in $TESTS; do
+    exe=$T/$name-$v.exe
+    srcs=tests/$name.cpp
+    if [ -f tests/$name.rc ]; then
+      "$RC" $RCFLAGS tests/$name.rc -o "$T/$name-res.o" 2>"$T/$name-rc.log" || {
+        echo "FAIL   $name-$v (resources)"; cat "$T/$name-rc.log"; nfail=$((nfail + 1)); continue; }
+      srcs="$srcs $T/$name-res.o -mwindows"
+    fi
+    # shellcheck disable=SC2086
+    "$CXX" $CXXFLAGS $flags $srcs -L"$OUT" -o "$exe" 2>"$T/$name-$v-build.log" || {
+      echo "FAIL   $name-$v (build)"; cat "$T/$name-$v-build.log"; nfail=$((nfail + 1)); continue; }
+    if [ $name = core ]; then
+      # The console test reports on standard output.
+      if [ $HAVE_WINE = 1 ]; then
+        if timeout 120 wine "$exe" > "$T/$v/core.log" 2>&1; then
+          echo "PASS   core-$v"; npass=$((npass + 1))
+        else
+          echo "FAIL   core-$v"; sed 's/^/       /' "$T/$v/core.log"; nfail=$((nfail + 1))
+        fi
+      else
+        echo "built  core-$v (no wine; not run)"
+      fi
+    else
+      run_test "$name" "$exe" "$T/$v"
+    fi
+  done
+done
+
+echo "$npass passed, $nfail failed"
+[ $nfail = 0 ]

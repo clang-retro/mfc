@@ -769,7 +769,12 @@ void CToolBar::OnPaint() {
   Default();
 }
 
-BOOL CToolBar::OnEraseBkgnd(CDC*) { return (BOOL)Default(); }
+// A flat toolbar is transparent and asks its parent for the background,
+// but the frame leaves erasing to its view, so the bar paints its own.
+BOOL CToolBar::OnEraseBkgnd(CDC* pDC) {
+  if (GetStyle() & (TBSTYLE_FLAT | TBSTYLE_TRANSPARENT)) return CControlBar::OnEraseBkgnd(pDC);
+  return (BOOL)Default();
+}
 
 // Updates a toolbar button during idle time.
 class CToolCmdUI : public CCmdUI {

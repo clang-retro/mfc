@@ -118,13 +118,15 @@ BOOL CView::OnCmdMsg(UINT nID, int nCode, void* pExtra, AFX_CMDHANDLERINFO* pHan
   return FALSE;
 }
 
+// With adjustBorder the view's own edge stays inside the rectangle, so a
+// view fills exactly the space its frame leaves for it.
 void CView::CalcWindowRect(LPRECT lpClientRect, UINT nAdjustType) {
-  ::AdjustWindowRectEx(lpClientRect, 0, FALSE, GetExStyle());
   if (nAdjustType == adjustOutside) {
     DWORD dwStyle = GetStyle();
     if (dwStyle & WS_VSCROLL) lpClientRect->right += ::GetSystemMetrics(SM_CXVSCROLL);
     if (dwStyle & WS_HSCROLL) lpClientRect->bottom += ::GetSystemMetrics(SM_CYHSCROLL);
   }
+  CWnd::CalcWindowRect(lpClientRect, nAdjustType);
 }
 
 CScrollBar* CView::GetScrollBarCtrl(int nBar) const {
@@ -424,7 +426,7 @@ void CScrollView::CalcWindowRect(LPRECT lpClientRect, UINT nAdjustType) {
     if (m_totalDev.cx > sizeClient.cx) lpClientRect->bottom += ::GetSystemMetrics(SM_CYHSCROLL);
     if (m_totalDev.cy > sizeClient.cy) lpClientRect->right += ::GetSystemMetrics(SM_CXVSCROLL);
   }
-  ::AdjustWindowRectEx(lpClientRect, 0, FALSE, GetExStyle());
+  CWnd::CalcWindowRect(lpClientRect, nAdjustType);
 }
 
 void CScrollView::FillOutsideRect(CDC* pDC, CBrush* pBrush) {

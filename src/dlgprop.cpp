@@ -110,6 +110,13 @@ LRESULT CPropertyPage::OnWizardNext() { return 0; }
 BOOL CPropertyPage::OnWizardFinish() { return TRUE; }
 HWND CPropertyPage::OnWizardFinishEx() { return OnWizardFinish() ? NULL : (HWND)-1; }
 
+static void _AfxSetSheetResult(CPropertyPage* pPage, int nResult) {
+  CWnd* pSheet = CWnd::FromHandlePermanent(::GetParent(pPage->m_hWnd));
+  if (pSheet != NULL && pSheet->IsKindOf(RUNTIME_CLASS(CPropertySheet)) &&
+      !((CPropertySheet*)pSheet)->m_bEndDialogCalled)
+    ((CPropertySheet*)pSheet)->m_nModalResult = nResult;
+}
+
 BOOL CPropertyPage::OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult) {
   NMHDR* pNMHDR = (NMHDR*)lParam;
   // Sheet notifications come from the sheet, not from a control.
@@ -123,6 +130,10 @@ BOOL CPropertyPage::OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult) {
         return TRUE;
       case PSN_APPLY:
         *pResult = OnApply() ? PSNRET_NOERROR : PSNRET_INVALID_NOCHANGEPAGE;
+        // lParam is set when the apply comes from OK rather than Apply.
+        // Not every comctl32 sends the sheet a WM_COMMAND for OK (Wine's
+        // PSM_PRESSBUTTON does not), so record the result here too.
+        if (*pResult == PSNRET_NOERROR && ((LPPSHNOTIFY)lParam)->lParam) _AfxSetSheetResult(this, IDOK);
         return TRUE;
       case PSN_RESET:
         OnReset();
@@ -139,6 +150,7 @@ BOOL CPropertyPage::OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult) {
         return TRUE;
       case PSN_WIZFINISH:
         *pResult = !OnWizardFinish();
+        if (*pResult == 0) _AfxSetSheetResult(this, ID_WIZFINISH);
         return TRUE;
       case PSN_HELP:
         SendMessage(WM_COMMAND, ID_HELP);

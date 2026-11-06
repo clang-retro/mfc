@@ -1,0 +1,20 @@
+// dlgtest.h - resource IDs for dlgtest.
+#define IDD_TEST 100
+#define IDD_PAGE1 101
+#define IDD_PAGE2 102
+#define IDC_NAME 1000
+#define IDC_AGE 1001
+#define IDC_CHECK 1002
+#define IDC_RADIO1 1003
+#define IDC_RADIO2 1004
+#define IDC_RADIO3 1005
+#define IDC_COMBO 1006
+#define IDC_LIST 1007
+#define IDC_PROGRESS 1008
+#define IDC_LISTCTRL 1009
+#define IDC_TREE 1010
+#define IDC_SLIDER 1011
+#define IDC_BUTTON 1012
+#define IDC_PAGE_EDIT 1013
+#define IDC_PAGE_CHECK 1014
+#define IDS_HELLO 2000
