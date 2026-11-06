@@ -80,8 +80,9 @@ inline bool _AfxIsNullPtr(const void* p) {
 #define AFX_DEPRECATED(x)
 #endif
 #define AFX_MANAGE_STATE(p)
-#define AFX_MODULE_STATE void
-#define AfxGetStaticModuleState() ((AFX_MODULE_STATE*)0)
+struct AFX_MODULE_STATE;
+AFX_MODULE_STATE* __stdcall AfxGetModuleState();
+#define AfxGetStaticModuleState() AfxGetModuleState()
 #define METHOD_PROLOGUE(theClass, localClass) \
   theClass* pThis = ((theClass*)((BYTE*)this - offsetof(theClass, m_x##localClass)));
 #define METHOD_PROLOGUE_EX(theClass, localClass) METHOD_PROLOGUE(theClass, localClass)

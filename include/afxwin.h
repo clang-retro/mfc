@@ -15,6 +15,14 @@
 #include <commdlg.h>
 #include <shellapi.h>
 
+// Resource types MFC adds
+#ifndef RT_DLGINIT
+#define RT_DLGINIT MAKEINTRESOURCE(240)
+#endif
+#ifndef RT_TOOLBAR
+#define RT_TOOLBAR MAKEINTRESOURCE(241)
+#endif
+
 // Names that windows.h defines as macros but MFC uses as member names.
 #undef GetNextWindow
 
@@ -1020,6 +1028,7 @@ public:
 
   // Creation
   CWnd();
+  explicit CWnd(HWND hWnd);
   virtual ~CWnd();
 
   static CWnd* PASCAL FromHandle(HWND hWnd);
@@ -2079,6 +2088,7 @@ public:
   BOOL m_bModal;
 
   virtual void PreInitDialog();
+  void CommonConstruct();
   HWND PreModal();
   void PostModal();
   BOOL CreateDlgIndirect(LPCDLGTEMPLATE lpDialogTemplate, CWnd* pParentWnd, HINSTANCE hInst);
