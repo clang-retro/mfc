@@ -9,6 +9,8 @@ BEGIN
   IDS_TESTCTL "CtlTest Control"
   IDS_TESTPAGE "General"
   IDS_TESTPAGE_TYPE "CtlTest Property Page"
+  IDS_VERB_RESET "&Reset"
+  IDS_VERB_BUMP "&Bump"
 END
 
 // A property page template is an ordinary dialog: COlePropertyPage makes

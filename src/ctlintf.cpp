@@ -102,9 +102,114 @@ STDMETHODIMP COleControl::XOleObject::DoVerb(LONG iVerb, LPMSG lpmsg, LPOLECLIEN
 
 STDMETHODIMP COleControl::XOleObject::EnumVerbs(LPENUMOLEVERB* ppEnumOleVerb) {
   METHOD_PROLOGUE(COleControl, OleObject);
-  CLSID clsid;
-  pThis->GetClassID(&clsid);
-  return ::OleRegEnumVerbs(clsid, ppEnumOleVerb);
+  return pThis->EnumVerbs(ppEnumOleVerb);
+}
+
+// ---------------------------------------------------------------------
+// The verbs a control lists: its verb map's own, then Properties when it
+// has property pages.
+
+namespace {
+
+class CVerbEnum final : public IEnumOLEVERB {
+public:
+  CArray<OLEVERB, const OLEVERB&> m_verbs;
+  CStringArray m_names;
+  ULONG m_nNext;
+  LONG m_nRef;
+  CVerbEnum() : m_nNext(0), m_nRef(1) {}
+
+  void Add(LONG lVerb, LPCTSTR lpszName) {
+    OLEVERB verb;
+    memset(&verb, 0, sizeof(verb));
+    verb.lVerb = lVerb;
+    verb.fuFlags = MF_STRING | MF_ENABLED;
+    verb.grfAttribs = OLEVERBATTRIB_ONCONTAINERMENU;
+    m_verbs.Add(verb);
+    m_names.Add(lpszName);
+  }
+
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (iid == IID_IUnknown || iid == IID_IEnumOLEVERB) {
+      *ppv = this;
+      AddRef();
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return (ULONG)::InterlockedIncrement(&m_nRef); }
+  STDMETHOD_(ULONG, Release)() {
+    LONG n = ::InterlockedDecrement(&m_nRef);
+    if (n == 0) delete this;
+    return (ULONG)n;
+  }
+  STDMETHOD(Next)(ULONG celt, LPOLEVERB rgelt, ULONG* pceltFetched) {
+    if (rgelt == NULL || (celt > 1 && pceltFetched == NULL)) return E_POINTER;
+    ULONG n = 0;
+    while (n < celt && m_nNext < (ULONG)m_verbs.GetSize()) {
+      rgelt[n] = m_verbs[m_nNext];
+      CStringW strName(m_names[m_nNext]);
+      SIZE_T cb = (strName.GetLength() + 1) * sizeof(WCHAR);
+      rgelt[n].lpszVerbName = (LPOLESTR)::CoTaskMemAlloc(cb);
+      if (rgelt[n].lpszVerbName != NULL) memcpy(rgelt[n].lpszVerbName, (LPCWSTR)strName, cb);
+      n++;
+      m_nNext++;
+    }
+    if (pceltFetched != NULL) *pceltFetched = n;
+    return n == celt ? S_OK : S_FALSE;
+  }
+  STDMETHOD(Skip)(ULONG celt) {
+    m_nNext += celt;
+    if (m_nNext > (ULONG)m_verbs.GetSize()) {
+      m_nNext = (ULONG)m_verbs.GetSize();
+      return S_FALSE;
+    }
+    return S_OK;
+  }
+  STDMETHOD(Reset)() {
+    m_nNext = 0;
+    return S_OK;
+  }
+  STDMETHOD(Clone)(IEnumOLEVERB** ppEnum) {
+    if (ppEnum == NULL) return E_POINTER;
+    CVerbEnum* pClone = new CVerbEnum;
+    pClone->m_verbs.Copy(m_verbs);
+    pClone->m_names.Copy(m_names);
+    pClone->m_nNext = m_nNext;
+    *ppEnum = pClone;
+    return S_OK;
+  }
+};
+
+}  // namespace
+
+HRESULT COleControl::EnumVerbs(LPENUMOLEVERB* ppEnum) {
+  if (ppEnum == NULL) return E_POINTER;
+  *ppEnum = NULL;
+  CVerbEnum* pEnum = new CVerbEnum;
+  LONG nCustom = 0;
+  for (const AFX_MSGMAP* pMap = GetMessageMap(); pMap != NULL;
+       pMap = pMap->pfnGetBaseMap != NULL ? pMap->pfnGetBaseMap() : NULL) {
+    for (const AFX_MSGMAP_ENTRY* p = pMap->lpEntries; p->nSig != AfxSig_end; p++) {
+      if (p->nMessage != _AFX_OLEVERB_MSG || p->nCode != _AFX_OLEVERB_CUSTOM) continue;
+      CString strName;
+      strName.LoadString(p->nID);
+      pEnum->Add(++nCustom, strName);
+    }
+  }
+  ULONG nPages = 0;
+  GetPropPageIDs(nPages);
+  if (nPages > 0) pEnum->Add(OLEIVERB_PROPERTIES, _T("&Properties..."));
+  if (pEnum->m_verbs.GetSize() == 0) {
+    // Nothing of its own: the registry's verbs, if any.
+    pEnum->Release();
+    CLSID clsid;
+    GetClassID(&clsid);
+    return ::OleRegEnumVerbs(clsid, ppEnum);
+  }
+  *ppEnum = pEnum;
+  return S_OK;
 }
 
 STDMETHODIMP COleControl::XOleObject::Update() { return S_OK; }
@@ -440,3 +545,141 @@ STDMETHODIMP COleControl::XFontNotification::OnChanged(DISPID) {
 }
 
 STDMETHODIMP COleControl::XFontNotification::OnRequestEdit(DISPID) { return S_OK; }
+
+// ---------------------------------------------------------------------
+// IPerPropertyBrowsing: how a property browser shows the properties.
+
+BOOL COleControl::OnGetDisplayString(DISPID dispid, CString& strValue) {
+  if (dispid == DISPID_FONT && (GetStockPropMask() & STOCKPROP_FONT))
+    return m_font.GetDisplayString(strValue);
+  return FALSE;
+}
+
+BOOL COleControl::OnMapPropertyToPage(DISPID dispid, LPCLSID lpclsid, BOOL* pbPageOptional) {
+  // The stock properties go to the system's stock pages.
+  switch (dispid) {
+    case DISPID_FONT:
+      *lpclsid = CLSID_CFontPropPage;
+      break;
+    case DISPID_BACKCOLOR:
+    case DISPID_FORECOLOR:
+      *lpclsid = CLSID_CColorPropPage;
+      break;
+    default:
+      return FALSE;
+  }
+  if (pbPageOptional != NULL) *pbPageOptional = TRUE;
+  return TRUE;
+}
+
+BOOL COleControl::OnGetPredefinedStrings(DISPID, CStringArray*, CDWordArray*) { return FALSE; }
+
+BOOL COleControl::OnGetPredefinedValue(DISPID, DWORD, VARIANT*) { return FALSE; }
+
+CTL_IUNKNOWN(PerPropertyBrowsing)
+
+STDMETHODIMP COleControl::XPerPropertyBrowsing::GetDisplayString(DISPID dispid, BSTR* lpbstr) {
+  METHOD_PROLOGUE(COleControl, PerPropertyBrowsing);
+  if (lpbstr == NULL) return E_POINTER;
+  *lpbstr = NULL;
+  CString str;
+  if (!pThis->OnGetDisplayString(dispid, str)) return S_FALSE;
+  *lpbstr = str.AllocSysString();
+  return S_OK;
+}
+
+STDMETHODIMP COleControl::XPerPropertyBrowsing::MapPropertyToPage(DISPID dispid, LPCLSID lpclsid) {
+  METHOD_PROLOGUE(COleControl, PerPropertyBrowsing);
+  if (lpclsid == NULL) return E_POINTER;
+  *lpclsid = CLSID_NULL;
+  BOOL bOptional = FALSE;
+  if (!pThis->OnMapPropertyToPage(dispid, lpclsid, &bOptional)) return PERPROP_E_NOPAGEAVAILABLE;
+  return S_OK;
+}
+
+STDMETHODIMP COleControl::XPerPropertyBrowsing::GetPredefinedStrings(DISPID dispid,
+                                                                     CALPOLESTR* lpcaStringsOut,
+                                                                     CADWORD* lpcaCookiesOut) {
+  METHOD_PROLOGUE(COleControl, PerPropertyBrowsing);
+  if (lpcaStringsOut == NULL || lpcaCookiesOut == NULL) return E_POINTER;
+  lpcaStringsOut->cElems = 0;
+  lpcaStringsOut->pElems = NULL;
+  lpcaCookiesOut->cElems = 0;
+  lpcaCookiesOut->pElems = NULL;
+  CStringArray strings;
+  CDWordArray cookies;
+  if (!pThis->OnGetPredefinedStrings(dispid, &strings, &cookies)) return S_FALSE;
+  ULONG n = (ULONG)min(strings.GetSize(), cookies.GetSize());
+  if (n == 0) return S_FALSE;
+  lpcaStringsOut->pElems = (LPOLESTR*)::CoTaskMemAlloc(n * sizeof(LPOLESTR));
+  lpcaCookiesOut->pElems = (DWORD*)::CoTaskMemAlloc(n * sizeof(DWORD));
+  if (lpcaStringsOut->pElems == NULL || lpcaCookiesOut->pElems == NULL) {
+    ::CoTaskMemFree(lpcaStringsOut->pElems);
+    ::CoTaskMemFree(lpcaCookiesOut->pElems);
+    lpcaStringsOut->pElems = NULL;
+    lpcaCookiesOut->pElems = NULL;
+    return E_OUTOFMEMORY;
+  }
+  for (ULONG i = 0; i < n; i++) {
+    CStringW str(strings[i]);
+    SIZE_T cb = (str.GetLength() + 1) * sizeof(WCHAR);
+    lpcaStringsOut->pElems[i] = (LPOLESTR)::CoTaskMemAlloc(cb);
+    if (lpcaStringsOut->pElems[i] != NULL) memcpy(lpcaStringsOut->pElems[i], (LPCWSTR)str, cb);
+    lpcaCookiesOut->pElems[i] = cookies[i];
+  }
+  lpcaStringsOut->cElems = n;
+  lpcaCookiesOut->cElems = n;
+  return S_OK;
+}
+
+STDMETHODIMP COleControl::XPerPropertyBrowsing::GetPredefinedValue(DISPID dispid, DWORD dwCookie,
+                                                                   VARIANT* lpvarOut) {
+  METHOD_PROLOGUE(COleControl, PerPropertyBrowsing);
+  if (lpvarOut == NULL) return E_POINTER;
+  ::VariantInit(lpvarOut);
+  return pThis->OnGetPredefinedValue(dispid, dwCookie, lpvarOut) ? S_OK : E_FAIL;
+}
+
+// ---------------------------------------------------------------------
+// IQuickActivate: the container hands over its site, sinks and ambient
+// properties in one call.
+
+CTL_IUNKNOWN(QuickActivate)
+
+STDMETHODIMP COleControl::XQuickActivate::QuickActivate(QACONTAINER* pQaContainer,
+                                                        QACONTROL* pQaControl) {
+  METHOD_PROLOGUE(COleControl, QuickActivate);
+  if (pQaContainer == NULL || pQaControl == NULL) return E_POINTER;
+  if (pQaContainer->cbSize < offsetof(QACONTAINER, hpal) ||
+      pQaControl->cbSize < offsetof(QACONTROL, dwPointerActivationPolicy))
+    return E_INVALIDARG;
+  ULONG cbControl = pQaControl->cbSize;
+  memset(pQaControl, 0, cbControl);
+  pQaControl->cbSize = cbControl;
+
+  if (pQaContainer->pClientSite != NULL) {
+    HRESULT hr = pThis->m_xOleObject.SetClientSite(pQaContainer->pClientSite);
+    if (FAILED(hr)) return hr;
+  }
+  if (pQaContainer->pAdviseSink != NULL)
+    pThis->m_xViewObject.SetAdvise(DVASPECT_CONTENT, 0, pQaContainer->pAdviseSink);
+  if (pQaContainer->pPropertyNotifySink != NULL)
+    ((LPCONNECTIONPOINT)&pThis->m_xPropConnPt.m_xConnPt)
+        ->Advise(pQaContainer->pPropertyNotifySink, &pQaControl->dwPropNotifyCookie);
+  if (pQaContainer->pUnkEventSink != NULL)
+    ((LPCONNECTIONPOINT)&pThis->m_xEventConnPt.m_xConnPt)
+        ->Advise(pQaContainer->pUnkEventSink, &pQaControl->dwEventCookie);
+  pQaControl->dwMiscStatus = pThis->GetMiscStatus();
+  pQaControl->dwViewStatus = 0;
+  return S_OK;
+}
+
+STDMETHODIMP COleControl::XQuickActivate::SetContentExtent(LPSIZEL lpsizel) {
+  METHOD_PROLOGUE(COleControl, QuickActivate);
+  return pThis->m_xOleObject.SetExtent(DVASPECT_CONTENT, lpsizel);
+}
+
+STDMETHODIMP COleControl::XQuickActivate::GetContentExtent(LPSIZEL lpsizel) {
+  METHOD_PROLOGUE(COleControl, QuickActivate);
+  return pThis->m_xOleObject.GetExtent(DVASPECT_CONTENT, lpsizel);
+}

@@ -66,6 +66,8 @@ BEGIN_INTERFACE_MAP(COleControl, CWnd)
   INTERFACE_PART(COleControl, IID_IProvideClassInfo, ProvideClassInfo)
   INTERFACE_PART(COleControl, IID_IProvideClassInfo2, ProvideClassInfo)
   INTERFACE_PART(COleControl, IID_ISpecifyPropertyPages, SpecifyPropertyPages)
+  INTERFACE_PART(COleControl, IID_IPerPropertyBrowsing, PerPropertyBrowsing)
+  INTERFACE_PART(COleControl, IID_IQuickActivate, QuickActivate)
   INTERFACE_PART(COleControl, IID_IConnectionPointContainer, ConnPtContainer)
 END_INTERFACE_MAP()
 
@@ -1122,7 +1124,30 @@ BOOL COleControl::OnProperties(LPMSG, HWND hWndParent, LPCRECT) {
   return SUCCEEDED(hr);
 }
 
+// Custom verbs are numbered from 1, in the order of the maps from the
+// class's own to its bases'.
+const AFX_MSGMAP_ENTRY* COleControl::FindVerbEntry(LONG iVerb) {
+  LONG nCustom = 0;
+  for (const AFX_MSGMAP* pMap = GetMessageMap(); pMap != NULL;
+       pMap = pMap->pfnGetBaseMap != NULL ? pMap->pfnGetBaseMap() : NULL) {
+    for (const AFX_MSGMAP_ENTRY* p = pMap->lpEntries; p->nSig != AfxSig_end; p++) {
+      if (p->nMessage != _AFX_OLEVERB_MSG || p->nSig != AfxSig_thunk) continue;
+      if (p->nCode == _AFX_OLEVERB_CUSTOM) {
+        if (++nCustom == iVerb) return p;
+      } else if (p->nCode == _AFX_OLEVERB_STOCK && (LONG)p->nID == iVerb) {
+        return p;
+      }
+    }
+  }
+  return NULL;
+}
+
 BOOL COleControl::OnDoVerb(LONG iVerb, LPMSG lpMsg, HWND hWndParent, LPCRECT lpRect) {
+  const AFX_MSGMAP_ENTRY* pEntry = FindVerbEntry(iVerb);
+  if (pEntry != NULL) {
+    AFX_OLEVERB_PARAMS params = {lpMsg, hWndParent, lpRect};
+    return pEntry->pThunk(this, _AFX_OLEVERB_MSG, (WPARAM)iVerb, (LPARAM)&params) != 0;
+  }
   switch (iVerb) {
     case OLEIVERB_PRIMARY:
     case OLEIVERB_SHOW:

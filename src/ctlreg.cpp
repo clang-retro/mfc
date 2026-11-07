@@ -115,8 +115,6 @@ BOOL AFXAPI AfxOleRegisterControlClass(HINSTANCE hInstance, REFCLSID clsid, LPCT
   SetKey(strKey + _T("\\MiscStatus"), NULL, _T("0"));
   SetKey(strKey + _T("\\MiscStatus\\1"), NULL, strMisc);
 
-  // Verbs every control has: Properties.
-  SetKey(strKey + _T("\\Verb\\0"), NULL, _T("&Properties...,0,2"));
 
   if (tlid != GUID_NULL) {
     SetKey(strKey + _T("\\TypeLib"), NULL, GuidString(tlid));

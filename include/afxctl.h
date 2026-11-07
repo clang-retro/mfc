@@ -117,6 +117,30 @@ protected:                              \
     return _pIDs;                   \
   }
 
+// Verbs: entries of a control's message map. ON_OLEVERB adds a verb of
+// the control's own, named by a string resource and numbered from 1 in
+// the order of the map; ON_STDOLEVERB handles a standard verb (an
+// OLEIVERB_ value). The handler is BOOL Fn(LPMSG, HWND hWndParent,
+// LPCRECT lpRect).
+#define _AFX_OLEVERB_MSG 0xC002
+#define _AFX_OLEVERB_CUSTOM 0x8001
+#define _AFX_OLEVERB_STOCK 0x8002
+struct AFX_OLEVERB_PARAMS {
+  LPMSG lpMsg;
+  HWND hWndParent;
+  LPCRECT lpRect;
+};
+#define _AFX_OLEVERB_THUNK(memberFxn)                                                   \
+  _AFX_THUNK(AFX_OLEVERB_PARAMS* _p = (AFX_OLEVERB_PARAMS*)_l;                          \
+             return (LRESULT)(_AFX_CALL(memberFxn)(_p->lpMsg, _p->hWndParent, _p->lpRect) \
+                              != 0);)
+#define ON_OLEVERB(idsVerbName, memberFxn)                                            \
+  {_AFX_OLEVERB_MSG, _AFX_OLEVERB_CUSTOM, (UINT)(idsVerbName), (UINT)(idsVerbName),     \
+   AfxSig_thunk, (AFX_PMSG)0, _AFX_OLEVERB_THUNK(memberFxn)},
+#define ON_STDOLEVERB(iVerb, memberFxn)                                                 \
+  {_AFX_OLEVERB_MSG, _AFX_OLEVERB_STOCK, (UINT)(LONG)(iVerb), (UINT)(LONG)(iVerb),        \
+   AfxSig_thunk, (AFX_PMSG)0, _AFX_OLEVERB_THUNK(memberFxn)},
+
 // Registration (ctlreg.cpp).
 BOOL AFXAPI AfxOleRegisterControlClass(HINSTANCE hInstance, REFCLSID clsid, LPCTSTR pszProgID,
                                        UINT idTypeName, UINT idBitmap, int nRegFlags,
@@ -426,6 +450,16 @@ public:
   virtual BOOL OnEdit(LPMSG lpMsg, HWND hWndParent, LPCRECT lpRect);
   virtual BOOL OnProperties(LPMSG lpMsg, HWND hWndParent, LPCRECT lpRect);
   virtual BOOL OnDoVerb(LONG iVerb, LPMSG lpMsg, HWND hWndParent, LPCRECT lpRect);
+  // The verb map: the entry for a verb, and the verbs to enumerate.
+  const AFX_MSGMAP_ENTRY* FindVerbEntry(LONG iVerb);
+
+  // Property browsing (IPerPropertyBrowsing).
+  virtual BOOL OnGetDisplayString(DISPID dispid, CString& strValue);
+  virtual BOOL OnMapPropertyToPage(DISPID dispid, LPCLSID lpclsid, BOOL* pbPageOptional);
+  virtual BOOL OnGetPredefinedStrings(DISPID dispid, CStringArray* pStringArray,
+                                      CDWordArray* pCookieArray);
+  virtual BOOL OnGetPredefinedValue(DISPID dispid, DWORD dwCookie, VARIANT* lpvarOut);
+  HRESULT EnumVerbs(LPENUMOLEVERB* ppEnum);
   virtual void OnClose(DWORD dwSaveOption);
   virtual void OnGetControlInfo(LPCONTROLINFO pControlInfo);
   virtual void OnMnemonic(LPMSG pMsg);
@@ -638,6 +672,20 @@ public:
   END_INTERFACE_PART(SpecifyPropertyPages)
 
   // The font's changes.
+  BEGIN_INTERFACE_PART(PerPropertyBrowsing, IPerPropertyBrowsing)
+    STDMETHOD(GetDisplayString)(DISPID dispid, BSTR* lpbstr);
+    STDMETHOD(MapPropertyToPage)(DISPID dispid, LPCLSID lpclsid);
+    STDMETHOD(GetPredefinedStrings)(DISPID dispid, CALPOLESTR* lpcaStringsOut,
+                                    CADWORD* lpcaCookiesOut);
+    STDMETHOD(GetPredefinedValue)(DISPID dispid, DWORD dwCookie, VARIANT* lpvarOut);
+  END_INTERFACE_PART(PerPropertyBrowsing)
+
+  BEGIN_INTERFACE_PART(QuickActivate, IQuickActivate)
+    STDMETHOD(QuickActivate)(QACONTAINER* pQaContainer, QACONTROL* pQaControl);
+    STDMETHOD(SetContentExtent)(LPSIZEL lpsizel);
+    STDMETHOD(GetContentExtent)(LPSIZEL lpsizel);
+  END_INTERFACE_PART(QuickActivate)
+
   BEGIN_INTERFACE_PART(FontNotification, IPropertyNotifySink)
     STDMETHOD(OnChanged)(DISPID dispid);
     STDMETHOD(OnRequestEdit)(DISPID dispid);
