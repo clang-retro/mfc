@@ -279,6 +279,83 @@ IMPLEMENT_OLECREATE_EX(CLicCtrl, "CtlTest.LicCtrl.1", 0x6a1d3f52, 0x0e4b, 0x4d7a
 // The test makes it without the registry.
 BOOL CLicCtrl::CLicCtrlFactory::UpdateRegistry(BOOL) { return TRUE; }
 
+// Downloads, read at once or while the program runs; a control with a
+// data path property.
+class CTestAsyncFile : public CAsyncMonikerFile {
+public:
+  BOOL m_bStarted, m_bStopped, m_bLast;
+  HRESULT m_hrStop;
+  int m_nData;
+  CStringA m_strData;
+  CTestAsyncFile() : m_bStarted(FALSE), m_bStopped(FALSE), m_bLast(FALSE), m_hrStop(E_FAIL), m_nData(0) {}
+
+protected:
+  virtual void OnStartBinding() { m_bStarted = GetBinding() != NULL; }
+  virtual void OnDataAvailable(DWORD dwSize, DWORD bscfFlag) {
+    m_nData++;
+    if (bscfFlag & BSCF_LASTDATANOTIFICATION) m_bLast = TRUE;
+    // Through the CFile side this time.
+    char buf[1024];
+    while ((DWORD)m_strData.GetLength() < dwSize) {
+      UINT n = 0;
+      try {
+        n = Read(buf, sizeof(buf));
+      } catch (CException* e) {
+        e->Delete();  // E_PENDING: more to come
+        break;
+      }
+      if (n == 0) break;
+      m_strData += CStringA(buf, n);
+    }
+  }
+  virtual void OnStopBinding(HRESULT hr, LPCTSTR) {
+    m_hrStop = hr;
+    m_bStopped = TRUE;
+  }
+};
+
+class CTestDataProp : public CCachedDataPathProperty {
+public:
+  BOOL m_bStopped;
+  HRESULT m_hrStop;
+  CTestDataProp() : m_bStopped(FALSE), m_hrStop(E_FAIL) {}
+  virtual void ResetData() {
+    CCachedDataPathProperty::ResetData();
+    m_bStopped = FALSE;
+  }
+
+protected:
+  virtual void OnStopBinding(HRESULT hr, LPCTSTR) {
+    m_hrStop = hr;
+    m_bStopped = TRUE;
+    // A control usually says so through its ready state.
+    if (GetControl() != NULL) GetControl()->InternalSetReadyState(READYSTATE_COMPLETE);
+  }
+};
+
+class CDataCtrl : public CTestCtrl {
+  DECLARE_DYNCREATE(CDataCtrl)
+public:
+  static CDataCtrl* s_pLast;
+  CTestDataProp m_data;
+  CDataCtrl() {
+    m_data.SetControl(this);
+    s_pLast = this;
+  }
+  virtual void DoPropExchange(CPropExchange* pPX) {
+    CTestCtrl::DoPropExchange(pPX);
+    PX_DataPath(pPX, _T("Data"), m_data);
+  }
+  DECLARE_OLECREATE_EX(CDataCtrl)
+};
+
+CDataCtrl* CDataCtrl::s_pLast = NULL;
+IMPLEMENT_DYNCREATE(CDataCtrl, CTestCtrl)
+// {6A1D3F52-0E4B-4D7A-9F23-8B5E1CAD4F66}
+IMPLEMENT_OLECREATE_EX(CDataCtrl, "CtlTest.DataCtrl.1", 0x6a1d3f52, 0x0e4b, 0x4d7a, 0x9f, 0x23,
+                       0x8b, 0x5e, 0x1c, 0xad, 0x4f, 0x66)
+BOOL CDataCtrl::CDataCtrlFactory::UpdateRegistry(BOOL) { return TRUE; }
+
 int CTestPropPage::s_nAlive = 0;
 CTestPropPage* CTestPropPage::s_pLast = NULL;
 BOOL CTestPropPage::s_bDirtyAtEnd = FALSE;
@@ -506,6 +583,7 @@ public:
   void TestPropertyFrame();
   void TestBrowsingAndQuickActivate();
   void TestLicensing();
+  void TestDataPath();
 
   afx_msg int OnCreate(LPCREATESTRUCT lpcs) {
     if (CFrameWnd::OnCreate(lpcs) == -1) return -1;
@@ -1408,12 +1486,131 @@ void CMainFrame::TestLicensing() {
   ::DeleteFile(LicPath());
 }
 
+// Runs the message loop until *pbDone, for at most ten seconds.
+static BOOL PumpUntil(const BOOL* pbDone) {
+  DWORD dwStart = ::GetTickCount();
+  while (!*pbDone && ::GetTickCount() - dwStart < 10000) {
+    PumpMessages();
+    ::MsgWaitForMultipleObjects(0, NULL, FALSE, 20, QS_ALLINPUT);
+  }
+  return *pbDone;
+}
+
+void CMainFrame::TestDataPath() {
+  TestLog("data path properties");
+  // A file to download, bigger than one read.
+  CString strPath = LicPath();
+  strPath = strPath.Left(strPath.ReverseFind('\\') + 1) + _T("ctldata.txt");
+  CStringA strData;
+  for (int i = 0; i < 2000; i++) strData += "data path line\r\n";
+  {
+    CFile file(strPath, CFile::modeCreate | CFile::modeWrite);
+    file.Write((LPCSTR)strData, strData.GetLength());
+  }
+  CString strURL = _T("file:///") + strPath;
+  strURL.Replace('\\', '/');
+
+  // At once.
+  CMonikerFile mf;
+  CHECK(mf.Open(strURL));
+  CHECK(mf.GetMoniker() != NULL && mf.GetStream() != NULL);
+  CStringA strRead;
+  char buf[1000];
+  UINT n;
+  while ((n = mf.Read(buf, sizeof(buf))) > 0) strRead += CStringA(buf, n);
+  CHECK(strRead == strData);
+  mf.Close();
+  CHECK(mf.GetMoniker() == NULL && mf.GetStream() == NULL);
+  CFileException fe;
+  CString strMissing = strURL.Left(strURL.ReverseFind('/') + 1) + _T("nosuch.txt");
+  CHECK(!mf.Open(strMissing, &fe) && fe.m_lOsError != 0);
+  CHECK(mf.GetMoniker() == NULL);
+
+  // While the program runs.
+  {
+    CTestAsyncFile af;
+    CHECK(af.Open(strURL));
+    CHECK(PumpUntil(&af.m_bStopped));
+    CHECK(af.m_bStarted);
+    CHECK(af.m_hrStop == S_OK);
+    CHECK(af.m_nData > 0);
+    // Windows marks the last notice. Wine (as of Wine 9) sends a local
+    // file in one notice that is only marked as the first.
+    CHECK(af.m_bLast ||
+          ::GetProcAddress(::GetModuleHandleA("ntdll.dll"), "wine_get_version") != NULL);
+    CHECK(af.m_strData == strData);
+    CHECK(af.GetFormatEtc() != NULL);
+    CHECK(af.GetBinding() == NULL);  // let go when the binding stopped
+    af.Close();
+  }
+  {
+    // Once closed, nothing more is reported. (A local file can come in
+    // full while Open runs.)
+    CTestAsyncFile af;
+    CHECK(af.Open(strURL));
+    af.Close();
+    int nData = af.m_nData;
+    BOOL bStopped = af.m_bStopped;
+    PumpMessages();
+    ::Sleep(100);
+    PumpMessages();
+    CHECK(af.m_nData == nData && af.m_bStopped == bStopped);
+  }
+
+  // A control's data path property, from a property bag.
+  LPUNKNOWN pUnk = NULL;
+  HRESULT hr = ::CoCreateInstance(CDataCtrl::guid, NULL, CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER,
+                                  IID_IUnknown, (void**)&pUnk);
+  CHECK(SUCCEEDED(hr) && pUnk != NULL);
+  CDataCtrl* pCtl = CDataCtrl::s_pLast;
+  if (pUnk != NULL && pCtl != NULL) {
+    LPPERSISTPROPERTYBAG pPPB = NULL;
+    pUnk->QueryInterface(IID_IPersistPropertyBag, (void**)&pPPB);
+    CHECK(pPPB != NULL);
+    if (pPPB != NULL) {
+      CTestPropBag bag;
+      COleVariant var(strURL);
+      bag.Write(L"Data", &var);
+      pCtl->InternalSetReadyState(READYSTATE_LOADING);
+      CHECK(pPPB->Load(&bag, NULL) == S_OK);
+      CHECK(pCtl->m_data.GetPath() == strURL);
+      CHECK(PumpUntil(&pCtl->m_data.m_bStopped));
+      CHECK(pCtl->m_data.m_hrStop == S_OK);
+      CHECK(pCtl->m_data.m_Cache.GetLength() == (ULONGLONG)strData.GetLength());
+      CStringA strCache;
+      pCtl->m_data.m_Cache.SeekToBegin();
+      UINT nLen = (UINT)pCtl->m_data.m_Cache.GetLength();
+      pCtl->m_data.m_Cache.Read(strCache.GetBuffer(nLen), nLen);
+      strCache.ReleaseBuffer(nLen);
+      CHECK(strCache == strData);
+      CHECK(pCtl->GetReadyState() == READYSTATE_COMPLETE);
+
+      // The path is what is saved.
+      CTestPropBag saved;
+      CHECK(pPPB->Save(&saved, TRUE, FALSE) == S_OK);
+      int i = saved.Find(L"Data");
+      CHECK(i >= 0 && saved.m_values[i].vt == VT_BSTR &&
+            CString(saved.m_values[i].bstrVal) == strURL);
+
+      // COleControl::Load starts again from nothing.
+      CHECK(pCtl->Load(strURL, pCtl->m_data));
+      CHECK(PumpUntil(&pCtl->m_data.m_bStopped));
+      CHECK(pCtl->m_data.m_Cache.GetLength() == (ULONGLONG)strData.GetLength());
+      pPPB->Release();
+    }
+    pUnk->Release();
+  }
+  CHECK(CTestCtrl::s_nAlive == 0);
+  ::DeleteFile(strPath);
+}
+
 void CMainFrame::RunTests() {
   TestHosted();
   TestPropertyPage();
   TestPropertyFrame();
   TestBrowsingAndQuickActivate();
   TestLicensing();
+  TestDataPath();
   TestPersistence();
   TestRegistry();
 }

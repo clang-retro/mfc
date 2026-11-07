@@ -180,7 +180,9 @@ when there is no display:
   and in the property frame of the Properties verb; IPerPropertyBrowsing
   and IQuickActivate; and licensing, through IClassFactory2 with and
   without a license file (AfxVerifyLicFile) and a run-time key, also
-  from CreateControl.
+  from CreateControl; and downloads of a local file through
+  CMonikerFile, CAsyncMonikerFile and a CCachedDataPathProperty loaded
+  from a property bag (PX_DataPath).
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -221,7 +223,9 @@ request with the stock MinGW-w64 toolchain.
   COleDropTarget, with the CView drag and drop handlers. Containers:
   COleDocument (flat or compound files), COleClientItem (new, pasted,
   dropped, linked, static and cloned objects, verbs, drawing, the
-  clipboard), COleStreamFile, AfxOleSetEditMenu. Programs can include
+  clipboard), COleStreamFile, CMonikerFile and CAsyncMonikerFile
+  (downloads through URL monikers, which need urlmon.dll from Internet
+  Explorer 3 or later), AfxOleSetEditMenu. Programs can include
   `afxolecl.rc` for the container messages. Servers: COleServerDoc,
   COleServerItem (drawing, extents, verbs, data, the clipboard),
   COleLinkingDoc (links to a file and to its items through monikers,
@@ -252,12 +256,14 @@ request with the stock MinGW-w64 toolchain.
   interfaces, in-place activation, stock properties, methods and events,
   ambient properties, IViewObject drawing and persistence through
   streams, storages and property bags), COleControlModule, event maps,
-  verb maps (ON_OLEVERB, ON_STDOLEVERB), DECLARE_OLECREATE_EX,
-  DECLARE_OLECTLTYPE, DECLARE_PROPPAGEIDS,
-  CFontHolder, CPropExchange and the PX_ functions,
-  AfxOleRegisterControlClass, and property pages: COlePropertyPage
-  (IPropertyPage2, made from an ordinary dialog template) and the DDP_
-  functions.
+  verb maps (ON_OLEVERB, ON_STDOLEVERB), IPerPropertyBrowsing,
+  IQuickActivate, DECLARE_OLECREATE_EX, DECLARE_OLECTLTYPE,
+  DECLARE_PROPPAGEIDS, CFontHolder, CPropExchange and the PX_
+  functions, AfxOleRegisterControlClass, licensing (IClassFactory2,
+  AfxVerifyLicFile), data path properties (CDataPathProperty,
+  CCachedDataPathProperty, PX_DataPath), and property pages:
+  COlePropertyPage (IPropertyPage2, made from an ordinary dialog
+  template) and the DDP_ functions.
 * `afxodlgs.h`: the OLE dialogs over oledlg: COleInsertDialog,
   COlePasteSpecialDialog, COleLinksDialog, COleUpdateDialog,
   COleChangeIconDialog, COleConvertDialog and COleBusyDialog, and the
@@ -304,13 +310,14 @@ request with the stock MinGW-w64 toolchain.
   (`AFX_EXT_CLASS`, CDynLinkLibrary), which share one MFC DLL with the
   program, are not supported, since the library is only linked
   statically.
+* An asynchronous moniker file's bind status callback is not
+  aggregated: CreateBindStatusCallback ignores its pUnkControlling.
 * Wine's OleCreatePropertyFrame (as of Wine 9) never calls
   IPropertyPage::Apply, so under Wine the OK and Apply buttons of a
   control's property frame do not change the control; Windows applies
   the pages.
 * COleControl makes windowed controls only (no windowless or
-  IOleInPlaceObjectWindowless controls), and data path
-  properties (CDataPathProperty) are not implemented. A
+  IOleInPlaceObjectWindowless controls). A
   control's binary stream (IPersistStreamInit, IPersistStorage, DLGINIT
   data) has this library's own format, not the one Visual C++ MFC
   writes; property bags hold the same names and values.
