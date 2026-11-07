@@ -212,7 +212,9 @@ CCmdTarget* COleObjectFactory::OnCreateObject() {
 }
 
 BOOL COleObjectFactory::IsLicenseValid() {
-  if (!m_bLicenseChecked) {
+  // A valid license stays valid; a missing one is checked again, so a
+  // license installed while the program runs is seen.
+  if (!m_bLicenseChecked || !m_bLicenseValid) {
     m_bLicenseValid = VerifyUserLicense();
     m_bLicenseChecked = TRUE;
   }

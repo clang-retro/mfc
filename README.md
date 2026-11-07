@@ -177,7 +177,10 @@ when there is no display:
   registry keys of AfxOleRegisterControlClass, and the control's
   COlePropertyPage, through IPropertyPage (its size and title, DDP_ and
   DDX values from and to one or two controls, dirty controls, Apply)
-  and in the property frame of the Properties verb.
+  and in the property frame of the Properties verb; IPerPropertyBrowsing
+  and IQuickActivate; and licensing, through IClassFactory2 with and
+  without a license file (AfxVerifyLicFile) and a run-time key, also
+  from CreateControl.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -307,7 +310,7 @@ request with the stock MinGW-w64 toolchain.
   the pages.
 * COleControl makes windowed controls only (no windowless or
   IOleInPlaceObjectWindowless controls), and data path
-  properties (CDataPathProperty) and licensing are not implemented. A
+  properties (CDataPathProperty) are not implemented. A
   control's binary stream (IPersistStreamInit, IPersistStorage, DLGINIT
   data) has this library's own format, not the one Visual C++ MFC
   writes; property bags hold the same names and values.

@@ -144,3 +144,47 @@ BOOL AFXAPI AfxOleRegisterPropertyPageClass(HINSTANCE hInstance, REFCLSID clsid,
   return RegisterServer(hInstance, _T("CLSID\\") + strClsid, LoadName(hInstance, idTypeName),
                         nRegFlags);
 }
+
+// ---------------------------------------------------------------------
+// Licensing
+
+BOOL AFXAPI AfxVerifyLicFile(HINSTANCE hInstance, LPCTSTR pszLicFileName,
+                             LPCOLESTR pszLicFileContents, UINT cch) {
+  if (pszLicFileName == NULL || pszLicFileContents == NULL) return FALSE;
+  // The license file sits beside the module.
+  TCHAR szPath[MAX_PATH];
+  DWORD n = ::GetModuleFileName(hInstance, szPath, MAX_PATH);
+  if (n == 0 || n >= MAX_PATH) return FALSE;
+  LPTSTR pszName = szPath;
+  for (LPTSTR p = szPath; *p != 0; p = ::CharNext(p))
+    if (*p == '\\' || *p == '/' || *p == ':') pszName = p + 1;
+  if ((pszName - szPath) + lstrlen(pszLicFileName) >= MAX_PATH) return FALSE;
+  lstrcpy(pszName, pszLicFileName);
+
+  // License files are plain ANSI text.
+  UINT cchContents = (UINT)wcslen(pszLicFileContents);
+  if (cch == (UINT)-1 || cch > cchContents) cch = cchContents;
+  int cbExpect = ::WideCharToMultiByte(CP_ACP, 0, pszLicFileContents, (int)cch, NULL, 0, NULL, NULL);
+  if (cch != 0 && cbExpect <= 0) return FALSE;
+  CStringA strExpect;
+  if (cbExpect > 0) {
+    ::WideCharToMultiByte(CP_ACP, 0, pszLicFileContents, (int)cch, strExpect.GetBuffer(cbExpect),
+                          cbExpect, NULL, NULL);
+    strExpect.ReleaseBuffer(cbExpect);
+  }
+
+  HANDLE hFile = ::CreateFile(szPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL, NULL);
+  if (hFile == INVALID_HANDLE_VALUE) return FALSE;
+  BOOL bMatch = TRUE;
+  if (cbExpect > 0) {
+    CStringA strFile;
+    DWORD cbRead = 0;
+    bMatch = ::ReadFile(hFile, strFile.GetBuffer(cbExpect), (DWORD)cbExpect, &cbRead, NULL) &&
+             cbRead == (DWORD)cbExpect;
+    strFile.ReleaseBuffer(bMatch ? cbExpect : 0);
+    bMatch = bMatch && memcmp((LPCSTR)strFile, (LPCSTR)strExpect, cbExpect) == 0;
+  }
+  ::CloseHandle(hFile);
+  return bMatch;
+}
