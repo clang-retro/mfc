@@ -14,6 +14,12 @@
 BIN ?=
 CFG ?=
 TARGET ?= i586-pc-windows5.1-gnu
+# Linux and macOS targets (make TARGET=x86_64-linux-gnu, or
+# TARGET=arm64-apple-macos11) build over the portable Win32 layer in
+# port/, which goes into libwinport.a beside the MFC libraries.
+ifneq ($(filter %linux% %linux-gnu %darwin% %apple%,$(TARGET)),)
+PORTABLE = 1
+endif
 SYSROOT ?=
 ifneq ($(CFG),)
 OUT ?= build/$(basename $(notdir $(CFG)))
@@ -37,12 +43,34 @@ ALL_CXXFLAGS = $(TARGET_FLAGS) $(STDLIB) -fno-delete-null-pointer-checks \
   -std=c++17 -Wall -Wno-invalid-offsetof -Wno-missing-exception-spec -Wno-overloaded-virtual -Wno-unused-private-field \
   -Iinclude -Isrc $(CXXFLAGS)
 
+ifeq ($(PORTABLE),1)
+# The library's sources that build over the layer so far; the rest
+# follow as the layer grows.
+SRCS = $(addprefix src/,$(addsuffix .cpp,$(PORT_MFC_SRCS)))
+PORT_MFC_SRCS = archive coll except file fileshrd mtcore object state strcore time
+PORT_SRCS = $(wildcard port/src/*.cpp)
+PORT_OBJS = $(patsubst port/src/%.cpp,$(OUT)/port/%.o,$(PORT_SRCS))
+ALL_CXXFLAGS += -Iport/include -fPIC
+PORT_LIB = $(OUT)/libwinport.a
+else
 SRCS = $(wildcard src/*.cpp)
+endif
 OBJS_A = $(patsubst src/%.cpp,$(OUT)/a/%.o,$(SRCS))
 OBJS_U = $(patsubst src/%.cpp,$(OUT)/u/%.o,$(SRCS))
 HDRS = $(wildcard include/*.h) $(wildcard src/*.h) src/wnd_handlers.inc
+ifeq ($(PORTABLE),1)
+HDRS += $(wildcard port/include/*.h) $(wildcard port/src/*.h)
+endif
 
-all: $(OUT)/libmfc.a $(OUT)/libmfcu.a
+all: $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PORT_LIB)
+
+$(PORT_LIB): $(PORT_OBJS)
+	rm -f $@
+	$(AR) rcs $@ $^
+
+$(OUT)/port/%.o: port/src/%.cpp $(HDRS)
+	@mkdir -p $(dir $@)
+	$(CXX) $(ALL_CXXFLAGS) -Iport/src -c $< -o $@
 
 $(OUT)/libmfc.a: $(OBJS_A)
 	rm -f $@
@@ -64,6 +92,11 @@ install: all
 	mkdir -p $(PREFIX)/include/mfc $(PREFIX)/lib
 	cp include/*.h include/*.rc $(PREFIX)/include/mfc/
 	cp $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PREFIX)/lib/
+ifeq ($(PORTABLE),1)
+	mkdir -p $(PREFIX)/include/winport
+	cp port/include/*.h $(PREFIX)/include/winport/
+	cp $(PORT_LIB) $(PREFIX)/lib/
+endif
 
 check: all
 	BIN=$(BIN) STDLIB="$(STDLIB)" RC="$(TEST_RC)" LDFLAGS="$(LDFLAGS)" CFG=$(CFG) SYSROOT=$(SYSROOT) TARGET=$(TARGET) OUT=$(OUT) sh tests/run-tests.sh
