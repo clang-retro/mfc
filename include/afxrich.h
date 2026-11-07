@@ -160,9 +160,10 @@ public:
 // ---------------------------------------------------------------------
 // CRichEditDoc: the document of a rich edit view; the text lives in the
 // view's control, objects included. m_bRTF chooses rich text or plain
-// text files.
+// text files. It is an OLE server document, which a program serves by
+// overriding OnGetEmbeddedItem.
 
-class CRichEditDoc : public COleDocument {
+class CRichEditDoc : public COleServerDoc {
   DECLARE_DYNAMIC(CRichEditDoc)
 protected:
   CRichEditDoc();
@@ -173,6 +174,10 @@ public:
   BOOL m_bRTF;
 
   virtual CRichEditView* GetView() const;
+  // SF_RTF, or SF_TEXT for a plain text document.
+  int GetStreamFormat() const;
+  // NULL: override it to serve the document.
+  virtual COleServerItem* OnGetEmbeddedItem();
   // Makes the item for an object in the text (preo) or for a new one
   // (NULL). Override it to make your own CRichEditCntrItem class.
   virtual CRichEditCntrItem* CreateClientItem(REOBJECT* preo = NULL) const;

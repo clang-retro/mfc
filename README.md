@@ -90,6 +90,10 @@ when there is no display:
   rich text and plain text, page layout for printing, word wrap, an
   object embedded in the text (selected, saved and loaded with it), and
   the Insert Object, Paste Special and Links dialogs.
+* `richsrvtest`: CRichEditDoc as a server document, with its container
+  in the same program: a new rich text object embedded, its text read
+  back through the object's data, a copy saved and loaded again with
+  its formatting, and a link to a saved file.
 * `dbtest`: `afxdb.h` against an in-memory ODBC driver written in the
   test (`tests/odbcmock.h`), since Wine has no 32-bit ODBC driver to
   test with: opening, moving, filters, sorts and parameters, nulls,
@@ -148,7 +152,8 @@ request with the stock MinGW-w64 toolchain.
 * `afxrich.h`: CRichEditView and CRichEditDoc (rich text or plain text
   files, formatting the selection, find and replace, printing), with
   OLE objects in the text through CRichEditCntrItem (Insert Object,
-  Paste Special, the selected item).
+  Paste Special, the selected item). CRichEditDoc is a COleServerDoc,
+  so a program serves its documents by overriding OnGetEmbeddedItem.
 * `afxdb.h`: CDatabase, CRecordset (snapshot, dynaset and forward-only,
   with RFX for the usual types, bookmarks and parameters),
   CRecordView and the DDX_Field functions, CDBException, CDBVariant.
@@ -197,8 +202,7 @@ request with the stock MinGW-w64 toolchain.
   defines the macros for C only). `NOMINMAX` turns them off.
 * Floating bars are tool windows, so the system draws their captions,
   and they resize with the system's sizing border.
-* CRichEditDoc derives from COleDocument rather than COleServerDoc
-  (it becomes a server document with in-place activation). Wine's rich edit control draws an
+* Wine's rich edit control draws an
   embedded object from its data rather than through IViewObject, and
   writes only the object's picture into rich text, so there a saved
   object comes back as a picture.
