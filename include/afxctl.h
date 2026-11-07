@@ -150,6 +150,13 @@ BOOL AFXAPI AfxOleUnregisterClass(REFCLSID clsid, LPCTSTR pszProgID);
 BOOL AFXAPI AfxOleRegisterPropertyPageClass(HINSTANCE hInstance, REFCLSID clsid, UINT idTypeName,
                                             int nRegFlags = afxRegApartmentThreading);
 
+// Control licensing: TRUE when the file lpszLicFileName, in the folder of
+// the module hInstance, begins with the first cch characters of
+// pszLicFileContents (all of them when cch is -1). A factory's
+// VerifyUserLicense usually calls it.
+BOOL AFXAPI AfxVerifyLicFile(HINSTANCE hInstance, LPCTSTR pszLicFileName,
+                             LPCOLESTR pszLicFileContents, UINT cch = (UINT)-1);
+
 // ---------------------------------------------------------------------
 // Event maps: the events a control fires, by name and dispatch ID. The
 // stock events listed here are the ones the control fires by itself.

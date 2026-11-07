@@ -253,6 +253,32 @@ public:
   DECLARE_OLECREATE_EX(CTestPropPage)
 };
 
+// A licensed control: its factory takes a license file beside the
+// program, or the run-time key a licensed copy hands out.
+static const WCHAR kLicText[] = L"CtlTest license: this copy may be used to build programs.";
+static const WCHAR kLicKey[] = L"CtlTest run-time key";
+
+class CLicCtrl : public CTestCtrl {
+  DECLARE_DYNCREATE(CLicCtrl)
+  BEGIN_OLEFACTORY(CLicCtrl)
+    virtual BOOL VerifyUserLicense() {
+      return AfxVerifyLicFile(AfxGetInstanceHandle(), _T("ctltest.lic"), kLicText);
+    }
+    virtual BOOL GetLicenseKey(DWORD, BSTR* pbstrKey) {
+      *pbstrKey = ::SysAllocString(kLicKey);
+      return *pbstrKey != NULL;
+    }
+  END_OLEFACTORY(CLicCtrl)
+};
+
+IMPLEMENT_DYNCREATE(CLicCtrl, CTestCtrl)
+// {6A1D3F52-0E4B-4D7A-9F23-8B5E1CAD4F65}
+IMPLEMENT_OLECREATE_EX(CLicCtrl, "CtlTest.LicCtrl.1", 0x6a1d3f52, 0x0e4b, 0x4d7a, 0x9f, 0x23, 0x8b,
+                       0x5e, 0x1c, 0xad, 0x4f, 0x65)
+
+// The test makes it without the registry.
+BOOL CLicCtrl::CLicCtrlFactory::UpdateRegistry(BOOL) { return TRUE; }
+
 int CTestPropPage::s_nAlive = 0;
 CTestPropPage* CTestPropPage::s_pLast = NULL;
 BOOL CTestPropPage::s_bDirtyAtEnd = FALSE;
@@ -479,6 +505,7 @@ public:
   void TestPropertyPage();
   void TestPropertyFrame();
   void TestBrowsingAndQuickActivate();
+  void TestLicensing();
 
   afx_msg int OnCreate(LPCREATESTRUCT lpcs) {
     if (CFrameWnd::OnCreate(lpcs) == -1) return -1;
@@ -1304,11 +1331,89 @@ void CMainFrame::TestRegistry() {
   CHECK(!ReadKey(_T("CtlTest.TestCtrl.1"), NULL, str));
 }
 
+// Writes ctltest.lic beside the program, or deletes it.
+static CString LicPath() {
+  TCHAR sz[MAX_PATH];
+  ::GetModuleFileName(NULL, sz, MAX_PATH);
+  CString str = sz;
+  return str.Left(str.ReverseFind('\\') + 1) + _T("ctltest.lic");
+}
+
+static void WriteLicFile(LPCSTR pszText) {
+  CFile file(LicPath(), CFile::modeCreate | CFile::modeWrite);
+  file.Write(pszText, (UINT)strlen(pszText));
+}
+
+void CMainFrame::TestLicensing() {
+  TestLog("licensing");
+  ::DeleteFile(LicPath());
+  HINSTANCE hInst = AfxGetInstanceHandle();
+  CHECK(!AfxVerifyLicFile(hInst, _T("ctltest.lic"), kLicText));
+
+  LPCLASSFACTORY2 pFactory = NULL;
+  HRESULT hr = ::CoGetClassObject(CLicCtrl::guid, CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER, NULL,
+                                  IID_IClassFactory2, (void**)&pFactory);
+  CHECK(SUCCEEDED(hr) && pFactory != NULL);
+  if (pFactory == NULL) return;
+
+  // No license file: no objects without the key, and no key to hand out.
+  LICINFO info = {0};
+  CHECK(pFactory->GetLicInfo(&info) == S_OK);
+  CHECK(info.cbLicInfo == sizeof(LICINFO) && info.fRuntimeKeyAvail && !info.fLicVerified);
+  LPUNKNOWN pUnk = NULL;
+  CHECK(pFactory->CreateInstance(NULL, IID_IUnknown, (void**)&pUnk) == CLASS_E_NOTLICENSED);
+  CHECK(pUnk == NULL);
+  BSTR bstrKey = NULL;
+  CHECK(pFactory->RequestLicKey(0, &bstrKey) == CLASS_E_NOTLICENSED && bstrKey == NULL);
+  BSTR bstrWrong = ::SysAllocString(L"not the key");
+  CHECK(pFactory->CreateInstanceLic(NULL, NULL, IID_IUnknown, bstrWrong, (void**)&pUnk) ==
+        CLASS_E_NOTLICENSED);
+  ::SysFreeString(bstrWrong);
+
+  // The run-time key makes one anyway, as for a program built with a
+  // licensed copy.
+  BSTR bstrRight = ::SysAllocString(kLicKey);
+  CHECK(pFactory->CreateInstanceLic(NULL, NULL, IID_IUnknown, bstrRight, (void**)&pUnk) == S_OK);
+  CHECK(pUnk != NULL && CTestCtrl::s_nAlive == 1);
+  if (pUnk != NULL) pUnk->Release();
+  pUnk = NULL;
+  CHECK(CTestCtrl::s_nAlive == 0);
+
+  // A container passes the key to CreateControl.
+  CWnd wnd;
+  CHECK(wnd.CreateControl(CLicCtrl::guid, NULL, WS_VISIBLE, CRect(0, 0, 50, 20), this, 3001, NULL,
+                          FALSE, bstrRight));
+  CHECK(CTestCtrl::s_nAlive == 1 && wnd.GetControlUnknown() != NULL);
+  wnd.DestroyWindow();
+  PumpMessages();
+  CHECK(CTestCtrl::s_nAlive == 0);
+  ::SysFreeString(bstrRight);
+
+  // A file that starts differently is not a license; the right one is, and
+  // the factory sees it without restarting.
+  WriteLicFile("CtlTest license: this copy may not be used.");
+  CHECK(!AfxVerifyLicFile(hInst, _T("ctltest.lic"), kLicText));
+  CHECK(AfxVerifyLicFile(hInst, _T("ctltest.lic"), kLicText, 17));  // "CtlTest license: "
+  WriteLicFile("CtlTest license: this copy may be used to build programs.\r\nMore text.\r\n");
+  CHECK(AfxVerifyLicFile(hInst, _T("ctltest.lic"), kLicText));
+  CHECK(!AfxVerifyLicFile(hInst, _T("nosuch.lic"), kLicText));
+  CHECK(pFactory->GetLicInfo(&info) == S_OK && info.fLicVerified);
+  CHECK(pFactory->CreateInstance(NULL, IID_IUnknown, (void**)&pUnk) == S_OK && pUnk != NULL);
+  if (pUnk != NULL) pUnk->Release();
+  CHECK(pFactory->RequestLicKey(0, &bstrKey) == S_OK && bstrKey != NULL &&
+        wcscmp(bstrKey, kLicKey) == 0);
+  ::SysFreeString(bstrKey);
+  pFactory->Release();
+  CHECK(CTestCtrl::s_nAlive == 0);
+  ::DeleteFile(LicPath());
+}
+
 void CMainFrame::RunTests() {
   TestHosted();
   TestPropertyPage();
   TestPropertyFrame();
   TestBrowsingAndQuickActivate();
+  TestLicensing();
   TestPersistence();
   TestRegistry();
 }
