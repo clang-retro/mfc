@@ -1,7 +1,7 @@
 // socktest.cpp - console tests for afxsock.h over the loopback interface:
 // event-driven CAsyncSocket connections, blocking CSocket calls with a
 // server on another thread, CArchive through a CSocketFile, datagrams,
-// errors and cancelling a blocking call.
+// errors and cancelling a blocking call, and IPv6 where the system has it.
 #include <afx.h>
 #include <afxwin.h>
 #include <afxsock.h>
@@ -316,12 +316,72 @@ static void TestErrors() {
   CHECK(!client.IsBlocking());
 }
 
+// The Ex functions with IPv4, and IPv6 over its loopback where the
+// system has IPv6.
+static void TestIPv6() {
+  CSocket v4;
+  CHECK(v4.Create(0, SOCK_DGRAM, _T("127.0.0.1")));
+  CString strAddr;
+  UINT nPort = 0;
+  CHECK(v4.GetSockNameEx(strAddr, nPort) && strAddr == _T("127.0.0.1") && nPort != 0);
+  CHECK(v4.SendToEx("four", 4, nPort, _T("127.0.0.1")) == 4);
+  char buf[64];
+  CString strFrom;
+  UINT nFromPort = 0;
+  CHECK(v4.ReceiveFromEx(buf, sizeof(buf), strFrom, nFromPort) == 4);
+  CHECK(memcmp(buf, "four", 4) == 0 && strFrom == _T("127.0.0.1") && nFromPort == nPort);
+  v4.Close();
+
+  CSocket dgram;
+  if (!dgram.Socket(SOCK_DGRAM, FD_READ | FD_WRITE, 0, AF_INET6)) {
+    int nError = CAsyncSocket::GetLastError();
+    CHECK(nError == WSAEAFNOSUPPORT || nError == WSAEPROTONOSUPPORT || nError == WSAEINVAL);
+    printf("note: no IPv6 here (error %d); IPv6 checks not run\n", nError);
+    return;
+  }
+  CHECK(dgram.Bind(0, _T("::1")));
+  CHECK(dgram.GetSockNameEx(strAddr, nPort) && strAddr == _T("::1") && nPort != 0);
+  // An IPv4 string form cannot hold the address.
+  CString strOld;
+  UINT nOld = 0;
+  CHECK(!dgram.GetSockName(strOld, nOld));
+  CHECK(dgram.SendToEx("six", 3, nPort, _T("::1")) == 3);
+  CHECK(dgram.ReceiveFromEx(buf, sizeof(buf), strFrom, nFromPort) == 3);
+  CHECK(memcmp(buf, "six", 3) == 0 && strFrom == _T("::1") && nFromPort == nPort);
+  // IPv6 has no broadcast for SendTo without an address.
+  CHECK(dgram.SendToEx("x", 1, nPort) == SOCKET_ERROR);
+  CHECK(CAsyncSocket::GetLastError() == WSAEDESTADDRREQ);
+  CHECK(dgram.SendToEx("x", 1, nPort, _T("no such host.invalid")) == SOCKET_ERROR);
+  dgram.Close();
+
+  // A stream connection: the string forms of Bind and Connect follow the
+  // socket's family.
+  CAsyncSocket listener;
+  CHECK(listener.Socket(SOCK_STREAM, FD_ACCEPT, 0, AF_INET6));
+  CHECK(listener.Bind(0, _T("::1")) && listener.Listen());
+  UINT nListenPort = 0;
+  CHECK(listener.GetSockNameEx(strAddr, nListenPort));
+  CSocket client;
+  CHECK(client.Socket(SOCK_STREAM, FD_READ | FD_WRITE | FD_CONNECT | FD_CLOSE, 0, AF_INET6));
+  CHECK(client.Connect(_T("::1"), nListenPort));
+  CHECK(client.GetPeerNameEx(strAddr, nPort) && strAddr == _T("::1") && nPort == nListenPort);
+  CAsyncSocket conn;
+  CHECK(listener.Accept(conn));
+  CHECK(client.Send("hello6", 6) == 6);
+  ::Sleep(50);
+  CHECK(conn.Receive(buf, sizeof(buf)) == 6 && memcmp(buf, "hello6", 6) == 0);
+  CHECK(conn.GetPeerNameEx(strAddr, nPort) && strAddr == _T("::1"));
+  UINT nClientPort = 0;
+  CHECK(client.GetSockNameEx(strFrom, nClientPort) && nPort == nClientPort);
+}
+
 int main() {
   CHECK(AfxSocketInit());
   TestAsync();
   TestBlocking();
   TestDatagram();
   TestErrors();
+  TestIPv6();
   if (g_failures == 0) printf("PASS: all socket tests\n");
   else printf("%d failure(s)\n", g_failures);
   return g_failures ? 1 : 0;

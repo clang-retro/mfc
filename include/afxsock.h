@@ -21,6 +21,14 @@ __asm__(".section .drectve,\"yn\"\n"
         ".text");
 #endif
 
+// Winsock 1's header has no IPv6; the Ex functions and Socket take it.
+#ifndef AF_INET6
+#define AF_INET6 23
+#endif
+#ifndef PF_INET6
+#define PF_INET6 AF_INET6
+#endif
+
 // Sent by Winsock to the thread's socket window (see WSAAsyncSelect).
 #define WM_SOCKET_NOTIFY 0x0373
 #define WM_SOCKET_DEAD 0x0374
@@ -59,6 +67,9 @@ public:
   BOOL GetPeerName(SOCKADDR* lpSockAddr, int* lpSockAddrLen);
   BOOL GetSockName(CString& rSocketAddress, UINT& rSocketPort);
   BOOL GetSockName(SOCKADDR* lpSockAddr, int* lpSockAddrLen);
+  // As GetPeerName and GetSockName, for IPv6 sockets as well as IPv4.
+  BOOL GetPeerNameEx(CString& rPeerAddress, UINT& rPeerPort);
+  BOOL GetSockNameEx(CString& rSocketAddress, UINT& rSocketPort);
   BOOL SetSockOpt(int nOptionName, const void* lpOptionValue, int nOptionLen,
                   int nLevel = SOL_SOCKET);
   BOOL GetSockOpt(int nOptionName, void* lpOptionValue, int* lpOptionLen,
@@ -80,6 +91,8 @@ public:
                   int nFlags = 0);
   int ReceiveFrom(void* lpBuf, int nBufLen, SOCKADDR* lpSockAddr, int* lpSockAddrLen,
                   int nFlags = 0);
+  int ReceiveFromEx(void* lpBuf, int nBufLen, CString& rSocketAddress, UINT& rSocketPort,
+                    int nFlags = 0);
   enum { receives = 0, sends = 1, both = 2 };
   BOOL ShutDown(int nHow = sends);
   virtual int Send(const void* lpBuf, int nBufLen, int nFlags = 0);
@@ -87,6 +100,8 @@ public:
              int nFlags = 0);
   int SendTo(const void* lpBuf, int nBufLen, const SOCKADDR* lpSockAddr, int nSockAddrLen,
              int nFlags = 0);
+  int SendToEx(const void* lpBuf, int nBufLen, UINT nHostPort, LPCTSTR lpszHostAddress = NULL,
+               int nFlags = 0);
   BOOL AsyncSelect(long lEvent = FD_READ | FD_WRITE | FD_OOB | FD_ACCEPT | FD_CONNECT |
                                  FD_CLOSE);
 

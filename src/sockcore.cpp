@@ -8,6 +8,9 @@
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
+// Winsock 2 and its IPv6 types come before <windows.h> brings in Winsock 1.
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include "afximpl.h"
 #include <afxsock.h>
 
@@ -153,6 +156,100 @@ void AddressToString(const SOCKADDR_IN& sa, CString& rAddress, UINT& rPort) {
   rPort = ntohs(sa.sin_port);
 }
 
+// The address family of a socket, bound or not. Winsock 1 has only IPv4.
+int SocketFamily(SOCKET hSocket) {
+  WSAPROTOCOL_INFOA info;
+  int nLen = sizeof(info);
+  if (::getsockopt(hSocket, SOL_SOCKET, SO_PROTOCOL_INFOA, (char*)&info, &nLen) == 0)
+    return info.iAddressFamily;
+  SOCKADDR_STORAGE ss;
+  nLen = sizeof(ss);
+  if (::getsockname(hSocket, (SOCKADDR*)&ss, &nLen) == 0) return ss.ss_family;
+  return AF_INET;
+}
+
+// getaddrinfo is in ws2_32 from Windows XP; earlier systems have only
+// numeric IPv6 addresses (WSAStringToAddress).
+typedef int(WSAAPI* PFNGETADDRINFO)(const char*, const char*, const struct addrinfo*,
+                                     struct addrinfo**);
+typedef void(WSAAPI* PFNFREEADDRINFO)(struct addrinfo*);
+
+// Fills in an address of the socket's family. lpszHost may be a numeric
+// address (IPv6 ones with a %scope) or a host name. With no host, IPv6
+// binding uses any local address; there is no IPv6 broadcast.
+BOOL MakeAddressEx(int nFamily, LPCTSTR lpszHost, UINT nPort, SOCKADDR_STORAGE& ss, int& nLen,
+                   u_long ulDefault) {
+  memset(&ss, 0, sizeof(ss));
+  if (nFamily != AF_INET6) {
+    nLen = sizeof(SOCKADDR_IN);
+    return MakeAddress(lpszHost, nPort, *(SOCKADDR_IN*)&ss, ulDefault);
+  }
+  sockaddr_in6& sa6 = *(sockaddr_in6*)&ss;
+  nLen = sizeof(sockaddr_in6);
+  if (lpszHost == NULL || *lpszHost == 0) {
+    if (ulDefault != INADDR_ANY) {
+      ::WSASetLastError(WSAEDESTADDRREQ);
+      return FALSE;
+    }
+    sa6.sin6_family = AF_INET6;  // in6addr_any
+    sa6.sin6_port = htons((u_short)nPort);
+    return TRUE;
+  }
+  CStringA strHost(lpszHost);
+  int nAddrLen = sizeof(ss);
+  if (::WSAStringToAddressA(strHost.GetBuffer(), AF_INET6, NULL, (SOCKADDR*)&ss, &nAddrLen) != 0) {
+    strHost.ReleaseBuffer();
+    memset(&ss, 0, sizeof(ss));
+    HMODULE hWS2 = ::GetModuleHandleA("ws2_32.dll");
+    PFNGETADDRINFO pfnGet =
+        hWS2 != NULL ? (PFNGETADDRINFO)(void*)::GetProcAddress(hWS2, "getaddrinfo") : NULL;
+    PFNFREEADDRINFO pfnFree =
+        hWS2 != NULL ? (PFNFREEADDRINFO)(void*)::GetProcAddress(hWS2, "freeaddrinfo") : NULL;
+    if (pfnGet == NULL || pfnFree == NULL) {
+      ::WSASetLastError(WSAHOST_NOT_FOUND);
+      return FALSE;
+    }
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET6;
+    struct addrinfo* pResult = NULL;
+    int nError = pfnGet(strHost, NULL, &hints, &pResult);
+    if (nError != 0 || pResult == NULL || pResult->ai_addrlen > sizeof(ss)) {
+      if (pResult != NULL) pfnFree(pResult);
+      ::WSASetLastError(nError != 0 ? nError : WSAHOST_NOT_FOUND);
+      return FALSE;
+    }
+    memcpy(&ss, pResult->ai_addr, pResult->ai_addrlen);
+    pfnFree(pResult);
+  } else {
+    strHost.ReleaseBuffer();
+  }
+  sa6.sin6_family = AF_INET6;
+  sa6.sin6_port = htons((u_short)nPort);
+  return TRUE;
+}
+
+// The numeric address and the port of an IPv4 or IPv6 address.
+BOOL AddressToStringEx(const SOCKADDR* pAddr, CString& rAddress, UINT& rPort) {
+  if (pAddr->sa_family == AF_INET) {
+    AddressToString(*(const SOCKADDR_IN*)pAddr, rAddress, rPort);
+    return TRUE;
+  }
+  if (pAddr->sa_family != AF_INET6) {
+    ::WSASetLastError(WSAEAFNOSUPPORT);
+    return FALSE;
+  }
+  // Without the port, the text is the address alone (and its %scope).
+  sockaddr_in6 sa6 = *(const sockaddr_in6*)pAddr;
+  rPort = ntohs(sa6.sin6_port);
+  sa6.sin6_port = 0;
+  char sz[64];
+  DWORD cch = sizeof(sz);
+  if (::WSAAddressToStringA((SOCKADDR*)&sa6, sizeof(sa6), NULL, sz, &cch) != 0) return FALSE;
+  rAddress = sz;
+  return TRUE;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------
@@ -251,9 +348,12 @@ void CAsyncSocket::Close() {
 }
 
 BOOL CAsyncSocket::Bind(UINT nSocketPort, LPCTSTR lpszSocketAddress) {
-  SOCKADDR_IN sa;
-  if (!MakeAddress(lpszSocketAddress, nSocketPort, sa, INADDR_ANY)) return FALSE;
-  return Bind((SOCKADDR*)&sa, sizeof(sa));
+  SOCKADDR_STORAGE ss;
+  int nLen;
+  if (!MakeAddressEx(SocketFamily(m_hSocket), lpszSocketAddress, nSocketPort, ss, nLen,
+                     INADDR_ANY))
+    return FALSE;
+  return Bind((SOCKADDR*)&ss, nLen);
 }
 
 BOOL CAsyncSocket::Bind(const SOCKADDR* lpSockAddr, int nSockAddrLen) {
@@ -261,12 +361,14 @@ BOOL CAsyncSocket::Bind(const SOCKADDR* lpSockAddr, int nSockAddrLen) {
 }
 
 BOOL CAsyncSocket::Connect(LPCTSTR lpszHostAddress, UINT nHostPort) {
-  SOCKADDR_IN sa;
-  if (lpszHostAddress == NULL || !MakeAddress(lpszHostAddress, nHostPort, sa, INADDR_NONE)) {
+  SOCKADDR_STORAGE ss;
+  int nLen;
+  if (lpszHostAddress == NULL || !MakeAddressEx(SocketFamily(m_hSocket), lpszHostAddress,
+                                                nHostPort, ss, nLen, INADDR_NONE)) {
     if (lpszHostAddress == NULL) ::WSASetLastError(WSAEINVAL);
     return FALSE;
   }
-  return ConnectHelper((SOCKADDR*)&sa, sizeof(sa));
+  return ConnectHelper((SOCKADDR*)&ss, nLen);
 }
 
 BOOL CAsyncSocket::Connect(const SOCKADDR* lpSockAddr, int nSockAddrLen) {
@@ -366,6 +468,45 @@ BOOL CAsyncSocket::GetSockName(CString& rSocketAddress, UINT& rSocketPort) {
 
 BOOL CAsyncSocket::GetSockName(SOCKADDR* lpSockAddr, int* lpSockAddrLen) {
   return ::getsockname(m_hSocket, lpSockAddr, lpSockAddrLen) != SOCKET_ERROR;
+}
+
+// The Ex forms take and give IPv6 addresses as well as IPv4 ones.
+
+BOOL CAsyncSocket::GetPeerNameEx(CString& rPeerAddress, UINT& rPeerPort) {
+  SOCKADDR_STORAGE ss;
+  memset(&ss, 0, sizeof(ss));
+  int nLen = sizeof(ss);
+  if (!GetPeerName((SOCKADDR*)&ss, &nLen)) return FALSE;
+  return AddressToStringEx((SOCKADDR*)&ss, rPeerAddress, rPeerPort);
+}
+
+BOOL CAsyncSocket::GetSockNameEx(CString& rSocketAddress, UINT& rSocketPort) {
+  SOCKADDR_STORAGE ss;
+  memset(&ss, 0, sizeof(ss));
+  int nLen = sizeof(ss);
+  if (!GetSockName((SOCKADDR*)&ss, &nLen)) return FALSE;
+  return AddressToStringEx((SOCKADDR*)&ss, rSocketAddress, rSocketPort);
+}
+
+int CAsyncSocket::ReceiveFromEx(void* lpBuf, int nBufLen, CString& rSocketAddress,
+                                UINT& rSocketPort, int nFlags) {
+  SOCKADDR_STORAGE ss;
+  memset(&ss, 0, sizeof(ss));
+  int nLen = sizeof(ss);
+  int nResult = ReceiveFromHelper(lpBuf, nBufLen, (SOCKADDR*)&ss, &nLen, nFlags);
+  if (nResult != SOCKET_ERROR && !AddressToStringEx((SOCKADDR*)&ss, rSocketAddress, rSocketPort))
+    return SOCKET_ERROR;
+  return nResult;
+}
+
+int CAsyncSocket::SendToEx(const void* lpBuf, int nBufLen, UINT nHostPort,
+                           LPCTSTR lpszHostAddress, int nFlags) {
+  SOCKADDR_STORAGE ss;
+  int nLen;
+  if (!MakeAddressEx(SocketFamily(m_hSocket), lpszHostAddress, nHostPort, ss, nLen,
+                     INADDR_BROADCAST))
+    return SOCKET_ERROR;
+  return SendToHelper(lpBuf, nBufLen, (SOCKADDR*)&ss, nLen, nFlags);
 }
 
 BOOL CAsyncSocket::SetSockOpt(int nOptionName, const void* lpOptionValue, int nOptionLen,

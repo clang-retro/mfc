@@ -88,7 +88,8 @@ when there is no display:
 * `socktest`: `afxsock.h` over the loopback interface: CAsyncSocket
   events, blocking CSocket calls against a server thread, CArchive
   through a CSocketFile, datagrams, errors and cancelling a blocking
-  call.
+  call, and IPv6 datagrams and connections over `::1` with the Ex
+  functions (the IPv6 checks run only where the system has IPv6).
 * `dlgtest`: a dialog with data exchange and validation, common
   controls, and a property sheet.
 * `sditest`: a single-document program with a toolbar, a status bar and
@@ -347,7 +348,13 @@ request with the stock MinGW-w64 toolchain.
   not open only when the item moniker is bound with the file's at its
   left, and Wine's OleCreateLink and OleQueryLinkFromData are stubs
   (CanPasteLink looks for Link Source itself).
-* Sockets are IPv4, as in MFC 6. `CAsyncSocket::FromHandle` returns
+* Sockets take IPv6 as later versions of MFC do: make the socket with
+  `Socket(nType, lEvent, 0, AF_INET6)`, after which the string forms of
+  Bind, Connect and SendTo take IPv6 addresses and host names, and
+  GetPeerNameEx, GetSockNameEx, ReceiveFromEx and SendToEx give and
+  take either family. Create makes IPv4 sockets. Host names need
+  getaddrinfo (Windows XP and later); earlier systems take numeric
+  IPv6 addresses only. `CAsyncSocket::FromHandle` returns
   only sockets attached in the calling thread, and NULL for others,
   rather than making a temporary object.
 * CRecordset keeps the rows it has fetched and writes changes with
