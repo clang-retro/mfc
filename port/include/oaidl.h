@@ -550,4 +550,16 @@ interface IRecordInfo : public IUnknown {
   STDMETHOD(RecordDestroy)(PVOID pvRecord) = 0;
 };
 
+WINPORT_UUIDOF(IDispatch)
+WINPORT_UUIDOF(ITypeComp)
+WINPORT_UUIDOF(ITypeInfo)
+WINPORT_UUIDOF(ITypeLib)
+WINPORT_UUIDOF(IEnumVARIANT)
+WINPORT_UUIDOF(IErrorInfo)
+WINPORT_UUIDOF(ICreateErrorInfo)
+WINPORT_UUIDOF(ISupportErrorInfo)
+WINPORT_UUIDOF(IErrorLog)
+WINPORT_UUIDOF(IPropertyBag)
+WINPORT_UUIDOF(IRecordInfo)
+
 #endif

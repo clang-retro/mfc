@@ -422,11 +422,11 @@ public:
   void AllocData();
   void AllocDescriptor(DWORD dwDims);
   void Copy(LPSAFEARRAY* ppsa);
-  void GetLBound(DWORD dwDim, long* pLBound);
-  void GetUBound(DWORD dwDim, long* pUBound);
-  void GetElement(long* rgIndices, void* pvData);
-  void PtrOfIndex(long* rgIndices, void** ppvData);
-  void PutElement(long* rgIndices, void* pvData);
+  void GetLBound(DWORD dwDim, LONG* pLBound);
+  void GetUBound(DWORD dwDim, LONG* pUBound);
+  void GetElement(LONG* rgIndices, void* pvData);
+  void PtrOfIndex(LONG* rgIndices, void** ppvData);
+  void PutElement(LONG* rgIndices, void* pvData);
   void Lock();
   void Unlock();
   DWORD GetDim();

@@ -371,15 +371,21 @@ void COleDispatchDriver::InvokeHelperV(DISPID dwDispID, WORD wFlags, VARTYPE vtR
   memset(&excepInfo, 0, sizeof(excepInfo));
   UINT nArgErr = (UINT)-1;
   SCODE sc = S_OK;
+  // A copy, because a va_list parameter may be an array that has decayed
+  // to a pointer and cannot bind to the helper's reference.
+  va_list args;
+  va_copy(args, argList);
   try {
-    for (UINT i = 0; i < nArgs; i++) _AfxArgFromList(&rgArgs[nArgs - 1 - i], pbParamInfo[i], argList);
+    for (UINT i = 0; i < nArgs; i++) _AfxArgFromList(&rgArgs[nArgs - 1 - i], pbParamInfo[i], args);
     sc = m_lpDispatch->Invoke(dwDispID, IID_NULL, 0, wFlags, &dispparams,
                               vtRet == VT_EMPTY ? NULL : &varResult, &excepInfo, &nArgErr);
   } catch (...) {
+    va_end(args);
     for (UINT i = 0; i < nArgs; i++) ::VariantClear(&rgArgs[i]);
     delete[] rgArgs;
     throw;
   }
+  va_end(args);
   for (UINT i = 0; i < nArgs; i++) ::VariantClear(&rgArgs[i]);
   delete[] rgArgs;
 

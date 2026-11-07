@@ -43,17 +43,12 @@ ALL_CXXFLAGS = $(TARGET_FLAGS) $(STDLIB) -fno-delete-null-pointer-checks \
   -std=c++17 -Wall -Wno-invalid-offsetof -Wno-missing-exception-spec -Wno-overloaded-virtual -Wno-unused-private-field \
   -Iinclude -Isrc $(CXXFLAGS)
 
+SRCS = $(wildcard src/*.cpp)
 ifeq ($(PORTABLE),1)
-# The library's sources that build over the layer so far; the rest
-# follow as the layer grows.
-SRCS = $(addprefix src/,$(addsuffix .cpp,$(PORT_MFC_SRCS)))
-PORT_MFC_SRCS = archive coll except file fileshrd mtcore object state strcore time
 PORT_SRCS = $(wildcard port/src/*.cpp)
 PORT_OBJS = $(patsubst port/src/%.cpp,$(OUT)/port/%.o,$(PORT_SRCS))
 ALL_CXXFLAGS += -Iport/include -fPIC
 PORT_LIB = $(OUT)/libwinport.a
-else
-SRCS = $(wildcard src/*.cpp)
 endif
 OBJS_A = $(patsubst src/%.cpp,$(OUT)/a/%.o,$(SRCS))
 OBJS_U = $(patsubst src/%.cpp,$(OUT)/u/%.o,$(SRCS))

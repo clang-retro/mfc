@@ -179,6 +179,7 @@ typedef int(CALLBACK* EDITWORDBREAKPROCW)(LPWSTR, int, int, int);
 #define WM_MOUSEHWHEEL 0x020E
 #define WM_MOUSELAST 0x020E
 #define WHEEL_DELTA 120
+#define WHEEL_PAGESCROLL ((UINT)-1)
 #define GET_WHEEL_DELTA_WPARAM(wParam) ((short)HIWORD(wParam))
 #define GET_KEYSTATE_WPARAM(wParam) (LOWORD(wParam))
 #define GET_XBUTTON_WPARAM(wParam) (HIWORD(wParam))

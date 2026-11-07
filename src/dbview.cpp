@@ -151,7 +151,11 @@ void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, UINT& value, CRecordset*
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, long& value, CRecordset* pSet) {
   FieldText(pDX, nIDC, value, pSet);
 }
+#ifndef _WINPORT
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, DWORD& value, CRecordset* pSet) {
+#else
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, unsigned long& value, CRecordset* pSet) {
+#endif
   FieldText(pDX, nIDC, value, pSet);
 }
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, CString& value, CRecordset* pSet) {

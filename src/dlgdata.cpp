@@ -133,6 +133,7 @@ void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, UINT& value) {
   _AfxDDXInteger(pDX, nIDC, value, 0, UINT_MAX, TRUE, AFX_IDP_PARSE_UINT, _T("%u"));
 }
 
+#ifndef _WINPORT
 void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, long& value) {
   _AfxDDXInteger(pDX, nIDC, value, LONG_MIN, LONG_MAX, FALSE, AFX_IDP_PARSE_INT, _T("%ld"));
 }
@@ -140,6 +141,20 @@ void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, long& value) {
 void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, DWORD& value) {
   _AfxDDXInteger(pDX, nIDC, value, 0, 0xFFFFFFFFLL, TRUE, AFX_IDP_PARSE_UINT, _T("%lu"));
 }
+#else
+// LONG and DWORD are int and UINT here; long may be 64 bits.
+void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, long& value) {
+  LONGLONG v = value;
+  DDX_Text(pDX, nIDC, v);
+  value = (long)v;
+}
+
+void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, unsigned long& value) {
+  ULONGLONG v = value;
+  DDX_Text(pDX, nIDC, v);
+  value = (unsigned long)v;
+}
+#endif
 
 void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, LONGLONG& value) {
   _AfxDDXInteger(pDX, nIDC, value, LLONG_MIN, LLONG_MAX, FALSE, AFX_IDP_PARSE_INT, _T("%I64d"));

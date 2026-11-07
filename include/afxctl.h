@@ -845,7 +845,11 @@ void AFXAPI DDP_Text(CDataExchange* pDX, int id, short& member, LPCTSTR pszPropN
 void AFXAPI DDP_Text(CDataExchange* pDX, int id, int& member, LPCTSTR pszPropName);
 void AFXAPI DDP_Text(CDataExchange* pDX, int id, UINT& member, LPCTSTR pszPropName);
 void AFXAPI DDP_Text(CDataExchange* pDX, int id, long& member, LPCTSTR pszPropName);
+#ifndef _WINPORT
 void AFXAPI DDP_Text(CDataExchange* pDX, int id, DWORD& member, LPCTSTR pszPropName);
+#else
+void AFXAPI DDP_Text(CDataExchange* pDX, int id, unsigned long& member, LPCTSTR pszPropName);
+#endif
 void AFXAPI DDP_Text(CDataExchange* pDX, int id, float& member, LPCTSTR pszPropName);
 void AFXAPI DDP_Text(CDataExchange* pDX, int id, double& member, LPCTSTR pszPropName);
 void AFXAPI DDP_Text(CDataExchange* pDX, int id, CString& member, LPCTSTR pszPropName);

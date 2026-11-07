@@ -5,6 +5,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #ifndef _WINPORT_OLEAUTO_H
 #define _WINPORT_OLEAUTO_H
+// The name the system header uses, which MFC tests for.
+#define _OLEAUTO_H_
 
 #include <oaidl.h>
 

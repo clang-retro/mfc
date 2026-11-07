@@ -20,7 +20,7 @@
 #include <docobj.h>
 #include <urlmon.h>
 
-#ifndef _AFX_NOFORCE_LIBS
+#if !defined(_AFX_NOFORCE_LIBS) && defined(_WIN32)
 __asm__(".section .drectve,\"yn\"\n"
         ".ascii \" -defaultlib:oledlg -defaultlib:urlmon\"\n"
         ".text");
