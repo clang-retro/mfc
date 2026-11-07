@@ -2,6 +2,7 @@
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 #include "afximpl.h"
+#include <afxole.h>
 
 IMPLEMENT_DYNCREATE(CFrameWnd, CWnd)
 
@@ -61,6 +62,7 @@ CFrameWnd::CFrameWnd() {
   m_phWndDisable = NULL;
   m_hMenuAlt = NULL;
   m_bInRecalcLayout = FALSE;
+  m_pNotifyHook = NULL;
   m_pFloatingFrameClass = NULL;
   m_dwDockStyle = 0;
   m_nIdleFlags = 0;
@@ -68,7 +70,10 @@ CFrameWnd::CFrameWnd() {
   m_nWindow = -1;
 }
 
-CFrameWnd::~CFrameWnd() { delete[] m_phWndDisable; }
+CFrameWnd::~CFrameWnd() {
+  if (m_pNotifyHook != NULL) m_pNotifyHook->OnFrameDestroy();
+  delete[] m_phWndDisable;
+}
 
 // ---------------------------------------------------------------------
 // Creation
@@ -307,6 +312,8 @@ void CFrameWnd::UpdateFrameTitleForDocument(LPCTSTR lpszDocName) {
 }
 
 void CFrameWnd::OnUpdateFrameMenu(HMENU hMenuAlt) {
+  // An object active in place keeps its shared menu up.
+  if (m_pNotifyHook != NULL && m_pNotifyHook->OnUpdateFrameMenu()) return;
   if (GetStyle() & WS_CHILD) return;
   if (hMenuAlt == NULL) {
     CDocument* pDoc = GetActiveDocument();
@@ -360,6 +367,9 @@ LRESULT CFrameWnd::OnIdleUpdateCmdUIMsg(WPARAM, LPARAM) {
 BOOL CFrameWnd::PreTranslateMessage(MSG* pMsg) {
   if (CWnd::PreTranslateMessage(pMsg)) return TRUE;
   if (pMsg->message >= WM_KEYFIRST && pMsg->message <= WM_KEYLAST) {
+    // The object active in place, then the container's in-place keys.
+    if (m_pNotifyHook != NULL && m_pNotifyHook->m_lpActiveObject != NULL)
+      return m_pNotifyHook->OnPreTranslateMessage(pMsg);
     HACCEL hAccel = GetDefaultAccelerator();
     return hAccel != NULL && ::TranslateAccelerator(m_hWnd, hAccel, pMsg);
   }
@@ -523,12 +533,14 @@ void CFrameWnd::RecalcLayout(BOOL bNotify) {
   m_bInRecalcLayout = TRUE;
   RepositionBars(0, 0xFFFF, AFX_IDW_PANE_FIRST, reposExtra, &m_rectBorder);
   m_bInRecalcLayout = FALSE;
+  // An object active in place lays its own bars out in what is left.
+  if (m_pNotifyHook != NULL) m_pNotifyHook->OnRecalcLayout();
 }
 
 BOOL CFrameWnd::NegotiateBorderSpace(UINT nBorderCmd, LPRECT lpRectBorder) {
   switch (nBorderCmd) {
-    case 1:  // borderGet
-      GetClientRect(lpRectBorder);
+    case 1:  // borderGet: the client area less the frame's own bars
+      RepositionBars(0, 0xFFFF, AFX_IDW_PANE_FIRST, reposQuery, lpRectBorder, NULL, TRUE);
       return TRUE;
     case 2:  // borderRequest
       return TRUE;
@@ -570,6 +582,7 @@ void CFrameWnd::OnSetFocus(CWnd* pOldWnd) {
 
 void CFrameWnd::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized) {
   CWnd::OnActivate(nState, pWndOther, bMinimized);
+  if (m_pNotifyHook != NULL) m_pNotifyHook->OnActivate(nState != WA_INACTIVE);
   CFrameWnd* pActiveFrame = GetActiveFrame();
   CView* pActiveView = pActiveFrame != NULL ? pActiveFrame->GetActiveView() : NULL;
   if (pActiveView != NULL) {
@@ -681,6 +694,7 @@ void CFrameWnd::OnDestroy() {
   if (pApp != NULL && pApp->m_pMainWnd == this && pApp->m_pszHelpFilePath != NULL)
     ::WinHelp(m_hWnd, NULL, HELP_QUIT, 0);
 
+  if (m_pNotifyHook != NULL) m_pNotifyHook->OnFrameDestroy();
   DestroyDockBars();
   CWnd::OnDestroy();
 }

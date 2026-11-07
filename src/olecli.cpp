@@ -16,6 +16,8 @@ IMPLEMENT_DYNAMIC(COleClientItem, CDocItem)
 BEGIN_INTERFACE_MAP(COleClientItem, CDocItem)
   INTERFACE_PART(COleClientItem, IID_IOleClientSite, OleClientSite)
   INTERFACE_PART(COleClientItem, IID_IAdviseSink, AdviseSink)
+  INTERFACE_PART(COleClientItem, IID_IOleWindow, OleIPSite)
+  INTERFACE_PART(COleClientItem, IID_IOleInPlaceSite, OleIPSite)
 END_INTERFACE_MAP()
 
 void AFXAPI _AfxThrowOleFileException(SCODE sc);
@@ -44,7 +46,8 @@ static CLIPFORMAT s_cfEmbeddedObject, s_cfObjectDescriptor, s_cfLinkSource,
 COleClientItem::COleClientItem(COleDocument* pContainerDoc)
     : m_lpObject(NULL), m_lpViewObject(NULL), m_lpStorage(NULL), m_lpLockBytes(NULL),
       m_dwItemNumber(0), m_dwConnection(0), m_nDrawAspect(DVASPECT_CONTENT),
-      m_nItemType(OT_UNKNOWN), m_nItemState(emptyState), m_scLast(S_OK), m_pView(NULL) {
+      m_nItemType(OT_UNKNOWN), m_nItemState(emptyState), m_scLast(S_OK), m_pView(NULL),
+      m_lpInPlaceObject(NULL), m_pInPlaceFrame(NULL), m_pInPlaceDoc(NULL) {
   if (pContainerDoc != NULL) pContainerDoc->AddItem(this);
 }
 
@@ -432,7 +435,6 @@ BOOL COleClientItem::IsRunning() const {
   return m_lpObject != NULL && ::OleIsRunning(m_lpObject);
 }
 
-CWnd* COleClientItem::GetInPlaceWindow() { return NULL; }
 
 OLEUPDATE COleClientItem::GetLinkUpdateOptions() {
   DWORD dw = 0;
@@ -462,6 +464,8 @@ BOOL COleClientItem::IsLinkUpToDate() const {
 // Operations
 
 void COleClientItem::Release(OLECLOSE dwCloseOption) {
+  if (IsInPlaceActive() || m_pInPlaceFrame != NULL) Deactivate();
+  ReleaseInPlace();
   if (m_lpObject != NULL) {
     if (m_lpViewObject != NULL) {
       m_lpViewObject->SetAdvise(m_nDrawAspect, 0, NULL);
@@ -485,6 +489,7 @@ void COleClientItem::Release(OLECLOSE dwCloseOption) {
 
 void COleClientItem::Close(OLECLOSE dwCloseOption) {
   if (m_lpObject == NULL) return;
+  if (IsInPlaceActive()) Deactivate();
   m_scLast = m_lpObject->Close(dwCloseOption);
   SetState(loadedState);
 }
@@ -508,9 +513,40 @@ void COleClientItem::Run() {
   if (FAILED(m_scLast)) AfxThrowOleException(m_scLast);
 }
 
+// Plays a METAFILEPICT into a rectangle of a DC.
+static void PlayMetafilePict(CDC* pDC, const METAFILEPICT* pmfp, LPCRECT lpBounds) {
+  int nSaved = pDC->SaveDC();
+  pDC->SetMapMode(MM_ANISOTROPIC);
+  pDC->SetWindowOrg(0, 0);
+  pDC->SetWindowExt(pmfp->xExt, pmfp->yExt);
+  pDC->SetViewportOrg(lpBounds->left, lpBounds->top);
+  pDC->SetViewportExt(lpBounds->right - lpBounds->left, lpBounds->bottom - lpBounds->top);
+  ::PlayMetaFile(pDC->m_hDC, pmfp->hMF);
+  pDC->RestoreDC(nSaved);
+}
+
 BOOL COleClientItem::Draw(CDC* pDC, LPCRECT lpBounds, DVASPECT nDrawAspect) {
-  if (m_lpViewObject == NULL) return FALSE;
   if (nDrawAspect == (DVASPECT)-1) nDrawAspect = m_nDrawAspect;
+  if (m_lpViewObject == NULL) {
+    // No view object: the object is the server's own, as when container
+    // and server share a process. Ask it for a picture instead.
+    if (m_lpObject == NULL) return FALSE;
+    LPDATAOBJECT lpDataObject = NULL;
+    m_scLast = m_lpObject->QueryInterface(IID_IDataObject, (void**)&lpDataObject);
+    if (FAILED(m_scLast)) return FALSE;
+    FORMATETC fmt = {CF_METAFILEPICT, NULL, (DWORD)nDrawAspect, -1, TYMED_MFPICT};
+    STGMEDIUM stg = {};
+    m_scLast = lpDataObject->GetData(&fmt, &stg);
+    lpDataObject->Release();
+    if (FAILED(m_scLast)) return FALSE;
+    METAFILEPICT* pmfp = (METAFILEPICT*)::GlobalLock(stg.hMetaFilePict);
+    if (pmfp != NULL) {
+      PlayMetafilePict(pDC, pmfp, lpBounds);
+      ::GlobalUnlock(stg.hMetaFilePict);
+    }
+    ::ReleaseStgMedium(&stg);
+    return pmfp != NULL;
+  }
   RECTL rcl = {lpBounds->left, lpBounds->top, lpBounds->right, lpBounds->bottom};
   RECTL rclW;
   LPRECTL lprclW = NULL;
@@ -536,14 +572,7 @@ BOOL COleClientItem::Draw(CDC* pDC, LPCRECT lpBounds, DVASPECT nDrawAspect) {
     HGLOBAL hMetaPict = GetIconicMetafile();
     if (hMetaPict != NULL) {
       METAFILEPICT* pmfp = (METAFILEPICT*)::GlobalLock(hMetaPict);
-      int nSaved = pDC->SaveDC();
-      pDC->SetMapMode(MM_ANISOTROPIC);
-      pDC->SetWindowOrg(0, 0);
-      pDC->SetWindowExt(pmfp->xExt, pmfp->yExt);
-      pDC->SetViewportOrg(lpBounds->left, lpBounds->top);
-      pDC->SetViewportExt(lpBounds->right - lpBounds->left, lpBounds->bottom - lpBounds->top);
-      ::PlayMetaFile(pDC->m_hDC, pmfp->hMF);
-      pDC->RestoreDC(nSaved);
+      PlayMetafilePict(pDC, pmfp, lpBounds);
       ::DeleteMetaFile(pmfp->hMF);
       ::GlobalUnlock(hMetaPict);
       ::GlobalFree(hMetaPict);
@@ -586,10 +615,6 @@ void COleClientItem::Activate(LONG nVerb, CView* pView, LPMSG lpMsg) {
   if (FAILED(m_scLast)) AfxThrowOleException(m_scLast);
 }
 
-void COleClientItem::Deactivate() {}
-void COleClientItem::DeactivateUI() {}
-
-BOOL COleClientItem::SetItemRects(LPCRECT, LPCRECT) { return FALSE; }
 
 BOOL COleClientItem::UpdateLink() {
   if (m_lpObject == NULL) return FALSE;
@@ -985,7 +1010,6 @@ void COleClientItem::OnChange(OLE_NOTIFICATION nCode, DWORD) {
 
 void COleClientItem::OnGetItemPosition(CRect& rPosition) { rPosition.SetRectEmpty(); }
 
-BOOL COleClientItem::OnChangeItemPosition(const CRect&) { return FALSE; }
 
 void COleClientItem::OnGetClipRect(CRect& rClipRect) {
   rClipRect.SetRectEmpty();
@@ -994,13 +1018,7 @@ void COleClientItem::OnGetClipRect(CRect& rClipRect) {
 
 void COleClientItem::OnShowItem() {}
 
-// In-place activation is not supported yet: objects open in their own
-// windows.
-BOOL COleClientItem::CanActivate() { return FALSE; }
-void COleClientItem::OnActivate() {}
-void COleClientItem::OnActivateUI() {}
-void COleClientItem::OnDeactivate() {}
-void COleClientItem::OnDeactivateUI(BOOL) {}
+// In-place activation is in oleipcli.cpp.
 
 void COleClientItem::SetState(UINT nNewState) {
   if (m_nItemState == nNewState) return;

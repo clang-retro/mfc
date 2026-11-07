@@ -163,11 +163,37 @@ LRESULT CControlBar::WindowProc(UINT nMsg, WPARAM wParam, LPARAM lParam) {
   return CWnd::WindowProc(nMsg, wParam, lParam);
 }
 
+// The frames that stand for a container's windows while a server's object
+// is active in place there (COleCntrFrameWnd): bars the server makes on
+// such a window are theirs, not the container's.
+static CPtrList s_listInPlaceDockSites;
+
+void AFXAPI _AfxRegisterInPlaceDockSite(CFrameWnd* pFrame, BOOL bAdd) {
+  POSITION pos = s_listInPlaceDockSites.Find(pFrame);
+  if (bAdd && pos == NULL)
+    s_listInPlaceDockSites.AddTail(pFrame);
+  else if (!bAdd && pos != NULL)
+    s_listInPlaceDockSites.RemoveAt(pos);
+}
+
+static CFrameWnd* InPlaceDockSite(HWND hWnd) {
+  POSITION pos = s_listInPlaceDockSites.GetHeadPosition();
+  while (pos != NULL) {
+    CFrameWnd* pFrame = (CFrameWnd*)s_listInPlaceDockSites.GetNext(pos);
+    if (pFrame->m_hWnd == hWnd) return pFrame;
+  }
+  return NULL;
+}
+
 int CControlBar::OnCreate(LPCREATESTRUCT lpcs) {
   if (CWnd::OnCreate(lpcs) == -1) return -1;
-  CWnd* pParent = GetParent();
-  if (pParent != NULL && pParent->IsFrameWnd()) {
-    m_pDockSite = (CFrameWnd*)pParent;
+  CFrameWnd* pSite = InPlaceDockSite(::GetParent(m_hWnd));
+  if (pSite == NULL) {
+    CWnd* pParent = GetParent();
+    if (pParent != NULL && pParent->IsFrameWnd()) pSite = (CFrameWnd*)pParent;
+  }
+  if (pSite != NULL) {
+    m_pDockSite = pSite;
     m_pDockSite->AddControlBar(this);
   }
   return 0;
@@ -485,6 +511,9 @@ BOOL CToolBar::CreateEx(CWnd* pParentWnd, DWORD dwCtrlStyle, DWORD dwStyle, CRec
   if (!AfxDeferRegisterClass(AFX_WNDCOMMCTL_BAR_REG)) AfxDeferRegisterClass(AFX_WNDCOMMCTLS_REG);
   if (!CWnd::Create(TOOLBARCLASSNAME, NULL, dwWndStyle, CRect(0, 0, 0, 0), pParentWnd, nID))
     return FALSE;
+  // An owner set before the bar was made gets the buttons' commands
+  // (as the in-place frame does for the bars it puts on a container).
+  if (m_hWndOwner != NULL) DefWindowProc(TB_SETPARENT, (WPARAM)m_hWndOwner, 0);
   DefWindowProc(TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0);
   SetSizes(m_sizeButton, m_sizeImage);
   return TRUE;

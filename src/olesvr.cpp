@@ -200,6 +200,9 @@ BEGIN_INTERFACE_MAP(COleServerDoc, COleLinkingDoc)
   INTERFACE_PART(COleServerDoc, IID_IPersistStorage, PersistStorage)
   INTERFACE_PART(COleServerDoc, IID_IOleObject, OleObject)
   INTERFACE_PART(COleServerDoc, IID_IDataObject, DataObject)
+  INTERFACE_PART(COleServerDoc, IID_IOleWindow, OleInPlaceObject)
+  INTERFACE_PART(COleServerDoc, IID_IOleInPlaceObject, OleInPlaceObject)
+  INTERFACE_PART(COleServerDoc, IID_IOleInPlaceActiveObject, OleInPlaceActiveObject)
 END_INTERFACE_MAP()
 
 BEGIN_MESSAGE_MAP(COleServerDoc, COleLinkingDoc)
@@ -216,12 +219,18 @@ COleServerDoc::COleServerDoc()
       m_bCntrVisible(FALSE),
       m_bClosing(FALSE),
       m_bOwnRef(TRUE),
-      m_bShownBefore(FALSE) {
+      m_bShownBefore(FALSE),
+      m_pInPlaceFrame(NULL),
+      m_pOrigParent(NULL),
+      m_dwOrigStyle(0),
+      m_dwOrigStyleEx(0),
+      m_lpInPlaceSite(NULL) {
   // A server program runs as long as it has documents.
   AfxOleLockApp();
 }
 
 COleServerDoc::~COleServerDoc() {
+  if (m_lpInPlaceSite != NULL) m_lpInPlaceSite->Release();
   if (m_lpClientSite != NULL) m_lpClientSite->Release();
   if (m_lpOleAdviseHolder != NULL) m_lpOleAdviseHolder->Release();
   if (m_lpDataAdviseHolder != NULL) m_lpDataAdviseHolder->Release();
@@ -312,6 +321,8 @@ void COleServerDoc::UpdateMenuText(CMenu* pMenu) {
 }
 
 void COleServerDoc::OnShowDocument(BOOL bShow) {
+  // Opening an object that is active in place takes it out first.
+  if (IsInPlaceActive()) OnDeactivate();
   CFrameWnd* pFrame = FirstFrame(this);
   CWnd* pMainWnd = AfxGetMainWnd();
   if (bShow) {
@@ -370,6 +381,7 @@ void COleServerDoc::OnSetHostNames(LPCTSTR lpszHost, LPCTSTR lpszHostObj) {
 
 void COleServerDoc::OnClose(OLECLOSE dwCloseOption) {
   if (m_bClosing) return;
+  if (IsInPlaceActive()) OnDeactivate();
   UpdateModifiedFlag();
   switch (dwCloseOption) {
   case OLECLOSE_PROMPTSAVE: {
@@ -413,6 +425,8 @@ BOOL COleServerDoc::SaveModified() {
 
 void COleServerDoc::OnCloseDocument() {
   if (m_bClosing) return;
+  // Out of the container's window first.
+  if (IsInPlaceActive()) OnDeactivate();
   m_bClosing = TRUE;
   // Keep the document while its containers let go of it.
   InternalAddRef();
@@ -462,6 +476,8 @@ void COleServerDoc::OnFinalRelease() {
 
 HMENU COleServerDoc::GetDefaultMenu() {
   CDocTemplate* pTemplate = GetDocTemplate();
+  if (IsInPlaceActive() && pTemplate != NULL && pTemplate->m_hMenuInPlaceServer != NULL)
+    return pTemplate->m_hMenuInPlaceServer;
   if (IsEmbedded() && pTemplate != NULL && pTemplate->m_hMenuEmbedding != NULL)
     return pTemplate->m_hMenuEmbedding;
   return COleLinkingDoc::GetDefaultMenu();
@@ -469,6 +485,8 @@ HMENU COleServerDoc::GetDefaultMenu() {
 
 HACCEL COleServerDoc::GetDefaultAccelerator() {
   CDocTemplate* pTemplate = GetDocTemplate();
+  if (IsInPlaceActive() && pTemplate != NULL && pTemplate->m_hAccelInPlaceServer != NULL)
+    return pTemplate->m_hAccelInPlaceServer;
   if (IsEmbedded() && pTemplate != NULL && pTemplate->m_hAccelEmbedding != NULL)
     return pTemplate->m_hAccelEmbedding;
   return COleLinkingDoc::GetDefaultAccelerator();
@@ -957,8 +975,13 @@ void COleServerItem::OnDoVerb(LONG iVerb) {
   }
 }
 
-// Without in-place editing, showing the item opens it in a window.
-void COleServerItem::OnShow() { OnOpen(); }
+// Showing the item activates it in place where the container and the
+// template allow, and opens it in a window otherwise.
+void COleServerItem::OnShow() {
+  COleServerDoc* pDoc = GetDocument();
+  if (pDoc != NULL && pDoc->ActivateInPlace()) return;
+  OnOpen();
+}
 
 void COleServerItem::OnOpen() {
   COleServerDoc* pDoc = GetDocument();
@@ -967,7 +990,11 @@ void COleServerItem::OnOpen() {
 
 void COleServerItem::OnHide() {
   COleServerDoc* pDoc = GetDocument();
-  if (pDoc != NULL) pDoc->OnShowDocument(FALSE);
+  if (pDoc == NULL) return;
+  if (pDoc->IsInPlaceActive())
+    pDoc->OnDeactivate();
+  else
+    pDoc->OnShowDocument(FALSE);
 }
 
 BOOL COleServerItem::OnDrawEx(CDC* pDC, DVASPECT nDrawAspect, CSize& rSize) {

@@ -208,6 +208,8 @@ BOOL CWinThread::IsIdleMessage(MSG* pMsg) {
   return pMsg->message != WM_PAINT && pMsg->message != 0x0118;
 }
 
+void(AFXAPI* _afxpfnInPlaceIdle)() = NULL;
+
 BOOL CWinThread::OnIdle(LONG lCount) {
   if (lCount <= 0) {
     // Let the main window update toolbars, status bars and menus.
@@ -216,6 +218,7 @@ BOOL CWinThread::OnIdle(LONG lCount) {
       AfxCallWndProc(pMainWnd, pMainWnd->m_hWnd, WM_IDLEUPDATECMDUI, (WPARAM)TRUE, 0);
       pMainWnd->SendMessageToDescendants(WM_IDLEUPDATECMDUI, (WPARAM)TRUE, 0, TRUE, TRUE);
     }
+    if (_afxpfnInPlaceIdle != NULL) _afxpfnInPlaceIdle();
   } else {
     // Free the temporary wrappers made by FromHandle.
     AfxLockTempMaps();

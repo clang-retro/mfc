@@ -68,6 +68,7 @@ class CView;
 class CScrollView;
 class CDocument;
 class CDocTemplate;
+class COleFrameHook;
 class CSingleDocTemplate;
 class CMultiDocTemplate;
 class CWinThread;
@@ -2060,6 +2061,7 @@ public:
   HMENU m_hMenuAlt;
   CString m_strTitle;
   BOOL m_bInRecalcLayout;
+  COleFrameHook* m_pNotifyHook;  // while an OLE object is active in place here
   CRuntimeClass* m_pFloatingFrameClass;
   DWORD m_dwDockStyle;  // sides bars may dock to (EnableDocking)
   static const DWORD dwDockBarMap[4][2];  // dock bar IDs and their CBRS_ styles
@@ -2595,6 +2597,9 @@ public:
   // while it edits an embedded object, and those for in-place editing.
   void SetServerInfo(UINT nIDOleEmbedding, UINT nIDOleInPlaceServer = 0,
                      CRuntimeClass* pOleFrameClass = NULL, CRuntimeClass* pOleViewClass = NULL);
+  // The in-place frame (of the class SetServerInfo gave) in the
+  // container's window, with a new view when bCreateView is TRUE.
+  virtual CFrameWnd* CreateOleFrame(CWnd* pParentWnd, CDocument* pDoc, BOOL bCreateView);
 
   UINT m_nIDResource;
   CRuntimeClass* m_pDocClass;

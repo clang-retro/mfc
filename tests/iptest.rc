@@ -1,0 +1,121 @@
+// iptest.rc - resources for iptest.
+#include <windows.h>
+#include <afxres.h>
+#include "iptest.h"
+
+// The container.
+IDR_CNTR MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&New", ID_FILE_NEW
+    MENUITEM SEPARATOR
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+  POPUP "&Edit"
+  BEGIN
+    MENUITEM "&Paste", ID_EDIT_PASTE
+  END
+  POPUP "&Tools"
+  BEGIN
+    MENUITEM "&Check", ID_TOOLS_CHECK
+  END
+END
+
+// The container's groups while an object is active in it: File, then
+// (after the first separator) Tools, then nothing for Window.
+IDR_CNTR_INPLACE MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+  MENUITEM SEPARATOR
+  POPUP "&Tools"
+  BEGIN
+    MENUITEM "&Check", ID_TOOLS_CHECK
+  END
+  MENUITEM SEPARATOR
+END
+
+IDR_CNTR_INPLACE ACCELERATORS
+BEGIN
+  VK_F6, ID_TOOLS_CHECK, VIRTKEY
+END
+
+IDR_CNTR 241
+BEGIN
+  1, 16, 15, 3,
+  ID_FILE_NEW, ID_EDIT_PASTE, ID_TOOLS_CHECK
+END
+IDR_CNTR BITMAP "toolbar.bmp"
+
+// The server.
+IDR_SRVR MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+  POPUP "&Edit"
+  BEGIN
+    MENUITEM "&Recolor", ID_EDIT_RECOLOR
+  END
+END
+
+IDR_SRVR_EMBEDDED MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&Update", ID_FILE_UPDATE
+    MENUITEM SEPARATOR
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+  POPUP "&Edit"
+  BEGIN
+    MENUITEM "&Recolor", ID_EDIT_RECOLOR
+  END
+END
+
+// The server's groups in place: Edit, then Color, then Help.
+IDR_SRVR_INPLACE MENU
+BEGIN
+  POPUP "&Edit"
+  BEGIN
+    MENUITEM "&Recolor", ID_EDIT_RECOLOR
+  END
+  MENUITEM SEPARATOR
+  POPUP "&Color"
+  BEGIN
+    MENUITEM "&Red", ID_COLOR_RED
+  END
+  MENUITEM SEPARATOR
+  POPUP "&Help"
+  BEGIN
+    MENUITEM "About the &Server", ID_HELP_SERVER
+  END
+END
+
+IDR_SRVR_INPLACE ACCELERATORS
+BEGIN
+  VK_F5, ID_EDIT_RECOLOR, VIRTKEY
+END
+
+IDR_SRVR_INPLACE 241
+BEGIN
+  1, 16, 15, 2,
+  ID_EDIT_RECOLOR, ID_COLOR_RED
+END
+IDR_SRVR_INPLACE BITMAP "toolbar.bmp"
+
+STRINGTABLE
+BEGIN
+  IDR_CNTR "IPCntr\n\nIPCntr"
+  IDR_SRVR "IPTest\n\nIPTest\nIPTest Files (*.ipt)\n.ipt\nIPTest.Document\nIPTest Document"
+  AFX_IDS_APP_TITLE "IPTest"
+  ID_COLOR_RED "Makes the object red\nRed"
+END
+
+#include "afxres.rc"
+#include "afxolecl.rc"
+#include "afxolesv.rc"

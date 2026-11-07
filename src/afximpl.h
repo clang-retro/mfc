@@ -4,6 +4,21 @@
 #pragma once
 #include "stdafx.h"
 
+// Bars made on a container's window while an object is active in place
+// there belong to the frame given (bars.cpp).
+void AFXAPI _AfxRegisterInPlaceDockSite(CFrameWnd* pFrame, BOOL bAdd);
+
+// Shared in-place menus (oleipcli.cpp): copies the groups of hMenuSource,
+// split by separators, into hMenuShared (nFirstGroup 0 for a container's
+// groups 0, 2 and 4; 1 for an object's 1, 3 and 5), and takes them out.
+void AFXAPI _AfxMergeMenus(HMENU hMenuShared, HMENU hMenuSource, LONG* lpMenuWidths,
+                           int nFirstGroup);
+void AFXAPI _AfxUnmergeMenus(HMENU hMenuShared, HMENU hMenuSource);
+
+// Idle updates for in-place frames, which are not under the main window
+// (thread.cpp calls it when set).
+extern void(AFXAPI* _afxpfnInPlaceIdle)();
+
 // Maps a Windows handle to the C++ object that wraps it. Each thread has
 // one map per handle kind. Objects the program creates go in the
 // permanent map; objects made up on the fly by FromHandle go in the

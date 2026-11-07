@@ -107,6 +107,11 @@ when there is no display:
   shown, changed, updated and closed through COleServerDoc and
   COleServerItem, the server's embedded menu and data, the object
   loaded again by a second server process, and its clipboard copy.
+* `iptest`: in-place activation, with the container and the server in
+  one program: the object activated in the container's view, the
+  shared menu, both sides' accelerators, the server's toolbar in the
+  container's frame, resizing through the resize bar, UI deactivation
+  and full deactivation, and CRectTracker.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -126,7 +131,7 @@ request with the stock MinGW-w64 toolchain.
 * `afxext.h`: CToolBar, CStatusBar, CDialogBar, docking and floating
   (dock bars, CMiniFrameWnd, drag and drop, CDockState), CSplitterWnd (static and dynamic, with split boxes and shared
   scroll bars), CFormView, CEditView,
-  CBitmapButton.
+  CBitmapButton, CRectTracker.
 * `afxrich.h`: CRichEditView and CRichEditDoc (rich text or plain text
   files, formatting the selection, find and replace, printing), with
   OLE objects in the text through CRichEditCntrItem (Insert Object,
@@ -148,7 +153,11 @@ request with the stock MinGW-w64 toolchain.
   COleServerItem (drawing, extents, verbs, data, the clipboard),
   COleLinkingDoc, COleTemplateServer (registration, one object per
   process for SDI), and the embedded menus of SetServerInfo, with
-  `afxolesv.rc` for the Update and Exit menu text.
+  `afxolesv.rc` for the Update and Exit menu text. In-place activation
+  on both sides: the container's frame takes the object's toolbars and
+  shared menu through COleFrameHook (IOleInPlaceFrame), and the server
+  shows its view in a COleIPFrameWnd with a COleResizeBar, from the
+  in-place resources of SetServerInfo and CDocTemplate::CreateOleFrame.
 * `afxodlgs.h`: the OLE dialogs over oledlg: COleInsertDialog,
   COlePasteSpecialDialog, COleLinksDialog, COleUpdateDialog,
   COleChangeIconDialog, COleConvertDialog and COleBusyDialog, and the
@@ -187,8 +196,7 @@ request with the stock MinGW-w64 toolchain.
   inset, without waiting nScrollDelay. Type libraries (EnableTypeLib), connection points and
   events and ActiveX control containment are not
   implemented yet.
-* Objects are not activated in place yet, on either side: they open in
-  their own windows, and servers do not give links to their items yet. COleDocument saves its items in its own format,
+* Servers do not give links to their items yet. COleDocument saves its items in its own format,
   which is not the one Visual C++ MFC writes. Wine's
   OleCreateStaticFromData makes objects without IOleObject, so static
   items cannot be created under Wine.
@@ -199,7 +207,10 @@ request with the stock MinGW-w64 toolchain.
   its object. Wine's object handler calls InitNew again when it runs
   an object it created, even after a save, so a container should clone
   such an object rather than run it again. Menus and clipboard data do
-  not cross processes under Wine.
+  not cross processes under Wine, so in-place activation is tested
+  with the container and server in one process. There Wine gives the
+  container the server's own object rather than OLE's handler, and
+  COleClientItem::Draw then draws from the object's metafile.
 * Sockets are IPv4, as in MFC 6. `CAsyncSocket::FromHandle` returns
   only sockets attached in the calling thread, and NULL for others,
   rather than making a temporary object.
