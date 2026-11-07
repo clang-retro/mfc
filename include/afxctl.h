@@ -11,6 +11,7 @@
 #include "afxwin.h"
 #include "afxext.h"
 #include "afxdisp.h"
+#include "afxtempl.h"
 #include <olectl.h>
 #include <ocidl.h>
 
@@ -645,6 +646,110 @@ public:
   DECLARE_INTERFACE_MAP()
   DECLARE_CONNECTION_MAP()
 };
+
+// ---------------------------------------------------------------------
+// COlePropertyPage: a property page of a control (IPropertyPage2), a
+// dialog made from a template as a child of the property frame. The
+// DDP_ functions, used with the DDX_ ones in DoDataExchange, move values
+// between the dialog's members and the controls' properties by name.
+
+class COlePropertyPage : public CDialog {
+  DECLARE_DYNAMIC(COlePropertyPage)
+public:
+  COlePropertyPage(UINT idDlg, UINT idCaption);
+  virtual ~COlePropertyPage();
+
+  LPDISPATCH* GetObjectArray(ULONG* pnObjects);
+  void SetModifiedFlag(BOOL bModified = TRUE);
+  BOOL IsModified() { return m_bDirty; }
+  LPPROPERTYPAGESITE GetPageSite() { return m_pPageSite; }
+  void SetDialogResource(HGLOBAL hDialog);
+  void SetPageName(LPCTSTR lpszPageName) { m_strPageName = lpszPageName; }
+  void SetHelpInfo(LPCTSTR lpszDocString, LPCTSTR lpszHelpFile = NULL, DWORD dwHelpContext = 0);
+  BOOL GetControlStatus(UINT nID);
+  BOOL SetControlStatus(UINT nID, BOOL bDirty);
+  void IgnoreApply(UINT nID);
+
+  virtual void OnSetPageSite();
+  virtual void OnObjectsChanged();
+  virtual BOOL OnHelp(LPCTSTR lpszHelpDir);
+  virtual BOOL OnInitDialog();
+  virtual BOOL OnEditProperty(DISPID dispid);
+  virtual BOOL PreTranslateMessage(MSG* pMsg);
+  virtual void OnFinalRelease();
+  virtual void PostNcDestroy();
+  virtual void OnOK() {}
+  virtual void OnCancel() {}
+  virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam);
+
+  // ----- Implementation
+  struct DDPEntry {
+    UINT nID;
+    void* pValue;
+    VARTYPE vt;
+    CString strProp;
+  };
+  CArray<DDPEntry*, DDPEntry*> m_ddpQueue;  // what DDP_PostProcessing writes
+  void QueueProperty(UINT nID, void* pValue, VARTYPE vt, LPCTSTR lpszProp);
+  BOOL ReadProperty(LPCTSTR lpszProp, VARTYPE vt, void* pValue);
+  BOOL WriteProperties();
+  void ClearQueue();
+
+  UINT m_idDlg;
+  UINT m_idCaption;
+  CString m_strPageName;
+  CString m_strDocString;
+  CString m_strHelpFile;
+  DWORD m_dwHelpContext;
+  HGLOBAL m_hDialog;  // the template, from SetDialogResource
+  BOOL m_bDirty;
+  BOOL m_bLoading;  // UpdateData(FALSE) is filling the controls
+  ULONG m_nObjects;
+  LPDISPATCH* m_ppDisp;
+  LPPROPERTYPAGESITE m_pPageSite;
+  CDWordArray m_dirtyIDs;
+  CDWordArray m_ignoreIDs;
+
+  HGLOBAL MakeChildTemplate(SIZE* pSize);
+  void LoadFromObjects();
+
+  BEGIN_INTERFACE_PART(PropertyPage, IPropertyPage2)
+    STDMETHOD(SetPageSite)(LPPROPERTYPAGESITE pPageSite);
+    STDMETHOD(Activate)(HWND hWndParent, LPCRECT pRect, BOOL bModal);
+    STDMETHOD(Deactivate)();
+    STDMETHOD(GetPageInfo)(LPPROPPAGEINFO pPageInfo);
+    STDMETHOD(SetObjects)(ULONG cObjects, LPUNKNOWN* ppUnk);
+    STDMETHOD(Show)(UINT nCmdShow);
+    STDMETHOD(Move)(LPCRECT pRect);
+    STDMETHOD(IsPageDirty)();
+    STDMETHOD(Apply)();
+    STDMETHOD(Help)(LPCOLESTR lpszHelpDir);
+    STDMETHOD(TranslateAccelerator)(LPMSG lpMsg);
+    STDMETHOD(EditProperty)(DISPID dispid);
+  END_INTERFACE_PART(PropertyPage)
+
+  DECLARE_INTERFACE_MAP()
+  DECLARE_MESSAGE_MAP()
+};
+
+void AFXAPI DDP_Text(CDataExchange* pDX, int id, BYTE& member, LPCTSTR pszPropName);
+void AFXAPI DDP_Text(CDataExchange* pDX, int id, short& member, LPCTSTR pszPropName);
+void AFXAPI DDP_Text(CDataExchange* pDX, int id, int& member, LPCTSTR pszPropName);
+void AFXAPI DDP_Text(CDataExchange* pDX, int id, UINT& member, LPCTSTR pszPropName);
+void AFXAPI DDP_Text(CDataExchange* pDX, int id, long& member, LPCTSTR pszPropName);
+void AFXAPI DDP_Text(CDataExchange* pDX, int id, DWORD& member, LPCTSTR pszPropName);
+void AFXAPI DDP_Text(CDataExchange* pDX, int id, float& member, LPCTSTR pszPropName);
+void AFXAPI DDP_Text(CDataExchange* pDX, int id, double& member, LPCTSTR pszPropName);
+void AFXAPI DDP_Text(CDataExchange* pDX, int id, CString& member, LPCTSTR pszPropName);
+void AFXAPI DDP_Check(CDataExchange* pDX, int id, int& member, LPCTSTR pszPropName);
+void AFXAPI DDP_Radio(CDataExchange* pDX, int id, int& member, LPCTSTR pszPropName);
+void AFXAPI DDP_LBString(CDataExchange* pDX, int id, CString& member, LPCTSTR pszPropName);
+void AFXAPI DDP_LBStringExact(CDataExchange* pDX, int id, CString& member, LPCTSTR pszPropName);
+void AFXAPI DDP_LBIndex(CDataExchange* pDX, int id, int& member, LPCTSTR pszPropName);
+void AFXAPI DDP_CBString(CDataExchange* pDX, int id, CString& member, LPCTSTR pszPropName);
+void AFXAPI DDP_CBStringExact(CDataExchange* pDX, int id, CString& member, LPCTSTR pszPropName);
+void AFXAPI DDP_CBIndex(CDataExchange* pDX, int id, int& member, LPCTSTR pszPropName);
+void AFXAPI DDP_PostProcessing(CDataExchange* pDX);
 
 // The stock property and event masks.
 enum {

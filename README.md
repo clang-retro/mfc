@@ -172,8 +172,11 @@ when there is no display:
   stock and custom events, the font object, ambient properties, frozen
   events, activation and focus, drawing in its window and through
   IViewObject, its state through IPersistStreamInit,
-  IPersistPropertyBag and IPersistStorage into new instances, and the
-  registry keys of AfxOleRegisterControlClass.
+  IPersistPropertyBag and IPersistStorage into new instances, the
+  registry keys of AfxOleRegisterControlClass, and the control's
+  COlePropertyPage, through IPropertyPage (its size and title, DDP_ and
+  DDX values from and to one or two controls, dirty controls, Apply)
+  and in the property frame of the Properties verb.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -246,8 +249,10 @@ request with the stock MinGW-w64 toolchain.
   ambient properties, IViewObject drawing and persistence through
   streams, storages and property bags), COleControlModule, event maps,
   DECLARE_OLECREATE_EX, DECLARE_OLECTLTYPE, DECLARE_PROPPAGEIDS,
-  CFontHolder, CPropExchange and the PX_ functions, and
-  AfxOleRegisterControlClass.
+  CFontHolder, CPropExchange and the PX_ functions,
+  AfxOleRegisterControlClass, and property pages: COlePropertyPage
+  (IPropertyPage2, made from an ordinary dialog template) and the DDP_
+  functions.
 * `afxodlgs.h`: the OLE dialogs over oledlg: COleInsertDialog,
   COlePasteSpecialDialog, COleLinksDialog, COleUpdateDialog,
   COleChangeIconDialog, COleConvertDialog and COleBusyDialog, and the
@@ -294,9 +299,13 @@ request with the stock MinGW-w64 toolchain.
   (`AFX_EXT_CLASS`, CDynLinkLibrary), which share one MFC DLL with the
   program, are not supported, since the library is only linked
   statically.
+* Wine's OleCreatePropertyFrame (as of Wine 9) never calls
+  IPropertyPage::Apply, so under Wine the OK and Apply buttons of a
+  control's property frame do not change the control; Windows applies
+  the pages.
 * COleControl makes windowed controls only (no windowless or
   IOleInPlaceObjectWindowless controls, no IQuickActivate, no
-  IPerPropertyBrowsing), and COlePropertyPage, verb maps, data path
+  IPerPropertyBrowsing), and verb maps, data path
   properties (CDataPathProperty) and licensing are not implemented. A
   control's binary stream (IPersistStreamInit, IPersistStorage, DLGINIT
   data) has this library's own format, not the one Visual C++ MFC
