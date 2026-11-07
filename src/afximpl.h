@@ -1,6 +1,7 @@
 // afximpl.h - private state shared by the library sources.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #pragma once
 #include "stdafx.h"
 

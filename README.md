@@ -321,3 +321,19 @@ style, so that MFC programs build and look the same on macOS and Linux.
 test programs and `tools/` the generator for the `ON_WM_*` macros and
 CWnd's default handlers (`tools/gen-msgmap.py`) and a development helper
 that lists declared functions the library does not define yet.
+
+## License
+
+clang-retro MFC is free software under the GNU Affero General Public
+License, version 3 only (`AGPL-3.0-only`); the full text is in
+[LICENSE](LICENSE). If you distribute a program built with it, or let
+people use a modified version over a network, you must offer the
+program's complete source under the same license.
+
+A commercial license, for programs that cannot meet those terms, is
+available from the clang-retro project; ask through
+[the clang-retro organization on GitHub](https://github.com/clang-retro).
+
+Contributions are accepted under the Contributor License Agreement in
+[CONTRIBUTING.md](CONTRIBUTING.md), which lets the project offer the
+code under both licenses.

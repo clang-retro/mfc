@@ -7,6 +7,7 @@
 // the values it was fetched with.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #include "dbimpl.h"
 #include <wctype.h>
 

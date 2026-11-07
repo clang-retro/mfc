@@ -5,6 +5,7 @@
 // servers (COleServerDoc, COleServerItem, COleTemplateServer).
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #ifndef __AFXOLE_H__
 #define __AFXOLE_H__
 

@@ -3,6 +3,7 @@
 // work with USES_CONVERSION (A2W, T2A, OLE2T, ...).
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API
+// SPDX-License-Identifier: AGPL-3.0-only
 // written from its public documentation.
 #ifndef __ATLCONV_H__
 #define __ATLCONV_H__

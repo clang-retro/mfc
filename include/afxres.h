@@ -3,6 +3,7 @@
 // Included both by C++ and by resource scripts (.rc).
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #ifndef __AFXRES_H__
 #define __AFXRES_H__
 #define _AFXRES_H

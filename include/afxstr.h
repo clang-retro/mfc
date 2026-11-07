@@ -5,6 +5,7 @@
 // buffer until one of them is changed.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #ifndef __AFXSTR_H__
 #define __AFXSTR_H__
 

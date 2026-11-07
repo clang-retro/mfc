@@ -1,6 +1,7 @@
 // gdi.cpp - CGdiObject and friends, CDC and its window DCs, CMenu.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 
 IMPLEMENT_DYNCREATE(CGdiObject, CObject)

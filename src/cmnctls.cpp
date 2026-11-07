@@ -1,6 +1,7 @@
 // cmnctls.cpp - the out-of-line members of the common control classes.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 #include <afxcmn.h>
 #include <objidl.h>

@@ -1,6 +1,7 @@
 // afxcview.h - views that are list view and tree view controls.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #ifndef __AFXCVIEW_H__
 #define __AFXCVIEW_H__
 

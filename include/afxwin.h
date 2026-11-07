@@ -2,6 +2,7 @@
 // the application classes.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #ifndef __AFXWIN_H__
 #define __AFXWIN_H__
 

@@ -4,6 +4,7 @@
 // 2), so archives made by MFC programs can be read and the other way round.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #include "stdafx.h"
 
 // Tags of the object format.

@@ -2,6 +2,7 @@
 // CFile, CArchive, CTime.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API
+// SPDX-License-Identifier: AGPL-3.0-only
 // written from its public documentation.
 #ifndef __AFX_H__
 #define __AFX_H__

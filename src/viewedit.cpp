@@ -1,6 +1,7 @@
 // viewedit.cpp - CEditView, a view that is a multi-line edit control.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 #include <afxext.h>
 

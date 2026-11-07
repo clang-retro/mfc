@@ -1,6 +1,7 @@
 // CTime and CTimeSpan.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #include "stdafx.h"
 
 // Times are seconds since 1970-01-01 UTC, kept in 64 bits. The conversions
