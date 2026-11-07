@@ -1,0 +1,9 @@
+// ctltest.rc - resources for ctltest: the control's type name.
+#include <windows.h>
+#include <afxres.h>
+#include "ctltest.h"
+
+STRINGTABLE
+BEGIN
+  IDS_TESTCTL "CtlTest Control"
+END
