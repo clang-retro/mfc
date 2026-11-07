@@ -99,6 +99,18 @@ when there is no display:
   CInternetException, and FTP directories, files, listings
   (CFtpFileFind), PutFile, GetFile, Rename and Remove, in passive and
   active mode.
+* `htmltest`: `afxhtml.h` with a WebBrowser control of the test's own
+  (Wine's needs Gecko to show a page), registered for CLSID_WebBrowser
+  in the process. For CHtmlView: the browser filling the view,
+  Navigate, the Navigate2 forms and LoadFromResource with their
+  arguments, the browser's events reaching the handlers (and a cancel
+  going back), the properties, PutProperty and GetProperty, ExecWB,
+  File Print, the forms commands, GetSource, the IDocHostUIHandler
+  questions and the browser's keys. For CDHtmlDialog, over a page of
+  fake elements: the page from the resources and its title, the
+  DDX_DHtml functions both ways, the element and control functions, the
+  DHTML event map by id, class and tag and the document's events,
+  window.external only for a local page, and a new page.
 * `dlgtest`: a dialog with data exchange and validation, common
   controls, and a property sheet.
 * `sditest`: a single-document program with a toolbar, a status bar and
@@ -288,6 +300,13 @@ request with the stock MinGW-w64 toolchain.
   CGopherFile, CGopherLocator and CGopherFileFind, CInternetFile with
   read and write buffers, CInternetException, AfxParseURL and
   AfxParseURLEx.
+* `afxhtml.h`: CHtmlView (the WebBrowser control in a view: navigation,
+  the browser's properties and events, IDocHostUIHandler through the
+  view's On functions) and CDHtmlDialog (a dialog whose face is an HTML
+  page: DHTML event maps, the element functions, the DDX_DHtml
+  functions, ActiveX controls in the page, window.external).
+  `atlcomcli.h` has the CComPtr, CComQIPtr, CComBSTR and CComVariant
+  their members use.
 
 ## Differences from Visual C++ MFC
 
@@ -334,6 +353,12 @@ request with the stock MinGW-w64 toolchain.
   CInternetSession's status callback finds its session through the
   handle's parent (INTERNET_OPTION_PARENT_HANDLE), or is the only
   session with the callback on.
+* CDHtmlDialog's event maps do not chain to the base class's map, and
+  there are no embedded maps (BEGIN_EMBED_DHTML_EVENT_MAP,
+  CMultiPageDHtmlDialog) or DHTML_EVENT_AXCONTROL entries yet. A handler
+  gets the element whose event it handles (for the document's events,
+  the element where the event happened). CHtmlEditView and
+  CHtmlEditCtrl are not there.
 * Wine's OleCreatePropertyFrame (as of Wine 9) never calls
   IPropertyPage::Apply, so under Wine the OK and Apply buttons of a
   control's property frame do not change the control; Windows applies
