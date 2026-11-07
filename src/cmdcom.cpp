@@ -63,6 +63,8 @@ LPUNKNOWN CCmdTarget::GetInterface(const void* iid) {
         return (LPUNKNOWN)((BYTE*)this + pEntry->nOffset);
     }
   }
+  if (m_bConnections && (bUnknown || ::IsEqualIID(riid, IID_IConnectionPointContainer)))
+    return &m_xConnPtContainer;
   if (m_bAutomation) {
     IID iidDispatch;
     if (bUnknown || ::IsEqualIID(riid, IID_IDispatch) ||

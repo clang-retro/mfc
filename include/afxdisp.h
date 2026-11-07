@@ -805,6 +805,107 @@ HRESULT AFXAPI AfxDllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv);
 HRESULT AFXAPI AfxDllCanUnloadNow();
 
 // ---------------------------------------------------------------------
+// Connection points: an object's outgoing interfaces. A class with
+// connections calls EnableConnections in its constructor and lists its
+// points in a connection map; each point is a member made with
+// BEGIN_CONNECTION_PART.
+
+class CConnectionPoint : public CCmdTarget {
+  DECLARE_DYNAMIC(CConnectionPoint)
+public:
+  CConnectionPoint();
+  virtual ~CConnectionPoint();
+
+  POSITION GetStartPosition() const;
+  LPUNKNOWN GetNextConnection(POSITION& pos) const;
+  const CPtrArray* GetConnections();
+
+  virtual LPCONNECTIONPOINTCONTAINER GetContainer();
+  virtual REFIID GetIID() = 0;
+  virtual void OnAdvise(BOOL bAdvise);
+  virtual int GetMaxConnections();  // -1 for any number
+  virtual HRESULT QuerySinkInterface(LPUNKNOWN pUnkSink, void** ppInterface);
+
+  CCmdTarget* m_pContainer;  // set by EnableConnections
+  CPtrArray m_connections;   // the sinks, each AddRef'd
+
+  BEGIN_INTERFACE_PART(ConnPt, IConnectionPoint)
+    STDMETHOD(GetConnectionInterface)(IID* pIID);
+    STDMETHOD(GetConnectionPointContainer)(IConnectionPointContainer** ppCPC);
+    STDMETHOD(Advise)(LPUNKNOWN pUnkSink, DWORD* pdwCookie);
+    STDMETHOD(Unadvise)(DWORD dwCookie);
+    STDMETHOD(EnumConnections)(LPENUMCONNECTIONS* ppEnum);
+  END_INTERFACE_PART(ConnPt)
+
+  DECLARE_INTERFACE_MAP()
+};
+
+#define BEGIN_CONNECTION_PART(theClass, localClass) \
+  class X##localClass : public CConnectionPoint { \
+  public: \
+    X##localClass() {}
+#define CONNECTION_IID(iid) \
+  REFIID GetIID() { return iid; }
+#define END_CONNECTION_PART(localClass) \
+  } m_x##localClass; \
+  friend class X##localClass;
+
+// Connects a sink to a source's connection point for iid. With bRefCount
+// FALSE the connection does not keep the sink alive (the sink is usually
+// the caller itself).
+BOOL AFXAPI AfxConnectionAdvise(LPUNKNOWN pUnkSrc, REFIID iid, LPUNKNOWN pUnkSink, BOOL bRefCount,
+                                DWORD* pdwCookie);
+BOOL AFXAPI AfxConnectionUnadvise(LPUNKNOWN pUnkSrc, REFIID iid, LPUNKNOWN pUnkSink,
+                                  BOOL bRefCount, DWORD dwCookie);
+
+// ---------------------------------------------------------------------
+// Type libraries. DECLARE_OLETYPELIB in the class and IMPLEMENT_OLETYPELIB
+// in its source give its IDispatch type information from a registered
+// type library.
+
+class CTypeLibCache {
+public:
+  CTypeLibCache() : m_pTypeLibID(NULL), m_lcid((LCID)-1), m_ptlib(NULL), m_ptinfo(NULL) {}
+  ~CTypeLibCache();
+  void Lock() {}
+  void Unlock() {}
+  BOOL Lookup(LCID lcid, LPTYPELIB* pptlib);
+  void Cache(LCID lcid, LPTYPELIB ptlib);
+  BOOL LookupTypeInfo(LCID lcid, REFGUID guid, LPTYPEINFO* pptinfo);
+  void CacheTypeInfo(LCID lcid, REFGUID guid, LPTYPEINFO ptinfo);
+
+  const GUID* m_pTypeLibID;
+  LCID m_lcid;
+  LPTYPELIB m_ptlib;
+  GUID m_guidInfo;
+  LPTYPEINFO m_ptinfo;
+};
+
+CTypeLibCache* AFXAPI AfxGetTypeLibCache(const GUID* pTypeLibID);
+
+#define DECLARE_OLETYPELIB(class_name) \
+protected: \
+  virtual UINT GetTypeInfoCount(); \
+  virtual HRESULT GetTypeLib(LCID lcid, LPTYPELIB* ppTypeLib); \
+  virtual CTypeLibCache* GetTypeLibCache();
+
+#define IMPLEMENT_OLETYPELIB(class_name, tlid, wVerMajor, wVerMinor) \
+  UINT class_name::GetTypeInfoCount() { return 1; } \
+  HRESULT class_name::GetTypeLib(LCID lcid, LPTYPELIB* ppTypeLib) { \
+    return ::LoadRegTypeLib(tlid, wVerMajor, wVerMinor, lcid, ppTypeLib); \
+  } \
+  CTypeLibCache* class_name::GetTypeLibCache() { return AfxGetTypeLibCache(&tlid); }
+
+// Registers the type library in pszFileName (by default the module's own
+// file) and checks that it is tlid.
+BOOL AFXAPI AfxOleRegisterTypeLib(HINSTANCE hInstance, REFGUID tlid, LPCTSTR pszFileName = NULL,
+                                  LPCTSTR pszHelpDir = NULL);
+// Unregisters a type library: one version, or with 0 for wVerMajor all
+// of them.
+BOOL AFXAPI AfxOleUnregisterTypeLib(REFGUID tlid, WORD wVerMajor = 0, WORD wVerMinor = 0,
+                                    LCID lcid = 0);
+
+// ---------------------------------------------------------------------
 // Dialog data exchange with dates and currency.
 
 void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, COleDateTime& value);

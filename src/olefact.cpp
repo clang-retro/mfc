@@ -28,7 +28,9 @@ BOOL AFXAPI AfxOleInit() {
 
 void AFXAPI AfxOleTerm(BOOL bJustRevoke) {
   COleObjectFactory::RevokeAll();
-  if (bJustRevoke || !g_bOleInit) return;
+  if (bJustRevoke) return;
+  _AfxReleaseTypeLibCaches();
+  if (!g_bOleInit) return;
   ::OleUninitialize();
   g_bOleInit = FALSE;
   _afxPfnOleTerm = NULL;

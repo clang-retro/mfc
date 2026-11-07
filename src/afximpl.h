@@ -18,6 +18,8 @@ void AFXAPI _AfxUnmergeMenus(HMENU hMenuShared, HMENU hMenuSource);
 // Idle updates for in-place frames, which are not under the main window
 // (thread.cpp calls it when set).
 extern void(AFXAPI* _afxpfnInPlaceIdle)();
+// Empties the type library caches (oleconn.cpp), before OLE goes.
+void AFXAPI _AfxReleaseTypeLibCaches();
 
 // Maps a Windows handle to the C++ object that wraps it. Each thread has
 // one map per handle kind. Objects the program creates go in the
