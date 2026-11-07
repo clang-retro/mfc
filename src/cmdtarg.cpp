@@ -42,6 +42,8 @@ const AFX_MSGMAP_ENTRY* PASCAL CCmdTarget::FindMessageEntry(const AFX_MSGMAP_ENT
 }
 
 BOOL CCmdTarget::OnCmdMsg(UINT nID, int nCode, void* pExtra, AFX_CMDHANDLERINFO* pHandlerInfo) {
+  // Events of hosted controls go through the event sink map.
+  if ((UINT)nCode == CN_EVENT) return OnEvent(nID, (AFX_EVENT*)pExtra, pHandlerInfo);
   // nCode carries the message in its high word (0 means WM_COMMAND),
   // except for CN_UPDATE_COMMAND_UI.
   UINT nMsg = 0;

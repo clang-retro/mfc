@@ -56,9 +56,13 @@ BOOL CDialog::CreateDlgIndirect(LPCDLGTEMPLATE lpDialogTemplate, CWnd* pParentWn
 BOOL CWnd::CreateDlgIndirect(LPCDLGTEMPLATE lpDialogTemplate, CWnd* pParentWnd,
                              HINSTANCE hInst) {
   if (hInst == NULL) hInst = AfxGetResourceHandle();
+  // ActiveX controls in the template are made apart from it.
+  if (_afxOccHooks != NULL)
+    lpDialogTemplate = _afxOccHooks->pfnPreCreateDialog(this, lpDialogTemplate, hInst);
   AfxHookWindowCreate(this);
   HWND hWnd = ::CreateDialogIndirectParam(hInst, lpDialogTemplate, pParentWnd->GetSafeHwnd(),
                                           AfxDlgProc, 0);
+  if (_afxOccHooks != NULL) _afxOccHooks->pfnPostCreateDialog(this);
   if (!AfxUnhookWindowCreate()) PostNcDestroy();
   if (hWnd == NULL && m_hWnd != NULL) {
     // Created and then failed (OnInitDialog asked for EndDialog(-1) and

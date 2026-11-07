@@ -18,6 +18,21 @@ void AFXAPI _AfxUnmergeMenus(HMENU hMenuShared, HMENU hMenuSource);
 // Idle updates for in-place frames, which are not under the main window
 // (thread.cpp calls it when set).
 extern void(AFXAPI* _afxpfnInPlaceIdle)();
+// What CWnd calls once ActiveX control containment is on (occmgr.cpp).
+struct _AFX_OCC_HOOKS {
+  // A dialog template's OLE controls come out before it is created...
+  const DLGTEMPLATE* (AFXAPI* pfnPreCreateDialog)(CWnd* pWnd, const DLGTEMPLATE* pTemplate,
+                                                  HINSTANCE hInst);
+  void(AFXAPI* pfnPostCreateDialog)(CWnd* pWnd);
+  // ...and are made on WM_INITDIALOG.
+  void(AFXAPI* pfnInitDialog)(CWnd* pWnd);
+  void(AFXAPI* pfnDestroy)(CWnd* pWnd);    // WM_DESTROY: the hosted controls close
+  void(AFXAPI* pfnNcDestroy)(CWnd* pWnd);  // the container goes
+  BOOL(AFXAPI* pfnDestroyControl)(CWnd* pWnd);  // DestroyWindow on a control's window
+  BOOL(AFXAPI* pfnDDXControl)(CWnd* pDlgWnd, int nIDC, CWnd& rControl);
+};
+extern const _AFX_OCC_HOOKS* _afxOccHooks;
+
 // Empties the type library caches (oleconn.cpp), before OLE goes.
 void AFXAPI _AfxReleaseTypeLibCaches();
 

@@ -135,6 +135,13 @@ when there is no display:
   view; the test checks the view's rectangle, commands through
   IOleCommandTarget (standard ones and an OLE command map's own), the
   view state, closing the view, and the DocObject registration.
+* `occtest`: ActiveX control containment, with a control of the test's
+  own: CWnd::CreateControl in a frame window (properties, methods,
+  events and property notifications through event sink maps, ambient
+  properties, frozen events, moving, enabling, focus and destroying),
+  and a dialog template with controls among ordinary items (made on
+  WM_INITDIALOG in the template's tab order, state from DLGINIT,
+  DDX_Control and the DDX_OC functions).
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -194,6 +201,14 @@ request with the stock MinGW-w64 toolchain.
   maps (BEGIN_OLECMD_MAP, ON_OLECMD and the ON_OLECMD_* entries), and the
   container's COleDocObjectItem; COleTemplateServer registers
   OAT_DOC_OBJECT_SERVER classes as DocObjects.
+* `afxocc.h`: ActiveX control containment after AfxEnableControlContainer:
+  COleControlContainer, COleControlSite and COccManager;
+  CWnd::CreateControl, InvokeHelper, GetProperty and SetProperty on a
+  control's window object, whose window functions (text, styles,
+  position, enabling, focus) go to the control; controls in dialog
+  templates with their DLGINIT state; event sink maps (ON_EVENT,
+  ON_EVENT_RANGE, ON_EVENT_REFLECT, ON_PROPNOTIFY) and the DDX_OC
+  functions.
 * `afxodlgs.h`: the OLE dialogs over oledlg: COleInsertDialog,
   COlePasteSpecialDialog, COleLinksDialog, COleUpdateDialog,
   COleChangeIconDialog, COleConvertDialog and COleBusyDialog, and the
@@ -228,9 +243,12 @@ request with the stock MinGW-w64 toolchain.
   the arguments, so the function's parameter types must be the ones its
   VTS_ string describes (as they must in MFC) and it must not be
   overloaded. Drag scrolling starts as soon as the pointer is in the
-  inset, without waiting nScrollDelay. ActiveX control containment is
-  not implemented yet. A connection point's cookie is the sink's
-  interface pointer.
+  inset, without waiting nScrollDelay. A connection point's cookie is
+  the sink's interface pointer.
+* Containment hosts windowed controls only: windowless controls,
+  extended controls (IOleControlSite::GetExtendedControl), data binding
+  and property pages are not implemented, and nor is COleControl, the
+  control side.
 * COleDocument saves its items in its own format,
   which is not the one Visual C++ MFC writes. Wine's
   OleCreateStaticFromData makes objects without IOleObject, so static

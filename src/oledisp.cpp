@@ -430,7 +430,8 @@ void AFX_CDECL COleDispatchDriver::InvokeHelper(DISPID dwDispID, WORD wFlags, VA
 void AFX_CDECL COleDispatchDriver::SetProperty(DISPID dwDispID, VARTYPE vtProp, ...) {
   va_list argList;
   va_start(argList, vtProp);
-  BYTE rgbParams[2] = {(BYTE)vtProp, 0};
+  // A VT_BSTR value is an LPCTSTR, as MFC's wrappers pass it.
+  BYTE rgbParams[2] = {(BYTE)(vtProp == VT_BSTR ? VT_BSTRT : vtProp), 0};
   WORD wFlags = (vtProp == VT_DISPATCH) ? DISPATCH_PROPERTYPUTREF : DISPATCH_PROPERTYPUT;
   try {
     InvokeHelperV(dwDispID, wFlags, VT_EMPTY, NULL, rgbParams, argList);
