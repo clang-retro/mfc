@@ -14,6 +14,28 @@ class COleControlSite;
 class CDataSourceControl;
 struct CDataBoundProperty;
 
+// The extender properties every container gives its controls.
+#ifndef DISPID_NAME
+#define DISPID_NAME (-800)
+#endif
+#ifndef DISPID_DELETE
+#define DISPID_DELETE (-801)
+#endif
+#ifndef DISPID_OBJECT
+#define DISPID_OBJECT (-802)
+#endif
+#ifndef DISPID_PARENT
+#define DISPID_PARENT (-803)
+#endif
+// And the ones this library's sites give: where the control is, in the
+// container's pixels, whether it shows, and its control ID.
+#define AFX_DISPID_EXT_LEFT ((DISPID)0x80010100L)
+#define AFX_DISPID_EXT_TOP ((DISPID)0x80010101L)
+#define AFX_DISPID_EXT_WIDTH ((DISPID)0x80010102L)
+#define AFX_DISPID_EXT_HEIGHT ((DISPID)0x80010103L)
+#define AFX_DISPID_EXT_VISIBLE ((DISPID)0x80010104L)
+#define AFX_DISPID_EXT_ID ((DISPID)0x80010105L)
+
 // The OLE controls of a dialog template, kept between creating the
 // dialog without them and making them on WM_INITDIALOG.
 struct _AFX_OCC_DIALOG_INFO {
@@ -98,6 +120,13 @@ public:
   virtual void BindProperty(DISPID dwDispId, CWnd* pWndDSC);
   virtual IUnknown* GetDSCCursor();
 
+  // The extended control (IOleControlSite::GetExtendedControl): an
+  // IDispatch with the extender properties (Name, Object, Parent, Left,
+  // Top, Width, Height, Visible, ID) whose other names and DISPIDs are
+  // the control's own. The caller releases it.
+  virtual LPDISPATCH GetExtendedControl();
+  CString m_strName;  // the extender Name property
+
   COleControlContainer* m_pCtrlCont;
   HWND m_hWnd;
   CWnd* m_pWndCtrl;
@@ -125,6 +154,7 @@ public:
   CDataSourceControl* m_pDataSourceControl;  // when this control is a data source
   CDataBoundProperty* m_pBindings;           // this control's bound properties
   BOOL m_bIgnoreNotify;                      // setting a bound property from its field
+  IDispatch* m_pExtendedControl;             // made on first asking, released with the site
 
 protected:
   HRESULT CreateOrLoad(REFCLSID clsid, CFile* pPersist, BOOL bStorage, BSTR bstrLicKey);

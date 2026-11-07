@@ -10,6 +10,175 @@
 
 const _AFX_OCC_BIND_HOOKS* _afxOccBindHooks = NULL;
 
+// ---------------------------------------------------------------------
+// The extended control: the extender properties, and the control's own
+// names and DISPIDs passed on to it.
+
+namespace {
+
+struct ExtProp {
+  const WCHAR* pszName;
+  DISPID dispid;
+};
+const ExtProp kExtProps[] = {
+    {L"Name", DISPID_NAME},          {L"Object", DISPID_OBJECT},
+    {L"Parent", DISPID_PARENT},      {L"Left", AFX_DISPID_EXT_LEFT},
+    {L"Top", AFX_DISPID_EXT_TOP},    {L"Width", AFX_DISPID_EXT_WIDTH},
+    {L"Height", AFX_DISPID_EXT_HEIGHT}, {L"Visible", AFX_DISPID_EXT_VISIBLE},
+    {L"ID", AFX_DISPID_EXT_ID},
+};
+
+class CExtendedControl final : public IDispatch {
+public:
+  explicit CExtendedControl(COleControlSite* pSite) : m_cRef(1), m_pSite(pSite) {}
+
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (::IsEqualIID(iid, IID_IUnknown) || ::IsEqualIID(iid, IID_IDispatch)) {
+      *ppv = static_cast<IDispatch*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return (ULONG)InterlockedIncrement(&m_cRef); }
+  STDMETHOD_(ULONG, Release)() {
+    LONG c = InterlockedDecrement(&m_cRef);
+    if (c == 0) delete this;
+    return (ULONG)c;
+  }
+  STDMETHOD(GetTypeInfoCount)(UINT* pctinfo) {
+    *pctinfo = 0;
+    return S_OK;
+  }
+  STDMETHOD(GetTypeInfo)(UINT, LCID, ITypeInfo** ppTI) {
+    *ppTI = NULL;
+    return E_NOTIMPL;
+  }
+  STDMETHOD(GetIDsOfNames)(REFIID riid, LPOLESTR* rgszNames, UINT cNames, LCID lcid,
+                           DISPID* rgDispId) {
+    if (cNames == 1) {
+      for (const ExtProp& prop : kExtProps)
+        if (::lstrcmpiW(rgszNames[0], prop.pszName) == 0) {
+          rgDispId[0] = prop.dispid;
+          return S_OK;
+        }
+    }
+    IDispatch* pDisp = Control();
+    if (pDisp == NULL) return DISP_E_UNKNOWNNAME;
+    return pDisp->GetIDsOfNames(riid, rgszNames, cNames, lcid, rgDispId);
+  }
+  STDMETHOD(Invoke)(DISPID dispid, REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS* pParams,
+                    VARIANT* pResult, EXCEPINFO* pExcepInfo, UINT* puArgErr) {
+    if (!IsExtender(dispid)) {
+      IDispatch* pDisp = Control();
+      if (pDisp == NULL) return DISP_E_MEMBERNOTFOUND;
+      return pDisp->Invoke(dispid, riid, lcid, wFlags, pParams, pResult, pExcepInfo, puArgErr);
+    }
+    if (m_pSite == NULL) return E_UNEXPECTED;
+    if (wFlags & DISPATCH_PROPERTYGET) return GetExtender(dispid, pResult);
+    if (wFlags & (DISPATCH_PROPERTYPUT | DISPATCH_PROPERTYPUTREF)) {
+      if (pParams == NULL || pParams->cArgs != 1) return DISP_E_BADPARAMCOUNT;
+      return PutExtender(dispid, &pParams->rgvarg[0], puArgErr);
+    }
+    return DISP_E_MEMBERNOTFOUND;
+  }
+
+  LONG m_cRef;
+  COleControlSite* m_pSite;  // NULL once the site goes
+
+private:
+  IDispatch* Control() const {
+    return m_pSite != NULL ? m_pSite->m_dispDriver.m_lpDispatch : NULL;
+  }
+  static BOOL IsExtender(DISPID dispid) {
+    for (const ExtProp& prop : kExtProps)
+      if (prop.dispid == dispid) return TRUE;
+    return FALSE;
+  }
+  HRESULT GetExtender(DISPID dispid, VARIANT* pResult) {
+    if (pResult == NULL) return S_OK;
+    ::VariantInit(pResult);
+    const CRect& rect = m_pSite->m_rect;
+    switch (dispid) {
+      case DISPID_NAME:
+        pResult->vt = VT_BSTR;
+        pResult->bstrVal = m_pSite->m_strName.AllocSysString();
+        return S_OK;
+      case DISPID_OBJECT:
+        pResult->vt = VT_DISPATCH;
+        pResult->pdispVal = Control();
+        if (pResult->pdispVal != NULL) pResult->pdispVal->AddRef();
+        return S_OK;
+      case DISPID_PARENT: {
+        // The container window's automation object, when it has one.
+        CWnd* pWnd = m_pSite->m_pCtrlCont->m_pWnd;
+        pResult->vt = VT_DISPATCH;
+        pResult->pdispVal = pWnd != NULL ? pWnd->GetIDispatch(TRUE) : NULL;
+        return S_OK;
+      }
+      case AFX_DISPID_EXT_LEFT: pResult->vt = VT_I4; pResult->lVal = rect.left; return S_OK;
+      case AFX_DISPID_EXT_TOP: pResult->vt = VT_I4; pResult->lVal = rect.top; return S_OK;
+      case AFX_DISPID_EXT_WIDTH: pResult->vt = VT_I4; pResult->lVal = rect.Width(); return S_OK;
+      case AFX_DISPID_EXT_HEIGHT: pResult->vt = VT_I4; pResult->lVal = rect.Height(); return S_OK;
+      case AFX_DISPID_EXT_VISIBLE:
+        pResult->vt = VT_BOOL;
+        pResult->boolVal = (m_pSite->m_dwStyle & WS_VISIBLE) ? VARIANT_TRUE : VARIANT_FALSE;
+        return S_OK;
+      case AFX_DISPID_EXT_ID:
+        pResult->vt = VT_I4;
+        pResult->lVal = (LONG)m_pSite->GetDlgCtrlID();
+        return S_OK;
+    }
+    return DISP_E_MEMBERNOTFOUND;
+  }
+  HRESULT PutExtender(DISPID dispid, VARIANT* pArg, UINT* puArgErr) {
+    VARIANT var;
+    ::VariantInit(&var);
+    VARTYPE vt = dispid == DISPID_NAME              ? VT_BSTR
+                 : dispid == AFX_DISPID_EXT_VISIBLE ? VT_BOOL
+                                                    : VT_I4;
+    if (dispid == DISPID_OBJECT || dispid == DISPID_PARENT) return DISP_E_MEMBERNOTFOUND;
+    if (FAILED(::VariantChangeType(&var, pArg, 0, vt))) {
+      if (puArgErr != NULL) *puArgErr = 0;
+      return DISP_E_TYPEMISMATCH;
+    }
+    CRect rect = m_pSite->m_rect;
+    switch (dispid) {
+      case DISPID_NAME: m_pSite->m_strName = var.bstrVal; break;
+      case AFX_DISPID_EXT_LEFT: rect.OffsetRect(var.lVal - rect.left, 0); break;
+      case AFX_DISPID_EXT_TOP: rect.OffsetRect(0, var.lVal - rect.top); break;
+      case AFX_DISPID_EXT_WIDTH: rect.right = rect.left + var.lVal; break;
+      case AFX_DISPID_EXT_HEIGHT: rect.bottom = rect.top + var.lVal; break;
+      case AFX_DISPID_EXT_VISIBLE:
+        m_pSite->ShowWindow(var.boolVal != VARIANT_FALSE ? SW_SHOWNA : SW_HIDE);
+        break;
+      case AFX_DISPID_EXT_ID: m_pSite->SetDlgCtrlID((int)var.lVal); break;
+    }
+    ::VariantClear(&var);
+    if (rect != m_pSite->m_rect)
+      m_pSite->MoveWindow(rect.left, rect.top, rect.Width(), rect.Height());
+    return S_OK;
+  }
+};
+
+}  // namespace
+
+LPDISPATCH COleControlSite::GetExtendedControl() {
+  if (m_pObject == NULL) return NULL;
+  if (m_pExtendedControl == NULL) m_pExtendedControl = new CExtendedControl(this);
+  m_pExtendedControl->AddRef();
+  return m_pExtendedControl;
+}
+
+static void _AfxReleaseExtendedControl(COleControlSite* pSite) {
+  if (pSite->m_pExtendedControl == NULL) return;
+  // The control may still hold it; it no longer reaches the site.
+  static_cast<CExtendedControl*>(pSite->m_pExtendedControl)->m_pSite = NULL;
+  pSite->m_pExtendedControl->Release();
+  pSite->m_pExtendedControl = NULL;
+}
+
 // HIMETRIC and pixels, at the screen's resolution.
 static void PixelsToHimetric(const SIZE& sizePix, SIZEL* pSizeHm) {
   HDC hDC = ::GetDC(NULL);
@@ -66,7 +235,8 @@ COleControlSite::COleControlSite(COleControlContainer* pCtrlCont)
       m_nFreezeEvents(0),
       m_pDataSourceControl(NULL),
       m_pBindings(NULL),
-      m_bIgnoreNotify(FALSE) {
+      m_bIgnoreNotify(FALSE),
+      m_pExtendedControl(NULL) {
   memset(&m_ctlInfo, 0, sizeof(m_ctlInfo));
   m_ctlInfo.cb = sizeof(m_ctlInfo);
 }
@@ -365,6 +535,7 @@ void COleControlSite::DetachWindow() {
 }
 
 BOOL COleControlSite::DestroyControl() {
+  _AfxReleaseExtendedControl(this);
   if (_afxOccBindHooks != NULL) _afxOccBindHooks->pfnRelease(this);
   DetachWindow();
   if (m_hWnd != NULL) m_pCtrlCont->m_siteMap.RemoveKey(m_hWnd);
@@ -993,8 +1164,10 @@ STDMETHODIMP COleControlSite::XOleControlSite::OnControlInfoChanged() {
 }
 STDMETHODIMP COleControlSite::XOleControlSite::LockInPlaceActive(BOOL) { return S_OK; }
 STDMETHODIMP COleControlSite::XOleControlSite::GetExtendedControl(LPDISPATCH* ppDisp) {
-  *ppDisp = NULL;
-  return E_NOTIMPL;
+  SITE(OleControlSite);
+  if (ppDisp == NULL) return E_POINTER;
+  *ppDisp = pThis->GetExtendedControl();
+  return *ppDisp != NULL ? S_OK : E_NOTIMPL;
 }
 STDMETHODIMP COleControlSite::XOleControlSite::TransformCoords(POINTL* pptlHimetric,
                                                                POINTF* pptfContainer,

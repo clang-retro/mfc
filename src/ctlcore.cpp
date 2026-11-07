@@ -643,6 +643,12 @@ DWORD COleControl::GetStockPropMask() const {
 void COleControl::SetModifiedFlag(BOOL bModified) { m_bModified = bModified; }
 BOOL COleControl::IsModified() { return m_bModified; }
 
+LPDISPATCH COleControl::GetExtendedControl() {
+  LPDISPATCH pDisp = NULL;
+  if (m_pControlSite == NULL || FAILED(m_pControlSite->GetExtendedControl(&pDisp))) return NULL;
+  return pDisp;
+}
+
 void COleControl::BoundPropertyChanged(DISPID dispid) {
   POSITION pos = m_xPropConnPt.GetStartPosition();
   while (pos != NULL) {

@@ -471,6 +471,9 @@ public:
 
   // ----- The container
   LPOLECLIENTSITE GetClientSite() { return m_pClientSite; }
+  // The container's extended control for this control, which the caller
+  // releases; NULL when the container has none.
+  LPDISPATCH GetExtendedControl();
   virtual void OnSetClientSite();
   BOOL GetAmbientProperty(DISPID dispid, VARTYPE vtProp, void* pvProp);
   OLE_COLOR AmbientBackColor();

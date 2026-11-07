@@ -386,7 +386,15 @@ STDMETHODIMP CDocObjectServer::XOleCommandTarget::Exec(const GUID* pguidCmdGroup
   return S_OK;
 }
 
-// IPrint: the container prints through the Print command instead.
+// IPrint: the document's view prints its pages, as it does for the
+// File Print command, to the printer the container names.
+
+#ifndef PRINT_E_CANCELLED
+#define PRINT_E_CANCELLED ((HRESULT)0x80040160L)
+#endif
+#ifndef PRINT_E_NOSUCHPAGE
+#define PRINT_E_NOSUCHPAGE ((HRESULT)0x80040161L)
+#endif
 
 STDMETHODIMP_(ULONG) CDocObjectServer::XPrint::AddRef() {
   METHOD_PROLOGUE_EX_(CDocObjectServer, Print)
@@ -409,18 +417,168 @@ STDMETHODIMP CDocObjectServer::XPrint::SetInitialPageNum(LONG nFirstPage) {
   return S_OK;
 }
 
+static CView* PrintingView(COleServerDoc* pDoc) {
+  POSITION pos = pDoc->GetFirstViewPosition();
+  return pos != NULL ? pDoc->GetNextView(pos) : NULL;
+}
+
+// The pages the view says it has, after OnPreparePrinting.
+static BOOL KnownPages(CPrintInfo* pInfo, UINT* pnMin, UINT* pnMax) {
+  *pnMin = pInfo->GetMinPage();
+  *pnMax = pInfo->GetMaxPage();
+  return *pnMax != 0xFFFF && *pnMax >= *pnMin;
+}
+
 STDMETHODIMP CDocObjectServer::XPrint::GetPageInfo(LPLONG pnFirstPage, LPLONG pcPages) {
   METHOD_PROLOGUE_EX_(CDocObjectServer, Print)
   if (pnFirstPage != NULL) *pnFirstPage = pThis->m_nFirstPage;
   if (pcPages != NULL) *pcPages = 0;
-  return E_NOTIMPL;  // the count is not known before printing
+  CView* pView = PrintingView(pThis->m_pOwner);
+  if (pView == NULL) return E_UNEXPECTED;
+  CPrintInfo info;
+  info.m_bDocObject = TRUE;
+  info.m_dwFlags = PRINTFLAG_DONTACTUALLYPRINT;
+  info.m_nOffsetPage = (UINT)(pThis->m_nFirstPage - 1);
+  pView->OnPreparePrinting(&info);  // the page count is set whether or not there is a printer
+  UINT nMin, nMax;
+  if (!KnownPages(&info, &nMin, &nMax)) return E_NOTIMPL;  // known only by printing
+  if (pcPages != NULL) *pcPages = (LONG)(nMax - nMin + 1);
+  return S_OK;
 }
 
-STDMETHODIMP CDocObjectServer::XPrint::Print(DWORD, DVTARGETDEVICE**, PAGESET**, LPSTGMEDIUM,
-                                             LPCONTINUECALLBACK, LONG, LPLONG pcPagesPrinted,
-                                             LPLONG) {
+// Whether page nPage (counted from 1 within the document) is among those
+// the page set asks for.
+static BOOL InPageSet(const PAGESET* pSet, LONG nPage) {
+  if (pSet == NULL) return TRUE;
+  if ((nPage & 1) ? !pSet->fOddPages : !pSet->fEvenPages) return FALSE;
+  if (pSet->cPageRange == 0) return TRUE;
+  for (ULONG i = 0; i < pSet->cPageRange; i++) {
+    const PAGERANGE& r = pSet->rgPages[i];
+    if (nPage >= r.nFromPage && (r.nToPage == PAGESET_TOLASTPAGE || nPage <= r.nToPage))
+      return TRUE;
+  }
+  return FALSE;
+}
+
+static HDC CreateTargetDC(const DVTARGETDEVICE* ptd) {
+  if (ptd == NULL || ptd->tdDeviceNameOffset == 0) return NULL;
+  const BYTE* pBase = (const BYTE*)ptd;
+  LPCWSTR pszDriver = ptd->tdDriverNameOffset ? (LPCWSTR)(pBase + ptd->tdDriverNameOffset) : NULL;
+  LPCWSTR pszDevice = (LPCWSTR)(pBase + ptd->tdDeviceNameOffset);
+  const DEVMODEW* pdm =
+      ptd->tdExtDevmodeOffset ? (const DEVMODEW*)(pBase + ptd->tdExtDevmodeOffset) : NULL;
+  return ::CreateDCW(pszDriver, pszDevice, NULL, pdm);
+}
+
+STDMETHODIMP CDocObjectServer::XPrint::Print(DWORD grfFlags, DVTARGETDEVICE** pptd,
+                                             PAGESET** ppPageSet, LPSTGMEDIUM pstgmOptions,
+                                             LPCONTINUECALLBACK pCallback, LONG nFirstPage,
+                                             LPLONG pcPagesPrinted, LPLONG pnLastPage) {
+  METHOD_PROLOGUE_EX_(CDocObjectServer, Print)
   if (pcPagesPrinted != NULL) *pcPagesPrinted = 0;
-  return E_NOTIMPL;
+  if (pnLastPage != NULL) *pnLastPage = nFirstPage - 1;
+  CView* pView = PrintingView(pThis->m_pOwner);
+  if (pView == NULL) return E_UNEXPECTED;
+  const PAGESET* pSet = ppPageSet != NULL ? *ppPageSet : NULL;
+  BOOL bPrint = !(grfFlags & PRINTFLAG_DONTACTUALLYPRINT);
+
+  CPrintInfo info;
+  info.m_bDocObject = TRUE;
+  info.m_dwFlags = grfFlags;
+  info.m_nOffsetPage = (UINT)(nFirstPage - 1);
+  // The container's printer, unless the user is to choose one.
+  if (pptd != NULL && *pptd != NULL && !(grfFlags & PRINTFLAG_PROMPTUSER))
+    info.m_pPD->m_pd.hDC = CreateTargetDC(*pptd);
+  BOOL bPrepared = pView->OnPreparePrinting(&info);
+  if (bPrint && !bPrepared)
+    return (grfFlags & PRINTFLAG_PROMPTUSER) ? PRINT_E_CANCELLED : E_FAIL;
+  HDC hDC = info.m_pPD->m_pd.hDC;
+  if (bPrint && hDC == NULL) return E_FAIL;
+
+  UINT nMin, nMax;
+  BOOL bKnown = KnownPages(&info, &nMin, &nMax);
+  if (!bKnown) {
+    nMin = info.GetMinPage();
+    nMax = 0xFFFF;  // until the view stops
+  }
+  if (pSet != NULL && bKnown) {
+    BOOL bAny = FALSE;
+    for (UINT n = nMin; n <= nMax && !bAny; n++) bAny = InPageSet(pSet, (LONG)(n - nMin + 1));
+    if (!bAny) return PRINT_E_NOSUCHPAGE;
+  }
+
+  if (!bPrint) {
+    // Only the count: the pages that would print.
+    LONG nCount = 0, nLast = nFirstPage - 1;
+    UINT nEnd = bKnown ? nMax : nMin;
+    for (UINT n = nMin; n <= nEnd; n++) {
+      LONG nPage = (LONG)(n - nMin + 1);
+      if (!InPageSet(pSet, nPage)) continue;
+      nCount++;
+      nLast = nFirstPage + nPage - 1;
+    }
+    if (pcPagesPrinted != NULL) *pcPagesPrinted = nCount;
+    if (pnLastPage != NULL) *pnLastPage = nLast;
+    return S_OK;
+  }
+
+  CString strTitle = pThis->m_pOwner->GetTitle();
+  if (strTitle.GetLength() > 31) strTitle = strTitle.Left(31);
+  CString strOutput;
+  if ((grfFlags & PRINTFLAG_PRINTTOFILE) && pstgmOptions != NULL &&
+      pstgmOptions->tymed == TYMED_FILE && pstgmOptions->lpszFileName != NULL)
+    strOutput = pstgmOptions->lpszFileName;
+  DOCINFO docInfo;
+  memset(&docInfo, 0, sizeof(docInfo));
+  docInfo.cbSize = sizeof(docInfo);
+  docInfo.lpszDocName = strTitle;
+  docInfo.lpszOutput = strOutput.IsEmpty() ? NULL : (LPCTSTR)strOutput;
+
+  CDC dcPrint;
+  dcPrint.Attach(hDC);
+  dcPrint.m_bPrinting = TRUE;
+  pView->OnBeginPrinting(&dcPrint, &info);
+  HRESULT hr = S_OK;
+  LONG nCount = 0, nLast = nFirstPage - 1;
+  if (dcPrint.StartDoc(&docInfo) == SP_ERROR) {
+    hr = E_FAIL;
+  } else {
+    for (info.m_nCurPage = nMin; info.m_nCurPage <= nMax; info.m_nCurPage++) {
+      LONG nPage = (LONG)(info.m_nCurPage - nMin + 1);
+      if (!InPageSet(pSet, nPage)) continue;
+      pView->OnPrepareDC(&dcPrint, &info);
+      if (!info.m_bContinuePrinting) break;
+      info.m_rectDraw.SetRect(0, 0, dcPrint.GetDeviceCaps(HORZRES),
+                              dcPrint.GetDeviceCaps(VERTRES));
+      dcPrint.DPtoLP(&info.m_rectDraw);
+      if (dcPrint.StartPage() < 0) {
+        hr = E_FAIL;
+        break;
+      }
+      pView->OnPrepareDC(&dcPrint, &info);
+      pView->OnPrint(&dcPrint, &info);
+      if (dcPrint.EndPage() < 0) {
+        hr = E_FAIL;
+        break;
+      }
+      nCount++;
+      nLast = nFirstPage + nPage - 1;
+      if (pCallback != NULL && pCallback->FContinuePrinting(nCount, nLast, NULL) == S_FALSE) {
+        hr = PRINT_E_CANCELLED;
+        break;
+      }
+      if (info.m_nCurPage == 0xFFFF) break;
+    }
+    if (hr == S_OK)
+      dcPrint.EndDoc();
+    else
+      dcPrint.AbortDoc();
+  }
+  pView->OnEndPrinting(&dcPrint, &info);
+  dcPrint.Detach();
+  if (pcPagesPrinted != NULL) *pcPagesPrinted = nCount;
+  if (pnLastPage != NULL) *pnLastPage = nLast;
+  return hr;
 }
 
 // ---------------------------------------------------------------------
@@ -565,8 +723,35 @@ BOOL COleDocObjectItem::GetPageCount(LPLONG pnFirstPage, LPLONG pcPages) {
   return TRUE;
 }
 
-void COleDocObjectItem::DoDefaultPrinting(CView*, CPrintInfo*) {
-  ExecCommand(OLECMDID_PRINT, OLECMDEXECOPT_DONTPROMPTUSER);
+DVTARGETDEVICE* AFXAPI _AfxOleCreateTargetDevice(const PRINTDLG* ppd);
+
+void COleDocObjectItem::DoDefaultPrinting(CView*, CPrintInfo* pInfo) {
+  if (m_pIPrint == NULL && m_lpObject != NULL)
+    m_lpObject->QueryInterface(IID_IPrint, (void**)&m_pIPrint);
+  if (m_pIPrint == NULL) {
+    // Without IPrint, its own Print command.
+    ExecCommand(OLECMDID_PRINT, OLECMDEXECOPT_DONTPROMPTUSER);
+    return;
+  }
+  // The pages and the printer the container's print job has.
+  DVTARGETDEVICE* ptd = pInfo != NULL ? _AfxOleCreateTargetDevice(&pInfo->m_pPD->m_pd) : NULL;
+  PAGESET pageSet;
+  memset(&pageSet, 0, sizeof(pageSet));
+  pageSet.cbStruct = sizeof(pageSet);
+  pageSet.fOddPages = pageSet.fEvenPages = TRUE;
+  pageSet.cPageRange = 1;
+  pageSet.rgPages[0].nFromPage = 1;
+  pageSet.rgPages[0].nToPage = PAGESET_TOLASTPAGE;
+  if (pInfo != NULL && (pInfo->m_pPD->m_pd.Flags & PD_PAGENUMS)) {
+    pageSet.rgPages[0].nFromPage = (LONG)pInfo->GetFromPage();
+    pageSet.rgPages[0].nToPage = (LONG)pInfo->GetToPage();
+  }
+  PAGESET* pSet = &pageSet;
+  LONG nPrinted = 0, nLast = 0;
+  m_pIPrint->Print(PRINTFLAG_MAYBOTHERUSER, ptd != NULL ? &ptd : NULL, &pSet, NULL, NULL,
+                   pInfo != NULL ? (LONG)pInfo->m_nOffsetPage + 1 : 1, &nPrinted, &nLast);
+  if (ptd != NULL) ::CoTaskMemFree(ptd);
+  if (pInfo != NULL) pInfo->m_bContinuePrinting = FALSE;  // the object printed every page
 }
 
 // The DocObject active in the view, if any.
