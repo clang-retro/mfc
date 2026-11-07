@@ -61,6 +61,12 @@ when there is no display:
   member, derived classes), interface maps, aggregation, a
   COleObjectFactory in the same process and its registry entries, and
   the program started again by COM as a local server, on the console.
+* `conntest`: connection points and type libraries, on the console: a
+  connection map through IConnectionPointContainer and
+  IConnectionPoint (enumeration, limits, cookies), AfxConnectionAdvise
+  with and without a reference, events fired to dispatch sinks, and the
+  type information of IMPLEMENT_OLETYPELIB from a type library the test
+  writes and registers.
 * `socktest`: `afxsock.h` over the loopback interface: CAsyncSocket
   events, blocking CSocket calls against a server thread, CArchive
   through a CSocketFile, datagrams, errors and cancelling a blocking
@@ -142,7 +148,10 @@ request with the stock MinGW-w64 toolchain.
 * `afxdisp.h`: automation clients (COleDispatchDriver and the variant,
   date, currency and safe array classes) and servers: dispatch maps on
   any CCmdTarget, interface maps, aggregation, COleObjectFactory with
-  registration and licensing, AfxOleLockApp and the /Automation start.
+  registration and licensing, AfxOleLockApp and the /Automation start,
+  connection points (connection maps, CConnectionPoint,
+  AfxConnectionAdvise) and type libraries (DECLARE_OLETYPELIB,
+  IMPLEMENT_OLETYPELIB, AfxOleRegisterTypeLib).
 * `afxole.h`: data transfer: COleDataSource (cached and delayed data,
   the clipboard, DoDragDrop), COleDataObject, COleDropSource and
   COleDropTarget, with the CView drag and drop handlers. Containers:
@@ -193,9 +202,9 @@ request with the stock MinGW-w64 toolchain.
   the arguments, so the function's parameter types must be the ones its
   VTS_ string describes (as they must in MFC) and it must not be
   overloaded. Drag scrolling starts as soon as the pointer is in the
-  inset, without waiting nScrollDelay. Type libraries (EnableTypeLib), connection points and
-  events and ActiveX control containment are not
-  implemented yet.
+  inset, without waiting nScrollDelay. ActiveX control containment is
+  not implemented yet. A connection point's cookie is the sink's
+  interface pointer.
 * Servers do not give links to their items yet. COleDocument saves its items in its own format,
   which is not the one Visual C++ MFC writes. Wine's
   OleCreateStaticFromData makes objects without IOleObject, so static

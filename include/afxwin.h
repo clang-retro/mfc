@@ -14,6 +14,7 @@
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shellapi.h>
+#include <ocidl.h>
 
 // Resource types MFC adds
 #ifndef RT_DLGINIT
@@ -1024,6 +1025,53 @@ public:
                     VARIANT* pvarResult, EXCEPINFO* pexcepinfo, UINT* puArgErr);
 };
 
+// Connection maps: the connection points (outgoing interfaces) of an
+// object, each a CConnectionPoint member made by BEGIN_CONNECTION_PART.
+struct AFX_CONNECTIONMAP_ENTRY {
+  const void* piid;  // NULL ends the map
+  size_t nOffset;
+};
+struct AFX_CONNECTIONMAP {
+  const AFX_CONNECTIONMAP* (PASCAL* pfnGetBaseMap)();
+  const AFX_CONNECTIONMAP_ENTRY* pEntry;
+};
+
+#define DECLARE_CONNECTION_MAP() \
+protected: \
+  static const AFX_CONNECTIONMAP* PASCAL GetThisConnectionMap(); \
+  virtual const AFX_CONNECTIONMAP* GetConnectionMap() const;
+
+#define BEGIN_CONNECTION_MAP(theClass, theBase) \
+  const AFX_CONNECTIONMAP* theClass::GetConnectionMap() const { return GetThisConnectionMap(); } \
+  const AFX_CONNECTIONMAP* PASCAL theClass::GetThisConnectionMap() { \
+    typedef theBase TheBaseClass; \
+    _AFX_NO_OFFSETOF_WARNING_BEGIN \
+    static const AFX_CONNECTIONMAP_ENTRY _connectionEntries[] = {
+
+#define CONNECTION_PART(theClass, iid, localClass) {&iid, offsetof(theClass, m_x##localClass)},
+
+#define END_CONNECTION_MAP() \
+      {NULL, (size_t)-1}}; \
+    _AFX_NO_OFFSETOF_WARNING_END \
+    static const AFX_CONNECTIONMAP connectionMap = {&TheBaseClass::GetThisConnectionMap, \
+                                                    &_connectionEntries[0]}; \
+    return &connectionMap; \
+  }
+
+// The IConnectionPointContainer of every CCmdTarget, answered once
+// EnableConnections has been called.
+class _AfxConnPtContainerImpl : public IConnectionPointContainer {
+public:
+  STDMETHOD(QueryInterface)(REFIID iid, LPVOID* ppvObj);
+  STDMETHOD_(ULONG, AddRef)();
+  STDMETHOD_(ULONG, Release)();
+  STDMETHOD(EnumConnectionPoints)(IEnumConnectionPoints** ppEnum);
+  STDMETHOD(FindConnectionPoint)(REFIID iid, IConnectionPoint** ppCP);
+};
+
+class CTypeLibCache;
+class CConnectionPoint;
+
 class _AfxInnerUnknownImpl : public IUnknown {
 public:
   STDMETHOD(QueryInterface)(REFIID iid, LPVOID* ppvObj);
@@ -1047,7 +1095,7 @@ public:
   // Automation: after EnableAutomation, GetIDispatch returns an IDispatch
   // that the class's dispatch map implements.
   void EnableAutomation();
-  void EnableConnections() {}
+  void EnableConnections();
   void EnableTypeLib() {}
   LPDISPATCH GetIDispatch(BOOL bAddRef);
   static CCmdTarget* PASCAL FromIDispatch(LPDISPATCH lpDispatch);
@@ -1056,11 +1104,20 @@ public:
   // For DISP_PROPERTY_EX entries of read-only and write-only properties.
   void GetNotSupported();
   void SetNotSupported();
+  // Type information, from the type library of IMPLEMENT_OLETYPELIB.
   virtual UINT GetTypeInfoCount() { return 0; }
-  virtual HRESULT GetTypeInfoOfGuid(LCID, REFGUID, LPTYPEINFO* ppTypeInfo) {
-    *ppTypeInfo = NULL;
-    return TYPE_E_ELEMENTNOTFOUND;
+  virtual HRESULT GetTypeLib(LCID, LPTYPELIB* ppTypeLib) {
+    *ppTypeLib = NULL;
+    return TYPE_E_CANTLOADLIBRARY;
   }
+  virtual CTypeLibCache* GetTypeLibCache() { return NULL; }
+  virtual HRESULT GetTypeInfoOfGuid(LCID lcid, REFGUID guid, LPTYPEINFO* ppTypeInfo);
+
+  // Connection points: those of the connection map, then the hook's and
+  // the extra ones.
+  virtual LPCONNECTIONPOINT GetConnectionHook(REFIID) { return NULL; }
+  virtual BOOL GetExtraConnectionPoints(CPtrArray*) { return FALSE; }
+  CConnectionPoint* FindConnection(REFIID iid);
 
   // Reference counting and interfaces. The External functions go to the
   // controlling unknown when the object is aggregated.
@@ -1082,7 +1139,9 @@ public:
   LPUNKNOWN m_pOuterUnknown;
   _AfxInnerUnknownImpl m_xInnerUnknown;
   _AfxDispatchImpl m_xDispatch;
+  _AfxConnPtContainerImpl m_xConnPtContainer;
   BOOL m_bAutomation;
+  BOOL m_bConnections;
   BOOL m_bAggregation;
   BOOL m_bResultExpected;
 
@@ -1096,9 +1155,11 @@ public:
                       VARIANT* pvarResult, EXCEPINFO* pExcepInfo, UINT* puArgErr);
 
   friend class _AfxDispatchImpl;
+  friend class _AfxConnPtContainerImpl;
   DECLARE_MESSAGE_MAP()
   DECLARE_DISPATCH_MAP()
   DECLARE_INTERFACE_MAP()
+  DECLARE_CONNECTION_MAP()
 };
 
 class CCmdUI {

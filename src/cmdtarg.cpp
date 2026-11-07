@@ -9,6 +9,7 @@ CCmdTarget::CCmdTarget()
     : m_dwRef(1),
       m_pOuterUnknown(NULL),
       m_bAutomation(FALSE),
+      m_bConnections(FALSE),
       m_bAggregation(FALSE),
       m_bResultExpected(TRUE) {}
 
