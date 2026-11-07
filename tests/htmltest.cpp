@@ -440,15 +440,28 @@ public:
   }
 };
 
-class CFakeHtmlDoc final : public CStubHTMLDocument2, public IConnectionPointContainer {
+class CFakeHtmlDoc final : public CStubHTMLDocument2,
+                          public IConnectionPointContainer,
+                          public IOleCommandTarget,
+                          public IPersistStreamInit {
 public:
   FAKE_REFCOUNT
   CFakeCollection* m_pAll;
   CString m_strTitle;
   CFakeEvents m_events;
+  // For HTML editing: design mode, the editing commands, the text.
+  CString m_strDesignMode;
+  DWORD m_nLastCmd, m_nLastOpt;
+  COleVariant m_varLastIn;
+  int m_nCmds;
+  BOOL m_bBold, m_bDirty;
+  CStringW m_strSource;
+  int m_nInitNew;
   CFakeHtmlDoc()
       : m_nRef(1), m_pAll(new CFakeCollection),
-        m_events(static_cast<IHTMLDocument2*>(this), kDIID_HTMLDocumentEvents2) {
+        m_events(static_cast<IHTMLDocument2*>(this), kDIID_HTMLDocumentEvents2),
+        m_nLastCmd(0), m_nLastOpt(0), m_nCmds(0), m_bBold(FALSE), m_bDirty(FALSE),
+        m_nInitNew(0) {
     g_nDomAlive++;
   }
   ~CFakeHtmlDoc() {
@@ -482,6 +495,10 @@ public:
       *ppv = static_cast<IHTMLDocument2*>(this);
     else if (iid == IID_IConnectionPointContainer)
       *ppv = static_cast<IConnectionPointContainer*>(this);
+    else if (iid == IID_IOleCommandTarget)
+      *ppv = static_cast<IOleCommandTarget*>(this);
+    else if (iid == IID_IPersistStreamInit)
+      *ppv = static_cast<IPersistStreamInit*>(this);
     else {
       *ppv = NULL;
       return E_NOINTERFACE;
@@ -492,6 +509,125 @@ public:
   FAKE_DISPATCH_INFO
   STDMETHOD(Invoke)(DISPID, REFIID, LCID, WORD, DISPPARAMS*, VARIANT*, EXCEPINFO*, UINT*) {
     return DISP_E_MEMBERNOTFOUND;
+  }
+  STDMETHOD(put_designMode)(BSTR v) {
+    m_strDesignMode = v;
+    return S_OK;
+  }
+  STDMETHOD(get_designMode)(BSTR* p) {
+    *p = ::SysAllocString(CStringW(m_strDesignMode));
+    return S_OK;
+  }
+
+  // ----- The editing commands (CGID_MSHTML)
+  static BOOL IsMshtml(const GUID* pGuid) {
+    static const GUID kMshtml = {
+        0xde4ba900, 0x59ca, 0x11cf, {0x95, 0x92, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+    return pGuid != NULL && *pGuid == kMshtml;
+  }
+  STDMETHOD(QueryStatus)(const GUID* pGuid, ULONG cCmds, OLECMD* prgCmds, OLECMDTEXT*) {
+    if (!IsMshtml(pGuid)) return OLECMDERR_E_UNKNOWNGROUP;
+    for (ULONG i = 0; i < cCmds; i++) {
+      DWORD f = OLECMDF_SUPPORTED;
+      if (prgCmds[i].cmdID != IDM_PASTE) f |= OLECMDF_ENABLED;  // nothing to paste
+      if (prgCmds[i].cmdID == IDM_BOLD && m_bBold) f |= OLECMDF_LATCHED;
+      prgCmds[i].cmdf = f;
+    }
+    return S_OK;
+  }
+  STDMETHOD(Exec)(const GUID* pGuid, DWORD nCmdID, DWORD nOpt, VARIANT* pIn, VARIANT* pOut) {
+    if (!IsMshtml(pGuid)) return OLECMDERR_E_UNKNOWNGROUP;
+    m_nCmds++;
+    m_nLastCmd = nCmdID;
+    m_nLastOpt = nOpt;
+    m_varLastIn.Clear();
+    if (pIn != NULL) m_varLastIn = *pIn;
+    if (nCmdID == IDM_BOLD) m_bBold = !m_bBold;
+    if (nCmdID == IDM_SETDIRTY && pIn != NULL && pIn->vt == VT_BOOL)
+      m_bDirty = pIn->boolVal != VARIANT_FALSE;
+    if (pOut == NULL) return S_OK;
+    ::VariantInit(pOut);
+    switch (nCmdID) {
+      case IDM_FONTNAME:
+        pOut->vt = VT_BSTR;
+        pOut->bstrVal = ::SysAllocString(L"Arial");
+        break;
+      case IDM_BLOCKFMT:
+        pOut->vt = VT_BSTR;
+        pOut->bstrVal = ::SysAllocString(L"Normal");
+        break;
+      case IDM_FONTSIZE:
+        pOut->vt = VT_I4;
+        pOut->lVal = 3;
+        break;
+      case IDM_FORECOLOR:
+        pOut->vt = VT_I4;
+        pOut->lVal = 0xff;
+        break;
+      case IDM_BACKCOLOR:
+        pOut->vt = VT_NULL;  // the selection has more than one
+        break;
+      case IDM_GETBLOCKFMTS: {
+        SAFEARRAY* psa = ::SafeArrayCreateVector(VT_BSTR, 0, 2);
+        LONG i = 0;
+        BSTR b = ::SysAllocString(L"Normal");
+        ::SafeArrayPutElement(psa, &i, b);
+        ::SysFreeString(b);
+        i = 1;
+        b = ::SysAllocString(L"Heading 1");
+        ::SafeArrayPutElement(psa, &i, b);
+        ::SysFreeString(b);
+        pOut->vt = VT_ARRAY | VT_BSTR;
+        pOut->parray = psa;
+        break;
+      }
+      default:
+        break;
+    }
+    return S_OK;
+  }
+
+  // ----- The page's text
+  STDMETHOD(GetClassID)(CLSID* p) {
+    *p = CLSID_NULL;
+    return E_NOTIMPL;
+  }
+  STDMETHOD(IsDirty)() { return m_bDirty ? S_OK : S_FALSE; }
+  STDMETHOD(Load)(LPSTREAM pStm) {
+    CByteArray ba;
+    BYTE buf[256];
+    ULONG cb = 0;
+    while (SUCCEEDED(pStm->Read(buf, sizeof(buf), &cb)) && cb != 0) {
+      INT_PTR n = ba.GetSize();
+      ba.SetSize(n + cb);
+      memcpy(ba.GetData() + n, buf, cb);
+    }
+    // UTF-16 with its mark, as CHtmlEditCtrlBase writes it.
+    if (ba.GetSize() < 2 || ba[0] != 0xFF || ba[1] != 0xFE) return E_FAIL;
+    m_strSource = CStringW((LPCWSTR)(ba.GetData() + 2), (int)(ba.GetSize() - 2) / 2);
+    m_bDirty = TRUE;
+    return S_OK;
+  }
+  STDMETHOD(Save)(LPSTREAM pStm, BOOL) {
+    // UTF-8, as a page usually is.
+    CStringA strA;
+    int cb = ::WideCharToMultiByte(CP_UTF8, 0, m_strSource, m_strSource.GetLength(), NULL, 0,
+                                   NULL, NULL);
+    if (cb > 0) {
+      ::WideCharToMultiByte(CP_UTF8, 0, m_strSource, m_strSource.GetLength(), strA.GetBuffer(cb),
+                            cb, NULL, NULL);
+      strA.ReleaseBuffer(cb);
+    }
+    return pStm->Write((LPCSTR)strA, (ULONG)strA.GetLength(), NULL);
+  }
+  STDMETHOD(GetSizeMax)(ULARGE_INTEGER* p) {
+    p->QuadPart = 0;
+    return E_NOTIMPL;
+  }
+  STDMETHOD(InitNew)() {
+    m_strSource.Empty();
+    m_nInitNew++;
+    return S_OK;
   }
   STDMETHOD(get_all)(IHTMLElementCollection** p) {
     *p = m_pAll;
@@ -554,18 +690,25 @@ public:
       AddRef();
       return S_OK;
     }
+    // Room for two sinks: the container's, and one of the control's
+    // own (CHtmlEditCtrl's).
     STDMETHOD(Advise)(LPUNKNOWN pUnk, DWORD* pdwCookie) {
       *pdwCookie = 0;
-      if (m_pOwner->m_pSink != NULL) return CONNECT_E_ADVISELIMIT;
-      if (FAILED(pUnk->QueryInterface(IID_IDispatch, (void**)&m_pOwner->m_pSink)))
-        return CONNECT_E_CANNOTCONNECT;
-      *pdwCookie = 1;
+      LPDISPATCH* ppSlot = m_pOwner->m_pSink == NULL    ? &m_pOwner->m_pSink
+                           : m_pOwner->m_pSink2 == NULL ? &m_pOwner->m_pSink2
+                                                        : NULL;
+      if (ppSlot == NULL) return CONNECT_E_ADVISELIMIT;
+      if (FAILED(pUnk->QueryInterface(IID_IDispatch, (void**)ppSlot))) return CONNECT_E_CANNOTCONNECT;
+      *pdwCookie = ppSlot == &m_pOwner->m_pSink ? 1 : 2;
       return S_OK;
     }
     STDMETHOD(Unadvise)(DWORD dwCookie) {
-      if (dwCookie != 1 || m_pOwner->m_pSink == NULL) return CONNECT_E_NOCONNECTION;
-      m_pOwner->m_pSink->Release();
-      m_pOwner->m_pSink = NULL;
+      LPDISPATCH* ppSlot = dwCookie == 1   ? &m_pOwner->m_pSink
+                           : dwCookie == 2 ? &m_pOwner->m_pSink2
+                                           : NULL;
+      if (ppSlot == NULL || *ppSlot == NULL) return CONNECT_E_NOCONNECTION;
+      (*ppSlot)->Release();
+      *ppSlot = NULL;
       return S_OK;
     }
     STDMETHOD(EnumConnections)(IEnumConnections** pp) {
@@ -582,6 +725,7 @@ public:
   LPOLEINPLACESITE m_pIPSite;
   IDocHostUIHandler* m_pHostUI;
   LPDISPATCH m_pSink;
+  LPDISPATCH m_pSink2;
   HWND m_hWnd;
   CFakeDoc* m_pDoc;
   IDispatch* m_pDocOverride;  // the document it shows instead
@@ -614,6 +758,7 @@ public:
         m_pIPSite(NULL),
         m_pHostUI(NULL),
         m_pSink(NULL),
+        m_pSink2(NULL),
         m_hWnd(NULL),
         m_pDoc(new CFakeDoc),
         m_pDocOverride(g_pNextDoc),
@@ -655,11 +800,12 @@ public:
 
   // Fires an event with the arguments in their declared order.
   void Fire(DISPID dispid, VARIANT* pArgs = NULL, UINT nArgs = 0) {
-    if (m_pSink == NULL) return;
     VARIANT rev[8];
     for (UINT i = 0; i < nArgs; i++) rev[i] = pArgs[nArgs - 1 - i];
     DISPPARAMS dp = {nArgs ? rev : NULL, NULL, nArgs, 0};
-    m_pSink->Invoke(dispid, IID_NULL, 0, DISPATCH_METHOD, &dp, NULL, NULL, NULL);
+    if (m_pSink != NULL) m_pSink->Invoke(dispid, IID_NULL, 0, DISPATCH_METHOD, &dp, NULL, NULL, NULL);
+    if (m_pSink2 != NULL)
+      m_pSink2->Invoke(dispid, IID_NULL, 0, DISPATCH_METHOD, &dp, NULL, NULL, NULL);
   }
   static VARIANT Disp(IDispatch* p) {
     VARIANT v;
@@ -2002,6 +2148,218 @@ void TestDHtmlDialog(CWnd* pParent) {
 }
 
 // =====================================================================
+// HTML editing: CHtmlEditView, CHtmlEditDoc and CHtmlEditCtrl
+
+#define ID_TEST_BOLD 32901
+#define ID_TEST_MYBOLD 32902
+#define ID_TEST_IMAGE 32903
+
+class CTestEditView : public CHtmlEditView {
+public:
+  int m_nMyBold;
+  UINT m_nImageID;
+  CTestEditView() : m_nMyBold(0), m_nImageID(0) {}
+  void OnMyBold() { m_nMyBold++; }
+  void OnImage(UINT nID) { m_nImageID = nID; }
+  DECLARE_DHTMLEDITING_CMDMAP(CTestEditView)
+};
+
+BEGIN_DHTMLEDITING_CMDMAP(CTestEditView)
+  DHTMLEDITING_CMD_ENTRY_TYPE(ID_TEST_BOLD, IDM_BOLD, AFX_UI_ELEMTYPE_CHECKBOX)
+  DHTMLEDITING_CMD_ENTRY_FUNC(ID_TEST_MYBOLD, IDM_BOLD, OnMyBold)
+  DHTMLEDITING_CMD_ENTRY_FUNC_TYPE(ID_TEST_IMAGE, IDM_IMAGE, OnImage, AFX_UI_ELEMTYPE_RADIO)
+END_DHTMLEDITING_CMDMAP()
+
+// What an update handler did.
+class CTestCmdUI : public CCmdUI {
+public:
+  BOOL m_bEnabled;
+  int m_nCheck;
+  int m_nRadio;
+  CTestCmdUI(UINT nID) : m_bEnabled(-1), m_nCheck(-1), m_nRadio(-1) {
+    m_nID = nID;
+    m_nIndexMax = 1;
+  }
+  virtual void Enable(BOOL bOn) {
+    m_bEnabled = bOn;
+    m_bEnableChanged = TRUE;
+  }
+  virtual void SetCheck(int nCheck) { m_nCheck = nCheck; }
+  virtual void SetRadio(BOOL bOn) { m_nRadio = bOn; }
+};
+
+static CTestCmdUI UpdateOf(CView* pView, UINT nID) {
+  CTestCmdUI ui(nID);
+  ui.DoUpdate(pView, FALSE);
+  return ui;
+}
+
+static BOOL LastIn(CFakeHtmlDoc* pDoc, LPCWSTR lpsz) {
+  return pDoc->m_varLastIn.vt == VT_BSTR && wcscmp(pDoc->m_varLastIn.bstrVal, lpsz) == 0;
+}
+
+static void TestHtmlEditView(CWnd* pParent) {
+  TestLog("html edit view");
+  CFakeHtmlDoc* pDoc = new CFakeHtmlDoc;
+  pDoc->m_strSource = L"<p>hi</p>";
+  pDoc->m_strTitle = _T("Edit Me");
+  g_pNextDoc = static_cast<IHTMLDocument2*>(pDoc);
+  int nBrowsersBefore = CFakeBrowser::s_nAlive;
+  CHtmlEditDoc* pEditDoc = new CHtmlEditDoc;
+  pEditDoc->m_bAutoDelete = FALSE;  // the test deletes it
+  CTestEditView* pView = new CTestEditView;
+  BOOL bMade = pView->Create(NULL, NULL, WS_CHILD | WS_VISIBLE, CRect(0, 0, 200, 120), pParent,
+                             0xE901, NULL);
+  g_pNextDoc = NULL;
+  CHECK(bMade);
+  if (!bMade) {
+    delete pEditDoc;
+    pDoc->Release();
+    return;
+  }
+  pEditDoc->AddView(pView);
+  CFakeBrowser* pBrowser = CFakeBrowser::s_pLast;
+
+  // The start page, in design mode.
+  CHECK(pBrowser->m_strURL == _T("about:blank"));
+  CHECK(pDoc->m_strDesignMode == _T("On"));
+  CComPtr<IHTMLDocument2> spDoc;
+  CHECK(pView->GetDHtmlDocument(&spDoc) && spDoc == static_cast<IHTMLDocument2*>(pDoc));
+  CHECK(pView->GetDocument() == pEditDoc && pEditDoc->GetView() == pView);
+  CString str;
+  CHECK(SUCCEEDED(pView->GetDocumentTitle(str)) && str == _T("Edit Me"));
+  CHECK(pView->SetDesignMode(FALSE) && pDoc->m_strDesignMode == _T("Off"));
+  pView->SetDesignMode(TRUE);
+
+  // Commands: plain, with a string, a number and a flag.
+  CHECK(SUCCEEDED(pView->Bold()));
+  CHECK(pDoc->m_nLastCmd == IDM_BOLD && pDoc->m_nLastOpt == OLECMDEXECOPT_DODEFAULT &&
+        pDoc->m_varLastIn.vt == VT_EMPTY);
+  CHECK(SUCCEEDED(pView->SetFontFace(_T("Verdana"))));
+  CHECK(pDoc->m_nLastCmd == IDM_FONTNAME && pDoc->m_nLastOpt == OLECMDEXECOPT_DONTPROMPTUSER &&
+        LastIn(pDoc, L"Verdana"));
+  CHECK(SUCCEEDED(pView->SetFontSize(5)));
+  CHECK(pDoc->m_nLastCmd == IDM_FONTSIZE && pDoc->m_varLastIn.vt == VT_I4 &&
+        pDoc->m_varLastIn.lVal == 5);
+  CHECK(SUCCEEDED(pView->ShowBorders(true)));
+  CHECK(pDoc->m_nLastCmd == IDM_SHOWZEROBORDERATDESIGNTIME && pDoc->m_varLastIn.vt == VT_BOOL &&
+        pDoc->m_varLastIn.boolVal == VARIANT_TRUE);
+  CHECK(SUCCEEDED(pView->Image()));  // no URL: MSHTML asks
+  CHECK(pDoc->m_nLastCmd == IDM_IMAGE && pDoc->m_nLastOpt == OLECMDEXECOPT_DODEFAULT &&
+        pDoc->m_varLastIn.vt == VT_EMPTY);
+  CHECK(SUCCEEDED(pView->SetHyperLink(_T("http://example.test/"))));
+  CHECK(pDoc->m_nLastCmd == IDM_HYPERLINK && LastIn(pDoc, L"http://example.test/"));
+  CHECK(SUCCEEDED(pView->SetForeColor(0x00ff00)) && pDoc->m_nLastCmd == IDM_FORECOLOR);
+  // Another command group goes to the document as given.
+  static const GUID kOther = {1, 2, 3, {4, 5, 6, 7, 8, 9, 10, 11}};
+  CHECK(pView->ExecCommand(&kOther, IDM_BOLD, OLECMDEXECOPT_DODEFAULT) ==
+        OLECMDERR_E_UNKNOWNGROUP);
+
+  // The current values.
+  CHECK(SUCCEEDED(pView->GetFontFace(str)) && str == _T("Arial"));
+  short nSize = 0;
+  CHECK(SUCCEEDED(pView->GetFontSize(nSize)) && nSize == 3);
+  int nColor = 0;
+  CHECK(SUCCEEDED(pView->GetForeColor(nColor)) && nColor == 0xff);
+  CHECK(pView->GetBackColor(nColor) == S_FALSE && nColor == 0);  // more than one
+  CHECK(SUCCEEDED(pView->GetBlockFormat(str)) && str == _T("Normal"));
+  CStringArray saFormats;
+  CHECK(SUCCEEDED(pView->GetBlockFormatNames(saFormats)) && saFormats.GetSize() == 2 &&
+        saFormats[1] == _T("Heading 1"));
+  CHECK((pView->QueryStatus(IDM_PASTE) & OLECMDF_ENABLED) == 0);
+  CHECK((pView->QueryStatus(IDM_COPY) & OLECMDF_ENABLED) != 0);
+
+  // The page's text.
+  CHECK(SUCCEEDED(pView->GetDocumentHTML(str)) && str == _T("<p>hi</p>"));
+  CHECK(SUCCEEDED(pView->SetDocumentHTML(_T("<p>new</p>"))));
+  CHECK(pDoc->m_strSource == L"<p>new</p>");
+  CHECK(pView->IsDirty() == S_OK && pEditDoc->IsModified());
+  pDoc->m_bDirty = FALSE;
+  CHECK(pView->IsDirty() == S_FALSE && !pEditDoc->IsModified());
+
+  // The editing command map: CHtmlEditView's and the class's own.
+  CTestCmdUI uiPaste = UpdateOf(pView, ID_EDIT_PASTE);
+  CHECK(uiPaste.m_bEnabled == FALSE);
+  CTestCmdUI uiCopy = UpdateOf(pView, ID_EDIT_COPY);
+  CHECK(uiCopy.m_bEnabled == TRUE && uiCopy.m_nCheck == -1);
+  pDoc->m_bBold = FALSE;
+  CHECK(UpdateOf(pView, ID_TEST_BOLD).m_nCheck == 0);
+  pDoc->m_bBold = TRUE;
+  CHECK(UpdateOf(pView, ID_TEST_BOLD).m_nCheck == 1);
+  CTestCmdUI uiImage = UpdateOf(pView, ID_TEST_IMAGE);
+  CHECK(uiImage.m_bEnabled == TRUE && uiImage.m_nRadio == FALSE);
+  pView->SendMessage(WM_COMMAND, ID_EDIT_COPY);
+  CHECK(pDoc->m_nLastCmd == IDM_COPY);
+  pView->SendMessage(WM_COMMAND, ID_TEST_BOLD);
+  CHECK(pDoc->m_nLastCmd == IDM_BOLD && pDoc->m_bBold == FALSE);
+  // A handler instead of the command.
+  int nCmds = pDoc->m_nCmds;
+  pView->SendMessage(WM_COMMAND, ID_TEST_MYBOLD);
+  CHECK(pView->m_nMyBold == 1 && pDoc->m_nCmds == nCmds);
+  pView->SendMessage(WM_COMMAND, ID_TEST_IMAGE);
+  CHECK(pView->m_nImageID == ID_TEST_IMAGE && pDoc->m_nCmds == nCmds);
+
+  // CHtmlEditDoc: saving writes the text and clears the change.
+  TCHAR szTemp[MAX_PATH], szFile[MAX_PATH];
+  ::GetTempPath(MAX_PATH, szTemp);
+  ::GetTempFileName(szTemp, _T("hte"), 0, szFile);
+  pDoc->m_bDirty = TRUE;
+  CHECK(pEditDoc->OnSaveDocument(szFile));
+  CHECK(pDoc->m_nLastCmd == IDM_SETDIRTY && !pDoc->m_bDirty && !pEditDoc->IsModified());
+  CFile file;
+  if (file.Open(szFile, CFile::modeRead)) {
+    char buf[64] = {0};
+    UINT n = file.Read(buf, sizeof(buf) - 1);
+    file.Close();
+    CHECK(n == 13 && memcmp(buf, "\xEF\xBB\xBF<p>new</p>", 13) == 0);
+  } else {
+    CHECK(!"saved file");
+  }
+  ::DeleteFile(szFile);
+  // A new document starts empty.
+  int nInit = pDoc->m_nInitNew;
+  CHECK(pEditDoc->OnNewDocument());
+  CHECK(pDoc->m_nInitNew == nInit + 1 && pDoc->m_strSource.IsEmpty());
+  // Opening one is navigating to it.
+  CHECK(pEditDoc->OpenURL(_T("http://example.test/edit")));
+  CHECK(pBrowser->m_strURL == _T("http://example.test/edit"));
+
+  pView->DestroyWindow();  // the view deletes itself
+  CHECK(CFakeBrowser::s_nAlive == nBrowsersBefore);
+  CHECK(pEditDoc->GetView() == NULL);
+  delete pEditDoc;
+  pDoc->Release();
+}
+
+static void TestHtmlEditCtrl(CWnd* pParent) {
+  TestLog("html edit control");
+  CFakeHtmlDoc* pDoc = new CFakeHtmlDoc;
+  g_pNextDoc = static_cast<IHTMLDocument2*>(pDoc);
+  int nBrowsersBefore = CFakeBrowser::s_nAlive;
+  CHtmlEditCtrl* pCtl = new CHtmlEditCtrl;
+  BOOL bMade = pCtl->Create(NULL, WS_CHILD | WS_VISIBLE, CRect(0, 0, 160, 90), pParent, 0x1234);
+  g_pNextDoc = NULL;
+  CHECK(bMade);
+  if (bMade) {
+    CFakeBrowser* pBrowser = CFakeBrowser::s_pLast;
+    CHECK(pBrowser->m_strURL == _T("about:blank"));
+    // Its own connection to the browser put the page in design mode.
+    CHECK(pBrowser->m_pSink2 != NULL);
+    CHECK(pDoc->m_strDesignMode == _T("On"));
+    CComPtr<IHTMLDocument2> spDoc;
+    CHECK(pCtl->GetDHtmlDocument(&spDoc) && spDoc == static_cast<IHTMLDocument2*>(pDoc));
+    spDoc.Release();
+    CHECK(SUCCEEDED(pCtl->Italic()) && pDoc->m_nLastCmd == IDM_ITALIC);
+    CHECK(SUCCEEDED(pCtl->Bookmark(_T("here"))) && pDoc->m_nLastCmd == IDM_BOOKMARK &&
+          LastIn(pDoc, L"here"));
+    pCtl->DestroyWindow();
+    CHECK(CFakeBrowser::s_nAlive == nBrowsersBefore);
+  }
+  delete pCtl;
+  pDoc->Release();
+}
+
+// =====================================================================
 // The frame and the steps
 
 class CMainFrame : public CFrameWnd {
@@ -2363,6 +2721,8 @@ void CMainFrame::RunTests() {
   TestDocument(pView, pBrowser);
   TestHostUI(pView, pBrowser);
   TestDHtmlDialog(this);
+  TestHtmlEditView(this);
+  TestHtmlEditCtrl(this);
   pView->Navigate2(_T("http://example.test/shown"));
   ::InvalidateRect(pBrowser->m_hWnd, NULL, TRUE);
   PumpMessages();

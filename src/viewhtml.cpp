@@ -448,49 +448,7 @@ BOOL CHtmlView::GetSource(CString& refString) {
   refString.Empty();
   LPDISPATCH pDisp = GetHtmlDocument();
   if (pDisp == NULL) return FALSE;
-  BOOL bOK = FALSE;
-  IPersistStreamInit* pPersist = NULL;
-  if (SUCCEEDED(pDisp->QueryInterface(IID_IPersistStreamInit, (void**)&pPersist))) {
-    IStream* pStream = NULL;
-    if (SUCCEEDED(::CreateStreamOnHGlobal(NULL, TRUE, &pStream))) {
-      if (SUCCEEDED(pPersist->Save(pStream, FALSE))) {
-        HGLOBAL hGlobal = NULL;
-        ::GetHGlobalFromStream(pStream, &hGlobal);
-        STATSTG stat;
-        memset(&stat, 0, sizeof(stat));
-        pStream->Stat(&stat, STATFLAG_NONAME);
-        const BYTE* pb = (const BYTE*)::GlobalLock(hGlobal);
-        int cb = (int)stat.cbSize.QuadPart;
-        if (pb != NULL) {
-          if (cb >= 2 && pb[0] == 0xFF && pb[1] == 0xFE) {
-            // UTF-16 with its byte order mark.
-            refString = CStringW((LPCWSTR)(pb + 2), (cb - 2) / 2);
-          } else {
-            if (cb >= 3 && pb[0] == 0xEF && pb[1] == 0xBB && pb[2] == 0xBF) {
-              pb += 3;
-              cb -= 3;
-            }
-            // UTF-8 when it is valid, else the ANSI code page.
-            UINT cp = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, (LPCSTR)pb, cb,
-                                            NULL, 0) > 0 || cb == 0
-                          ? CP_UTF8
-                          : CP_ACP;
-            int cch = ::MultiByteToWideChar(cp, 0, (LPCSTR)pb, cb, NULL, 0);
-            CStringW strW;
-            if (cch > 0) {
-              ::MultiByteToWideChar(cp, 0, (LPCSTR)pb, cb, strW.GetBuffer(cch), cch);
-              strW.ReleaseBuffer(cch);
-            }
-            refString = strW;
-          }
-          ::GlobalUnlock(hGlobal);
-          bOK = TRUE;
-        }
-      }
-      pStream->Release();
-    }
-    pPersist->Release();
-  }
+  BOOL bOK = SUCCEEDED(_AfxHtmlEditGetHTML(pDisp, refString));
   pDisp->Release();
   return bOK;
 }
