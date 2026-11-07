@@ -18,7 +18,7 @@ BIN=${BIN:-}
 CXX=${BIN:+$BIN/}clang++
 RC=${RC:-${BIN:+$BIN/}llvm-windres}
 LDFLAGS=${LDFLAGS:-}
-TESTS=${TESTS:-"core disptest socktest dlgtest sditest mditest docktest splittest richtest dbtest rvtest autotest conntest dragtest oletest srvtest linktest richsrvtest iptest docobtest occtest ctltest dlltest"}
+TESTS=${TESTS:-"core disptest socktest inettest dlgtest sditest mditest docktest splittest richtest dbtest rvtest autotest conntest dragtest oletest srvtest linktest richsrvtest iptest docobtest occtest ctltest dlltest"}
 
 if [ -z "${DISPLAY:-}" ] && [ -z "${MFC_TEST_NO_XVFB:-}" ] && command -v xvfb-run >/dev/null 2>&1; then
   MFC_TEST_NO_XVFB=1 exec xvfb-run -a -s "-screen 0 1024x768x24" "$0" "$@"
@@ -168,6 +168,8 @@ for v in a u; do
       if [ $HAVE_WINE = 1 ]; then
         if timeout 120 wine "$exe" > "$T/$v/$name.log" 2>&1; then
           echo "PASS   $name-$v"; npass=$((npass + 1))
+          # Notes a passing test leaves, such as checks it could not run.
+          grep '^note:' "$T/$v/$name.log" | sed 's/^/       /'
         else
           echo "FAIL   $name-$v"; sed 's/^/       /' "$T/$v/$name.log"; nfail=$((nfail + 1))
         fi

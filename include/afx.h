@@ -802,6 +802,9 @@ public:
   virtual BOOL FindNextFile();
 
 protected:
+  // Ends the search handle; finders of other kinds of files override it.
+  virtual void CloseContext();
+
   WIN32_FIND_DATA* m_pFoundInfo;
   WIN32_FIND_DATA* m_pNextInfo;
   HANDLE m_hContext;
