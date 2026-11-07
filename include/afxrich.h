@@ -8,6 +8,7 @@
 #include "afxwin.h"
 #include "afxext.h"
 #include "afxdlgs.h"
+#include "afxole.h"
 #include <richedit.h>
 #include <richole.h>
 
@@ -66,6 +67,23 @@ public:
   BOOL CanPaste() const;
   static BOOL AFX_CDECL IsRichEditFormat(CLIPFORMAT cf);
 
+  // Objects in the text. The items are made when they are first asked
+  // for, by the document's CreateClientItem.
+  CRichEditCntrItem* GetSelectedItem() const;
+  CRichEditCntrItem* GetInPlaceActiveItem() const;
+  void InsertItem(CRichEditCntrItem* pItem);
+  // Pastes the data as a new object; cf 0 embeds it, another format makes
+  // a static picture from that format.
+  void DoPaste(COleDataObject& dataobj, CLIPFORMAT cf, HMETAFILEPICT hMetaPict);
+  virtual BOOL IsSelected(const CObject* pDocItem) const;
+  virtual HRESULT QueryAcceptData(LPDATAOBJECT lpdataobj, CLIPFORMAT* lpcfFormat, DWORD dwReco,
+                                  BOOL bReally, HGLOBAL hMetaFile);
+  virtual HRESULT GetClipboardData(CHARRANGE* lpchrg, DWORD dwReco, LPDATAOBJECT lpRichDataObj,
+                                   LPDATAOBJECT* lplpdataobj);
+  virtual HMENU GetContextMenu(WORD seltype, LPOLEOBJECT lpoleobj, CHARRANGE* lpchrg);
+
+  LPRICHEDITOLE m_lpRichEditOle;
+
   virtual void Serialize(CArchive& ar);
   virtual void DeleteContents();
   virtual void OnInitialUpdate();
@@ -114,14 +132,37 @@ public:
   afx_msg void OnSelChange(NMHDR* pNMHDR, LRESULT* pResult);
   afx_msg BOOL OnEditChange();
   afx_msg LRESULT OnFindReplaceCmd(WPARAM wParam, LPARAM lParam);
+  afx_msg void OnInsertObject();
+  afx_msg void OnEditPasteSpecial();
+  afx_msg void OnUpdateEditPasteSpecial(CCmdUI* pCmdUI);
   DECLARE_MESSAGE_MAP()
+
+public:
+  BEGIN_INTERFACE_PART(RichEditOleCallback, IRichEditOleCallback)
+    STDMETHOD(GetNewStorage)(LPSTORAGE* lplpstg);
+    STDMETHOD(GetInPlaceContext)(LPOLEINPLACEFRAME* lplpFrame, LPOLEINPLACEUIWINDOW* lplpDoc,
+                                 LPOLEINPLACEFRAMEINFO lpFrameInfo);
+    STDMETHOD(ShowContainerUI)(BOOL fShow);
+    STDMETHOD(QueryInsertObject)(LPCLSID lpclsid, LPSTORAGE lpstg, LONG cp);
+    STDMETHOD(DeleteObject)(LPOLEOBJECT lpoleobj);
+    STDMETHOD(QueryAcceptData)(LPDATAOBJECT lpdataobj, CLIPFORMAT* lpcfFormat, DWORD reco,
+                               BOOL fReally, HGLOBAL hMetaPict);
+    STDMETHOD(ContextSensitiveHelp)(BOOL fEnterMode);
+    STDMETHOD(GetClipboardData)(CHARRANGE* lpchrg, DWORD reco, LPDATAOBJECT* lplpdataobj);
+    STDMETHOD(GetDragDropEffect)(BOOL fDrag, DWORD grfKeyState, LPDWORD pdwEffect);
+    STDMETHOD(GetContextMenu)(WORD seltype, LPOLEOBJECT lpoleobj, CHARRANGE* lpchrg,
+                              HMENU* lphmenu);
+  END_INTERFACE_PART(RichEditOleCallback)
+
+  DECLARE_INTERFACE_MAP()
 };
 
 // ---------------------------------------------------------------------
 // CRichEditDoc: the document of a rich edit view; the text lives in the
-// view's control. m_bRTF chooses rich text or plain text files.
+// view's control, objects included. m_bRTF chooses rich text or plain
+// text files.
 
-class CRichEditDoc : public CDocument {
+class CRichEditDoc : public COleDocument {
   DECLARE_DYNAMIC(CRichEditDoc)
 protected:
   CRichEditDoc();
@@ -132,27 +173,33 @@ public:
   BOOL m_bRTF;
 
   virtual CRichEditView* GetView() const;
+  // Makes the item for an object in the text (preo) or for a new one
+  // (NULL). Override it to make your own CRichEditCntrItem class.
   virtual CRichEditCntrItem* CreateClientItem(REOBJECT* preo = NULL) const;
+  CRichEditCntrItem* LookupItem(LPOLEOBJECT lpobj) const;
   virtual void Serialize(CArchive& ar);
   virtual void DeleteContents();
   virtual BOOL OnNewDocument();
+  virtual void UpdateModifiedFlag();
 };
 
 // ---------------------------------------------------------------------
-// CRichEditCntrItem: an object embedded in the text. Embedding needs the
-// OLE container classes, which are not there yet; the class exists so
-// that a document's CreateClientItem can be written.
+// CRichEditCntrItem: an object in the text. The rich edit control owns
+// the object; the item gives the document's OLE functions access to it.
 
-class CRichEditCntrItem : public CCmdTarget {
+class CRichEditCntrItem : public COleClientItem {
   DECLARE_SERIAL(CRichEditCntrItem)
 public:
   CRichEditCntrItem(REOBJECT* preo = NULL, CRichEditDoc* pContainer = NULL);
   virtual ~CRichEditCntrItem();
 
-  CRichEditDoc* GetDocument() const { return m_pDocument; }
+  CRichEditDoc* GetDocument() const { return (CRichEditDoc*)m_pDocument; }
+  // Takes the aspect and the object from the control's description.
   void SyncToRichEditObject(REOBJECT& reo);
+  virtual void Release(OLECLOSE dwCloseOption = OLECLOSE_NOSAVE);
+  virtual void OnChange(OLE_NOTIFICATION nCode, DWORD dwParam);
+  virtual BOOL CanActivate();
 
-  CRichEditDoc* m_pDocument;
   BOOL m_bLock;
 };
 

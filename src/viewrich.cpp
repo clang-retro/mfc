@@ -4,10 +4,15 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 #include "afximpl.h"
 #include <afxrich.h>
+#include <afxodlgs.h>
 
 IMPLEMENT_DYNCREATE(CRichEditView, CCtrlView)
-IMPLEMENT_DYNAMIC(CRichEditDoc, CDocument)
-IMPLEMENT_SERIAL(CRichEditCntrItem, CCmdTarget, 0)
+IMPLEMENT_DYNAMIC(CRichEditDoc, COleDocument)
+IMPLEMENT_SERIAL(CRichEditCntrItem, COleClientItem, 0)
+
+BEGIN_INTERFACE_MAP(CRichEditView, CCtrlView)
+  INTERFACE_PART(CRichEditView, IID_IRichEditOleCallback, RichEditOleCallback)
+END_INTERFACE_MAP()
 
 const DWORD CRichEditView::dwStyleDefault = AFX_WS_DEFAULT_VIEW | WS_HSCROLL | WS_VSCROLL |
                                             ES_AUTOHSCROLL | ES_AUTOVSCROLL | ES_MULTILINE |
@@ -34,6 +39,9 @@ static AFX_RICHEDIT_STATE& _AfxRichEditState() {
 BEGIN_MESSAGE_MAP(CRichEditView, CCtrlView)
   ON_WM_CREATE()
   ON_WM_DESTROY()
+  ON_COMMAND(ID_OLE_INSERT_NEW, OnInsertObject)
+  ON_COMMAND(ID_EDIT_PASTE_SPECIAL, OnEditPasteSpecial)
+  ON_UPDATE_COMMAND_UI(ID_EDIT_PASTE_SPECIAL, OnUpdateEditPasteSpecial)
   ON_WM_SIZE()
   ON_NOTIFY_REFLECT(EN_SELCHANGE, OnSelChange)
   ON_CONTROL_REFLECT_EX(EN_CHANGE, OnEditChange)
@@ -65,6 +73,7 @@ END_MESSAGE_MAP()
 CRichEditView::CRichEditView() : CCtrlView(RICHEDIT_CLASS, dwStyleDefault) {
   m_nWordWrap = WrapToWindow;
   m_nBulletIndent = 1440 / 4;
+  m_lpRichEditOle = NULL;
   // US Letter with the usual margins, in twips, until a printer says
   // otherwise.
   m_sizePaper = CSize(8 * 1440 + 720, 11 * 1440);
@@ -93,6 +102,9 @@ int CRichEditView::OnCreate(LPCREATESTRUCT lpcs) {
   ctrl.LimitText(0x0FFFFFFF);
   ctrl.SetEventMask(ENM_SELCHANGE | ENM_CHANGE | ENM_SCROLL);
   ctrl.SetOptions(ECOOP_OR, ECO_AUTOWORDSELECTION);
+  // Objects in the text go through the callback and IRichEditOle.
+  ctrl.SendMessage(EM_SETOLECALLBACK, 0, (LPARAM)&m_xRichEditOleCallback);
+  ctrl.SendMessage(EM_GETOLEINTERFACE, 0, (LPARAM)&m_lpRichEditOle);
   return 0;
 }
 
@@ -102,6 +114,20 @@ void CRichEditView::OnDestroy() {
     state.pFindReplaceDlg->SendMessage(WM_CLOSE);
     state.pFindReplaceDlg = NULL;
   }
+  // The objects go with the text; their items go too.
+  CRichEditDoc* pDoc = GetDocument();
+  if (pDoc != NULL && pDoc->IsKindOf(RUNTIME_CLASS(CRichEditDoc))) {
+    POSITION pos = pDoc->GetStartPosition();
+    while (pos != NULL) {
+      CDocItem* pItem = pDoc->GetNextItem(pos);
+      if (pItem->IsKindOf(RUNTIME_CLASS(CRichEditCntrItem))) delete pItem;
+    }
+  }
+  if (m_lpRichEditOle != NULL) {
+    m_lpRichEditOle->Release();
+    m_lpRichEditOle = NULL;
+  }
+  SendMessage(EM_SETOLECALLBACK, 0, 0);
   CCtrlView::OnDestroy();
 }
 
@@ -604,6 +630,230 @@ void CRichEditView::OnEndPrinting(CDC* pDC, CPrintInfo* pInfo) {
 }
 
 // ---------------------------------------------------------------------
+// Objects in the text
+
+BOOL CRichEditView::IsSelected(const CObject* pDocItem) const {
+  return pDocItem != NULL && pDocItem == GetSelectedItem();
+}
+
+CRichEditCntrItem* CRichEditView::GetSelectedItem() const {
+  if (m_lpRichEditOle == NULL) return NULL;
+  REOBJECT reo;
+  memset(&reo, 0, sizeof(reo));
+  reo.cbStruct = sizeof(reo);
+  if (m_lpRichEditOle->GetObject(REO_IOB_SELECTION, &reo, REO_GETOBJ_POLEOBJ) != S_OK ||
+      reo.poleobj == NULL)
+    return NULL;
+  // Only a selection that is just the object.
+  CHARRANGE cr;
+  GetRichEditCtrl().GetSel(cr);
+  CRichEditCntrItem* pItem = NULL;
+  if (cr.cpMax - cr.cpMin == 1) {
+    CRichEditDoc* pDoc = GetDocument();
+    pItem = pDoc->LookupItem(reo.poleobj);
+    if (pItem == NULL) {
+      // Ask again for everything the item needs.
+      LPOLEOBJECT lpObject = reo.poleobj;
+      memset(&reo, 0, sizeof(reo));
+      reo.cbStruct = sizeof(reo);
+      if (m_lpRichEditOle->GetObject(REO_IOB_SELECTION, &reo,
+                                     REO_GETOBJ_POLEOBJ | REO_GETOBJ_PSTG) == S_OK) {
+        pItem = pDoc->CreateClientItem(&reo);
+        if (reo.poleobj != NULL) reo.poleobj->Release();
+        if (reo.pstg != NULL) reo.pstg->Release();
+      }
+      reo.poleobj = lpObject;
+    }
+  }
+  reo.poleobj->Release();
+  return pItem;
+}
+
+CRichEditCntrItem* CRichEditView::GetInPlaceActiveItem() const {
+  CRichEditDoc* pDoc = GetDocument();
+  return pDoc != NULL ? (CRichEditCntrItem*)pDoc->GetInPlaceActiveItem((CWnd*)this) : NULL;
+}
+
+void CRichEditView::InsertItem(CRichEditCntrItem* pItem) {
+  if (m_lpRichEditOle == NULL || pItem->m_lpObject == NULL) AfxThrowOleException(E_UNEXPECTED);
+  REOBJECT reo;
+  memset(&reo, 0, sizeof(reo));
+  reo.cbStruct = sizeof(reo);
+  reo.cp = REO_CP_SELECTION;
+  pItem->GetClassID(&reo.clsid);
+  reo.poleobj = pItem->m_lpObject;
+  reo.pstg = pItem->m_lpStorage;
+  reo.dvaspect = pItem->GetDrawAspect();
+  reo.dwFlags = REO_RESIZABLE;
+  // In HIMETRIC; left at 0 the control asks the object.
+  CSize size(0, 0);
+  if (pItem->GetExtent(&size)) {
+    reo.sizel.cx = size.cx;
+    reo.sizel.cy = size.cy;
+  }
+  SCODE sc = m_lpRichEditOle->GetClientSite(&reo.polesite);
+  if (SUCCEEDED(sc)) {
+    sc = m_lpRichEditOle->InsertObject(&reo);
+    reo.polesite->Release();
+  }
+  if (FAILED(sc)) AfxThrowOleException(sc);
+  pItem->m_pView = this;
+  GetDocument()->SetModifiedFlag();
+}
+
+void CRichEditView::DoPaste(COleDataObject& dataobj, CLIPFORMAT cf, HMETAFILEPICT hMetaPict) {
+  CRichEditCntrItem* pItem = GetDocument()->CreateClientItem(NULL);
+  try {
+    BOOL bCreated = cf == 0 ? pItem->CreateFromData(&dataobj)
+                            : pItem->CreateStaticFromData(&dataobj, OLERENDER_FORMAT, cf);
+    if (!bCreated) AfxThrowOleException(pItem->GetLastStatus());
+    if (hMetaPict != NULL) {
+      pItem->SetIconicMetafile(hMetaPict);
+      pItem->SetDrawAspect(DVASPECT_ICON);
+    }
+    InsertItem(pItem);
+  } catch (CException*) {
+    pItem->Delete();
+    throw;
+  }
+}
+
+HRESULT CRichEditView::QueryAcceptData(LPDATAOBJECT, CLIPFORMAT*, DWORD, BOOL, HGLOBAL) {
+  return S_OK;
+}
+
+HRESULT CRichEditView::GetClipboardData(CHARRANGE*, DWORD, LPDATAOBJECT, LPDATAOBJECT* lplpdataobj) {
+  *lplpdataobj = NULL;
+  return E_NOTIMPL;
+}
+
+HMENU CRichEditView::GetContextMenu(WORD, LPOLEOBJECT, CHARRANGE*) { return NULL; }
+
+void CRichEditView::OnInsertObject() {
+  COleInsertDialog dlg;
+  if (dlg.DoModal() != IDOK) return;
+  CWaitCursor wait;
+  CRichEditCntrItem* pItem = GetDocument()->CreateClientItem(NULL);
+  try {
+    if (!dlg.CreateItem(pItem)) AfxThrowOleException(pItem->GetLastStatus());
+    InsertItem(pItem);
+  } catch (COleException* e) {
+    pItem->ReportError(e->m_sc);
+    e->Delete();
+    pItem->Delete();
+    return;
+  }
+  // A new object opens so that it can be filled in.
+  if (dlg.GetSelectionType() == COleInsertDialog::createNewItem)
+    pItem->DoVerb(OLEIVERB_SHOW, this);
+}
+
+void CRichEditView::OnEditPasteSpecial() {
+  COlePasteSpecialDialog dlg;
+  // The control's own formats first, then the objects and pictures.
+  dlg.AddFormat(CF_TEXT, TYMED_HGLOBAL, AFX_IDS_RTF_FORMAT_TEXT, FALSE, FALSE);
+  dlg.AddStandardFormats();
+  if (dlg.DoModal() != IDOK) return;
+  int i = dlg.GetPasteIndex();
+  if (dlg.GetSelectionType() == COlePasteSpecialDialog::pasteOther && i == 0) {
+    GetRichEditCtrl().PasteSpecial(CF_TEXT);
+    return;
+  }
+  CRichEditCntrItem* pItem = GetDocument()->CreateClientItem(NULL);
+  try {
+    if (!dlg.CreateItem(pItem)) AfxThrowOleException(pItem->GetLastStatus());
+    InsertItem(pItem);
+  } catch (COleException* e) {
+    pItem->ReportError(e->m_sc);
+    e->Delete();
+    pItem->Delete();
+  }
+}
+
+void CRichEditView::OnUpdateEditPasteSpecial(CCmdUI* pCmdUI) {
+  pCmdUI->Enable(::CountClipboardFormats() != 0);
+}
+
+// ---------------------------------------------------------------------
+// IRichEditOleCallback
+
+STDMETHODIMP_(ULONG) CRichEditView::XRichEditOleCallback::AddRef() {
+  METHOD_PROLOGUE_EX_(CRichEditView, RichEditOleCallback)
+  return pThis->ExternalAddRef();
+}
+
+STDMETHODIMP_(ULONG) CRichEditView::XRichEditOleCallback::Release() {
+  METHOD_PROLOGUE_EX_(CRichEditView, RichEditOleCallback)
+  return pThis->ExternalRelease();
+}
+
+STDMETHODIMP CRichEditView::XRichEditOleCallback::QueryInterface(REFIID iid, LPVOID* ppvObj) {
+  METHOD_PROLOGUE_EX_(CRichEditView, RichEditOleCallback)
+  return pThis->ExternalQueryInterface(&iid, ppvObj);
+}
+
+// Objects the control reads from rich text get a storage in memory.
+STDMETHODIMP CRichEditView::XRichEditOleCallback::GetNewStorage(LPSTORAGE* lplpstg) {
+  *lplpstg = NULL;
+  LPLOCKBYTES lpLockBytes = NULL;
+  SCODE sc = ::CreateILockBytesOnHGlobal(NULL, TRUE, &lpLockBytes);
+  if (FAILED(sc)) return sc;
+  sc = ::StgCreateDocfileOnILockBytes(
+      lpLockBytes, STGM_CREATE | STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, lplpstg);
+  lpLockBytes->Release();
+  return sc;
+}
+
+STDMETHODIMP CRichEditView::XRichEditOleCallback::GetInPlaceContext(LPOLEINPLACEFRAME*,
+                                                                    LPOLEINPLACEUIWINDOW*,
+                                                                    LPOLEINPLACEFRAMEINFO) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP CRichEditView::XRichEditOleCallback::ShowContainerUI(BOOL) { return S_OK; }
+
+STDMETHODIMP CRichEditView::XRichEditOleCallback::QueryInsertObject(LPCLSID, LPSTORAGE, LONG) {
+  return S_OK;
+}
+
+STDMETHODIMP CRichEditView::XRichEditOleCallback::DeleteObject(LPOLEOBJECT lpoleobj) {
+  METHOD_PROLOGUE_EX(CRichEditView, RichEditOleCallback)
+  CRichEditDoc* pDoc = pThis->GetDocument();
+  CRichEditCntrItem* pItem = pDoc != NULL ? pDoc->LookupItem(lpoleobj) : NULL;
+  if (pItem != NULL && !pItem->m_bLock) delete pItem;
+  return S_OK;
+}
+
+STDMETHODIMP CRichEditView::XRichEditOleCallback::QueryAcceptData(LPDATAOBJECT lpdataobj,
+                                                                  CLIPFORMAT* lpcfFormat,
+                                                                  DWORD reco, BOOL fReally,
+                                                                  HGLOBAL hMetaPict) {
+  METHOD_PROLOGUE_EX(CRichEditView, RichEditOleCallback)
+  return pThis->QueryAcceptData(lpdataobj, lpcfFormat, reco, fReally, hMetaPict);
+}
+
+STDMETHODIMP CRichEditView::XRichEditOleCallback::ContextSensitiveHelp(BOOL) { return S_OK; }
+
+STDMETHODIMP CRichEditView::XRichEditOleCallback::GetClipboardData(CHARRANGE* lpchrg, DWORD reco,
+                                                                   LPDATAOBJECT* lplpdataobj) {
+  METHOD_PROLOGUE_EX(CRichEditView, RichEditOleCallback)
+  return pThis->GetClipboardData(lpchrg, reco, NULL, lplpdataobj);
+}
+
+STDMETHODIMP CRichEditView::XRichEditOleCallback::GetDragDropEffect(BOOL, DWORD, LPDWORD) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP CRichEditView::XRichEditOleCallback::GetContextMenu(WORD seltype,
+                                                                 LPOLEOBJECT lpoleobj,
+                                                                 CHARRANGE* lpchrg,
+                                                                 HMENU* lphmenu) {
+  METHOD_PROLOGUE_EX(CRichEditView, RichEditOleCallback)
+  *lphmenu = pThis->GetContextMenu(seltype, lpoleobj, lpchrg);
+  return *lphmenu != NULL ? S_OK : E_NOTIMPL;
+}
+
+// ---------------------------------------------------------------------
 // CRichEditDoc
 
 CRichEditDoc::CRichEditDoc() { m_bRTF = TRUE; }
@@ -623,19 +873,56 @@ CRichEditCntrItem* CRichEditDoc::CreateClientItem(REOBJECT* preo) const {
   return new CRichEditCntrItem(preo, (CRichEditDoc*)this);
 }
 
+CRichEditCntrItem* CRichEditDoc::LookupItem(LPOLEOBJECT lpobj) const {
+  POSITION pos = GetStartPosition();
+  while (pos != NULL) {
+    CDocItem* pItem = GetNextItem(pos);
+    if (pItem->IsKindOf(RUNTIME_CLASS(CRichEditCntrItem)) &&
+        ((CRichEditCntrItem*)pItem)->m_lpObject == lpobj)
+      return (CRichEditCntrItem*)pItem;
+  }
+  return NULL;
+}
+
+// Only the objects still in the text count: the control may drop an
+// object without telling the callback, which leaves its item behind.
+void CRichEditDoc::UpdateModifiedFlag() {
+  CRichEditView* pView = GetView();
+  if (pView == NULL || pView->m_lpRichEditOle == NULL) {
+    COleDocument::UpdateModifiedFlag();
+    return;
+  }
+  LPRICHEDITOLE lpReOle = pView->m_lpRichEditOle;
+  LONG n = lpReOle->GetObjectCount();
+  for (LONG i = 0; i < n; i++) {
+    REOBJECT reo;
+    memset(&reo, 0, sizeof(reo));
+    reo.cbStruct = sizeof(reo);
+    if (lpReOle->GetObject(i, &reo, REO_GETOBJ_POLEOBJ) != S_OK) continue;
+    CRichEditCntrItem* pItem = LookupItem(reo.poleobj);
+    if (reo.poleobj != NULL) reo.poleobj->Release();
+    if (pItem != NULL && pItem->IsModified()) {
+      SetModifiedFlag();
+      return;
+    }
+  }
+}
+
+// The objects are part of the text, so the control saves and loads them.
 void CRichEditDoc::Serialize(CArchive& ar) {
   CRichEditView* pView = GetView();
   if (pView != NULL) pView->Serialize(ar);
 }
 
 void CRichEditDoc::DeleteContents() {
-  CDocument::DeleteContents();
+  // The text first: that lets the control release its objects.
   CRichEditView* pView = GetView();
   if (pView != NULL) pView->DeleteContents();
+  COleDocument::DeleteContents();
 }
 
 BOOL CRichEditDoc::OnNewDocument() {
-  if (!CDocument::OnNewDocument()) return FALSE;
+  if (!COleDocument::OnNewDocument()) return FALSE;
   CRichEditView* pView = GetView();
   if (pView != NULL) pView->GetRichEditCtrl().SetModify(FALSE);
   return TRUE;
@@ -644,12 +931,55 @@ BOOL CRichEditDoc::OnNewDocument() {
 // ---------------------------------------------------------------------
 // CRichEditCntrItem
 
-CRichEditCntrItem::CRichEditCntrItem(REOBJECT* preo, CRichEditDoc* pContainer) {
-  (void)preo;
-  m_pDocument = pContainer;
-  m_bLock = FALSE;
+CRichEditCntrItem::CRichEditCntrItem(REOBJECT* preo, CRichEditDoc* pContainer)
+    : COleClientItem(pContainer), m_bLock(FALSE) {
+  if (preo != NULL) SyncToRichEditObject(*preo);
 }
 
-CRichEditCntrItem::~CRichEditCntrItem() {}
+CRichEditCntrItem::~CRichEditCntrItem() { Release(); }
 
-void CRichEditCntrItem::SyncToRichEditObject(REOBJECT& reo) { (void)reo; }
+void CRichEditCntrItem::SyncToRichEditObject(REOBJECT& reo) {
+  m_nDrawAspect = (DVASPECT)reo.dvaspect;
+  if (reo.poleobj == NULL || reo.poleobj == m_lpObject) return;
+  Release();
+  m_lpObject = reo.poleobj;
+  m_lpObject->AddRef();
+  if (reo.pstg != NULL) {
+    m_lpStorage = reo.pstg;
+    m_lpStorage->AddRef();
+  }
+  m_lpObject->QueryInterface(IID_IViewObject2, (void**)&m_lpViewObject);
+  LPOLELINK lpLink = NULL;
+  if (SUCCEEDED(m_lpObject->QueryInterface(IID_IOleLink, (void**)&lpLink))) {
+    lpLink->Release();
+    m_nItemType = OT_LINK;
+  } else {
+    m_nItemType = OT_EMBEDDED;
+  }
+  m_nItemState = loadedState;
+}
+
+// The control keeps the object, so the item only lets go of it.
+void CRichEditCntrItem::Release(OLECLOSE) {
+  if (m_lpViewObject != NULL) {
+    m_lpViewObject->SetAdvise(m_nDrawAspect, 0, NULL);
+    m_lpViewObject->Release();
+    m_lpViewObject = NULL;
+  }
+  if (m_lpObject != NULL) {
+    if (m_dwConnection != 0) m_lpObject->Unadvise(m_dwConnection);
+    m_dwConnection = 0;
+    m_lpObject->Release();
+    m_lpObject = NULL;
+  }
+  ReleaseStorage();
+  m_nItemState = emptyState;
+}
+
+void CRichEditCntrItem::OnChange(OLE_NOTIFICATION nCode, DWORD dwParam) {
+  COleClientItem::OnChange(nCode, dwParam);
+  if (m_pView != NULL && (nCode == OLE_CHANGED || nCode == OLE_CHANGED_ASPECT))
+    m_pView->Invalidate();
+}
+
+BOOL CRichEditCntrItem::CanActivate() { return FALSE; }

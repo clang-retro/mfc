@@ -314,6 +314,11 @@ public:
   afx_msg void OnUpdatePasteLinkMenu(CCmdUI* pCmdUI);
   afx_msg void OnUpdateObjectVerbMenu(CCmdUI* pCmdUI);
   afx_msg void OnUpdateEditLinksMenu(CCmdUI* pCmdUI);
+  afx_msg void OnUpdateEditChangeIcon(CCmdUI* pCmdUI);
+  // These show the OLE dialogs (afxodlgs.h) for the selected item.
+  afx_msg void OnEditLinks();
+  afx_msg void OnEditConvert();
+  afx_msg void OnEditChangeIcon();
 
 protected:
   void ReleaseRoot();

@@ -59,7 +59,7 @@ $(OUT)/u/%.o: src/%.cpp $(HDRS)
 
 install: all
 	mkdir -p $(PREFIX)/include/mfc $(PREFIX)/lib
-	cp include/*.h $(PREFIX)/include/mfc/
+	cp include/*.h include/*.rc $(PREFIX)/include/mfc/
 	cp $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PREFIX)/lib/
 
 check: all

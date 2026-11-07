@@ -81,7 +81,9 @@ when there is no display:
   dragging a bar to the edge.
 * `richtest`: a rich edit document and view; bold, italic and paragraph
   alignment on the selection, finding and replacing, saving and loading
-  rich text and plain text, page layout for printing, and word wrap.
+  rich text and plain text, page layout for printing, word wrap, an
+  object embedded in the text (selected, saved and loaded with it), and
+  the Insert Object, Paste Special and Links dialogs.
 * `dbtest`: `afxdb.h` against an in-memory ODBC driver written in the
   test (`tests/odbcmock.h`), since Wine has no 32-bit ODBC driver to
   test with: opening, moving, filters, sorts and parameters, nulls,
@@ -121,7 +123,9 @@ request with the stock MinGW-w64 toolchain.
   scroll bars), CFormView, CEditView,
   CBitmapButton.
 * `afxrich.h`: CRichEditView and CRichEditDoc (rich text or plain text
-  files, formatting the selection, find and replace, printing).
+  files, formatting the selection, find and replace, printing), with
+  OLE objects in the text through CRichEditCntrItem (Insert Object,
+  Paste Special, the selected item).
 * `afxdb.h`: CDatabase, CRecordset (snapshot, dynaset and forward-only,
   with RFX for the usual types, bookmarks and parameters),
   CRecordView and the DDX_Field functions, CDBException, CDBVariant.
@@ -136,6 +140,10 @@ request with the stock MinGW-w64 toolchain.
   dropped, linked, static and cloned objects, verbs, drawing, the
   clipboard), COleStreamFile, AfxOleSetEditMenu. Programs can include
   `afxolecl.rc` for the container messages.
+* `afxodlgs.h`: the OLE dialogs over oledlg: COleInsertDialog,
+  COlePasteSpecialDialog, COleLinksDialog, COleUpdateDialog,
+  COleChangeIconDialog, COleConvertDialog and COleBusyDialog, and the
+  COleDocument Links, Convert and Change Icon commands.
 * `afxdlgs.h`: the common dialogs (file, color, font, print, page setup,
   find/replace) and CPropertySheet/CPropertyPage, wizards included.
 * `afxcmn.h`, `afxcview.h`: the common controls, CImageList, CListView,
@@ -152,9 +160,14 @@ request with the stock MinGW-w64 toolchain.
   defines the macros for C only). `NOMINMAX` turns them off.
 * Floating bars are tool windows, so the system draws their captions,
   and they resize with the system's sizing border.
-* CRichEditDoc derives from CDocument rather than COleServerDoc, and
-  CRichEditCntrItem is a placeholder: objects embedded in rich text need
-  the OLE container classes, which are not there yet.
+* CRichEditDoc derives from COleDocument rather than COleServerDoc
+  (OLE servers are not there yet). Wine's rich edit control draws an
+  embedded object from its data rather than through IViewObject, and
+  writes only the object's picture into rich text, so there a saved
+  object comes back as a picture.
+* Wine's oledlg ends a cancelled Insert Object dialog with OLEUI_FALSE,
+  which DoModal reports as IDABORT, and its Links dialog does nothing
+  yet.
 * Wine's rich edit control does not implement EM_FORMATRANGE yet, so
   under Wine a CRichEditView prints blank pages; Windows prints them.
 * A dispatch map entry calls its member function through a template

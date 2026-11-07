@@ -805,6 +805,12 @@ public:
   BOOL SetOLECallback(void* pCallback) {
     return (BOOL)::SendMessage(m_hWnd, EM_SETOLECALLBACK, 0, (LPARAM)pCallback);
   }
+  // The control's IRichEditOle, AddRef'd; the caller releases it.
+  struct IRichEditOle* GetIRichEditOle() const {
+    struct IRichEditOle* p = NULL;
+    ::SendMessage(m_hWnd, EM_GETOLEINTERFACE, 0, (LPARAM)&p);
+    return p;
+  }
   void EmptyUndoBuffer() { ::SendMessage(m_hWnd, EM_EMPTYUNDOBUFFER, 0, 0); }
   void ReplaceSel(LPCTSTR lpszNewText, BOOL bCanUndo = FALSE) {
     ::SendMessage(m_hWnd, EM_REPLACESEL, bCanUndo, (LPARAM)lpszNewText);
@@ -873,6 +879,11 @@ public:
   void Copy() { ::SendMessage(m_hWnd, WM_COPY, 0, 0); }
   void Cut() { ::SendMessage(m_hWnd, WM_CUT, 0, 0); }
   void Paste() { ::SendMessage(m_hWnd, WM_PASTE, 0, 0); }
+  // Pastes the clipboard in one format; a metafile gives the icon to show.
+  void PasteSpecial(UINT nClipFormat, DWORD dvAspect = 0, HMETAFILE hMF = 0) {
+    REPASTESPECIAL reps = {dvAspect, (DWORD_PTR)hMF};
+    ::SendMessage(m_hWnd, EM_PASTESPECIAL, nClipFormat, (LPARAM)&reps);
+  }
   BOOL CanPaste(UINT nFormat = 0) const { return (BOOL)::SendMessage(m_hWnd, EM_CANPASTE, nFormat, 0); }
   void RequestResize() { ::SendMessage(m_hWnd, EM_REQUESTRESIZE, 0, 0); }
   CPoint GetCharPos(long lChar) const {
