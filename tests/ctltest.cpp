@@ -52,7 +52,7 @@ public:
   DISPID m_dispidAmbient;
 
   CTestCtrl()
-      : m_nValue(7), m_nDraws(0), m_nBackChanges(0), m_nAmbientChanges(0), m_nValueChanges(0),
+      : m_nValue(7), m_nOpenVerbs(0), m_nDraws(0), m_nBackChanges(0), m_nAmbientChanges(0), m_nValueChanges(0),
         m_dispidAmbient(0) {
     InitializeIIDs(&IID_DTestCtrl, &IID_DTestCtrlEvents);
     s_nAlive++;
@@ -114,6 +114,44 @@ public:
   }
   void FireChanged(long n) { FireEvent(eventidChanged, EVENT_PARAM(VTS_I4), n); }
 
+  // Verbs.
+  int m_nOpenVerbs;
+  BOOL OnResetVerb(LPMSG, HWND, LPCRECT) {
+    m_nValue = 0;
+    return TRUE;
+  }
+  BOOL OnBumpVerb(LPMSG, HWND, LPCRECT) {
+    Bump();
+    return TRUE;
+  }
+  BOOL OnOpenVerb(LPMSG, HWND hWndParent, LPCRECT lpRect) {
+    m_nOpenVerbs++;
+    return hWndParent != NULL && lpRect != NULL;
+  }
+  DECLARE_MESSAGE_MAP()
+
+  // Property browsing.
+  virtual BOOL OnGetDisplayString(DISPID dispid, CString& strValue) {
+    if (dispid != DISPID_VALUE_) return COleControl::OnGetDisplayString(dispid, strValue);
+    strValue.Format(_T("Value %ld"), m_nValue);
+    return TRUE;
+  }
+  virtual BOOL OnGetPredefinedStrings(DISPID dispid, CStringArray* pStrings,
+                                      CDWordArray* pCookies) {
+    if (dispid != DISPID_BORDERSTYLE) return FALSE;
+    pStrings->Add(_T("0 - None"));
+    pCookies->Add(0);
+    pStrings->Add(_T("1 - Fixed Single"));
+    pCookies->Add(1);
+    return TRUE;
+  }
+  virtual BOOL OnGetPredefinedValue(DISPID dispid, DWORD dwCookie, VARIANT* pvar) {
+    if (dispid != DISPID_BORDERSTYLE || dwCookie > 1) return FALSE;
+    pvar->vt = VT_I2;
+    pvar->iVal = (short)dwCookie;
+    return TRUE;
+  }
+
   DECLARE_OLECREATE_EX(CTestCtrl)
   DECLARE_OLECTLTYPE(CTestCtrl)
   DECLARE_PROPPAGEIDS(CTestCtrl)
@@ -125,6 +163,12 @@ int CTestCtrl::s_nAlive = 0;
 CTestCtrl* CTestCtrl::s_pLast = NULL;
 
 IMPLEMENT_DYNCREATE(CTestCtrl, COleControl)
+
+BEGIN_MESSAGE_MAP(CTestCtrl, COleControl)
+  ON_OLEVERB(IDS_VERB_RESET, OnResetVerb)
+  ON_OLEVERB(IDS_VERB_BUMP, OnBumpVerb)
+  ON_STDOLEVERB(OLEIVERB_OPEN, OnOpenVerb)
+END_MESSAGE_MAP()
 
 // {6A1D3F52-0E4B-4D7A-9F23-8B5E1CAD4F60}
 IMPLEMENT_OLECREATE_EX(CTestCtrl, "CtlTest.TestCtrl.1", 0x6a1d3f52, 0x0e4b, 0x4d7a, 0x9f, 0x23,
@@ -256,6 +300,86 @@ public:
 };
 
 // =====================================================================
+// A bare container for IQuickActivate: a client site and the sinks.
+
+class CQuickSite : public IOleClientSite {
+public:
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (iid == IID_IUnknown || iid == IID_IOleClientSite) {
+      *ppv = this;
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return 1; }
+  STDMETHOD_(ULONG, Release)() { return 1; }
+  STDMETHOD(SaveObject)() { return S_OK; }
+  STDMETHOD(GetMoniker)(DWORD, DWORD, IMoniker** ppmk) {
+    *ppmk = NULL;
+    return E_NOTIMPL;
+  }
+  STDMETHOD(GetContainer)(IOleContainer** ppContainer) {
+    *ppContainer = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD(ShowObject)() { return S_OK; }
+  STDMETHOD(OnShowWindow)(BOOL) { return S_OK; }
+  STDMETHOD(RequestNewObjectLayout)() { return E_NOTIMPL; }
+};
+
+class CQuickEvents : public IDispatch {
+public:
+  int m_nEvents;
+  DISPID m_dispidLast;
+  CQuickEvents() : m_nEvents(0), m_dispidLast(0) {}
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (iid == IID_IUnknown || iid == IID_IDispatch || iid == IID_DTestCtrlEvents) {
+      *ppv = this;
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return 1; }
+  STDMETHOD_(ULONG, Release)() { return 1; }
+  STDMETHOD(GetTypeInfoCount)(UINT* pctinfo) {
+    *pctinfo = 0;
+    return S_OK;
+  }
+  STDMETHOD(GetTypeInfo)(UINT, LCID, ITypeInfo**) { return E_NOTIMPL; }
+  STDMETHOD(GetIDsOfNames)(REFIID, LPOLESTR*, UINT, LCID, DISPID*) { return E_NOTIMPL; }
+  STDMETHOD(Invoke)(DISPID dispid, REFIID, LCID, WORD, DISPPARAMS*, VARIANT*, EXCEPINFO*, UINT*) {
+    m_nEvents++;
+    m_dispidLast = dispid;
+    return S_OK;
+  }
+};
+
+class CQuickNotify : public IPropertyNotifySink {
+public:
+  int m_nChanged;
+  DISPID m_dispidLast;
+  CQuickNotify() : m_nChanged(0), m_dispidLast(0) {}
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (iid == IID_IUnknown || iid == IID_IPropertyNotifySink) {
+      *ppv = this;
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return 1; }
+  STDMETHOD_(ULONG, Release)() { return 1; }
+  STDMETHOD(OnChanged)(DISPID dispid) {
+    m_nChanged++;
+    m_dispidLast = dispid;
+    return S_OK;
+  }
+  STDMETHOD(OnRequestEdit)(DISPID) { return S_OK; }
+};
+
+// =====================================================================
 // A property bag in memory
 
 class CTestPropBag : public IPropertyBag {
@@ -354,6 +478,7 @@ public:
   void TestRegistry();
   void TestPropertyPage();
   void TestPropertyFrame();
+  void TestBrowsingAndQuickActivate();
 
   afx_msg int OnCreate(LPCREATESTRUCT lpcs) {
     if (CFrameWnd::OnCreate(lpcs) == -1) return -1;
@@ -578,6 +703,39 @@ void CMainFrame::TestHosted() {
   long nTwice = 0;
   m_ctl.InvokeHelper(DISPID_TWICE, DISPATCH_METHOD, VT_I4, &nTwice, paramsI4, 21L);
   CHECK(nTwice == 42);
+
+  // Verbs: the verb map's, numbered from 1, then Properties.
+  LPOLEOBJECT pVerbObj = NULL;
+  pUnk->QueryInterface(IID_IOleObject, (void**)&pVerbObj);
+  if (pVerbObj != NULL) {
+    LPENUMOLEVERB pEnum = NULL;
+    CHECK(pVerbObj->EnumVerbs(&pEnum) == S_OK && pEnum != NULL);
+    if (pEnum != NULL) {
+      OLEVERB verbs[5];
+      ULONG nVerbs = 0;
+      CHECK(pEnum->Next(5, verbs, &nVerbs) == S_FALSE && nVerbs == 3);
+      CHECK(verbs[0].lVerb == 1 && CString(verbs[0].lpszVerbName) == _T("&Reset"));
+      CHECK(verbs[1].lVerb == 2 && CString(verbs[1].lpszVerbName) == _T("&Bump"));
+      CHECK(verbs[2].lVerb == OLEIVERB_PROPERTIES);
+      CHECK((verbs[0].grfAttribs & OLEVERBATTRIB_ONCONTAINERMENU) != 0);
+      for (ULONG i = 0; i < nVerbs; i++) ::CoTaskMemFree(verbs[i].lpszVerbName);
+      pEnum->Reset();
+      CHECK(pEnum->Skip(2) == S_OK && pEnum->Next(1, verbs, NULL) == S_OK &&
+            verbs[0].lVerb == OLEIVERB_PROPERTIES);
+      ::CoTaskMemFree(verbs[0].lpszVerbName);
+      pEnum->Release();
+    }
+    pCtl->m_nValue = 30;
+    CHECK(pVerbObj->DoVerb(1, NULL, NULL, 0, m_hWnd, &rect) == S_OK && pCtl->m_nValue == 0);
+    CHECK(pVerbObj->DoVerb(2, NULL, NULL, 0, m_hWnd, &rect) == S_OK && pCtl->m_nValue == 1);
+    CHECK(m_nChanged == 1 && m_nLastChanged == 1);
+    CHECK(pVerbObj->DoVerb(OLEIVERB_OPEN, NULL, NULL, 0, m_hWnd, &rect) == S_OK);
+    CHECK(pCtl->m_nOpenVerbs == 1);
+    CHECK(pVerbObj->DoVerb(3, NULL, NULL, 0, m_hWnd, &rect) == OLEOBJ_S_INVALIDVERB);
+    pVerbObj->Release();
+    pCtl->m_nValue = 41;
+    m_nChanged = 0;
+  }
 
   // Events: a custom one from a method, and stock Click from the mouse
   // and from DoClick.
@@ -1006,6 +1164,109 @@ void CMainFrame::TestPropertyFrame() {
   CHECK(CTestCtrl::s_nAlive == 0);
 }
 
+void CMainFrame::TestBrowsingAndQuickActivate() {
+  TestLog("property browsing and quick activation");
+  CTestCtrl* pCtl = NULL;
+  LPUNKNOWN pUnk = NewControl(&pCtl);
+  if (pUnk == NULL || pCtl == NULL) return;
+  LPPERSISTSTREAMINIT pInit = NULL;
+  pUnk->QueryInterface(IID_IPersistStreamInit, (void**)&pInit);
+  if (pInit != NULL) {
+    pInit->InitNew();
+    pInit->Release();
+  }
+
+  // IPerPropertyBrowsing.
+  IPerPropertyBrowsing* pBrowse = NULL;
+  CHECK(pUnk->QueryInterface(IID_IPerPropertyBrowsing, (void**)&pBrowse) == S_OK);
+  if (pBrowse != NULL) {
+    BSTR bstr = NULL;
+    CHECK(pBrowse->GetDisplayString(DISPID_VALUE_, &bstr) == S_OK && CString(bstr) == _T("Value 7"));
+    ::SysFreeString(bstr);
+    bstr = NULL;
+    CHECK(pBrowse->GetDisplayString(DISPID_FONT, &bstr) == S_OK && bstr != NULL &&
+          ::SysStringLen(bstr) > 0);
+    ::SysFreeString(bstr);
+    bstr = NULL;
+    CHECK(pBrowse->GetDisplayString(DISPID_LABEL, &bstr) == S_FALSE && bstr == NULL);
+    CLSID clsid = GUID_NULL;
+    CHECK(pBrowse->MapPropertyToPage(DISPID_FONT, &clsid) == S_OK && clsid == CLSID_CFontPropPage);
+    CHECK(pBrowse->MapPropertyToPage(DISPID_BACKCOLOR, &clsid) == S_OK &&
+          clsid == CLSID_CColorPropPage);
+    CHECK(pBrowse->MapPropertyToPage(DISPID_VALUE_, &clsid) == PERPROP_E_NOPAGEAVAILABLE);
+    CALPOLESTR strings = {0, NULL};
+    CADWORD cookies = {0, NULL};
+    CHECK(pBrowse->GetPredefinedStrings(DISPID_BORDERSTYLE, &strings, &cookies) == S_OK);
+    CHECK(strings.cElems == 2 && cookies.cElems == 2);
+    if (strings.cElems == 2 && cookies.cElems == 2) {
+      CHECK(CString(strings.pElems[1]) == _T("1 - Fixed Single") && cookies.pElems[1] == 1);
+      VARIANT var;
+      CHECK(pBrowse->GetPredefinedValue(DISPID_BORDERSTYLE, cookies.pElems[1], &var) == S_OK);
+      CHECK(var.vt == VT_I2 && var.iVal == 1);
+      for (ULONG i = 0; i < strings.cElems; i++) ::CoTaskMemFree(strings.pElems[i]);
+    }
+    ::CoTaskMemFree(strings.pElems);
+    ::CoTaskMemFree(cookies.pElems);
+    CHECK(pBrowse->GetPredefinedStrings(DISPID_VALUE_, &strings, &cookies) == S_FALSE);
+    pBrowse->Release();
+  }
+
+  // IQuickActivate.
+  IQuickActivate* pQuick = NULL;
+  CHECK(pUnk->QueryInterface(IID_IQuickActivate, (void**)&pQuick) == S_OK);
+  if (pQuick != NULL) {
+    CQuickSite site;
+    CQuickEvents events;
+    CQuickNotify notify;
+    QACONTAINER qa;
+    memset(&qa, 0, sizeof(qa));
+    qa.cbSize = sizeof(qa);
+    qa.pClientSite = &site;
+    qa.pUnkEventSink = &events;
+    qa.pPropertyNotifySink = &notify;
+    QACONTROL qc;
+    memset(&qc, 0, sizeof(qc));
+    qc.cbSize = sizeof(qc);
+    CHECK(pQuick->QuickActivate(&qa, &qc) == S_OK);
+    CHECK(pCtl->GetClientSite() == &site);
+    CHECK(qc.dwMiscStatus == kMiscStatus && qc.dwEventCookie != 0 && qc.dwPropNotifyCookie != 0);
+    pCtl->FireChanged(5);
+    CHECK(events.m_nEvents == 1 && events.m_dispidLast == eventidChanged);
+    pCtl->SetValue(3);
+    CHECK(notify.m_nChanged == 1 && notify.m_dispidLast == DISPID_VALUE_);
+    SIZEL sizel = {5000, 2500};
+    CHECK(pQuick->SetContentExtent(&sizel) == S_OK);
+    SIZEL sizel2 = {0, 0};
+    CHECK(pQuick->GetContentExtent(&sizel2) == S_OK && sizel2.cx == 5000 && sizel2.cy == 2500);
+    // The cookies undo the connections.
+    LPCONNECTIONPOINTCONTAINER pCPC = NULL;
+    pUnk->QueryInterface(IID_IConnectionPointContainer, (void**)&pCPC);
+    if (pCPC != NULL) {
+      LPCONNECTIONPOINT pCP = NULL;
+      if (SUCCEEDED(pCPC->FindConnectionPoint(IID_DTestCtrlEvents, &pCP))) {
+        CHECK(pCP->Unadvise(qc.dwEventCookie) == S_OK);
+        pCP->Release();
+      }
+      if (SUCCEEDED(pCPC->FindConnectionPoint(IID_IPropertyNotifySink, &pCP))) {
+        CHECK(pCP->Unadvise(qc.dwPropNotifyCookie) == S_OK);
+        pCP->Release();
+      }
+      pCPC->Release();
+    }
+    pCtl->FireChanged(6);
+    CHECK(events.m_nEvents == 1);
+    LPOLEOBJECT pObj = NULL;
+    pUnk->QueryInterface(IID_IOleObject, (void**)&pObj);
+    if (pObj != NULL) {
+      pObj->SetClientSite(NULL);
+      pObj->Release();
+    }
+    pQuick->Release();
+  }
+  pUnk->Release();
+  CHECK(CTestCtrl::s_nAlive == 0);
+}
+
 static BOOL ReadKey(LPCTSTR lpszKey, LPCTSTR lpszValueName, CString& str) {
   HKEY hKey;
   str.Empty();
@@ -1047,6 +1308,7 @@ void CMainFrame::RunTests() {
   TestHosted();
   TestPropertyPage();
   TestPropertyFrame();
+  TestBrowsingAndQuickActivate();
   TestPersistence();
   TestRegistry();
 }

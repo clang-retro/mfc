@@ -169,7 +169,8 @@ when there is no display:
   window classes.
 * `ctltest`: writing a control with COleControl, the test being both
   its server and its container: stock and custom properties, a method,
-  stock and custom events, the font object, ambient properties, frozen
+  stock and custom events, verbs from its message map (ON_OLEVERB,
+  ON_STDOLEVERB), the font object, ambient properties, frozen
   events, activation and focus, drawing in its window and through
   IViewObject, its state through IPersistStreamInit,
   IPersistPropertyBag and IPersistStorage into new instances, the
@@ -248,7 +249,8 @@ request with the stock MinGW-w64 toolchain.
   interfaces, in-place activation, stock properties, methods and events,
   ambient properties, IViewObject drawing and persistence through
   streams, storages and property bags), COleControlModule, event maps,
-  DECLARE_OLECREATE_EX, DECLARE_OLECTLTYPE, DECLARE_PROPPAGEIDS,
+  verb maps (ON_OLEVERB, ON_STDOLEVERB), DECLARE_OLECREATE_EX,
+  DECLARE_OLECTLTYPE, DECLARE_PROPPAGEIDS,
   CFontHolder, CPropExchange and the PX_ functions,
   AfxOleRegisterControlClass, and property pages: COlePropertyPage
   (IPropertyPage2, made from an ordinary dialog template) and the DDP_
@@ -304,8 +306,7 @@ request with the stock MinGW-w64 toolchain.
   control's property frame do not change the control; Windows applies
   the pages.
 * COleControl makes windowed controls only (no windowless or
-  IOleInPlaceObjectWindowless controls, no IQuickActivate, no
-  IPerPropertyBrowsing), and verb maps, data path
+  IOleInPlaceObjectWindowless controls), and data path
   properties (CDataPathProperty) and licensing are not implemented. A
   control's binary stream (IPersistStreamInit, IPersistStorage, DLGINIT
   data) has this library's own format, not the one Visual C++ MFC
