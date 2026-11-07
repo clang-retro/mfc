@@ -986,7 +986,9 @@ BOOL COleControlContainer::CreateControl(CWnd* pWndCtrl, REFCLSID clsid, LPCTSTR
                                          UINT nID, CFile* pPersist, BOOL bStorage,
                                          BSTR bstrLicKey, COleControlSite** ppNewSite) {
   if (ppNewSite != NULL) *ppNewSite = NULL;
-  COleControlSite* pSite = _AfxGetOccManager()->CreateSite(this);
+  COleControlSite* pSite = NULL;
+  if (m_pWnd != NULL) m_pWnd->CreateControlSite(this, &pSite, nID, clsid);
+  if (pSite == NULL) pSite = _AfxGetOccManager()->CreateSite(this);
   if (pSite == NULL) return FALSE;
   m_listSitesOrWnds.AddTail(pSite);
   HRESULT hr = pSite->CreateControl(pWndCtrl, clsid, lpszWindowName, dwStyle, ppt, psize, nID,

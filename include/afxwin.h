@@ -1328,6 +1328,10 @@ public:
   // container's defaults.
   virtual BOOL OnAmbientProperty(COleControlSite* pSite, DISPID dispid, VARIANT* pvar);
   BOOL InitControlContainer();
+  // Makes the site of a control this window is about to host; *ppSite
+  // left NULL means the usual COleControlSite.
+  virtual BOOL CreateControlSite(COleControlContainer* pContainer, COleControlSite** ppSite,
+                                 UINT nID, REFCLSID clsid);
 
   COleControlContainer* m_pCtrlCont;  // the controls this window hosts
   COleControlSite* m_pCtrlSite;       // the site, when this is a control's window

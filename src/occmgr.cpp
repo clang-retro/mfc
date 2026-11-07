@@ -421,6 +421,11 @@ BOOL CWnd::InitControlContainer() {
   return m_pCtrlCont != NULL;
 }
 
+BOOL CWnd::CreateControlSite(COleControlContainer*, COleControlSite** ppSite, UINT, REFCLSID) {
+  if (ppSite != NULL) *ppSite = NULL;
+  return FALSE;
+}
+
 BOOL CWnd::CreateControl(REFCLSID clsid, LPCTSTR pszWindowName, DWORD dwStyle, const RECT& rect,
                          CWnd* pParentWnd, UINT nID, CFile* pPersist, BOOL bStorage,
                          BSTR bstrLicKey) {

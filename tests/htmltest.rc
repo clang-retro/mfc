@@ -1,0 +1,14 @@
+// htmltest.rc - a page in the program's resources, for LoadFromResource.
+#include <windows.h>
+#include "htmltest.h"
+
+IDR_PAGE 23 "htmltest.htm"
+PAGE.HTM 23 "htmltest.htm"
+IDR_DLGPAGE 23 "htmltest.htm"
+
+IDD_HTMLDLG DIALOG 0, 0, 200, 120
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE
+CAPTION "DHTML dialog"
+FONT 8, "MS Shell Dlg"
+BEGIN
+END
