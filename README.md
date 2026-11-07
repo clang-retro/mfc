@@ -37,7 +37,8 @@ clang++ --config=winxp.cfg -Ipath/to/mfc/include app.cpp app-res.o \
 As with Visual C++, `afx.h` names the libraries to link, so no `-l`
 options are needed: `mfc` or `mfcu` by `_UNICODE`, and `user32`, `gdi32`,
 `comdlg32`, `comctl32`, `shell32`, `advapi32`, `winspool`, `ole32`,
-`oleaut32` and `uuid` (`afxsock.h` adds `ws2_32` and `afxdb.h` adds
+`oleaut32` and `uuid` (`afxsock.h` adds `ws2_32`, `afxinet.h` adds
+`wininet`, `afxole.h` adds `oledlg` and `urlmon`, and `afxdb.h` adds
 `odbc32`).
 Define `_AFX_NOFORCE_LIBS` to turn that off. The library provides
 `WinMain` (and `wWinMain`), so Unicode programs link with or without
@@ -90,6 +91,14 @@ when there is no display:
   through a CSocketFile, datagrams, errors and cancelling a blocking
   call, and IPv6 datagrams and connections over `::1` with the Ex
   functions (the IPv6 checks run only where the system has IPv6).
+* `inettest`: `afxinet.h` against an HTTP server and an FTP server the
+  test runs itself: AfxParseURL, OpenURL for http, ftp and file URLs,
+  GET, POST and PUT requests (SendRequest, SendRequestEx and
+  EndRequest, buffered writes), request headers, status codes and
+  QueryInfo, ReadString, cookies, the status callback,
+  CInternetException, and FTP directories, files, listings
+  (CFtpFileFind), PutFile, GetFile, Rename and Remove, in passive and
+  active mode.
 * `dlgtest`: a dialog with data exchange and validation, common
   controls, and a property sheet.
 * `sditest`: a single-document program with a toolbar, a status bar and
@@ -273,6 +282,12 @@ request with the stock MinGW-w64 toolchain.
   find/replace) and CPropertySheet/CPropertyPage, wizards included.
 * `afxcmn.h`, `afxcview.h`: the common controls, CImageList, CListView,
   CTreeView. `afxmt.h`: synchronization objects.
+* `afxinet.h`: the internet classes over WinINet: CInternetSession
+  (OpenURL, options, cookies, the status callback), CHttpConnection and
+  CHttpFile, CFtpConnection, CFtpFileFind, CGopherConnection,
+  CGopherFile, CGopherLocator and CGopherFileFind, CInternetFile with
+  read and write buffers, CInternetException, AfxParseURL and
+  AfxParseURLEx.
 
 ## Differences from Visual C++ MFC
 
@@ -313,6 +328,12 @@ request with the stock MinGW-w64 toolchain.
   statically.
 * An asynchronous moniker file's bind status callback is not
   aggregated: CreateBindStatusCallback ignores its pUnkControlling.
+* The gopher classes call WinINet's gopher functions, which Internet
+  Explorer 7 and later removed and Wine does not have, so they are not
+  tested; neither is https, which needs a server with a certificate.
+  CInternetSession's status callback finds its session through the
+  handle's parent (INTERNET_OPTION_PARENT_HANDLE), or is the only
+  session with the callback on.
 * Wine's OleCreatePropertyFrame (as of Wine 9) never calls
   IPropertyPage::Apply, so under Wine the OK and Apply buttons of a
   control's property frame do not change the control; Windows applies
