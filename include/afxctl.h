@@ -370,6 +370,38 @@ public:
   virtual BOOL OnSetObjectRects(LPCRECT lprcPosRect, LPCRECT lprcClipRect);
   CWnd* GetOuterWindow() const;
 
+  // ----- Windowless activation: a control whose GetControlFlags has
+  // windowlessActivate draws on its container's window and gets its
+  // messages from the container, when the container can do that.
+  enum ControlFlags {
+    fastBeginPaint = 0x0001,
+    clipPaintDC = 0x0002,
+    pointerInactive = 0x0004,
+    noFlickerActivate = 0x0010,
+    windowlessActivate = 0x0020,
+    canOptimizeDraw = 0x0040,
+  };
+  virtual DWORD GetControlFlags();
+  // A message from the container; its mouse coordinates are the
+  // control's own. The default sends it through the message map.
+  virtual BOOL OnWindowlessMessage(UINT msg, WPARAM wParam, LPARAM lParam, LRESULT* plResult);
+  virtual IDropTarget* GetWindowlessDropTarget();
+  BOOL IsWindowless() const { return m_bInPlaceSiteWndless; }
+  // These work windowless too, through the container.
+  CWnd* SetCapture();
+  BOOL ReleaseCapture();
+  CWnd* GetCapture();
+  CWnd* SetFocus();
+  CWnd* GetFocus();
+  CDC* GetDC(LPCRECT lprcRect = NULL, DWORD dwFlags = OLEDC_PAINTBKGND);
+  int ReleaseDC(CDC* pDC);
+  void GetClientRect(LPRECT lpRect) const;
+  void InvalidateRgn(CRgn* pRgn, BOOL bErase = TRUE);
+  void ScrollWindow(int xAmount, int yAmount, LPCRECT lpRect = NULL, LPCRECT lpClipRect = NULL);
+  void ClientToParent(LPCRECT lprcBounds, LPPOINT pPoint) const;
+  void ParentToClient(LPCRECT lprcBounds, LPPOINT pPoint, BOOL bHitTest = FALSE) const;
+  virtual LRESULT DefWindowProc(UINT message, WPARAM wParam, LPARAM lParam);
+
   // ----- Stock properties
   OLE_COLOR GetBackColor();
   void SetBackColor(OLE_COLOR clrBack);
@@ -512,6 +544,8 @@ public:
   BOOL m_bInPlaceActive;
   BOOL m_bUIActive;
   BOOL m_bInPlaceSiteEx;
+  BOOL m_bInPlaceSiteWndless;
+  LPOLEINPLACESITEWINDOWLESS m_pInPlaceSiteWndless;
   short m_nFreezeEvents;
   BOOL m_bPendingUIActivation;
   CRect m_rcPos;
@@ -611,13 +645,15 @@ public:
     STDMETHOD(SetColorScheme)(LPLOGPALETTE pLogpal);
   END_INTERFACE_PART(OleObject)
 
-  BEGIN_INTERFACE_PART(OleInPlaceObject, IOleInPlaceObject)
+  BEGIN_INTERFACE_PART(OleInPlaceObject, IOleInPlaceObjectWindowless)
     STDMETHOD(GetWindow)(HWND* phwnd);
     STDMETHOD(ContextSensitiveHelp)(BOOL fEnterMode);
     STDMETHOD(InPlaceDeactivate)();
     STDMETHOD(UIDeactivate)();
     STDMETHOD(SetObjectRects)(LPCRECT lprcPosRect, LPCRECT lprcClipRect);
     STDMETHOD(ReactivateAndUndo)();
+    STDMETHOD(OnWindowMessage)(UINT msg, WPARAM wParam, LPARAM lParam, LRESULT* plResult);
+    STDMETHOD(GetDropTarget)(IDropTarget** ppDropTarget);
   END_INTERFACE_PART(OleInPlaceObject)
 
   BEGIN_INTERFACE_PART(OleInPlaceActiveObject, IOleInPlaceActiveObject)

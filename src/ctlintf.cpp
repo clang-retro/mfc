@@ -325,6 +325,25 @@ STDMETHODIMP COleControl::XOleInPlaceObject::SetObjectRects(LPCRECT lprcPosRect,
 
 STDMETHODIMP COleControl::XOleInPlaceObject::ReactivateAndUndo() { return E_NOTIMPL; }
 
+STDMETHODIMP COleControl::XOleInPlaceObject::OnWindowMessage(UINT msg, WPARAM wParam,
+                                                            LPARAM lParam, LRESULT* plResult) {
+  METHOD_PROLOGUE(COleControl, OleInPlaceObject);
+  if (plResult == NULL) return E_POINTER;
+  *plResult = 0;
+  if (!pThis->m_bInPlaceSiteWndless) return E_UNEXPECTED;
+  pThis->ExternalAddRef();  // a handler may close the control
+  BOOL bHandled = pThis->OnWindowlessMessage(msg, wParam, lParam, plResult);
+  pThis->ExternalRelease();
+  return bHandled ? S_OK : S_FALSE;
+}
+
+STDMETHODIMP COleControl::XOleInPlaceObject::GetDropTarget(IDropTarget** ppDropTarget) {
+  METHOD_PROLOGUE(COleControl, OleInPlaceObject);
+  if (ppDropTarget == NULL) return E_POINTER;
+  *ppDropTarget = pThis->GetWindowlessDropTarget();
+  return *ppDropTarget != NULL ? S_OK : E_NOTIMPL;
+}
+
 // ---------------------------------------------------------------------
 // IOleInPlaceActiveObject
 

@@ -399,9 +399,30 @@ BOOL AFXAPI HookDDXControl(CWnd* pDlgWnd, int nIDC, CWnd& rControl) {
   return TRUE;
 }
 
-const _AFX_OCC_HOOKS s_hooks = {HookPreCreateDialog, HookPostCreateDialog, HookInitDialog,
-                                HookDestroy,         HookNcDestroy,        HookDestroyControl,
-                                HookDDXControl};
+BOOL AFXAPI HookHasWindowless(CWnd* pWnd) {
+  return pWnd->m_pCtrlCont != NULL && pWnd->m_pCtrlCont->m_nWindowlessControls > 0;
+}
+
+BOOL AFXAPI HookWindowlessMessage(CWnd* pWnd, UINT message, WPARAM wParam, LPARAM lParam,
+                                  LRESULT* plResult) {
+  return pWnd->m_pCtrlCont->HandleWindowlessMessage(message, wParam, lParam, plResult);
+}
+
+void AFXAPI HookPaintWindowless(CWnd* pWnd, HRGN hRgnUpdate) {
+  HDC hDC = ::GetDC(pWnd->m_hWnd);
+  if (hDC == NULL) return;
+  ::SelectClipRgn(hDC, hRgnUpdate);
+  CDC dc;
+  dc.Attach(hDC);
+  pWnd->m_pCtrlCont->OnPaint(&dc);
+  dc.Detach();
+  ::ReleaseDC(pWnd->m_hWnd, hDC);
+}
+
+const _AFX_OCC_HOOKS s_hooks = {HookPreCreateDialog,   HookPostCreateDialog, HookInitDialog,
+                                HookDestroy,           HookNcDestroy,        HookDestroyControl,
+                                HookDDXControl,        HookHasWindowless,    HookWindowlessMessage,
+                                HookPaintWindowless};
 
 }  // namespace
 

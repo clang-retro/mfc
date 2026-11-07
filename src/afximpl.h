@@ -31,6 +31,12 @@ struct _AFX_OCC_HOOKS {
   void(AFXAPI* pfnNcDestroy)(CWnd* pWnd);  // the container goes
   BOOL(AFXAPI* pfnDestroyControl)(CWnd* pWnd);  // DestroyWindow on a control's window
   BOOL(AFXAPI* pfnDDXControl)(CWnd* pDlgWnd, int nIDC, CWnd& rControl);
+  // Windowless controls in the window: whether there are any, a message
+  // for one of them, and drawing them over what the window painted.
+  BOOL(AFXAPI* pfnHasWindowless)(CWnd* pWnd);
+  BOOL(AFXAPI* pfnWindowlessMessage)(CWnd* pWnd, UINT message, WPARAM wParam, LPARAM lParam,
+                                     LRESULT* plResult);
+  void(AFXAPI* pfnPaintWindowless)(CWnd* pWnd, HRGN hRgnUpdate);
 };
 extern const _AFX_OCC_HOOKS* _afxOccHooks;
 
