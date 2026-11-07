@@ -11,6 +11,7 @@
 #include "afxwin.h"
 #include "afxext.h"
 #include "afxdisp.h"
+#include "afxole.h"
 #include "afxtempl.h"
 #include <olectl.h>
 #include <ocidl.h>
@@ -326,6 +327,10 @@ BOOL AFXAPI PX_Font(CPropExchange* pPX, LPCTSTR pszPropName, CFontHolder& font,
                     const FONTDESC* pFontDesc = NULL, LPFONTDISP pFontDispAmbient = NULL);
 BOOL AFXAPI PX_IUnknown(CPropExchange* pPX, LPCTSTR pszPropName, LPUNKNOWN& pUnk, REFIID iid,
                         LPUNKNOWN pUnkDefault = NULL);
+class CDataPathProperty;
+// Saves a data path property's path; loading one starts its download.
+BOOL AFXAPI PX_DataPath(CPropExchange* pPX, LPCTSTR pszPropName,
+                        CDataPathProperty& dataPathProperty);
 
 // ---------------------------------------------------------------------
 // COleControl
@@ -387,6 +392,9 @@ public:
   const CString& InternalGetText();
   long GetReadyState();
   void InternalSetReadyState(long lNewState);
+  // Starts loading a data path property from a new path, dropping what
+  // it had.
+  BOOL Load(LPCTSTR strNewPath, CDataPathProperty& prop);
   void GetStockTextMetrics(LPTEXTMETRIC lptm);
   void GetFontTextMetrics(LPTEXTMETRIC lptm, CFontHolder& fontHolder);
 
@@ -700,6 +708,51 @@ public:
 
   DECLARE_INTERFACE_MAP()
   DECLARE_CONNECTION_MAP()
+};
+
+// ---------------------------------------------------------------------
+// Data path properties: a property whose value is a URL, with the data
+// coming while the control runs. The bind host is the control's
+// container's, which resolves URLs relative to its document.
+
+class CDataPathProperty : public CAsyncMonikerFile {
+  DECLARE_DYNAMIC(CDataPathProperty)
+public:
+  CDataPathProperty(COleControl* pControl = NULL);
+  CDataPathProperty(LPCTSTR lpszPath, COleControl* pControl = NULL);
+  virtual ~CDataPathProperty();
+
+  BOOL Open(COleControl* pControl, CFileException* pError = NULL);
+  BOOL Open(LPCTSTR lpszPath, COleControl* pControl, CFileException* pError = NULL);
+  BOOL Open(LPCTSTR lpszPath, CFileException* pError = NULL);
+  BOOL Open(CFileException* pError = NULL);
+
+  // Forgets the data that came before a new download.
+  virtual void ResetData();
+
+  void SetControl(COleControl* pControl) { m_pControl = pControl; }
+  COleControl* GetControl() { return m_pControl; }
+  void SetPath(LPCTSTR lpszPath) { m_strPath = lpszPath; }
+  CString GetPath() const { return m_strPath; }
+
+protected:
+  COleControl* m_pControl;
+  CString m_strPath;
+};
+
+// CCachedDataPathProperty: keeps the data in m_Cache as it arrives.
+class CCachedDataPathProperty : public CDataPathProperty {
+  DECLARE_DYNAMIC(CCachedDataPathProperty)
+public:
+  CCachedDataPathProperty(COleControl* pControl = NULL);
+  CCachedDataPathProperty(LPCTSTR lpszPath, COleControl* pControl = NULL);
+
+  virtual void ResetData();
+
+  CMemFile m_Cache;
+
+protected:
+  virtual void OnDataAvailable(DWORD dwSize, DWORD bscfFlag);
 };
 
 // ---------------------------------------------------------------------

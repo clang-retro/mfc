@@ -18,10 +18,11 @@
 #undef PRINTFLAG_PROMPTUSER
 #endif
 #include <docobj.h>
+#include <urlmon.h>
 
 #ifndef _AFX_NOFORCE_LIBS
 __asm__(".section .drectve,\"yn\"\n"
-        ".ascii \" -defaultlib:oledlg\"\n"
+        ".ascii \" -defaultlib:oledlg -defaultlib:urlmon\"\n"
         ".text");
 #endif
 
@@ -256,6 +257,96 @@ public:
   virtual BOOL GetStatus(CFileStatus& rStatus) const;
 
   LPSTREAM m_lpStream;
+};
+
+// ---------------------------------------------------------------------
+// CMonikerFile: a COleStreamFile over the data a moniker or URL names,
+// read through URL monikers (urlmon.dll, from Internet Explorer 3). Open
+// waits for the data.
+
+class CMonikerFile : public COleStreamFile {
+  DECLARE_DYNAMIC(CMonikerFile)
+public:
+  CMonikerFile();
+  virtual ~CMonikerFile();
+
+  virtual BOOL Open(LPCTSTR lpszURL, CFileException* pError = NULL);
+  virtual BOOL Open(IMoniker* pMoniker, CFileException* pError = NULL);
+  // With a bind host (usually a control's container), which resolves
+  // relative URLs and makes the moniker.
+  virtual BOOL Open(LPCTSTR lpszURL, IBindHost* pBindHost, CFileException* pError = NULL);
+  virtual BOOL Open(IMoniker* pMoniker, IBindHost* pBindHost, CFileException* pError = NULL);
+  virtual void Close();
+  // Lets go of the stream and the moniker without closing the stream.
+  BOOL Detach(CFileException* pError = NULL);
+  IMoniker* GetMoniker() const { return m_pMoniker; }
+
+protected:
+  virtual IBindCtx* CreateBindContext(CFileException* pError);
+  // Makes the moniker for lpszURL, with the bind host when there is one.
+  BOOL MakeMoniker(LPCTSTR lpszURL, IBindHost* pBindHost, CFileException* pError);
+  // Binds m_pMoniker to a stream; the asynchronous file passes its callback.
+  virtual BOOL Bind(IBindHost* pBindHost, CFileException* pError);
+  static void SetError(CFileException* pError, HRESULT hr, LPCTSTR lpszName);
+
+  IMoniker* m_pMoniker;
+};
+
+// CAsyncMonikerFile: the same, with the data arriving while the program
+// runs its message loop. Open returns at once, and the On... members say
+// how the download goes.
+
+class CAsyncMonikerFile : public CMonikerFile {
+  DECLARE_DYNAMIC(CAsyncMonikerFile)
+public:
+  CAsyncMonikerFile();
+  virtual ~CAsyncMonikerFile();
+
+  virtual BOOL Open(LPCTSTR lpszURL, CFileException* pError = NULL);
+  virtual BOOL Open(IMoniker* pMoniker, CFileException* pError = NULL);
+  virtual BOOL Open(LPCTSTR lpszURL, IBindHost* pBindHost, CFileException* pError = NULL);
+  virtual BOOL Open(IMoniker* pMoniker, IBindHost* pBindHost, CFileException* pError = NULL);
+  // The bind host from a service provider (SID_IBindHost) or an object
+  // that has one (such as a control's client site).
+  virtual BOOL Open(LPCTSTR lpszURL, IServiceProvider* pServiceProvider,
+                    CFileException* pError = NULL);
+  virtual BOOL Open(IMoniker* pMoniker, IServiceProvider* pServiceProvider,
+                    CFileException* pError = NULL);
+  virtual BOOL Open(LPCTSTR lpszURL, IUnknown* pUnknown, CFileException* pError = NULL);
+  virtual BOOL Open(IMoniker* pMoniker, IUnknown* pUnknown, CFileException* pError = NULL);
+  // Stops a download that is still going.
+  virtual void Close();
+
+  IBinding* GetBinding() const { return m_pBinding; }
+  FORMATETC* GetFormatEtc() const { return m_pFormatEtc; }
+
+protected:
+  // The IBindStatusCallback that reports to this object. pUnkControlling
+  // is not used: the callback is not aggregated.
+  virtual IUnknown* CreateBindStatusCallback(IUnknown* pUnkControlling);
+  virtual DWORD GetBindInfo() const;
+  virtual LONG GetPriority() const;
+  virtual void OnStartBinding();
+  virtual void OnProgress(ULONG ulProgress, ULONG ulProgressMax, ULONG ulStatusCode,
+                          LPCTSTR szStatusText);
+  // dwSize is all the data that has arrived; bscfFlag has
+  // BSCF_LASTDATANOTIFICATION with the last of it.
+  virtual void OnDataAvailable(DWORD dwSize, DWORD bscfFlag);
+  virtual void OnLowResource();
+  virtual void OnStopBinding(HRESULT hresult, LPCTSTR szError);
+
+  virtual IBindCtx* CreateBindContext(CFileException* pError);
+  virtual BOOL Bind(IBindHost* pBindHost, CFileException* pError);
+  static IBindHost* GetBindHost(IUnknown* pUnknown);
+
+public:
+  // The callback's side.
+  class XBindStatusCallback;
+  friend class XBindStatusCallback;
+  XBindStatusCallback* m_pCallback;
+  IBindStatusCallback* m_pBSC;
+  IBinding* m_pBinding;
+  FORMATETC* m_pFormatEtc;
 };
 
 // ---------------------------------------------------------------------
