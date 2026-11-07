@@ -190,8 +190,8 @@ when there is no display:
   events and property notifications through event sink maps, ambient
   properties, frozen events, moving, enabling, focus and destroying),
   and a dialog template with controls among ordinary items (made on
-  WM_INITDIALOG in the template's tab order, state from DLGINIT,
-  DDX_Control and the DDX_OC functions).
+  WM_INITDIALOG in the template's tab order, state from DLGINIT after
+  its license key, DDX_Control and the DDX_OC functions).
 * `dlltest`: MFC in a DLL: a control in a regular DLL (`dlltest-dll`,
   built like an `.ocx`) registered through DllRegisterServer, made by
   COM from the registry and hosted by the program (properties, methods
@@ -228,8 +228,11 @@ when there is no display:
   current row (and null fields and no row), changes to the fields, and
   set the fields, and the other controls bound to them; a property
   given the data source; the data source control's rowset; unbinding;
-  destroying the bound controls or the data source control first; and
-  a data source without a row position.
+  destroying the bound controls or the data source control first; a
+  data source without a row position; bindings from a dialog
+  template's DLGINIT records; an older data source control that makes
+  an ICursor, with the same bindings; and ON_DSCNOTIFY, which hears of
+  each step of a change and can refuse it.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -301,9 +304,14 @@ request with the stock MinGW-w64 toolchain.
   functions. Windowless controls (IOleInPlaceSiteWindowless): the
   container draws them in its window's WM_PAINT and passes them mouse,
   keyboard and focus messages. Data binding to OLE DB data source
-  controls (DataSource): CWnd::BindDefaultProperty binds a control's
-  property to a field of the current row, both ways, BindProperty gives
-  a property the data source, and GetDSCCursor gives its rowset.
+  controls (DataSource) and to the older ones that make an ICursor
+  (IVBDSC; `ocdb.h` declares the cursor interfaces):
+  CWnd::BindDefaultProperty binds a control's property to a field of
+  the current row, both ways, BindProperty gives a property the data
+  source (or the cursor), GetDSCCursor gives its rowset or cursor, the
+  dialog editor's bindings in DLGINIT records are made with the dialog,
+  and ON_DSCNOTIFY (and ON_DSCNOTIFY_RANGE and _REFLECT) hears of the
+  data source control's changes.
   Extended controls (IOleControlSite::GetExtendedControl): the
   extender properties, and the control's own through the same
   IDispatch.
@@ -381,11 +389,13 @@ request with the stock MinGW-w64 toolchain.
   Left, Top, Width, Height, Visible and ID (in the container window's
   pixels, with DISPIDs of this library's, AFX_DISPID_EXT_*); Parent is
   the container window's IDispatch when it has automation. Data binding
-  works with OLE DB data sources only (DataSource and its default data
-  member, with IRowPosition or else the rowset's first row), not with
-  the older ICursor data source controls, and there is no ON_DSCNOTIFY
-  or binding through dialog templates; a field is set as soon as its
-  bound property changes.
+  uses an OLE DB data source's default data member (with IRowPosition,
+  or else the rowset's first row), and a cursor's current row; a field
+  is set as soon as its bound property changes (with a cursor, as an
+  update of its own unless one is going on). ON_DSCNOTIFY hears of
+  every step of a cursor's changes, but of an OLE DB data source's only
+  once something is bound to it, and then only of the steps the rowset
+  tells of.
   Windowless controls are drawn after the container's own painting,
   in the order they were made, and are not given drag and drop
   (GetWindowlessDropTarget is not called).

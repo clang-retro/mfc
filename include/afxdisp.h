@@ -720,7 +720,8 @@ enum {
   _AFX_EVENTSINK_END = 0,
   _AFX_EVENTSINK_EVENT,
   _AFX_EVENTSINK_REQUEST,  // a property's OnRequestEdit
-  _AFX_EVENTSINK_CHANGED   // a property's OnChanged
+  _AFX_EVENTSINK_CHANGED,  // a property's OnChanged
+  _AFX_EVENTSINK_DSCNOTIFY // a data source control's notification
 };
 
 struct AFX_EVENTSINKMAP_ENTRY {
@@ -776,6 +777,19 @@ struct AFX_EVENTSINKMAP_ENTRY {
                        FALSE) \
   _AFX_EVENTSINK_ENTRY(theClass, -1, -1, dispid, pfnChanged, VTS_NONE, _AFX_EVENTSINK_CHANGED, \
                        FALSE)
+
+// pfnNotify is BOOL (DSCSTATE nState, DSCREASON nReason, BOOL* pbAllow),
+// for the notifications of a data source control as its current row
+// moves or changes: at dscOKToDo, it sets *pbAllow to FALSE to refuse.
+#define ON_DSCNOTIFY(theClass, id, pfnNotify) \
+  _AFX_EVENTSINK_ENTRY(theClass, id, id, DISPID_UNKNOWN, pfnNotify, VTS_I4 VTS_I4 VTS_PBOOL, \
+                       _AFX_EVENTSINK_DSCNOTIFY, FALSE)
+#define ON_DSCNOTIFY_RANGE(theClass, idFirst, idLast, pfnNotify) \
+  _AFX_EVENTSINK_ENTRY(theClass, idFirst, idLast, DISPID_UNKNOWN, pfnNotify, \
+                       VTS_I4 VTS_I4 VTS_PBOOL, _AFX_EVENTSINK_DSCNOTIFY, TRUE)
+#define ON_DSCNOTIFY_REFLECT(theClass, pfnNotify) \
+  _AFX_EVENTSINK_ENTRY(theClass, -1, -1, DISPID_UNKNOWN, pfnNotify, VTS_I4 VTS_I4 VTS_PBOOL, \
+                       _AFX_EVENTSINK_DSCNOTIFY, FALSE)
 
 // Dialog data exchange with the properties of a control in a dialog.
 void AFXAPI DDX_OCText(CDataExchange* pDX, int nIDC, DISPID dispid, CString& value);

@@ -10,7 +10,15 @@
 //     and changes to the properties go to the table and to the other
 //     controls bound to the same field; BindProperty gives DataSource
 //     the data source; GetDSCCursor gives the rowset; unbinding and
-//     destroying either side leaves nothing behind.
+//     destroying either side leaves nothing behind;
+//   - a dialog template's DLGINIT record binds a control to the data
+//     source control next to it, as the dialog editor writes it;
+//   - an older data source control (CVBDscCtrl, IVBDSC) makes a cursor
+//     (ICursorMove, ICursorUpdateARow) over the same rows, and tells of
+//     its changes through INotifyDBEvents: the bindings work the same,
+//     and each step of a change is an ON_DSCNOTIFY notification, which
+//     can refuse it;
+//   - ON_DSCNOTIFY hears of the OLE DB data source's row moving too.
 #include <afxwin.h>
 #include <afxdisp.h>
 #include <afxctl.h>
@@ -20,11 +28,13 @@
 #include <oledb.h>
 #include <oledberr.h>
 #include <msdatsrc.h>
+#include "bindtest.h"
 #include "testutil.h"
 
 #define IDC_DSC 2001
 #define IDC_BOUND1 2002
 #define IDC_BOUND2 2003
+#define IDC_VBDSC 2004
 
 #define DISPID_AGE 1
 #define DISPID_DATASOURCE 2
@@ -422,6 +432,400 @@ STDMETHODIMP CDscCtrl::XDataSrc::addDataSourceListener(DataSourceListener*) { re
 STDMETHODIMP CDscCtrl::XDataSrc::removeDataSourceListener(DataSourceListener*) { return S_OK; }
 
 // =====================================================================
+// The older kind of data source control (CVBDscCtrl): IVBDSC makes a
+// cursor over the same three rows, which tells of its changes through
+// the control's INotifyDBEvents connection point.
+
+class CVBDscCtrl;
+
+static BOOL SameColumn(const DBCOLUMNID& a, const DBCOLUMNID& b) {
+  if (a.dwKind != b.dwKind) return FALSE;
+  if (a.dwKind != DBCOLKIND_NAME && !::IsEqualGUID(a.guid, b.guid)) return FALSE;
+  if (a.dwKind == DBCOLKIND_GUID_NUMBER) return a.lNumber == b.lNumber;
+  return ::lstrcmpW(a.lpdbsz, b.lpdbsz) == 0;
+}
+
+// {5B8E2C11-6A4F-4D2B-9E31-7A0C4F6B2D10}: the Name column's GUID.
+static const GUID kGUID_Columns = {
+    0x5b8e2c11, 0x6a4f, 0x4d2b, {0x9e, 0x31, 0x7a, 0x0c, 0x4f, 0x6b, 0x2d, 0x10}};
+
+// The data columns: Name by GUID and name, Age by GUID and number.
+static DBCOLUMNID DataColumn(int nCol) {
+  DBCOLUMNID id;
+  memset(&id, 0, sizeof(id));
+  id.guid = kGUID_Columns;
+  if (nCol == 0) {
+    id.dwKind = DBCOLKIND_GUID_NAME;
+    id.lpdbsz = (LPDBSTR)L"NameColumn";
+  } else {
+    id.dwKind = DBCOLKIND_GUID_NUMBER;
+    id.lNumber = 2;
+  }
+  return id;
+}
+
+// The columns cursor: a row a column, with its column ID and name.
+class CFakeColumns : public ICursor {
+public:
+  CFakeColumns() : m_cRef(1), m_nBindings(0), m_cbRow(0) {}
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (::IsEqualIID(iid, IID_IUnknown) || ::IsEqualIID(iid, IID_ICursor)) {
+      *ppv = static_cast<ICursor*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return ++m_cRef; }
+  STDMETHOD_(ULONG, Release)() {
+    ULONG c = --m_cRef;
+    if (c == 0) delete this;
+    return c;
+  }
+  STDMETHOD(GetColumnsCursor)(REFIID, IUnknown**, ULONG_PTR*) { return E_NOTIMPL; }
+  STDMETHOD(SetBindings)(ULONG_PTR cCol, DBCOLUMNBINDING rg[], ULONG_PTR cbRow, DWORD) {
+    if (cCol > 4) return E_INVALIDARG;
+    m_nBindings = cCol;
+    for (ULONG_PTR i = 0; i < cCol; i++) m_bindings[i] = rg[i];
+    m_cbRow = cbRow;
+    return S_OK;
+  }
+  STDMETHOD(GetBindings)(ULONG_PTR*, DBCOLUMNBINDING*[], ULONG_PTR*) { return E_NOTIMPL; }
+  STDMETHOD(GetNextRows)(LARGE_INTEGER, DBFETCHROWS* pFetch) {
+    if (!(pFetch->dwFlags & DBROWFETCH_CALLEEALLOCATES)) return E_INVALIDARG;
+    static const char* const kNames[2] = {"Name", "Age"};
+    BYTE* pData = (BYTE*)::CoTaskMemAlloc(m_cbRow * 2);
+    BYTE* pVar = (BYTE*)::CoTaskMemAlloc(256);
+    memset(pData, 0, m_cbRow * 2);
+    BYTE* pNext = pVar;
+    for (int nRow = 0; nRow < 2; nRow++) {
+      BYTE* pRow = pData + m_cbRow * nRow;
+      for (ULONG_PTR i = 0; i < m_nBindings; i++) {
+        const DBCOLUMNBINDING& b = m_bindings[i];
+        if (SameColumn(b.columnID, COLUMN_COLUMNID) && b.dwDataType == DBTYPE_COLUMNID) {
+          DBCOLUMNID id = DataColumn(nRow);
+          if (id.dwKind != DBCOLKIND_GUID_NUMBER) {  // its name goes with the variable data
+            size_t cb = (::lstrlenW(id.lpdbsz) + 1) * sizeof(WCHAR);
+            memcpy(pNext, id.lpdbsz, cb);
+            id.lpdbsz = (LPDBSTR)pNext;
+            pNext += cb;
+          }
+          memcpy(pRow + b.obData, &id, sizeof(id));
+        } else if (SameColumn(b.columnID, COLUMN_NAME) && b.dwDataType == VT_LPSTR) {
+          size_t cb = strlen(kNames[nRow]) + 1;
+          memcpy(pNext, kNames[nRow], cb);
+          *(LPSTR*)(pRow + b.obData) = (LPSTR)pNext;
+          pNext += cb;
+        } else {
+          continue;
+        }
+        if (b.obInfo != DB_NOVALUE) *(DWORD*)(pRow + b.obInfo) = 0;
+      }
+    }
+    pFetch->pData = pData;
+    pFetch->pVarData = pVar;
+    pFetch->cbVarData = 256;
+    pFetch->cRowsReturned = 2;
+    return S_OK;
+  }
+  STDMETHOD(Requery)() { return S_OK; }
+
+  ULONG m_cRef;
+  ULONG_PTR m_nBindings;
+  DBCOLUMNBINDING m_bindings[4];
+  ULONG_PTR m_cbRow;
+};
+
+class CFakeCursor : public ICursorMove, public ICursorUpdateARow {
+public:
+  enum { kRows = 3 };
+  CFakeCursor()
+      : m_cRef(1),
+        m_pCtrl(NULL),
+        m_nRow(0),
+        m_nBindings(0),
+        m_dwEditMode(DBEDITMODE_NONE),
+        m_nUpdates(0),
+        m_nSetColumns(0) {
+    m_strNames[0] = _T("Ann");
+    m_strNames[1] = _T("Bob");
+    m_strNames[2] = _T("Cy");
+    m_nAges[0] = 31;
+    m_nAges[1] = 42;
+    m_nAges[2] = -1;  // null
+    s_nAlive++;
+  }
+  ~CFakeCursor() { s_nAlive--; }
+
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (::IsEqualIID(iid, IID_IUnknown) || ::IsEqualIID(iid, IID_ICursor) ||
+        ::IsEqualIID(iid, IID_ICursorMove))
+      *ppv = static_cast<ICursorMove*>(this);
+    else if (::IsEqualIID(iid, IID_ICursorUpdateARow))
+      *ppv = static_cast<ICursorUpdateARow*>(this);
+    else {
+      *ppv = NULL;
+      return E_NOINTERFACE;
+    }
+    AddRef();
+    return S_OK;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return ++m_cRef; }
+  STDMETHOD_(ULONG, Release)() {
+    ULONG c = --m_cRef;
+    if (c == 0) delete this;
+    return c;
+  }
+
+  // ICursor
+  STDMETHOD(GetColumnsCursor)(REFIID riid, IUnknown** ppv, ULONG_PTR* pcRows) {
+    CFakeColumns* p = new CFakeColumns;
+    HRESULT hr = p->QueryInterface(riid, (void**)ppv);
+    p->Release();
+    if (pcRows != NULL) *pcRows = 2;
+    return hr;
+  }
+  STDMETHOD(SetBindings)(ULONG_PTR cCol, DBCOLUMNBINDING rg[], ULONG_PTR, DWORD dwFlags) {
+    if (dwFlags != DBCOLUMNBINDOPTS_REPLACE || cCol > 4) return E_INVALIDARG;
+    m_nBindings = cCol;
+    for (ULONG_PTR i = 0; i < cCol; i++) m_bindings[i] = rg[i];
+    return S_OK;
+  }
+  STDMETHOD(GetBindings)(ULONG_PTR*, DBCOLUMNBINDING*[], ULONG_PTR*) { return E_NOTIMPL; }
+  STDMETHOD(GetNextRows)(LARGE_INTEGER, DBFETCHROWS*) { return E_NOTIMPL; }
+  STDMETHOD(Requery)() { return S_OK; }
+
+  // ICursorMove: only to the current row, read as VARIANTs.
+  STDMETHOD(Move)(ULONG cbBookmark, void* pBookmark, LARGE_INTEGER dlOffset,
+                  DBFETCHROWS* pFetch) {
+    if (cbBookmark != 1 || *(BYTE*)pBookmark != DBBMK_CURRENT || dlOffset.QuadPart != 0)
+      return E_INVALIDARG;
+    pFetch->cRowsReturned = 0;
+    if (m_nRow < 0 || pFetch->cRowsRequested == 0) return S_OK;
+    for (ULONG_PTR i = 0; i < m_nBindings; i++) {
+      const DBCOLUMNBINDING& b = m_bindings[i];
+      if (b.dwBinding != DBBINDING_VARIANT) return E_INVALIDARG;
+      VARIANT* pvar = (VARIANT*)((BYTE*)pFetch->pData + b.obData);
+      ::VariantInit(pvar);
+      int nCol = ColumnOf(b.columnID);
+      if (nCol < 0) return E_INVALIDARG;
+      if (nCol == 0) {
+        pvar->vt = VT_BSTR;
+        pvar->bstrVal = m_strNames[m_nRow].AllocSysString();
+      } else if (m_nAges[m_nRow] < 0) {
+        pvar->vt = VT_NULL;
+      } else {
+        pvar->vt = VT_I4;
+        pvar->lVal = m_nAges[m_nRow];
+      }
+      if (pvar->vt != VT_NULL && b.dwDataType != VT_VARIANT && b.dwDataType != pvar->vt &&
+          FAILED(::VariantChangeType(pvar, pvar, 0, (VARTYPE)b.dwDataType)))
+        return E_FAIL;
+    }
+    pFetch->cRowsReturned = 1;
+    return S_OK;
+  }
+  STDMETHOD(GetBookmark)(DBCOLUMNID*, ULONG, ULONG*, void*) { return E_NOTIMPL; }
+  STDMETHOD(Clone)(DWORD, REFIID, IUnknown**) { return E_NOTIMPL; }
+
+  // ICursorUpdateARow
+  STDMETHOD(BeginUpdate)(DWORD dwFlags) {
+    if (m_dwEditMode != DBEDITMODE_NONE || dwFlags != DBROWACTION_UPDATE) return E_FAIL;
+    m_dwEditMode = DBEDITMODE_UPDATE;
+    m_strEditName = m_strNames[m_nRow];
+    m_nEditAge = m_nAges[m_nRow];
+    return S_OK;
+  }
+  STDMETHOD(SetColumn)(DBCOLUMNID* pcid, DBBINDPARAMS* pParams) {
+    if (m_dwEditMode == DBEDITMODE_NONE || pParams->dwBinding != DBBINDING_VARIANT) return E_FAIL;
+    m_nSetColumns++;
+    int nCol = ColumnOf(*pcid);
+    if (nCol < 0) return E_INVALIDARG;
+    if (pParams->dwInfo == DB_NULL) {
+      if (nCol == 1) m_nEditAge = -1;
+      return S_OK;
+    }
+    COleVariant var(*(VARIANT*)pParams->pData);
+    if (nCol == 0) {
+      var.ChangeType(VT_BSTR);
+      m_strEditName = var.bstrVal;
+    } else {
+      var.ChangeType(VT_I4);
+      m_nEditAge = var.lVal;
+    }
+    return S_OK;
+  }
+  STDMETHOD(GetColumn)(DBCOLUMNID*, DBBINDPARAMS*, DWORD*) { return E_NOTIMPL; }
+  STDMETHOD(GetEditMode)(DWORD* pdwState) {
+    *pdwState = m_dwEditMode;
+    return S_OK;
+  }
+  STDMETHOD(Update)(DBCOLUMNID*, ULONG*, void**) {
+    if (m_dwEditMode == DBEDITMODE_NONE) return E_FAIL;
+    m_dwEditMode = DBEDITMODE_NONE;
+    m_nUpdates++;
+    int nRow = m_nRow;
+    CString strName = m_strEditName;
+    long nAge = m_nEditAge;
+    return Change(DBEVENT_CURRENT_ROW_DATA_CHANGED, DBREASON_MODIFIED, [&]() {
+      m_strNames[nRow] = strName;
+      m_nAges[nRow] = nAge;
+    });
+  }
+  STDMETHOD(Cancel)() {
+    m_dwEditMode = DBEDITMODE_NONE;
+    return S_OK;
+  }
+  STDMETHOD(Delete)() { return E_NOTIMPL; }
+
+  // The test's changes.
+  HRESULT MoveTo(int nRow) {
+    return Change(DBEVENT_CURRENT_ROW_CHANGED, DBREASON_MOVE, [&]() { m_nRow = nRow; });
+  }
+  HRESULT ChangeAge(int nRow, long nAge) {
+    return Change(nRow == m_nRow ? DBEVENT_CURRENT_ROW_DATA_CHANGED
+                                 : DBEVENT_NONCURRENT_ROW_DATA_CHANGED,
+                  DBREASON_MODIFIED, [&]() { m_nAges[nRow] = nAge; });
+  }
+
+  int ColumnOf(const DBCOLUMNID& id) {
+    for (int i = 0; i < 2; i++)
+      if (SameColumn(id, DataColumn(i))) return i;
+    return -1;
+  }
+  // Each step of a change, told to the control's sinks; any of them can
+  // refuse it at OKToDo.
+  template <class F>
+  HRESULT Change(DWORD dwWhat, DWORD dwReason, F change);
+
+  static int s_nAlive;
+  ULONG m_cRef;
+  CVBDscCtrl* m_pCtrl;  // NULL once the control goes
+  int m_nRow;           // -1: none
+  CString m_strNames[kRows];
+  long m_nAges[kRows];
+  ULONG_PTR m_nBindings;
+  DBCOLUMNBINDING m_bindings[4];
+  DWORD m_dwEditMode;
+  CString m_strEditName;
+  long m_nEditAge;
+  int m_nUpdates, m_nSetColumns;
+};
+int CFakeCursor::s_nAlive = 0;
+
+class CVBDscCtrl : public COleControl {
+  DECLARE_DYNCREATE(CVBDscCtrl)
+public:
+  static CVBDscCtrl* s_pLast;
+  static int s_nAlive;
+  CFakeCursor* m_pCursor;
+  int m_nCursors;
+
+  CVBDscCtrl() : m_pCursor(new CFakeCursor), m_nCursors(0) {
+    InitializeIIDs(&IID_DDscCtrl, &IID_DDscCtrlEvents);
+    m_pCursor->m_pCtrl = this;
+    s_pLast = this;
+    s_nAlive++;
+  }
+  virtual ~CVBDscCtrl() {
+    m_pCursor->m_pCtrl = NULL;
+    m_pCursor->Release();
+    if (s_pLast == this) s_pLast = NULL;
+    s_nAlive--;
+  }
+  virtual void OnDraw(CDC* pDC, const CRect& rcBounds, const CRect&) {
+    pDC->FillSolidRect(rcBounds, RGB(200, 200, 200));
+  }
+
+  BEGIN_INTERFACE_PART(VBDSC, IVBDSC)
+    STDMETHOD(CancelUnload)(BOOL* pfCancel);
+    STDMETHOD(Error)(DWORD dwErr, BOOL* pfShowError);
+    STDMETHOD(CreateCursor)(ICursor** ppCursor);
+  END_INTERFACE_PART(VBDSC)
+
+  BEGIN_CONNECTION_PART(CVBDscCtrl, DBEventsCP)
+    CONNECTION_IID(IID_INotifyDBEvents)
+  END_CONNECTION_PART(DBEventsCP)
+
+  DECLARE_INTERFACE_MAP()
+  DECLARE_CONNECTION_MAP()
+  DECLARE_OLECREATE_EX(CVBDscCtrl)
+  DECLARE_OLECTLTYPE(CVBDscCtrl)
+  DECLARE_DISPATCH_MAP()
+  DECLARE_EVENT_MAP()
+};
+CVBDscCtrl* CVBDscCtrl::s_pLast = NULL;
+int CVBDscCtrl::s_nAlive = 0;
+
+IMPLEMENT_DYNCREATE(CVBDscCtrl, COleControl)
+IMPLEMENT_OLECREATE_EX(CVBDscCtrl, "BindTest.VBDsc.1", 0x5b8e2c11, 0x6a4f, 0x4d2b, 0x9e, 0x31,
+                       0x7a, 0x0c, 0x4f, 0x6b, 0x2d, 0x06)
+IMPLEMENT_OLECTLTYPE(CVBDscCtrl, 0, kMiscStatus)
+BOOL CVBDscCtrl::CVBDscCtrlFactory::UpdateRegistry(BOOL) { return TRUE; }
+
+BEGIN_DISPATCH_MAP(CVBDscCtrl, COleControl)
+END_DISPATCH_MAP()
+BEGIN_EVENT_MAP(CVBDscCtrl, COleControl)
+END_EVENT_MAP()
+BEGIN_INTERFACE_MAP(CVBDscCtrl, COleControl)
+  INTERFACE_PART(CVBDscCtrl, IID_IVBDSC, VBDSC)
+END_INTERFACE_MAP()
+BEGIN_CONNECTION_MAP(CVBDscCtrl, COleControl)
+  CONNECTION_PART(CVBDscCtrl, IID_INotifyDBEvents, DBEventsCP)
+END_CONNECTION_MAP()
+
+STDMETHODIMP_(ULONG) CVBDscCtrl::XVBDSC::AddRef() {
+  METHOD_PROLOGUE_EX_(CVBDscCtrl, VBDSC)
+  return pThis->ExternalAddRef();
+}
+STDMETHODIMP_(ULONG) CVBDscCtrl::XVBDSC::Release() {
+  METHOD_PROLOGUE_EX_(CVBDscCtrl, VBDSC)
+  return pThis->ExternalRelease();
+}
+STDMETHODIMP CVBDscCtrl::XVBDSC::QueryInterface(REFIID iid, void** ppv) {
+  METHOD_PROLOGUE_EX_(CVBDscCtrl, VBDSC)
+  return (HRESULT)pThis->ExternalQueryInterface(&iid, ppv);
+}
+STDMETHODIMP CVBDscCtrl::XVBDSC::CancelUnload(BOOL* pfCancel) {
+  *pfCancel = FALSE;
+  return S_OK;
+}
+STDMETHODIMP CVBDscCtrl::XVBDSC::Error(DWORD, BOOL*) { return S_OK; }
+STDMETHODIMP CVBDscCtrl::XVBDSC::CreateCursor(ICursor** ppCursor) {
+  METHOD_PROLOGUE_EX_(CVBDscCtrl, VBDSC)
+  pThis->m_nCursors++;
+  *ppCursor = static_cast<ICursorMove*>(pThis->m_pCursor);
+  pThis->m_pCursor->AddRef();
+  return S_OK;
+}
+
+template <class F>
+HRESULT CFakeCursor::Change(DWORD dwWhat, DWORD dwReason, F change) {
+  DBNOTIFYREASON reason;
+  memset(&reason, 0, sizeof(reason));
+  reason.dwReason = dwReason;
+  const CPtrArray* pSinks = m_pCtrl != NULL ? m_pCtrl->m_xDBEventsCP.GetConnections() : NULL;
+  INT_PTR nSinks = pSinks != NULL ? pSinks->GetSize() : 0;
+  for (INT_PTR i = 0; i < nSinks; i++) {
+    INotifyDBEvents* pSink = (INotifyDBEvents*)pSinks->GetAt(i);
+    if (pSink->OKToDo(dwWhat, 1, &reason) != S_OK) {
+      for (INT_PTR j = 0; j <= i; j++)
+        ((INotifyDBEvents*)pSinks->GetAt(j))->Cancelled(dwWhat, 1, &reason);
+      return OCDB_S_OPERATIONCANCELLED;
+    }
+  }
+  for (INT_PTR i = 0; i < nSinks; i++)
+    ((INotifyDBEvents*)pSinks->GetAt(i))->AboutToDo(dwWhat, 1, &reason);
+  change();
+  for (INT_PTR i = 0; i < nSinks; i++)
+    ((INotifyDBEvents*)pSinks->GetAt(i))->SyncAfter(dwWhat, 1, &reason);
+  for (INT_PTR i = 0; i < nSinks; i++)
+    ((INotifyDBEvents*)pSinks->GetAt(i))->DidEvent(dwWhat, 1, &reason);
+  return S_OK;
+}
+
+// =====================================================================
 // The bound control
 
 class CBoundCtrl : public COleControl {
@@ -446,6 +850,8 @@ public:
   virtual void OnDraw(CDC* pDC, const CRect& rcBounds, const CRect&) {
     pDC->FillSolidRect(rcBounds, RGB(255, 255, 255));
   }
+  // No saved properties, so an empty saved state loads.
+  virtual void DoPropExchange(CPropExchange*) {}
 
   long GetAge() { return m_nAge; }
   void SetAge(long nAge) {
@@ -496,8 +902,39 @@ public:
   CBoundCtrl* m_pCtl1;
   CBoundCtrl* m_pCtl2;
   int m_nRequestEdits, m_nAgeChanges;
+  // The data source controls' notifications (ON_DSCNOTIFY_RANGE): how
+  // many, the last, and the ones a move made.
+  int m_nDSCNotifies;
+  UINT m_nDSCID;
+  DSCSTATE m_nDSCState;
+  DSCREASON m_nDSCReason;
+  CString m_strMoveSteps;
+  BOOL m_bRefuseMoves;
 
-  CMainFrame() : m_pCtl1(NULL), m_pCtl2(NULL), m_nRequestEdits(0), m_nAgeChanges(0) {}
+  CMainFrame()
+      : m_pCtl1(NULL),
+        m_pCtl2(NULL),
+        m_nRequestEdits(0),
+        m_nAgeChanges(0),
+        m_nDSCNotifies(0),
+        m_nDSCID(0),
+        m_nDSCState(dscNoState),
+        m_nDSCReason(dscNoReason),
+        m_bRefuseMoves(FALSE) {}
+
+  BOOL OnDSCNotify(UINT nID, DSCSTATE nState, DSCREASON nReason, BOOL* pbAllow) {
+    m_nDSCNotifies++;
+    m_nDSCID = nID;
+    m_nDSCState = nState;
+    m_nDSCReason = nReason;
+    if (nReason == dscMove) {
+      CString str;
+      str.Format(_T("%d"), (int)nState);
+      m_strMoveSteps += str;
+      if (m_bRefuseMoves && nState == dscOKToDo) *pbAllow = FALSE;
+    }
+    return TRUE;
+  }
 
   BOOL OnRequestEdit(BOOL*) {  // allowed
     m_nRequestEdits++;
@@ -514,6 +951,8 @@ public:
   void TestUnbind();
   void TestDestroyOrder();
   void TestRowsetOnly();
+  void TestDialog();
+  void TestCursor();
 
   afx_msg int OnCreate(LPCREATESTRUCT lpcs) {
     if (CFrameWnd::OnCreate(lpcs) == -1) return -1;
@@ -536,6 +975,7 @@ END_MESSAGE_MAP()
 
 BEGIN_EVENTSINK_MAP(CMainFrame, CFrameWnd)
   ON_PROPNOTIFY(CMainFrame, IDC_BOUND1, DISPID_AGE, OnRequestEdit, OnAgeChanged)
+  ON_DSCNOTIFY_RANGE(CMainFrame, IDC_DSC, IDC_VBDSC, OnDSCNotify)
 END_EVENTSINK_MAP()
 
 static CString TextOf(CWnd& wnd) {
@@ -584,9 +1024,12 @@ void CMainFrame::TestSimple() {
   IUnknown* pCursor = m_dsc.GetDSCCursor();
   CHECK(pCursor == static_cast<IRowset*>(pTable));
 
-  // The current row moves.
+  // The current row moves, which ON_DSCNOTIFY hears of.
+  m_nDSCNotifies = 0;
   pTable->MoveTo(2);
   CHECK(TextOf(m_bound1) == _T("Bob") && AgeOf(m_bound1) == 42 && TextOf(m_bound2) == _T("Bob"));
+  CHECK(m_nDSCNotifies == 1 && m_nDSCID == IDC_DSC && m_nDSCState == dscDidEvent &&
+        m_nDSCReason == dscMove);
   // A null field is the property type's empty value.
   pTable->MoveTo(3);
   CHECK(TextOf(m_bound1) == _T("Cy") && AgeOf(m_bound1) == 0);
@@ -723,12 +1166,118 @@ void CMainFrame::TestRowsetOnly() {
   CHECK(CFakeTable::s_nAlive == 0 && CDscCtrl::s_nAlive == 0 && CBoundCtrl::s_nAlive == 0);
 }
 
+void CMainFrame::TestDialog() {
+  TestLog("bindings from a dialog template");
+  CDialog dlg;
+  CBoundCtrl::s_pLast = NULL;
+  CHECK(dlg.Create(IDD_BINDDLG, this));
+  CBoundCtrl* pCtl = CBoundCtrl::s_pLast;
+  CDscCtrl* pDsc = CDscCtrl::s_pLast;
+  CHECK(pCtl != NULL && pDsc != NULL);
+  if (pCtl != NULL && pDsc != NULL) {
+    // Age follows the field, and DataSource holds the data source.
+    CHECK(pCtl->m_nAge == 31);
+    IUnknown* pDataSource = NULL;
+    pDsc->GetControllingUnknown()->QueryInterface(kIID_DataSource, (void**)&pDataSource);
+    CHECK(pDataSource != NULL && pCtl->m_pDataSource == pDataSource);
+    if (pDataSource != NULL) pDataSource->Release();
+    pDsc->m_pTable->MoveTo(2);
+    CHECK(pCtl->m_nAge == 42);
+    pCtl->SetAge(43);
+    CHECK(pDsc->m_pTable->Age(1) == 43);
+    pCtl->SetDataSource(NULL);  // so that the controls can go
+  }
+  dlg.DestroyWindow();
+  CHECK(CFakeTable::s_nAlive == 0 && CDscCtrl::s_nAlive == 0 && CBoundCtrl::s_nAlive == 0);
+}
+
+// A data source control that makes a cursor (IVBDSC).
+void CMainFrame::TestCursor() {
+  TestLog("cursor data source control");
+  CWnd vbdsc;
+  CHECK(vbdsc.CreateControl(CVBDscCtrl::guid, NULL, WS_VISIBLE, CRect(10, 100, 60, 120), this,
+                            IDC_VBDSC));
+  CVBDscCtrl* pDsc = CVBDscCtrl::s_pLast;
+  if (!MakeControls() || pDsc == NULL) return;
+  CFakeCursor* pCursor = pDsc->m_pCursor;
+  CBoundCtrl* pCtl1 = m_pCtl1;
+  CHECK(pDsc->m_xDBEventsCP.GetConnections()->GetSize() == 1);  // its site's
+
+  m_bound1.BindDefaultProperty(DISPID_TEXT, VT_BSTR, _T("Name"), &vbdsc);
+  m_bound1.BindDefaultProperty(DISPID_AGE, VT_I4, _T("age"), &vbdsc);
+  m_bound2.BindDefaultProperty(DISPID_TEXT, VT_BSTR, _T("Name"), &vbdsc);
+  CHECK(pDsc->m_nCursors == 1);
+  CHECK(TextOf(m_bound1) == _T("Ann") && AgeOf(m_bound1) == 31 && TextOf(m_bound2) == _T("Ann"));
+  // The cursor, which BindProperty gives too.
+  CHECK(vbdsc.GetDSCCursor() == static_cast<ICursor*>(static_cast<ICursorMove*>(pCursor)));
+  m_bound2.BindProperty(DISPID_DATASOURCE, &vbdsc);
+  CHECK(m_pCtl2->m_pDataSource == static_cast<ICursor*>(static_cast<ICursorMove*>(pCursor)));
+  m_bound2.SetProperty(DISPID_DATASOURCE, VT_UNKNOWN, (IUnknown*)NULL);
+  m_bound2.BindProperty(DISPID_DATASOURCE, NULL);
+
+  // The current row moves: each step is an ON_DSCNOTIFY notification.
+  m_nDSCNotifies = 0;
+  m_strMoveSteps.Empty();
+  CHECK(pCursor->MoveTo(1) == S_OK);
+  CHECK(TextOf(m_bound1) == _T("Bob") && AgeOf(m_bound1) == 42 && TextOf(m_bound2) == _T("Bob"));
+  CString strSteps;
+  strSteps.Format(_T("%d%d%d%d"), dscOKToDo, dscAboutToDo, dscSyncAfter, dscDidEvent);
+  CHECK(m_strMoveSteps == strSteps && m_nDSCID == IDC_VBDSC);
+  // A null field is the property type's empty value.
+  pCursor->MoveTo(2);
+  CHECK(TextOf(m_bound1) == _T("Cy") && AgeOf(m_bound1) == 0);
+  // The container refuses a move.
+  m_bRefuseMoves = TRUE;
+  m_strMoveSteps.Empty();
+  CHECK(pCursor->MoveTo(0) == OCDB_S_OPERATIONCANCELLED);
+  m_bRefuseMoves = FALSE;
+  strSteps.Format(_T("%d%d"), dscOKToDo, dscCancelled);
+  CHECK(m_strMoveSteps == strSteps && pCursor->m_nRow == 2 && TextOf(m_bound1) == _T("Cy"));
+  pCursor->MoveTo(0);
+  CHECK(TextOf(m_bound1) == _T("Ann"));
+  CHECK(pCursor->m_nUpdates == 0);
+
+  // The control changes a bound property: an update of the row, which
+  // the other control bound to the field follows.
+  pCtl1->SetText(_T("Anne"));
+  CHECK(pCursor->m_strNames[0] == _T("Anne") && pCursor->m_nUpdates == 1);
+  CHECK(pCursor->m_dwEditMode == DBEDITMODE_NONE && pCursor->m_nSetColumns == 1);
+  CHECK(TextOf(m_bound2) == _T("Anne"));
+  CHECK(m_nDSCReason == dscModify && m_nDSCState == dscDidEvent);
+  pCtl1->SetAge(33);
+  CHECK(pCursor->m_nAges[0] == 33 && pCursor->m_nUpdates == 2);
+  CHECK(pCursor->m_strNames[1] == _T("Bob") && pCursor->m_nAges[1] == 42);
+
+  // The cursor changes a field of the current row, and of another.
+  int nSets = pCtl1->m_nAgeSets;
+  pCursor->ChangeAge(0, 50);
+  CHECK(AgeOf(m_bound1) == 50 && pCtl1->m_nAgeSets == nSets + 1);
+  pCursor->ChangeAge(1, 51);
+  CHECK(AgeOf(m_bound1) == 50 && pCtl1->m_nAgeSets == nSets + 1);
+  CHECK(pCursor->m_nUpdates == 2);
+
+  // A field the cursor does not have binds nothing.
+  m_bound2.BindDefaultProperty(DISPID_AGE, VT_I4, _T("Height"), &vbdsc);
+  CHECK(AgeOf(m_bound2) == -1);
+
+  m_bound1.DestroyWindow();
+  pCursor->MoveTo(1);
+  CHECK(TextOf(m_bound2) == _T("Bob"));
+  m_bound2.DestroyWindow();
+  m_dsc.DestroyWindow();
+  vbdsc.DestroyWindow();
+  CHECK(CFakeCursor::s_nAlive == 0 && CVBDscCtrl::s_nAlive == 0 && CBoundCtrl::s_nAlive == 0 &&
+        CDscCtrl::s_nAlive == 0);
+}
+
 void CMainFrame::RunTests() {
   TestSimple();
   TestComplex();
   TestUnbind();
   TestDestroyOrder();
   TestRowsetOnly();
+  TestDialog();
+  TestCursor();
 }
 
 // =====================================================================
@@ -755,6 +1304,7 @@ public:
   virtual int ExitInstance() {
     COleObjectFactory::RevokeAll();
     CHECK(CFakeTable::s_nAlive == 0 && CDscCtrl::s_nAlive == 0 && CBoundCtrl::s_nAlive == 0);
+    CHECK(CFakeCursor::s_nAlive == 0 && CVBDscCtrl::s_nAlive == 0);
     COleControlModule::ExitInstance();
     return TestFinish();
   }

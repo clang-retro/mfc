@@ -16,10 +16,10 @@ BEGIN
   PUSHBUTTON "Cancel", IDCANCEL, 163, 99, 50, 14
 END
 
-// DLGINIT (type 240): the second control loads Value 1234 from a stream;
-// the first starts new.
+// DLGINIT (type 240): the second control loads Value 1234 from a stream
+// (after its license key's length, 0); the first starts new.
 IDD_CTLDLG 240
 BEGIN
-  IDC_DLGCTL2, 0x0376, 4, 0, 1234, 0,
+  IDC_DLGCTL2, 0x0376, 8, 0, 0, 0, 1234, 0,
   0
 END

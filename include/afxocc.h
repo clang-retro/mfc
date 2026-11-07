@@ -8,11 +8,21 @@
 #define __AFXOCC_H__
 
 #include "afxdisp.h"
+#include "ocdb.h"
 
 class COleControlContainer;
 class COleControlSite;
 class CDataSourceControl;
 struct CDataBoundProperty;
+
+// The interface of the older data source controls (the Visual Basic
+// ones), which make the cursor that bound controls use.
+extern "C" const IID IID_IVBDSC;
+struct IVBDSC : public IUnknown {
+  virtual HRESULT STDMETHODCALLTYPE CancelUnload(BOOL* pfCancel) = 0;
+  virtual HRESULT STDMETHODCALLTYPE Error(DWORD dwErr, BOOL* pfShowError) = 0;
+  virtual HRESULT STDMETHODCALLTYPE CreateCursor(ICursor** ppCursor) = 0;
+};
 
 // The extender properties every container gives its controls.
 #ifndef DISPID_NAME
@@ -112,9 +122,10 @@ public:
   virtual BOOL GetEventIID(IID* piid);
   virtual BOOL IsWindowlessControl() { return m_bIsWindowless; }
 
-  // Data binding to a data source control (an OLE DB DataSource): a
-  // property bound to a field of the current row, or given the data
-  // source; and, for a data source control's site, its rowset.
+  // Data binding to a data source control (an OLE DB DataSource, or an
+  // older one that gives an ICursor): a property bound to a field of the
+  // current row, or given the data source; and, for a data source
+  // control's site, its rowset or cursor.
   virtual void BindDefaultProperty(DISPID dwDispID, VARTYPE vtProp, LPCTSTR szFieldName,
                                    CWnd* pDSCWnd);
   virtual void BindProperty(DISPID dwDispId, CWnd* pWndDSC);
@@ -139,6 +150,7 @@ public:
   COleDispatchDriver m_dispDriver;
   DWORD m_dwEventSink;
   DWORD m_dwPropNotifySink;
+  DWORD m_dwNotifyDBEvents;
   DWORD m_dwMiscStatus;
   DWORD m_dwStyleMask;
   DWORD m_dwStyle;  // the styles the site keeps for the control
@@ -238,6 +250,18 @@ protected:
     STDMETHOD(OnRequestEdit)(DISPID);
   END_INTERFACE_PART(PropertyNotifySink)
 
+  // A data source control's notifications (the older, ICursor ones).
+  BEGIN_INTERFACE_PART(NotifyDBEvents, INotifyDBEvents)
+    STDMETHOD(OKToDo)(DWORD, ULONG, DBNOTIFYREASON[]);
+    STDMETHOD(Cancelled)(DWORD, ULONG, DBNOTIFYREASON[]);
+    STDMETHOD(SyncBefore)(DWORD, ULONG, DBNOTIFYREASON[]);
+    STDMETHOD(AboutToDo)(DWORD, ULONG, DBNOTIFYREASON[]);
+    STDMETHOD(FailedToDo)(DWORD, ULONG, DBNOTIFYREASON[]);
+    STDMETHOD(SyncAfter)(DWORD, ULONG, DBNOTIFYREASON[]);
+    STDMETHOD(DidEvent)(DWORD, ULONG, DBNOTIFYREASON[]);
+    HRESULT Notify(DSCSTATE nState, DWORD dwEventWhat, ULONG cReasons, DBNOTIFYREASON rgReasons[]);
+  END_INTERFACE_PART(NotifyDBEvents)
+
   // The control's events; its QueryInterface answers m_iidEvents.
   BEGIN_INTERFACE_PART(EventSink, IDispatch)
     STDMETHOD(GetTypeInfoCount)(UINT*);
@@ -248,6 +272,8 @@ protected:
 
   DECLARE_INTERFACE_MAP()
   friend class COleControlContainer;
+  friend HRESULT AFXAPI _AfxFireDSCNotify(COleControlSite* pSite, DSCSTATE nState,
+                                          DSCREASON nReason);
 };
 
 // ---------------------------------------------------------------------

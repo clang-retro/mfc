@@ -244,6 +244,87 @@ static const BYTE* FindDlgInit(void* lpResource, UINT nID, WORD* pnMsg, DWORD* p
   }
 }
 
+// A data binding a control's DLGINIT record asks for, made once all the
+// dialog's controls are there.
+struct _AFX_DLG_BINDING {
+  UINT nIDCtrl;
+  UINT nIDDSC;  // the data source control
+  DISPID dispid;
+  VARTYPE vt;
+  BOOL bSimple;  // a property bound to a field, not given the data source
+  CString strField;
+};
+
+// The binding records written for DISPID_DATASOURCE (simple binding to a
+// field) and other properties (given the data source), at the start of
+// a WM_OCC_*_EX record's data.
+#define _AFX_DISPID_DATASOURCE ((DISPID)0x80010001L)
+#define _AFX_DISPID_DATAFIELD ((DISPID)0x80010002L)
+
+// Reads a control's DLGINIT data: its license key, then (for the _EX
+// records) its bindings, leaving pData and cb on its saved state.
+static BSTR ReadDlgInitHeader(UINT nID, WORD* pnMsg, const BYTE** ppData, DWORD* pcb,
+                              CPtrArray* pBindings) {
+  const BYTE* p = *ppData;
+  DWORD cb = *pcb;
+  BSTR bstrLicKey = NULL;
+  if (cb >= sizeof(ULONG)) {
+    ULONG cchKey;
+    memcpy(&cchKey, p, sizeof(cchKey));
+    p += sizeof(ULONG);
+    cb -= sizeof(ULONG);
+    if (cchKey > 0 && cchKey * sizeof(WCHAR) <= cb) {
+      bstrLicKey = ::SysAllocStringLen((const OLECHAR*)p, cchKey);
+      p += cchKey * sizeof(WCHAR);
+      cb -= cchKey * sizeof(WCHAR);
+    }
+  }
+  if ((*pnMsg == WM_OCC_LOADFROMSTREAM_EX || *pnMsg == WM_OCC_LOADFROMSTORAGE_EX) &&
+      cb >= 3 * sizeof(DWORD)) {
+    DWORD cbSection;  // with itself
+    memcpy(&cbSection, p, sizeof(cbSection));
+    if (cbSection > cb || cbSection < 3 * sizeof(DWORD)) cbSection = cb;
+    const BYTE* pEnd = p + cbSection;
+    const BYTE* q = p + 3 * sizeof(DWORD);  // the size, the flags and the bindings' size
+    while (q + sizeof(DISPID) + sizeof(WORD) <= pEnd) {
+      _AFX_DLG_BINDING binding;
+      binding.nIDCtrl = nID;
+      DISPID dispid;
+      WORD nIDDSC;
+      memcpy(&dispid, q, sizeof(dispid));
+      memcpy(&nIDDSC, q + sizeof(DISPID), sizeof(nIDDSC));
+      q += sizeof(DISPID) + sizeof(WORD);
+      binding.nIDDSC = nIDDSC;
+      if (dispid == _AFX_DISPID_DATASOURCE) {
+        // The bound property, its type, DISPID_DATAFIELD and the field's
+        // name (a length, then the ANSI name ending in a nul).
+        if (q + 4 * sizeof(DWORD) > pEnd) break;
+        DWORD dwType;
+        memcpy(&binding.dispid, q, sizeof(DISPID));
+        memcpy(&dwType, q + sizeof(DISPID), sizeof(DWORD));
+        q += 4 * sizeof(DWORD);
+        const BYTE* pName = q;
+        while (q < pEnd && *q != 0) q++;
+        binding.strField = CString(CStringA((LPCSTR)pName, (int)(q - pName)));
+        if (q < pEnd) q++;
+        binding.vt = (VARTYPE)dwType;
+        binding.bSimple = TRUE;
+      } else {
+        binding.dispid = dispid;
+        binding.vt = VT_UNKNOWN;
+        binding.bSimple = FALSE;
+      }
+      if (nIDDSC != 0) pBindings->Add(new _AFX_DLG_BINDING(binding));
+    }
+    p += cbSection;
+    cb -= cbSection;
+    *pnMsg = (WORD)(*pnMsg - (WM_OCC_LOADFROMSTREAM_EX - WM_OCC_LOADFROMSTREAM));
+  }
+  *ppData = p;
+  *pcb = cb;
+  return bstrLicKey;
+}
+
 BOOL COccManager::CreateDlgControls(CWnd* pWndParent, void* lpResource,
                                     _AFX_OCC_DIALOG_INFO* pInfo) {
   if (pInfo == NULL || pInfo->m_cItems == 0) return TRUE;
@@ -254,6 +335,7 @@ BOOL COccManager::CreateDlgControls(CWnd* pWndParent, void* lpResource,
     children.Add(h);
   CArray<HWND, HWND> made;
   made.SetSize(pInfo->m_cItems);
+  CPtrArray bindings;  // of _AFX_DLG_BINDING
   BOOL bOK = TRUE;
   for (int i = 0; i < pInfo->m_cItems; i++) {
     _AFX_OCC_DIALOG_INFO::ItemInfo& item = pInfo->m_pItemInfo[i];
@@ -263,6 +345,8 @@ BOOL COccManager::CreateDlgControls(CWnd* pWndParent, void* lpResource,
     WORD nMsg = WM_OCC_INITNEW;
     DWORD dwLen = 0;
     const BYTE* pData = FindDlgInit(lpResource, item.nID, &nMsg, &dwLen);
+    BSTR bstrLicKey = NULL;
+    if (pData != NULL) bstrLicKey = ReadDlgInitHeader(item.nID, &nMsg, &pData, &dwLen, &bindings);
     CMemFile memFile;
     CFile* pPersist = NULL;
     BOOL bStorage = FALSE;
@@ -273,12 +357,14 @@ BOOL COccManager::CreateDlgControls(CWnd* pWndParent, void* lpResource,
     }
     COleControlSite* pSite = NULL;
     if (!pWndParent->m_pCtrlCont->CreateControl(NULL, item.clsid, item.strText, item.dwStyle,
-                                                rect, item.nID, pPersist, bStorage, NULL,
-                                                &pSite)) {
+                                                rect, item.nID, pPersist, bStorage,
+                                                bstrLicKey, &pSite)) {
       TRACE(_T("Warning: a dialog's ActiveX control %u was not created.\n"), item.nID);
+      if (bstrLicKey != NULL) ::SysFreeString(bstrLicKey);
       bOK = FALSE;
       continue;
     }
+    if (bstrLicKey != NULL) ::SysFreeString(bstrLicKey);
     if (pPersist != NULL) memFile.Detach();
     made[i] = pSite->m_hWnd;
     if (pSite->m_hWnd == NULL) continue;
@@ -297,6 +383,23 @@ BOOL COccManager::CreateDlgControls(CWnd* pWndParent, void* lpResource,
     if (hWndAfter != NULL)
       ::SetWindowPos(pSite->m_hWnd, hWndAfter, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  }
+  // The bindings, now that the data source controls are there.
+  COleControlContainer* pCont = pWndParent->m_pCtrlCont;
+  for (int i = 0; i < bindings.GetSize(); i++) {
+    _AFX_DLG_BINDING* pb = (_AFX_DLG_BINDING*)bindings[i];
+    COleControlSite* pSite = pCont != NULL ? pCont->FindItem(pb->nIDCtrl) : NULL;
+    COleControlSite* pDSCSite = pCont != NULL ? pCont->FindItem(pb->nIDDSC) : NULL;
+    if (pSite == NULL || pDSCSite == NULL) {
+      TRACE(_T("Warning: a dialog's data binding names a control that is not there.\n"));
+    } else {
+      CWnd* pDSCWnd = pCont->GetDlgItem((int)pb->nIDDSC);
+      if (pb->bSimple)
+        pSite->BindDefaultProperty(pb->dispid, pb->vt, pb->strField, pDSCWnd);
+      else
+        pSite->BindProperty(pb->dispid, pDSCWnd);
+    }
+    delete pb;
   }
   return bOK;
 }

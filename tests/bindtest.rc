@@ -1,0 +1,31 @@
+// bindtest.rc - a dialog with a data source control and a control bound
+// to it through its DLGINIT record, as the dialog editor writes them.
+#include <windows.h>
+#include <afxres.h>
+#include "bindtest.h"
+
+IDD_BINDDLG DIALOGEX 0, 0, 200, 80
+STYLE DS_SETFONT | WS_POPUP | WS_VISIBLE | WS_CAPTION
+CAPTION "Bound"
+FONT 8, "MS Shell Dlg"
+BEGIN
+  CONTROL "", IDC_DLGDSC, "{5B8E2C11-6A4F-4D2B-9E31-7A0C4F6B2D00}", WS_TABSTOP, 7, 7, 50, 14
+  CONTROL "", IDC_DLGBOUND, "{5B8E2C11-6A4F-4D2B-9E31-7A0C4F6B2D05}", WS_TABSTOP, 7, 28, 100, 14
+END
+
+// DLGINIT (type 240). The bound control's record is
+// WM_OCC_LOADFROMSTREAM_EX: the license key's length (0); the bindings
+// (their size with itself, flags 1, the size of the bindings), first
+// DISPID_DATASOURCE for IDC_DLGDSC binding property 1 (Age, VT_I4) to the
+// field named after DISPID_DATAFIELD ("Age"), then property 2
+// (DataSource) given IDC_DLGDSC; then its saved state (empty).
+IDD_BINDDLG 240
+BEGIN
+  IDC_DLGBOUND, 0x037A, 48, 0,
+  0x0000, 0x0000,
+  0x002C, 0x0000, 0x0001, 0x0000, 0x0020, 0x0000,
+  0x0001, 0x8001, IDC_DLGDSC, 0x0001, 0x0000, 0x0003, 0x0000,
+  0x0002, 0x8001, 0x0003, 0x0000, 0x6741, 0x0065,
+  0x0002, 0x0000, IDC_DLGDSC,
+  0
+END

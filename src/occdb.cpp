@@ -2,13 +2,21 @@
 // property bound to a field of a data source control's current row
 // (simple binding, BindDefaultProperty), or given the data source itself
 // (BindProperty), for data source controls that are OLE DB data sources
-// (the DataSource interface of msdatsrc.h).
+// (the DataSource interface of msdatsrc.h), or older ones that make an
+// ICursor (IVBDSC, ocdb.h).
 //
 // The data source control's site keeps a CDataSourceControl: the
 // rowset of the data source's default data member, its row position and
 // the bound properties. When the current row or a field changes, the
 // bound properties are set from their fields; when a bound property
-// changes (IPropertyNotifySink::OnChanged), its field is set.
+// changes (IPropertyNotifySink::OnChanged), its field is set. With a
+// cursor, a field is read by binding its column as a VARIANT and moving
+// to the current row, and set by ICursorUpdateARow (BeginUpdate,
+// SetColumn, Update); the site's INotifyDBEvents tells of changes.
+//
+// The data source control's notifications are ON_DSCNOTIFY ones for its
+// container, through the site (occsite.cpp for a cursor, here for OLE
+// DB once something is bound to it).
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -22,6 +30,24 @@
 static const IID kIID_DataSource = {
     0x7c0ffab3, 0xcd84, 0x11d0, {0x94, 0x9a, 0x00, 0xa0, 0xc9, 0x11, 0x10, 0xed}};
 
+#define _AFX_CURSOR_IID(l) {l, 0xd188, 0x11cd, {0xad, 0x48, 0x00, 0xaa, 0x00, 0x3c, 0x9c, 0xb6}}
+extern "C" const IID IID_ICursor = _AFX_CURSOR_IID(0x9f6aa700);
+extern "C" const IID IID_ICursorMove = _AFX_CURSOR_IID(0xacff0690);
+extern "C" const IID IID_ICursorUpdateARow = _AFX_CURSOR_IID(0xd14216a0);
+extern "C" const IID IID_INotifyDBEvents = _AFX_CURSOR_IID(0xdb526cc0);
+#undef _AFX_CURSOR_IID
+// {1AB42240-8C70-11CE-9421-00AA0062BE57}
+extern "C" const IID IID_IVBDSC = {
+    0x1ab42240, 0x8c70, 0x11ce, {0x94, 0x21, 0x00, 0xaa, 0x00, 0x62, 0xbe, 0x57}};
+
+// A column of a cursor: its ID (whose name, if it has one, is
+// strIDName) and its name.
+struct _AFX_CURSOR_COLUMN {
+  DBCOLUMNID id;
+  CStringW strIDName;
+  CString strName;
+};
+
 // One bound property of a control.
 struct CDataBoundProperty {
   CDataBoundProperty* m_pNext;
@@ -30,7 +56,7 @@ struct CDataBoundProperty {
   DISPID m_dispid;
   VARTYPE m_vt;
   BOOL m_bComplex;   // BindProperty: the property holds the data source
-  DBORDINAL m_nColumn;
+  DBORDINAL m_nColumn;  // from 1; with a cursor, in m_cursorColumns
   HACCESSOR m_hAccessor;
 };
 
@@ -90,10 +116,16 @@ public:
         m_nColumns(0),
         m_pColumns(NULL),
         m_pStrings(NULL),
-        m_bUpdating(FALSE) {}
+        m_bUpdating(FALSE),
+        m_pCursorMove(NULL),
+        m_pCursorUpdate(NULL) {}
   ~CDataSourceControl();
 
   BOOL Initialize();
+  BOOL InitializeCursor();
+  BOOL GetCursorField(CDataBoundProperty* pProp, VARIANT* pvar);
+  BOOL SetCursorField(CDataBoundProperty* pProp, const VARIANT* pvar);
+  IUnknown* GetCursor();  // the rowset or the cursor, without a reference
   DBORDINAL FindColumn(LPCTSTR pszName) const;
   HROW GetCurrentRow();  // with a reference to release, or DB_NULL_HROW
   void ReleaseRow(HROW hRow);
@@ -120,6 +152,10 @@ public:
   OLECHAR* m_pStrings;
   CPtrList m_bound;  // the bound properties
   BOOL m_bUpdating;
+  // An older data source control: its cursor, and the cursor's columns.
+  ICursorMove* m_pCursorMove;
+  ICursorUpdateARow* m_pCursorUpdate;  // NULL when read only
+  CPtrArray m_cursorColumns;
 };
 
 static void Advise(IUnknown* pUnk, REFIID iid, IUnknown* pSink, DWORD* pdwCookie) {
@@ -148,9 +184,9 @@ static void Unadvise(IUnknown* pUnk, REFIID iid, DWORD dwCookie) {
 }
 
 BOOL CDataSourceControl::Initialize() {
-  if (m_pSite->m_pObject == NULL ||
-      FAILED(m_pSite->m_pObject->QueryInterface(kIID_DataSource, (void**)&m_pDataSource)))
-    return FALSE;
+  if (m_pSite->m_pObject == NULL) return FALSE;
+  if (FAILED(m_pSite->m_pObject->QueryInterface(kIID_DataSource, (void**)&m_pDataSource)))
+    return InitializeCursor();
   // The default data member: a row position, or else a rowset.
   BSTR bstrDM = ::SysAllocString(L"");
   IUnknown* pUnk = NULL;
@@ -195,6 +231,81 @@ BOOL CDataSourceControl::Initialize() {
   return TRUE;
 }
 
+// The cursor's columns: the rows of its columns cursor, read as their
+// column ID and name.
+BOOL CDataSourceControl::InitializeCursor() {
+  IVBDSC* pVBDSC = NULL;
+  if (FAILED(m_pSite->m_pObject->QueryInterface(IID_IVBDSC, (void**)&pVBDSC))) return FALSE;
+  ICursor* pCursor = NULL;
+  HRESULT hr = pVBDSC->CreateCursor(&pCursor);
+  pVBDSC->Release();
+  if (FAILED(hr) || pCursor == NULL) return FALSE;
+  hr = pCursor->QueryInterface(IID_ICursorMove, (void**)&m_pCursorMove);
+  pCursor->Release();
+  if (FAILED(hr) || m_pCursorMove == NULL) {
+    m_pCursorMove = NULL;
+    return FALSE;
+  }
+  if (FAILED(m_pCursorMove->QueryInterface(IID_ICursorUpdateARow, (void**)&m_pCursorUpdate)))
+    m_pCursorUpdate = NULL;
+
+  IUnknown* pUnk = NULL;
+  ULONG_PTR nRows = 0;
+  if (FAILED(m_pCursorMove->GetColumnsCursor(IID_ICursor, &pUnk, &nRows)) || pUnk == NULL)
+    return FALSE;
+  ICursor* pColumns = NULL;
+  pUnk->QueryInterface(IID_ICursor, (void**)&pColumns);
+  pUnk->Release();
+  if (pColumns == NULL) return FALSE;
+
+  struct MetaRow {
+    DBCOLUMNID id;
+    DWORD dwIDInfo;
+    LPSTR pszName;
+    DWORD dwNameInfo;
+  };
+  DBCOLUMNBINDING bindings[2];
+  memset(bindings, 0, sizeof(bindings));
+  bindings[0].columnID = COLUMN_COLUMNID;
+  bindings[0].obData = offsetof(MetaRow, id);
+  bindings[0].cbMaxLen = sizeof(DBCOLUMNID);
+  bindings[0].obInfo = offsetof(MetaRow, dwIDInfo);
+  bindings[0].obVarDataLen = DB_NOVALUE;
+  bindings[0].dwBinding = DBBINDING_DEFAULT;
+  bindings[0].dwDataType = DBTYPE_COLUMNID;
+  bindings[1].columnID = COLUMN_NAME;
+  bindings[1].obData = offsetof(MetaRow, pszName);
+  bindings[1].cbMaxLen = DB_NOMAXLENGTH;
+  bindings[1].obInfo = offsetof(MetaRow, dwNameInfo);
+  bindings[1].obVarDataLen = DB_NOVALUE;
+  bindings[1].dwBinding = DBBINDING_DEFAULT;
+  bindings[1].dwDataType = VT_LPSTR;
+  DBFETCHROWS fetch;
+  memset(&fetch, 0, sizeof(fetch));
+  fetch.cRowsRequested = nRows != 0 ? nRows : 1024;
+  fetch.dwFlags = DBROWFETCH_CALLEEALLOCATES;
+  LARGE_INTEGER zero;
+  zero.QuadPart = 0;
+  hr = pColumns->SetBindings(2, bindings, sizeof(MetaRow), DBCOLUMNBINDOPTS_REPLACE);
+  if (SUCCEEDED(hr)) hr = pColumns->GetNextRows(zero, &fetch);
+  pColumns->Release();
+  if (FAILED(hr)) return FALSE;
+  for (ULONG_PTR i = 0; i < fetch.cRowsReturned; i++) {
+    const MetaRow& row = ((const MetaRow*)fetch.pData)[i];
+    _AFX_CURSOR_COLUMN* pCol = new _AFX_CURSOR_COLUMN;
+    pCol->id = row.id;
+    if (row.id.dwKind != DBCOLKIND_GUID_NUMBER) {
+      pCol->strIDName = row.id.lpdbsz;
+      pCol->id.lpdbsz = (LPDBSTR)(LPCWSTR)pCol->strIDName;
+    }
+    if (row.pszName != NULL && row.dwNameInfo != DB_NULL) pCol->strName = row.pszName;
+    m_cursorColumns.Add(pCol);
+  }
+  ::CoTaskMemFree(fetch.pData);
+  ::CoTaskMemFree(fetch.pVarData);
+  return TRUE;
+}
+
 CDataSourceControl::~CDataSourceControl() {
   // Its bound properties are bound to nothing now.
   while (!m_bound.IsEmpty()) {
@@ -220,10 +331,18 @@ CDataSourceControl::~CDataSourceControl() {
   if (m_pRowset != NULL) m_pRowset->Release();
   if (m_pRowPos != NULL) m_pRowPos->Release();
   if (m_pDataSource != NULL) m_pDataSource->Release();
+  for (INT_PTR i = 0; i < m_cursorColumns.GetSize(); i++)
+    delete (_AFX_CURSOR_COLUMN*)m_cursorColumns[i];
+  if (m_pCursorUpdate != NULL) m_pCursorUpdate->Release();
+  if (m_pCursorMove != NULL) m_pCursorMove->Release();
 }
 
 DBORDINAL CDataSourceControl::FindColumn(LPCTSTR pszName) const {
   if (pszName == NULL) return 0;
+  for (INT_PTR i = 0; i < m_cursorColumns.GetSize(); i++) {
+    if (((_AFX_CURSOR_COLUMN*)m_cursorColumns[i])->strName.CompareNoCase(pszName) == 0)
+      return (DBORDINAL)i + 1;
+  }
   CStringW strName(pszName);
   for (DBORDINAL i = 0; i < m_nColumns; i++) {
     const DBCOLUMNINFO& info = m_pColumns[i];
@@ -268,8 +387,83 @@ static BOOL MakeAccessor(IAccessor* pAccessor, DBORDINAL nColumn, HACCESSOR* phA
                                              sizeof(_AFX_DB_FIELD), phAccessor, &status));
 }
 
+// A cursor's field: its column bound as a VARIANT of the property's
+// type, read from the current row.
+BOOL CDataSourceControl::GetCursorField(CDataBoundProperty* pProp, VARIANT* pvar) {
+  if (pProp->m_nColumn == 0 || pProp->m_nColumn > (DBORDINAL)m_cursorColumns.GetSize())
+    return FALSE;
+  _AFX_CURSOR_COLUMN* pCol = (_AFX_CURSOR_COLUMN*)m_cursorColumns[(INT_PTR)pProp->m_nColumn - 1];
+  DBCOLUMNBINDING binding;
+  memset(&binding, 0, sizeof(binding));
+  binding.columnID = pCol->id;
+  binding.obData = 0;
+  binding.cbMaxLen = DB_NOMAXLENGTH;
+  binding.obInfo = DB_NOVALUE;
+  binding.obVarDataLen = DB_NOVALUE;
+  binding.dwBinding = DBBINDING_VARIANT;
+  binding.dwDataType = pProp->m_vt;
+  if (FAILED(m_pCursorMove->SetBindings(1, &binding, sizeof(VARIANT), DBCOLUMNBINDOPTS_REPLACE)))
+    return FALSE;
+  VARIANT var;
+  ::VariantInit(&var);
+  DBFETCHROWS fetch;
+  memset(&fetch, 0, sizeof(fetch));
+  fetch.cRowsRequested = 1;
+  fetch.pData = &var;
+  LARGE_INTEGER zero;
+  zero.QuadPart = 0;
+  HRESULT hr = m_pCursorMove->Move(sizeof(DBBMK_CURRENT), (void*)&DBBMK_CURRENT, zero, &fetch);
+  if (FAILED(hr) || fetch.cRowsReturned == 0) {
+    ::VariantClear(&var);
+    return FALSE;
+  }
+  *pvar = var;
+  return TRUE;
+}
+
+// Set through ICursorUpdateARow, as an update of the current row unless
+// one is going on already.
+BOOL CDataSourceControl::SetCursorField(CDataBoundProperty* pProp, const VARIANT* pvar) {
+  if (m_pCursorUpdate == NULL || pProp->m_nColumn == 0 ||
+      pProp->m_nColumn > (DBORDINAL)m_cursorColumns.GetSize())
+    return FALSE;
+  _AFX_CURSOR_COLUMN* pCol = (_AFX_CURSOR_COLUMN*)m_cursorColumns[(INT_PTR)pProp->m_nColumn - 1];
+  m_bUpdating = TRUE;
+  DWORD dwMode = DBEDITMODE_NONE;
+  HRESULT hr = m_pCursorUpdate->GetEditMode(&dwMode);
+  BOOL bBegun = FALSE;
+  if (SUCCEEDED(hr) && dwMode == DBEDITMODE_NONE) {
+    hr = m_pCursorUpdate->BeginUpdate(DBROWACTION_UPDATE);
+    bBegun = SUCCEEDED(hr);
+  }
+  if (SUCCEEDED(hr)) {
+    VARIANT var;
+    ::VariantInit(&var);
+    ::VariantCopy(&var, const_cast<VARIANT*>(pvar));
+    BOOL bNull = var.vt == VT_NULL || var.vt == VT_EMPTY;
+    DBBINDPARAMS params;
+    memset(&params, 0, sizeof(params));
+    params.dwBinding = DBBINDING_VARIANT;
+    params.dwDataType = var.vt;
+    params.dwInfo = bNull ? DB_NULL : (DWORD)sizeof(VARIANT);
+    params.pData = &var;
+    hr = m_pCursorUpdate->SetColumn(&pCol->id, &params);
+    ::VariantClear(&var);
+    if (SUCCEEDED(hr) && dwMode == DBEDITMODE_NONE) hr = m_pCursorUpdate->Update(NULL, NULL, NULL);
+    if (FAILED(hr) && bBegun) m_pCursorUpdate->Cancel();
+  }
+  m_bUpdating = FALSE;
+  return SUCCEEDED(hr);
+}
+
+IUnknown* CDataSourceControl::GetCursor() {
+  if (m_pRowset != NULL) return m_pRowset;
+  return static_cast<ICursor*>(m_pCursorMove);
+}
+
 BOOL CDataSourceControl::GetField(CDataBoundProperty* pProp, VARIANT* pvar) {
   ::VariantInit(pvar);
+  if (m_pCursorMove != NULL) return GetCursorField(pProp, pvar);
   HROW hRow = GetCurrentRow();
   if (hRow == DB_NULL_HROW) return FALSE;
   _AFX_DB_FIELD field;
@@ -291,6 +485,7 @@ BOOL CDataSourceControl::GetField(CDataBoundProperty* pProp, VARIANT* pvar) {
 }
 
 BOOL CDataSourceControl::SetField(CDataBoundProperty* pProp, const VARIANT* pvar) {
+  if (m_pCursorMove != NULL) return SetCursorField(pProp, pvar);
   IRowsetChange* pChange = NULL;
   if (FAILED(m_pRowset->QueryInterface(IID_IRowsetChange, (void**)&pChange))) return FALSE;
   HROW hRow = GetCurrentRow();
@@ -316,9 +511,10 @@ void CDataSourceControl::UpdateControl(CDataBoundProperty* pProp) {
   if (pSite->m_pObject == NULL) return;
   COleVariant var;
   if (pProp->m_bComplex) {
+    // The OLE DB data source, or the cursor.
     var.vt = VT_UNKNOWN;
-    var.punkVal = m_pDataSource;
-    m_pDataSource->AddRef();
+    var.punkVal = m_pDataSource != NULL ? (IUnknown*)m_pDataSource : GetCursor();
+    var.punkVal->AddRef();
   } else {
     GetField(pProp, &var);
     // A null field, or no current row, is the property type's empty value.
@@ -358,19 +554,47 @@ void CDataSourceControl::Remove(CDataBoundProperty* pProp) {
 // ---------------------------------------------------------------------
 // Notifications
 
+// The ON_DSCNOTIFY notification for a step of an OLE DB change.
+static HRESULT FireDSCNotify(CDataSourceControl* pDSC, DBEVENTPHASE ePhase, DSCREASON nReason) {
+  DSCSTATE nState;
+  switch (ePhase) {
+    case DBEVENTPHASE_OKTODO: nState = dscOKToDo; break;
+    case DBEVENTPHASE_ABOUTTODO: nState = dscAboutToDo; break;
+    case DBEVENTPHASE_SYNCHAFTER: nState = dscSyncAfter; break;
+    case DBEVENTPHASE_FAILEDTODO: nState = dscFailedToDo; break;
+    case DBEVENTPHASE_DIDEVENT: nState = dscDidEvent; break;
+    default: return S_OK;
+  }
+  if (pDSC == NULL || nReason == dscNoReason) return S_OK;
+  HRESULT hr = _AfxFireDSCNotify(pDSC->m_pSite, nState, nReason);
+  // Only a change not made yet can be refused.
+  return ePhase == DBEVENTPHASE_OKTODO && hr == S_FALSE ? S_FALSE : S_OK;
+}
+
 STDMETHODIMP _AfxDSCSink::OnRowPositionChange(DBREASON, DBEVENTPHASE ePhase, WINBOOL) {
+  if (FireDSCNotify(m_pDSC, ePhase, dscMove) == S_FALSE) return S_FALSE;
   if (m_pDSC != NULL && ePhase == DBEVENTPHASE_DIDEVENT) m_pDSC->UpdateControls();
   return S_OK;
 }
 STDMETHODIMP _AfxDSCSink::OnFieldChange(IRowset*, HROW, DBORDINAL, DBORDINAL[], DBREASON,
                                         DBEVENTPHASE ePhase, WINBOOL) {
+  if (FireDSCNotify(m_pDSC, ePhase, dscModify) == S_FALSE) return S_FALSE;
   // A field this side set has already been updated in the controls.
   if (m_pDSC != NULL && !m_pDSC->m_bUpdating && ePhase == DBEVENTPHASE_DIDEVENT)
     m_pDSC->UpdateControls();
   return S_OK;
 }
-STDMETHODIMP _AfxDSCSink::OnRowChange(IRowset*, DBCOUNTITEM, const HROW[], DBREASON,
+STDMETHODIMP _AfxDSCSink::OnRowChange(IRowset*, DBCOUNTITEM, const HROW[], DBREASON eReason,
                                       DBEVENTPHASE ePhase, WINBOOL) {
+  DSCREASON nReason = dscNoReason;
+  switch (eReason) {
+    case DBREASON_ROW_ACTIVATE: nReason = dscMove; break;
+    case DBREASON_ROW_DELETE: nReason = dscDelete; break;
+    case DBREASON_ROW_INSERT: nReason = dscInsert; break;
+    case DBREASON_ROW_UPDATE: nReason = dscCommit; break;
+    default: break;
+  }
+  if (FireDSCNotify(m_pDSC, ePhase, nReason) == S_FALSE) return S_FALSE;
   if (m_pDSC != NULL && !m_pDSC->m_bUpdating && ePhase == DBEVENTPHASE_DIDEVENT)
     m_pDSC->UpdateControls();
   return S_OK;
@@ -417,7 +641,19 @@ static void AFXAPI BindRelease(COleControlSite* pSite) {
   pSite->m_pDataSourceControl = NULL;
 }
 
-static const _AFX_OCC_BIND_HOOKS s_bindHooks = {BindChanged, BindRelease};
+// A change to a cursor: once its current row moved or changed, the bound
+// controls are set again (but not for the change this side made).
+static HRESULT AFXAPI BindDBEvent(COleControlSite* pSite, int nState, DWORD dwEventWhat, ULONG,
+                                  DBNOTIFYREASON*) {
+  CDataSourceControl* pDSC = pSite->m_pDataSourceControl;
+  if (pDSC == NULL || pDSC->m_pCursorMove == NULL || pDSC->m_bUpdating) return S_OK;
+  if (nState == dscSyncAfter &&
+      (dwEventWhat & (DBEVENT_CURRENT_ROW_CHANGED | DBEVENT_CURRENT_ROW_DATA_CHANGED)))
+    pDSC->UpdateControls();
+  return S_OK;
+}
+
+static const _AFX_OCC_BIND_HOOKS s_bindHooks = {BindChanged, BindRelease, BindDBEvent};
 
 static CDataSourceControl* GetDSC(CWnd* pDSCWnd) {
   if (pDSCWnd == NULL || pDSCWnd->m_pCtrlSite == NULL) return NULL;
@@ -457,7 +693,8 @@ void COleControlSite::BindDefaultProperty(DISPID dwDispID, VARTYPE vtProp, LPCTS
   if (pDSC == NULL || m_pObject == NULL) return;
   DBORDINAL nColumn = pDSC->FindColumn(szFieldName);
   HACCESSOR hAccessor = NULL;
-  if (nColumn == 0 || !MakeAccessor(pDSC->m_pAccessor, nColumn, &hAccessor)) return;
+  if (nColumn == 0) return;
+  if (pDSC->m_pAccessor != NULL && !MakeAccessor(pDSC->m_pAccessor, nColumn, &hAccessor)) return;
   CDataBoundProperty* pProp = NewBinding(this, pDSC, dwDispID, vtProp, FALSE);
   pProp->m_nColumn = nColumn;
   pProp->m_hAccessor = hAccessor;
@@ -487,7 +724,7 @@ IUnknown* COleControlSite::GetDSCCursor() {
     CDataSourceControl* pDSC = m_pWndCtrl != NULL ? GetDSC(m_pWndCtrl) : NULL;
     if (pDSC == NULL) return NULL;
   }
-  return m_pDataSourceControl->m_pRowset;
+  return m_pDataSourceControl->GetCursor();
 }
 
 // ---------------------------------------------------------------------

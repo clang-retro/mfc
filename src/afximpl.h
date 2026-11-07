@@ -40,12 +40,19 @@ struct _AFX_OCC_HOOKS {
 };
 extern const _AFX_OCC_HOOKS* _afxOccHooks;
 // What a control site calls once a control is data bound (occdb.cpp):
-// a control's bound property changed, and a site goes.
+// a control's bound property changed, a site goes, and a data source
+// control's cursor changed.
 class COleControlSite;
 struct _AFX_OCC_BIND_HOOKS {
   void(AFXAPI* pfnChanged)(COleControlSite* pSite, DISPID dispid);
   void(AFXAPI* pfnRelease)(COleControlSite* pSite);
+  // A data source control's site was told of a change to its cursor.
+  HRESULT(AFXAPI* pfnDBEvent)(COleControlSite* pSite, int nState, DWORD dwEventWhat,
+                              ULONG cReasons, struct tagDBNOTIFYREASON* rgReasons);
 };
+// Fires a data source control's notification (ON_DSCNOTIFY) on its
+// container: S_FALSE when a handler refuses it.
+HRESULT AFXAPI _AfxFireDSCNotify(COleControlSite* pSite, DSCSTATE nState, DSCREASON nReason);
 extern const _AFX_OCC_BIND_HOOKS* _afxOccBindHooks;
 
 // Empties the type library caches (oleconn.cpp), before OLE goes.
