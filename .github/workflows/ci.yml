@@ -110,3 +110,39 @@ jobs:
           path: |
             build/i686-w64-mingw32/tests/a
             build/i686-w64-mingw32/tests/u
+
+  # Linux and macOS: the libraries over the portable Win32 layer (port/),
+  # built with the runner's own clang, and the tests it can run so far.
+  native-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: make -j"$(nproc)" TARGET=x86_64-linux-gnu STDLIB= AR=ar
+      - name: Test
+        run: make check TARGET=x86_64-linux-gnu STDLIB= AR=ar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-output-native-linux
+          path: |
+            build/x86_64-linux-gnu/tests/a
+            build/x86_64-linux-gnu/tests/u
+
+  native-macos:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: make -j"$(sysctl -n hw.ncpu)" TARGET=arm64-apple-macos11 STDLIB= AR=ar
+      - name: Test
+        run: make check TARGET=arm64-apple-macos11 STDLIB= AR=ar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-output-native-macos
+          path: |
+            build/arm64-apple-macos11/tests/a
+            build/arm64-apple-macos11/tests/u

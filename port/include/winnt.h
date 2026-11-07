@@ -10,23 +10,43 @@
 
 typedef union _LARGE_INTEGER {
   struct {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    LONG HighPart;
+    DWORD LowPart;
+#else
     DWORD LowPart;
     LONG HighPart;
+#endif
   };
   struct {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    LONG HighPart;
+    DWORD LowPart;
+#else
     DWORD LowPart;
     LONG HighPart;
+#endif
   } u;
   LONGLONG QuadPart;
 } LARGE_INTEGER, *PLARGE_INTEGER;
 typedef union _ULARGE_INTEGER {
   struct {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    DWORD HighPart;
+    DWORD LowPart;
+#else
     DWORD LowPart;
     DWORD HighPart;
+#endif
   };
   struct {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    DWORD HighPart;
+    DWORD LowPart;
+#else
     DWORD LowPart;
     DWORD HighPart;
+#endif
   } u;
   ULONGLONG QuadPart;
 } ULARGE_INTEGER, *PULARGE_INTEGER;

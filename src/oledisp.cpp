@@ -188,14 +188,26 @@ void COleDispatchDriver::ReleaseDispatch() {
   }
 }
 
+// A VTS_PI4 argument is a long*, and VT_I4 by reference is 32 bits; where
+// long is wider, the object gets a 32-bit copy, written back afterwards.
+struct _AFX_LONGREF {
+  long* pLong;
+  LONG l;
+};
+
 // Builds one argument from the next value in the list.
-static void _AfxArgFromList(VARIANT* pArg, BYTE bType, va_list& argList) {
+static void _AfxArgFromList(VARIANT* pArg, BYTE bType, va_list& argList, _AFX_LONGREF* pLongRef) {
   ::VariantInit(pArg);
   if (bType & VT_MFCBYREF) {
     // A pointer to the value, passed as it is.
     VARTYPE vt = (VARTYPE)(bType & ~VT_MFCBYREF);
     pArg->vt = (VARTYPE)(vt | VT_BYREF);
     pArg->byref = va_arg(argList, void*);
+    if (sizeof(long) != sizeof(LONG) && (vt == VT_I4 || vt == VT_ERROR) && pArg->byref != NULL) {
+      pLongRef->pLong = (long*)pArg->byref;
+      pLongRef->l = (LONG)*pLongRef->pLong;
+      pArg->plVal = &pLongRef->l;
+    }
     return;
   }
   switch (bType) {
@@ -205,7 +217,7 @@ static void _AfxArgFromList(VARIANT* pArg, BYTE bType, va_list& argList) {
       break;
     case VT_I4:
       pArg->vt = VT_I4;
-      pArg->lVal = va_arg(argList, long);
+      pArg->lVal = (LONG)va_arg(argList, long);
       break;
     case VT_R4:
       pArg->vt = VT_R4;
@@ -375,17 +387,23 @@ void COleDispatchDriver::InvokeHelperV(DISPID dwDispID, WORD wFlags, VARTYPE vtR
   // to a pointer and cannot bind to the helper's reference.
   va_list args;
   va_copy(args, argList);
+  _AFX_LONGREF* rgLongRefs = nArgs > 0 ? new _AFX_LONGREF[nArgs]() : NULL;
   try {
-    for (UINT i = 0; i < nArgs; i++) _AfxArgFromList(&rgArgs[nArgs - 1 - i], pbParamInfo[i], args);
+    for (UINT i = 0; i < nArgs; i++)
+      _AfxArgFromList(&rgArgs[nArgs - 1 - i], pbParamInfo[i], args, &rgLongRefs[i]);
     sc = m_lpDispatch->Invoke(dwDispID, IID_NULL, 0, wFlags, &dispparams,
                               vtRet == VT_EMPTY ? NULL : &varResult, &excepInfo, &nArgErr);
   } catch (...) {
     va_end(args);
     for (UINT i = 0; i < nArgs; i++) ::VariantClear(&rgArgs[i]);
     delete[] rgArgs;
+    delete[] rgLongRefs;
     throw;
   }
   va_end(args);
+  for (UINT i = 0; i < nArgs; i++)
+    if (rgLongRefs[i].pLong != NULL) *rgLongRefs[i].pLong = rgLongRefs[i].l;
+  delete[] rgLongRefs;
   for (UINT i = 0; i < nArgs; i++) ::VariantClear(&rgArgs[i]);
   delete[] rgArgs;
 

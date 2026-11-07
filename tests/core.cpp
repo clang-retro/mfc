@@ -205,7 +205,11 @@ static void TestTime() {
 
 static void TestConversion() {
   USES_CONVERSION;
+#ifdef _WINPORT
+  LPCWSTR pszW = A2W("caf\xc3\xa9");  // e-acute in UTF-8, the ANSI code page there
+#else
   LPCWSTR pszW = A2W("caf\xe9");  // e-acute in Windows-1252
+#endif
   CHECK(lstrlenW(pszW) == 4 && pszW[3] == 0xE9);
   CHECK(lstrcmpA(W2A(L"plain"), "plain") == 0);
   CHECK(lstrcmp(A2T("abc"), _T("abc")) == 0);

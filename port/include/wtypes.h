@@ -22,8 +22,13 @@ typedef DWORD PROPID;
 
 typedef union tagCY {
   struct {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    int Hi;
+    unsigned int Lo;
+#else
     unsigned int Lo;
     int Hi;
+#endif
   };
   LONGLONG int64;
 } CY, CURRENCY, *LPCY;
