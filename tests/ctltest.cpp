@@ -131,7 +131,12 @@ IMPLEMENT_OLECREATE_EX(CTestCtrl, "CtlTest.TestCtrl.1", 0x6a1d3f52, 0x0e4b, 0x4d
                        0x8b, 0x5e, 0x1c, 0xad, 0x4f, 0x60)
 IMPLEMENT_OLECTLTYPE(CTestCtrl, IDS_TESTCTL, kMiscStatus)
 
-BEGIN_PROPPAGEIDS(CTestCtrl, 1)
+// {6A1D3F52-0E4B-4D7A-9F23-8B5E1CAD4F64}
+static const CLSID CLSID_TestPage = {
+    0x6a1d3f52, 0x0e4b, 0x4d7a, {0x9f, 0x23, 0x8b, 0x5e, 0x1c, 0xad, 0x4f, 0x64}};
+
+BEGIN_PROPPAGEIDS(CTestCtrl, 2)
+  PROPPAGEID(CLSID_TestPage)
   PROPPAGEID(CLSID_CColorPropPage)
 END_PROPPAGEIDS(CTestCtrl)
 
@@ -163,6 +168,92 @@ BOOL CTestCtrl::CTestCtrlFactory::UpdateRegistry(BOOL bRegister) {
                                       1, 0);
   return AfxOleUnregisterClass(m_clsid, m_lpszProgID);
 }
+
+// =====================================================================
+// The control's property page
+
+class CTestPropPage : public COlePropertyPage {
+  DECLARE_DYNCREATE(CTestPropPage)
+public:
+  static int s_nAlive;
+  static CTestPropPage* s_pLast;
+  long m_nValue;
+  CString m_strLabel;
+  int m_nEnabled;
+  int m_nBorder;
+  int m_nObjectsChanged;
+  CTestPropPage()
+      : COlePropertyPage(IDD_TESTPAGE, IDS_TESTPAGE), m_nValue(0), m_nEnabled(0), m_nBorder(0),
+        m_nObjectsChanged(0) {
+    s_nAlive++;
+    s_pLast = this;
+  }
+  static BOOL s_bDirtyAtEnd;
+  virtual ~CTestPropPage() {
+    s_bDirtyAtEnd = IsModified();
+    if (s_pLast == this) s_pLast = NULL;
+    s_nAlive--;
+  }
+  virtual void OnObjectsChanged() { m_nObjectsChanged++; }
+  virtual void DoDataExchange(CDataExchange* pDX) {
+    DDP_Text(pDX, IDC_VALUE, m_nValue, _T("Value"));
+    DDX_Text(pDX, IDC_VALUE, m_nValue);
+    DDP_Text(pDX, IDC_LABEL, m_strLabel, _T("Label"));
+    DDX_Text(pDX, IDC_LABEL, m_strLabel);
+    DDP_Check(pDX, IDC_ENABLED, m_nEnabled, _T("Enabled"));
+    DDX_Check(pDX, IDC_ENABLED, m_nEnabled);
+    DDP_Radio(pDX, IDC_BORDER0, m_nBorder, _T("BorderStyle"));
+    DDX_Radio(pDX, IDC_BORDER0, m_nBorder);
+    DDP_PostProcessing(pDX);
+  }
+  DECLARE_OLECREATE_EX(CTestPropPage)
+};
+
+int CTestPropPage::s_nAlive = 0;
+CTestPropPage* CTestPropPage::s_pLast = NULL;
+BOOL CTestPropPage::s_bDirtyAtEnd = FALSE;
+
+IMPLEMENT_DYNCREATE(CTestPropPage, COlePropertyPage)
+IMPLEMENT_OLECREATE_EX(CTestPropPage, "CtlTest.TestPropPage.1", 0x6a1d3f52, 0x0e4b, 0x4d7a, 0x9f,
+                       0x23, 0x8b, 0x5e, 0x1c, 0xad, 0x4f, 0x64)
+
+BOOL CTestPropPage::CTestPropPageFactory::UpdateRegistry(BOOL bRegister) {
+  if (bRegister)
+    return AfxOleRegisterPropertyPageClass(AfxGetInstanceHandle(), m_clsid, IDS_TESTPAGE_TYPE);
+  return AfxOleUnregisterClass(m_clsid, NULL);
+}
+
+// The frame's side of a page.
+class CTestPageSite : public IPropertyPageSite {
+public:
+  int m_nDirty;
+  int m_nClean;
+  CTestPageSite() : m_nDirty(0), m_nClean(0) {}
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (iid == IID_IUnknown || iid == IID_IPropertyPageSite) {
+      *ppv = this;
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return 1; }
+  STDMETHOD_(ULONG, Release)() { return 1; }
+  STDMETHOD(OnStatusChange)(DWORD dwFlags) {
+    if (dwFlags & PROPPAGESTATUS_DIRTY) m_nDirty++;
+    if (dwFlags & PROPPAGESTATUS_CLEAN) m_nClean++;
+    return S_OK;
+  }
+  STDMETHOD(GetLocaleID)(LCID* pLocaleID) {
+    *pLocaleID = LOCALE_USER_DEFAULT;
+    return S_OK;
+  }
+  STDMETHOD(GetPageContainer)(IUnknown** ppUnk) {
+    *ppUnk = NULL;
+    return E_NOTIMPL;
+  }
+  STDMETHOD(TranslateAccelerator)(MSG*) { return S_FALSE; }
+};
 
 // =====================================================================
 // A property bag in memory
@@ -261,6 +352,8 @@ public:
   void TestHosted();
   void TestPersistence();
   void TestRegistry();
+  void TestPropertyPage();
+  void TestPropertyFrame();
 
   afx_msg int OnCreate(LPCREATESTRUCT lpcs) {
     if (CFrameWnd::OnCreate(lpcs) == -1) return -1;
@@ -356,7 +449,8 @@ void CMainFrame::TestHosted() {
   if (SUCCEEDED(pUnk->QueryInterface(IID_ISpecifyPropertyPages, (void**)&pSPP))) {
     CAUUID pages = {0, NULL};
     CHECK(pSPP->GetPages(&pages) == S_OK);
-    CHECK(pages.cElems == 1 && pages.pElems != NULL && pages.pElems[0] == CLSID_CColorPropPage);
+    CHECK(pages.cElems == 2 && pages.pElems != NULL && pages.pElems[0] == CLSID_TestPage &&
+          pages.pElems[1] == CLSID_CColorPropPage);
     ::CoTaskMemFree(pages.pElems);
     pSPP->Release();
   }
@@ -710,6 +804,208 @@ void CMainFrame::TestPersistence() {
   CHECK(CTestCtrl::s_nAlive == 0);
 }
 
+static CString DlgText(HWND hDlg, int nID) {
+  TCHAR sz[64];
+  sz[0] = 0;
+  ::GetDlgItemText(hDlg, nID, sz, _countof(sz));
+  return sz;
+}
+
+void CMainFrame::TestPropertyPage() {
+  TestLog("property page");
+  CTestCtrl* pCtl = NULL;
+  LPUNKNOWN pUnkCtl = NewControl(&pCtl);
+  CTestCtrl* pCtl2 = NULL;
+  LPUNKNOWN pUnkCtl2 = NewControl(&pCtl2);
+  if (pUnkCtl == NULL || pUnkCtl2 == NULL) return;
+  LPPERSISTSTREAMINIT pInit = NULL;
+  pUnkCtl->QueryInterface(IID_IPersistStreamInit, (void**)&pInit);
+  if (pInit != NULL) {
+    pInit->InitNew();
+    pInit->Release();
+  }
+  pUnkCtl2->QueryInterface(IID_IPersistStreamInit, (void**)&pInit);
+  if (pInit != NULL) {
+    pInit->InitNew();
+    pInit->Release();
+  }
+
+  // The page, from its class factory.
+  LPPROPERTYPAGE pPage = NULL;
+  HRESULT hr = ::CoCreateInstance(CLSID_TestPage, NULL, CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER,
+                                  IID_IPropertyPage, (void**)&pPage);
+  CHECK(SUCCEEDED(hr) && pPage != NULL);
+  CTestPropPage* pObj = CTestPropPage::s_pLast;
+  CHECK(pObj != NULL && CTestPropPage::s_nAlive == 1);
+  if (pPage == NULL || pObj == NULL) {
+    pUnkCtl->Release();
+    pUnkCtl2->Release();
+    return;
+  }
+  LPUNKNOWN p2 = NULL;
+  CHECK(pPage->QueryInterface(IID_IPropertyPage2, (void**)&p2) == S_OK);
+  if (p2 != NULL) p2->Release();
+
+  CTestPageSite site;
+  CHECK(pPage->SetPageSite(&site) == S_OK);
+  CHECK(pObj->GetPageSite() == &site);
+
+  // The page's title and size, from the caption string and the template.
+  PROPPAGEINFO info;
+  memset(&info, 0, sizeof(info));
+  CHECK(pPage->GetPageInfo(&info) == S_OK);
+  CHECK(info.pszTitle != NULL && CString(info.pszTitle) == _T("General"));
+  CHECK(info.size.cx > 200 && info.size.cy > 90);
+  TestLog("page size %ldx%ld", (long)info.size.cx, (long)info.size.cy);
+  ::CoTaskMemFree(info.pszTitle);
+  ::CoTaskMemFree(info.pszDocString);
+  ::CoTaskMemFree(info.pszHelpFile);
+
+  // The values come from the control.
+  pCtl->m_nValue = 31;
+  pCtl->m_strLabel = _T("first");
+  pCtl->SetBorderStyle(0);
+  CHECK(pPage->SetObjects(1, &pUnkCtl) == S_OK);
+  CHECK(pObj->m_nObjectsChanged == 1);
+  ULONG nObjects = 0;
+  CHECK(pObj->GetObjectArray(&nObjects) != NULL && nObjects == 1);
+  CRect rcPage(0, 0, info.size.cx, info.size.cy);
+  CHECK(pPage->Activate(m_hWnd, &rcPage, FALSE) == S_OK);
+  HWND hPage = pObj->m_hWnd;
+  CHECK(hPage != NULL && ::GetParent(hPage) == m_hWnd);
+  if (hPage == NULL) return;
+  CHECK((::GetWindowLong(hPage, GWL_STYLE) & (WS_CHILD | WS_CAPTION)) == WS_CHILD);
+  CHECK(pPage->Show(SW_SHOW) == S_OK && ::IsWindowVisible(hPage));
+  CHECK(DlgText(hPage, IDC_VALUE) == _T("31"));
+  CHECK(DlgText(hPage, IDC_LABEL) == _T("first"));
+  CHECK(::IsDlgButtonChecked(hPage, IDC_ENABLED) == BST_CHECKED);
+  CHECK(::IsDlgButtonChecked(hPage, IDC_BORDER0) == BST_CHECKED);
+  CHECK(pPage->IsPageDirty() == S_FALSE && site.m_nDirty == 0);
+
+  // Changing controls makes them, and the page, dirty.
+  ::SetDlgItemText(hPage, IDC_VALUE, _T("123"));
+  CHECK(pPage->IsPageDirty() == S_OK && site.m_nDirty == 1);
+  CHECK(pObj->GetControlStatus(IDC_VALUE) && !pObj->GetControlStatus(IDC_LABEL));
+  ::SendDlgItemMessage(hPage, IDC_BORDER1, BM_CLICK, 0, 0);
+  ::SendDlgItemMessage(hPage, IDC_ENABLED, BM_CLICK, 0, 0);
+  CHECK(pObj->GetControlStatus(IDC_BORDER0) && pObj->GetControlStatus(IDC_ENABLED));
+  CHECK(site.m_nDirty == 1);
+  // Apply writes the changed values only.
+  pCtl->m_strLabel = _T("changed elsewhere");
+  CHECK(pPage->Apply() == S_OK);
+  CHECK(pCtl->m_nValue == 123 && pCtl->GetBorderStyle() == 1 && !pCtl->GetEnabled());
+  CHECK(pCtl->m_strLabel == _T("changed elsewhere"));
+  CHECK(pPage->IsPageDirty() == S_FALSE && site.m_nClean == 1);
+  CHECK(!pObj->GetControlStatus(IDC_VALUE));
+
+  // New objects reload the page; a change goes to every object.
+  pCtl->m_strLabel = _T("one");
+  pCtl2->m_strLabel = _T("two");
+  LPUNKNOWN objs[2] = {pUnkCtl, pUnkCtl2};
+  CHECK(pPage->SetObjects(2, objs) == S_OK);
+  CHECK(pObj->m_nObjectsChanged == 2);
+  CHECK(DlgText(hPage, IDC_LABEL) == _T("one"));
+  CHECK(pPage->IsPageDirty() == S_FALSE);
+  ::SetDlgItemText(hPage, IDC_LABEL, _T("both"));
+  CHECK(pPage->Apply() == S_OK);
+  CHECK(pCtl->m_strLabel == _T("both") && pCtl2->m_strLabel == _T("both"));
+  CHECK(pCtl->m_nValue == 123 && pCtl2->m_nValue == 7);
+  // A control the page ignores does not make it dirty.
+  pObj->IgnoreApply(IDC_VALUE);
+  ::SetDlgItemText(hPage, IDC_VALUE, _T("5"));
+  CHECK(pPage->IsPageDirty() == S_FALSE);
+
+  // Keys the page handles.
+  MSG msg;
+  memset(&msg, 0, sizeof(msg));
+  msg.hwnd = ::GetDlgItem(hPage, IDC_VALUE);
+  msg.message = WM_KEYDOWN;
+  msg.wParam = VK_TAB;
+  CHECK(pPage->TranslateAccelerator(&msg) == S_OK);
+  msg.wParam = VK_RETURN;
+  CHECK(pPage->TranslateAccelerator(&msg) == S_FALSE);
+
+  PumpMessages();
+  TestSaveWindowBitmap(hPage, _T("ctltest-page.bmp"));
+
+  CHECK(pPage->Deactivate() == S_OK && pObj->m_hWnd == NULL);
+  CHECK(pPage->SetObjects(0, NULL) == S_OK);
+  CHECK(pPage->SetPageSite(NULL) == S_OK);
+  pPage->Release();
+  CHECK(CTestPropPage::s_nAlive == 0);
+  pUnkCtl->Release();
+  pUnkCtl2->Release();
+  CHECK(CTestCtrl::s_nAlive == 0);
+}
+
+// The property frame (OleCreatePropertyFrame, from the control's
+// Properties verb) runs its own loop; a timer works the page and presses
+// OK.
+static int s_nFrameTicks = 0;
+static BOOL s_bFrameSeen = FALSE;
+
+static BOOL CALLBACK FindFrame(HWND hWnd, LPARAM lParam) {
+  if (::IsWindowVisible(hWnd) && hWnd != AfxGetMainWnd()->m_hWnd) {
+    CTestPropPage* pPage = CTestPropPage::s_pLast;
+    if (pPage != NULL && pPage->m_hWnd != NULL && ::IsChild(hWnd, pPage->m_hWnd)) {
+      *(HWND*)lParam = hWnd;
+      return FALSE;
+    }
+  }
+  return TRUE;
+}
+
+static void CALLBACK FrameTimer(HWND, UINT, UINT_PTR idEvent, DWORD) {
+  s_nFrameTicks++;
+  HWND hFrame = NULL;
+  ::EnumThreadWindows(::GetCurrentThreadId(), FindFrame, (LPARAM)&hFrame);
+  if (hFrame != NULL) {
+    ::KillTimer(NULL, idEvent);
+    s_bFrameSeen = TRUE;
+    HWND hPage = CTestPropPage::s_pLast->m_hWnd;
+    ::SetDlgItemText(hPage, IDC_VALUE, _T("77"));
+    TestSaveWindowBitmap(hFrame, _T("ctltest-frame-props.bmp"));
+    ::PostMessage(hFrame, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED),
+                  (LPARAM)::GetDlgItem(hFrame, IDOK));
+  } else if (s_nFrameTicks > 50) {
+    // No frame: close whatever dialog came up.
+    ::KillTimer(NULL, idEvent);
+    HWND hWnd = ::GetActiveWindow();
+    if (hWnd != NULL && hWnd != AfxGetMainWnd()->m_hWnd) ::PostMessage(hWnd, WM_COMMAND, IDCANCEL, 0);
+  }
+}
+
+void CMainFrame::TestPropertyFrame() {
+  TestLog("property frame");
+  CRect rect(10, 10, 210, 70);
+  BOOL bMade = m_ctl.CreateControl(CTestCtrl::guid, _T("Props"), WS_VISIBLE, rect, this, IDC_CTL);
+  CHECK(bMade);
+  CTestCtrl* pCtl = CTestCtrl::s_pLast;
+  if (!bMade || pCtl == NULL) return;
+  LPOLEOBJECT pObj = NULL;
+  m_ctl.GetControlUnknown()->QueryInterface(IID_IOleObject, (void**)&pObj);
+  CHECK(pObj != NULL);
+  if (pObj != NULL) {
+    s_nFrameTicks = 0;
+    s_bFrameSeen = FALSE;
+    ::SetTimer(NULL, 0, 100, FrameTimer);
+    HRESULT hr = pObj->DoVerb(OLEIVERB_PROPERTIES, NULL, NULL, 0, m_hWnd, &rect);
+    CHECK(SUCCEEDED(hr));
+    CHECK(s_bFrameSeen);
+    // OK applies the dirty page. Wine's frame (as of Wine 9) never calls
+    // IPropertyPage::Apply, so there the page is still dirty at the end.
+    if (::GetProcAddress(::GetModuleHandleA("ntdll.dll"), "wine_get_version") != NULL) {
+      CHECK(CTestPropPage::s_bDirtyAtEnd && pCtl->m_nValue == 7);
+    } else {
+      CHECK(!CTestPropPage::s_bDirtyAtEnd && pCtl->m_nValue == 77);
+    }
+    pObj->Release();
+  }
+  CHECK(CTestPropPage::s_nAlive == 0);
+  m_ctl.DestroyWindow();
+  CHECK(CTestCtrl::s_nAlive == 0);
+}
+
 static BOOL ReadKey(LPCTSTR lpszKey, LPCTSTR lpszValueName, CString& str) {
   HKEY hKey;
   str.Empty();
@@ -749,6 +1045,8 @@ void CMainFrame::TestRegistry() {
 
 void CMainFrame::RunTests() {
   TestHosted();
+  TestPropertyPage();
+  TestPropertyFrame();
   TestPersistence();
   TestRegistry();
 }

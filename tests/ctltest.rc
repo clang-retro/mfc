@@ -1,4 +1,5 @@
-// ctltest.rc - resources for ctltest: the control's type name.
+// ctltest.rc - resources for ctltest: the control's type name and its
+// property page.
 #include <windows.h>
 #include <afxres.h>
 #include "ctltest.h"
@@ -6,4 +7,22 @@
 STRINGTABLE
 BEGIN
   IDS_TESTCTL "CtlTest Control"
+  IDS_TESTPAGE "General"
+  IDS_TESTPAGE_TYPE "CtlTest Property Page"
+END
+
+// A property page template is an ordinary dialog: COlePropertyPage makes
+// it a child of the property frame.
+IDD_TESTPAGE DIALOGEX 0, 0, 200, 90
+STYLE DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "General"
+FONT 8, "MS Shell Dlg"
+BEGIN
+  LTEXT "&Value:", -1, 7, 9, 40, 8
+  EDITTEXT IDC_VALUE, 50, 7, 60, 14, ES_AUTOHSCROLL
+  LTEXT "&Label:", -1, 7, 27, 40, 8
+  EDITTEXT IDC_LABEL, 50, 25, 100, 14, ES_AUTOHSCROLL
+  AUTOCHECKBOX "&Enabled", IDC_ENABLED, 7, 45, 80, 10
+  AUTORADIOBUTTON "&No border", IDC_BORDER0, 7, 60, 80, 10, WS_GROUP | WS_TABSTOP
+  AUTORADIOBUTTON "&Border", IDC_BORDER1, 7, 72, 80, 10
 END
