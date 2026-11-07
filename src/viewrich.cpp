@@ -7,7 +7,7 @@
 #include <afxodlgs.h>
 
 IMPLEMENT_DYNCREATE(CRichEditView, CCtrlView)
-IMPLEMENT_DYNAMIC(CRichEditDoc, COleDocument)
+IMPLEMENT_DYNAMIC(CRichEditDoc, COleServerDoc)
 IMPLEMENT_SERIAL(CRichEditCntrItem, COleClientItem, 0)
 
 BEGIN_INTERFACE_MAP(CRichEditView, CCtrlView)
@@ -860,6 +860,11 @@ CRichEditDoc::CRichEditDoc() { m_bRTF = TRUE; }
 
 CRichEditDoc::~CRichEditDoc() {}
 
+// A program that serves its documents makes the item that draws one.
+COleServerItem* CRichEditDoc::OnGetEmbeddedItem() { return NULL; }
+
+int CRichEditDoc::GetStreamFormat() const { return m_bRTF ? SF_RTF : SF_TEXT; }
+
 CRichEditView* CRichEditDoc::GetView() const {
   POSITION pos = GetFirstViewPosition();
   while (pos != NULL) {
@@ -889,7 +894,7 @@ CRichEditCntrItem* CRichEditDoc::LookupItem(LPOLEOBJECT lpobj) const {
 void CRichEditDoc::UpdateModifiedFlag() {
   CRichEditView* pView = GetView();
   if (pView == NULL || pView->m_lpRichEditOle == NULL) {
-    COleDocument::UpdateModifiedFlag();
+    COleServerDoc::UpdateModifiedFlag();
     return;
   }
   LPRICHEDITOLE lpReOle = pView->m_lpRichEditOle;
@@ -918,11 +923,11 @@ void CRichEditDoc::DeleteContents() {
   // The text first: that lets the control release its objects.
   CRichEditView* pView = GetView();
   if (pView != NULL) pView->DeleteContents();
-  COleDocument::DeleteContents();
+  COleServerDoc::DeleteContents();
 }
 
 BOOL CRichEditDoc::OnNewDocument() {
-  if (!COleDocument::OnNewDocument()) return FALSE;
+  if (!COleServerDoc::OnNewDocument()) return FALSE;
   CRichEditView* pView = GetView();
   if (pView != NULL) pView->GetRichEditCtrl().SetModify(FALSE);
   return TRUE;

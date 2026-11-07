@@ -1,0 +1,32 @@
+// richsrvtest.rc - resources for richsrvtest.
+#include <windows.h>
+#include <afxres.h>
+#include "richsrvtest.h"
+
+IDR_RICHTYPE MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&Save", ID_FILE_SAVE
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+END
+
+IDR_SRVR_EMBEDDED MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&Update", ID_FILE_UPDATE
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+END
+
+STRINGTABLE
+BEGIN
+  IDR_RICHTYPE "RichSrv\n\nRichSrv\nRichSrv Files (*.rsv)\n.rsv\nRichSrv.Document\nRichSrv Document"
+  AFX_IDS_APP_TITLE "RichSrv"
+END
+
+#include "afxres.rc"
+#include "afxolecl.rc"
+#include "afxolesv.rc"

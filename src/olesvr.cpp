@@ -47,7 +47,7 @@ static LPOLESTR TaskString(LPCTSTR lpsz) {
 // is its own: a document a link opened closes when the links let go,
 // though the table still lists it. (Its IUnknown is its own, so COM keys
 // the table's stub on it and not on the target.)
-class CRunningStandIn : public IUnknown {
+class CRunningStandIn final : public IUnknown {
 public:
   CCmdTarget* m_pTarget;
   LONG m_cRef;
