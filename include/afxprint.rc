@@ -4,6 +4,7 @@
 // strings. Without it, the library builds the same dialogs in memory.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 
 #include <afxres.h>
 

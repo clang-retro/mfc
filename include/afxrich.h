@@ -2,6 +2,7 @@
 // and views built on the rich edit control.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #ifndef __AFXRICH_H__
 #define __AFXRICH_H__
 

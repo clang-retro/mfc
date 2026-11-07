@@ -1,6 +1,7 @@
 // ctlimpl.h - shared between the COleControl sources.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #pragma once
 
 // What SendAdvise tells the advise sinks.

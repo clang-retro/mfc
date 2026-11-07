@@ -1,6 +1,7 @@
 // dlgdata.cpp - dialog data exchange (DDX_) and validation (DDV_).
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 #include <errno.h>
 #include <float.h>

@@ -3,6 +3,7 @@
 // oledlg.h) build everywhere.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #if defined(__has_include_next) && __has_include_next(<tchar.h>)
 #include_next <tchar.h>
 #else

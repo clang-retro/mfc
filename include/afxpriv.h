@@ -3,6 +3,7 @@
 // conversion macros (afxconv.h).
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API
+// SPDX-License-Identifier: AGPL-3.0-only
 // written from its public documentation.
 #ifndef __AFXPRIV_H__
 #define __AFXPRIV_H__

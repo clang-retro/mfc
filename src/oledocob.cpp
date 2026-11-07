@@ -3,6 +3,7 @@
 // CDocObjectServerItem, and the container's COleDocObjectItem.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 #include <afxole.h>
 #include <afxdocob.h>

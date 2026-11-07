@@ -1,6 +1,7 @@
 // afxmt.h - thread synchronization objects.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #ifndef __AFXMT_H__
 #define __AFXMT_H__
 

@@ -2,6 +2,7 @@
 // pointer wrappers.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #ifndef __AFXTEMPL_H__
 #define __AFXTEMPL_H__
 

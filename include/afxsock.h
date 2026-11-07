@@ -4,6 +4,7 @@
 // read and write through a CSocket.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #ifndef __AFXSOCK_H__
 #define __AFXSOCK_H__
 

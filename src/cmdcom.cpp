@@ -6,6 +6,7 @@
 // word how many classes up from the object's own class the map is.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 #include <afxdisp.h>
 

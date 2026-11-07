@@ -3,6 +3,7 @@
 // DDX_OC functions.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 #include <afxocc.h>
 

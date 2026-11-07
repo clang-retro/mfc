@@ -1,6 +1,7 @@
 // CFile, CStdioFile, CMemFile, CFileFind and the path helpers.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #include "stdafx.h"
 
 IMPLEMENT_DYNAMIC(CFile, CObject)

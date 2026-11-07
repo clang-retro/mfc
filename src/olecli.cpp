@@ -2,6 +2,7 @@
 // container document, and the client site it gives the object.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 #include <afxole.h>
 // oledlg.h needs <tchar.h>, which some C libraries lack; this is the one

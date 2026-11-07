@@ -3,6 +3,7 @@
 // of dialog templates.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
 #ifndef __AFXOCC_H__
 #define __AFXOCC_H__
 
