@@ -32,6 +32,8 @@ BEGIN_INTERFACE_MAP(COleControlSite, CCmdTarget)
   INTERFACE_PART(COleControlSite, IID_IOleClientSite, OleClientSite)
   INTERFACE_PART(COleControlSite, IID_IOleWindow, OleIPSite)
   INTERFACE_PART(COleControlSite, IID_IOleInPlaceSite, OleIPSite)
+  INTERFACE_PART(COleControlSite, IID_IOleInPlaceSiteEx, OleIPSite)
+  INTERFACE_PART(COleControlSite, IID_IOleInPlaceSiteWindowless, OleIPSite)
   INTERFACE_PART(COleControlSite, IID_IOleControlSite, OleControlSite)
   INTERFACE_PART(COleControlSite, IID_IDispatch, AmbientProps)
   INTERFACE_PART(COleControlSite, IID_IPropertyNotifySink, PropertyNotifySink)
@@ -362,6 +364,10 @@ BOOL COleControlSite::DestroyControl() {
   if (m_hWnd != NULL) m_pCtrlCont->m_siteMap.RemoveKey(m_hWnd);
   if (m_pCtrlCont->m_pSiteUIActive == this) m_pCtrlCont->m_pSiteUIActive = NULL;
   if (m_pCtrlCont->m_pSiteFocus == this) m_pCtrlCont->m_pSiteFocus = NULL;
+  if (m_pCtrlCont->m_pSiteCapture == this) {
+    m_pCtrlCont->m_pSiteCapture = NULL;
+    if (::GetCapture() == m_pCtrlCont->m_pWnd->GetSafeHwnd()) ::ReleaseCapture();
+  }
   if (m_pObject != NULL) {
     DisconnectSink(IID_IPropertyNotifySink, m_dwPropNotifySink);
     DisconnectSink(m_iidEvents, m_dwEventSink);
@@ -508,7 +514,9 @@ int COleControlSite::SetDlgCtrlID(int nID) {
 }
 
 void COleControlSite::MoveWindow(int x, int y, int nWidth, int nHeight, BOOL bRepaint) {
+  if (m_bIsWindowless && bRepaint) InvalidateWindowless(NULL, TRUE);  // where it was
   m_rect.SetRect(x, y, x + nWidth, y + nHeight);
+  if (m_bIsWindowless && bRepaint) InvalidateWindowless(NULL, TRUE);
   SetExtent();
   if (m_pInPlaceObject != NULL)
     m_pInPlaceObject->SetObjectRects(&m_rect, &m_rect);
@@ -532,10 +540,15 @@ BOOL COleControlSite::SetWindowPos(const CWnd* pWndInsertAfter, int x, int y, in
 BOOL COleControlSite::ShowWindow(int nCmdShow) {
   if (nCmdShow == SW_HIDE && m_bUIActive && m_pInPlaceObject != NULL)
     m_pInPlaceObject->UIDeactivate();
+  BOOL bWasVisible = (m_dwStyle & WS_VISIBLE) != 0;
   if (nCmdShow == SW_HIDE)
     m_dwStyle &= ~WS_VISIBLE;
   else
     m_dwStyle |= WS_VISIBLE;
+  if (m_bIsWindowless) {
+    if (bWasVisible != ((m_dwStyle & WS_VISIBLE) != 0)) InvalidateWindowless(NULL, TRUE);
+    return bWasVisible;
+  }
   return m_hWnd != NULL ? ::ShowWindow(m_hWnd, nCmdShow) : FALSE;
 }
 
@@ -699,9 +712,7 @@ STDMETHODIMP COleControlSite::XOleIPSite::ContextSensitiveHelp(BOOL) { return E_
 STDMETHODIMP COleControlSite::XOleIPSite::CanInPlaceActivate() { return S_OK; }
 STDMETHODIMP COleControlSite::XOleIPSite::OnInPlaceActivate() {
   SITE(OleIPSite);
-  pThis->m_bInPlaceActive = TRUE;
-  if (pThis->m_pInPlaceObject == NULL)
-    pThis->m_pObject->QueryInterface(IID_IOleInPlaceObject, (void**)&pThis->m_pInPlaceObject);
+  pThis->OnActivated(0);
   return S_OK;
 }
 STDMETHODIMP COleControlSite::XOleIPSite::OnUIActivate() {
@@ -741,11 +752,7 @@ STDMETHODIMP COleControlSite::XOleIPSite::OnUIDeactivate(BOOL) {
 }
 STDMETHODIMP COleControlSite::XOleIPSite::OnInPlaceDeactivate() {
   SITE(OleIPSite);
-  pThis->m_bInPlaceActive = FALSE;
-  if (pThis->m_pInPlaceObject != NULL) {
-    pThis->m_pInPlaceObject->Release();
-    pThis->m_pInPlaceObject = NULL;
-  }
+  pThis->OnDeactivated();
   return S_OK;
 }
 STDMETHODIMP COleControlSite::XOleIPSite::DiscardUndoState() { return S_OK; }
@@ -756,10 +763,206 @@ STDMETHODIMP COleControlSite::XOleIPSite::DeactivateAndUndo() {
 }
 STDMETHODIMP COleControlSite::XOleIPSite::OnPosRectChange(LPCRECT lprcPosRect) {
   SITE(OleIPSite);
+  if (pThis->m_bIsWindowless) pThis->InvalidateWindowless(NULL, TRUE);
   pThis->m_rect = *lprcPosRect;
   if (pThis->m_pInPlaceObject != NULL)
     pThis->m_pInPlaceObject->SetObjectRects(&pThis->m_rect, &pThis->m_rect);
+  if (pThis->m_bIsWindowless) pThis->InvalidateWindowless(NULL, TRUE);
   return S_OK;
+}
+
+// ----- IOleInPlaceSiteEx
+
+STDMETHODIMP COleControlSite::XOleIPSite::OnInPlaceActivateEx(BOOL* pfNoRedraw, DWORD dwFlags) {
+  SITE(OleIPSite);
+  if (pfNoRedraw != NULL) *pfNoRedraw = FALSE;
+  pThis->OnActivated(dwFlags);
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::OnInPlaceDeactivateEx(BOOL) {
+  SITE(OleIPSite);
+  pThis->OnDeactivated();
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::RequestUIActivate() { return S_OK; }
+
+// ----- IOleInPlaceSiteWindowless: what a windowless control asks of the
+// window it lives in.
+
+STDMETHODIMP COleControlSite::XOleIPSite::CanWindowlessActivate() {
+  SITE(OleIPSite);
+  return pThis->m_pCtrlCont->m_pWnd->GetSafeHwnd() != NULL ? S_OK : S_FALSE;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::GetCapture() {
+  SITE(OleIPSite);
+  return pThis->m_pCtrlCont->m_pSiteCapture == pThis ? S_OK : S_FALSE;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::SetCapture(BOOL fCapture) {
+  SITE(OleIPSite);
+  COleControlContainer* pCont = pThis->m_pCtrlCont;
+  HWND hWnd = pCont->m_pWnd->GetSafeHwnd();
+  if (fCapture) {
+    pCont->m_pSiteCapture = pThis;
+    if (::GetCapture() != hWnd) ::SetCapture(hWnd);
+  } else if (pCont->m_pSiteCapture == pThis) {
+    pCont->m_pSiteCapture = NULL;
+    if (::GetCapture() == hWnd) ::ReleaseCapture();
+  }
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::GetFocus() {
+  SITE(OleIPSite);
+  return pThis->m_pCtrlCont->m_pSiteFocus == pThis ? S_OK : S_FALSE;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::SetFocus(BOOL fFocus) {
+  SITE(OleIPSite);
+  COleControlContainer* pCont = pThis->m_pCtrlCont;
+  HWND hWnd = pCont->m_pWnd->GetSafeHwnd();
+  if (!fFocus) {
+    if (pCont->m_pSiteFocus == pThis) pCont->m_pSiteFocus = NULL;
+    return S_OK;
+  }
+  if (pCont->m_pSiteFocus == pThis && ::GetFocus() == hWnd) return S_OK;
+  // The old windowless control loses the focus.
+  COleControlSite* pOld = pCont->m_pSiteFocus;
+  pCont->m_pSiteFocus = pThis;
+  LRESULT lResult = 0;
+  if (pOld != NULL && pOld != pThis && pOld->m_bIsWindowless)
+    pOld->SendWindowlessMessage(WM_KILLFOCUS, (WPARAM)hWnd, 0, &lResult);
+  // The window takes the keyboard (the control hears WM_SETFOCUS from
+  // it); when it has it already, the control hears it now.
+  if (::GetFocus() != hWnd)
+    ::SetFocus(hWnd);
+  else
+    pThis->SendWindowlessMessage(WM_SETFOCUS, (WPARAM)hWnd, 0, &lResult);
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::GetDC(LPCRECT pRect, DWORD grfFlags, HDC* phDC) {
+  SITE(OleIPSite);
+  if (phDC == NULL) return E_POINTER;
+  *phDC = NULL;
+  HWND hWnd = pThis->m_pCtrlCont->m_pWnd->GetSafeHwnd();
+  if (hWnd == NULL) return E_FAIL;
+  HDC hDC = ::GetDC(hWnd);
+  if (hDC == NULL) return E_FAIL;
+  ::SaveDC(hDC);
+  // Only the control's part of the window.
+  CRect rect(pThis->m_rect);
+  if (pRect != NULL) rect.IntersectRect(&rect, pRect);
+  ::IntersectClipRect(hDC, rect.left, rect.top, rect.right, rect.bottom);
+  if (grfFlags & OLEDC_PAINTBKGND) ::SendMessage(hWnd, WM_ERASEBKGND, (WPARAM)hDC, 0);
+  *phDC = hDC;
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::ReleaseDC(HDC hDC) {
+  SITE(OleIPSite);
+  if (hDC == NULL) return E_INVALIDARG;
+  ::RestoreDC(hDC, -1);
+  ::ReleaseDC(pThis->m_pCtrlCont->m_pWnd->GetSafeHwnd(), hDC);
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::InvalidateRect(LPCRECT pRect, BOOL fErase) {
+  SITE(OleIPSite);
+  pThis->InvalidateWindowless(pRect, fErase);
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::InvalidateRgn(HRGN hRgn, BOOL fErase) {
+  SITE(OleIPSite);
+  HWND hWnd = pThis->m_pCtrlCont->m_pWnd->GetSafeHwnd();
+  if (hWnd == NULL) return E_FAIL;
+  if (hRgn == NULL) {
+    pThis->InvalidateWindowless(NULL, fErase);
+    return S_OK;
+  }
+  // Within the control's part.
+  HRGN hRgnPart = ::CreateRectRgnIndirect(&pThis->m_rect);
+  ::CombineRgn(hRgnPart, hRgnPart, hRgn, RGN_AND);
+  ::InvalidateRgn(hWnd, hRgnPart, fErase);
+  ::DeleteObject(hRgnPart);
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::ScrollRect(INT, INT, LPCRECT pRectScroll,
+                                                     LPCRECT pRectClip) {
+  // The scrolled part is drawn again.
+  SITE(OleIPSite);
+  CRect rect(pRectScroll != NULL ? *pRectScroll : pThis->m_rect);
+  if (pRectClip != NULL) rect.IntersectRect(&rect, pRectClip);
+  pThis->InvalidateWindowless(&rect, FALSE);
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::AdjustRect(LPRECT prc) {
+  return prc != NULL ? S_OK : E_INVALIDARG;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::OnDefWindowMessage(UINT msg, WPARAM wParam,
+                                                             LPARAM lParam, LRESULT* plResult) {
+  SITE(OleIPSite);
+  CWnd* pWnd = pThis->m_pCtrlCont->m_pWnd;
+  if (plResult == NULL) return E_POINTER;
+  *plResult = 0;
+  if (pWnd->GetSafeHwnd() == NULL) return S_FALSE;
+  // The window's default handling, not its message map: the control has
+  // had the message.
+  *plResult = pWnd->DefWindowProc(msg, wParam, lParam);
+  return S_OK;
+}
+
+// ----- Windowless controls
+
+void COleControlSite::OnActivated(DWORD dwFlags) {
+  m_bInPlaceActive = TRUE;
+  if (m_pInPlaceObject == NULL)
+    m_pObject->QueryInterface(IID_IOleInPlaceObject, (void**)&m_pInPlaceObject);
+  if ((dwFlags & ACTIVATE_WINDOWLESS) && !m_bIsWindowless) {
+    IOleInPlaceObjectWindowless* pWindowless = NULL;
+    if (SUCCEEDED(m_pObject->QueryInterface(IID_IOleInPlaceObjectWindowless,
+                                            (void**)&pWindowless))) {
+      m_pWindowlessObject = pWindowless;
+      m_bIsWindowless = TRUE;
+      m_pCtrlCont->m_nWindowlessControls++;
+      InvalidateWindowless(NULL, TRUE);
+    }
+  }
+}
+
+void COleControlSite::OnDeactivated() {
+  m_bInPlaceActive = FALSE;
+  if (m_bIsWindowless) {
+    InvalidateWindowless(NULL, TRUE);
+    m_bIsWindowless = FALSE;
+    m_pCtrlCont->m_nWindowlessControls--;
+    if (m_pCtrlCont->m_pSiteCapture == this) {
+      m_pCtrlCont->m_pSiteCapture = NULL;
+      if (::GetCapture() == m_pCtrlCont->m_pWnd->GetSafeHwnd()) ::ReleaseCapture();
+    }
+    if (m_pCtrlCont->m_pSiteFocus == this) m_pCtrlCont->m_pSiteFocus = NULL;
+    ((IOleInPlaceObjectWindowless*)m_pWindowlessObject)->Release();
+    m_pWindowlessObject = NULL;
+  }
+  if (m_pInPlaceObject != NULL) {
+    m_pInPlaceObject->Release();
+    m_pInPlaceObject = NULL;
+  }
+}
+
+void COleControlSite::InvalidateWindowless(LPCRECT lpRect, BOOL bErase) {
+  HWND hWnd = m_pCtrlCont->m_pWnd->GetSafeHwnd();
+  if (hWnd == NULL) return;
+  CRect rect(m_rect);
+  if (lpRect != NULL) rect.IntersectRect(&rect, lpRect);
+  if (!rect.IsRectEmpty()) ::InvalidateRect(hWnd, &rect, bErase);
+}
+
+HRESULT COleControlSite::SendWindowlessMessage(UINT msg, WPARAM wParam, LPARAM lParam,
+                                               LRESULT* plResult) {
+  *plResult = 0;
+  if (!m_bIsWindowless || m_pWindowlessObject == NULL) return S_FALSE;
+  InternalAddRef();  // the control may go away
+  IOleInPlaceObjectWindowless* pWindowless = (IOleInPlaceObjectWindowless*)m_pWindowlessObject;
+  pWindowless->AddRef();
+  HRESULT hr = pWindowless->OnWindowMessage(msg, wParam, lParam, plResult);
+  pWindowless->Release();
+  InternalRelease();
+  return hr;
 }
 
 // ---------------------------------------------------------------------
@@ -961,6 +1164,74 @@ COleControlContainer::~COleControlContainer() {
   DestroyAll();
   if (m_pOleFont != NULL) m_pOleFont->Release();
   if (m_pActiveObject != NULL) m_pActiveObject->Release();
+}
+
+COleControlSite* COleControlContainer::FindWindowlessSite(CPoint point) const {
+  // The last made is on top.
+  POSITION pos = m_listSitesOrWnds.GetTailPosition();
+  while (pos != NULL) {
+    COleControlSite* pSite = (COleControlSite*)m_listSitesOrWnds.GetPrev(pos);
+    if (pSite->m_bIsWindowless && (pSite->m_dwStyle & WS_VISIBLE) && pSite->m_rect.PtInRect(point))
+      return pSite;
+  }
+  return NULL;
+}
+
+BOOL COleControlContainer::OnPaint(CDC* pDC) {
+  BOOL bDrew = FALSE;
+  POSITION pos = m_listSitesOrWnds.GetHeadPosition();
+  while (pos != NULL) {
+    COleControlSite* pSite = (COleControlSite*)m_listSitesOrWnds.GetNext(pos);
+    if (!pSite->m_bIsWindowless || !(pSite->m_dwStyle & WS_VISIBLE) || pSite->m_pObject == NULL)
+      continue;
+    if (!pDC->RectVisible(&pSite->m_rect)) continue;
+    IViewObject* pView = NULL;
+    if (FAILED(pSite->m_pObject->QueryInterface(IID_IViewObject, (void**)&pView))) continue;
+    RECTL rcl = {pSite->m_rect.left, pSite->m_rect.top, pSite->m_rect.right,
+                 pSite->m_rect.bottom};
+    if (SUCCEEDED(pView->Draw(DVASPECT_CONTENT, -1, NULL, NULL, NULL, pDC->m_hDC, &rcl, NULL,
+                              NULL, 0)))
+      bDrew = TRUE;
+    pView->Release();
+  }
+  return bDrew;
+}
+
+BOOL COleControlContainer::HandleWindowlessMessage(UINT message, WPARAM wParam, LPARAM lParam,
+                                                   LRESULT* plResult) {
+  if (m_nWindowlessControls <= 0 || m_pWnd->GetSafeHwnd() == NULL) return FALSE;
+  COleControlSite* pSite = NULL;
+  if (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST) {
+    if (message == WM_MOUSEWHEEL) {
+      pSite = m_pSiteFocus;  // the wheel goes with the keyboard
+    } else {
+      pSite = m_pSiteCapture;
+      if (pSite == NULL)
+        pSite = FindWindowlessSite(CPoint((short)LOWORD(lParam), (short)HIWORD(lParam)));
+    }
+  } else if (message == WM_SETCURSOR) {
+    if ((HWND)wParam != m_pWnd->m_hWnd || LOWORD(lParam) != HTCLIENT) return FALSE;
+    pSite = m_pSiteCapture;
+    if (pSite == NULL) {
+      CPoint point;
+      ::GetCursorPos(&point);
+      ::ScreenToClient(m_pWnd->m_hWnd, &point);
+      pSite = FindWindowlessSite(point);
+    }
+  } else if ((message >= WM_KEYFIRST && message <= WM_KEYLAST) ||
+             (message >= WM_IME_SETCONTEXT && message <= WM_IME_KEYUP) ||
+             message == WM_HELP || message == WM_SETFOCUS || message == WM_KILLFOCUS) {
+    pSite = m_pSiteFocus;
+  } else if (message == WM_CANCELMODE || message == WM_CAPTURECHANGED) {
+    pSite = m_pSiteCapture;
+    // The window lost the mouse, so the control did.
+    if (message == WM_CAPTURECHANGED && (HWND)lParam != m_pWnd->m_hWnd) m_pSiteCapture = NULL;
+  }
+  if (pSite == NULL || !pSite->m_bIsWindowless) return FALSE;
+  LRESULT lResult = 0;
+  if (pSite->SendWindowlessMessage(message, wParam, lParam, &lResult) != S_OK) return FALSE;
+  *plResult = lResult;
+  return TRUE;
 }
 
 void COleControlContainer::DestroyAll() {

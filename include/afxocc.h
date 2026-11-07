@@ -86,7 +86,7 @@ public:
   virtual DWORD GetDefBtnCode();
   virtual void SetDefaultButton(BOOL bDefault);
   virtual BOOL GetEventIID(IID* piid);
-  virtual BOOL IsWindowlessControl() { return FALSE; }
+  virtual BOOL IsWindowlessControl() { return m_bIsWindowless; }
 
   COleControlContainer* m_pCtrlCont;
   HWND m_hWnd;
@@ -110,7 +110,7 @@ public:
   BOOL m_bSubclassed;  // m_pWndCtrl subclassed the control's window
   CWnd* m_pWndOwned;   // the window object GetDlgItem made, which the site deletes
   CLSID m_clsid;
-  void* m_pWindowlessObject;
+  void* m_pWindowlessObject;  // a windowless control's IOleInPlaceObjectWindowless
   int m_nFreezeEvents;
 
 protected:
@@ -122,6 +122,12 @@ protected:
   BOOL SetExtent();
   void FindEventsIID();
   HRESULT FireEvent(AFX_EVENT* pEvent);
+  // A windowless control: its part of the container window to repaint,
+  // and a message for it.
+  void InvalidateWindowless(LPCRECT lpRect, BOOL bErase);
+  HRESULT SendWindowlessMessage(UINT msg, WPARAM wParam, LPARAM lParam, LRESULT* plResult);
+  void OnActivated(DWORD dwFlags);
+  void OnDeactivated();
 
   // IOleClientSite
   BEGIN_INTERFACE_PART(OleClientSite, IOleClientSite)
@@ -133,7 +139,9 @@ protected:
     STDMETHOD(RequestNewObjectLayout)();
   END_INTERFACE_PART(OleClientSite)
 
-  BEGIN_INTERFACE_PART(OleIPSite, IOleInPlaceSite)
+  // IOleInPlaceSite, and IOleInPlaceSiteEx and IOleInPlaceSiteWindowless
+  // for windowless controls.
+  BEGIN_INTERFACE_PART(OleIPSite, IOleInPlaceSiteWindowless)
     STDMETHOD(GetWindow)(HWND*);
     STDMETHOD(ContextSensitiveHelp)(BOOL);
     STDMETHOD(CanInPlaceActivate)();
@@ -147,6 +155,21 @@ protected:
     STDMETHOD(DiscardUndoState)();
     STDMETHOD(DeactivateAndUndo)();
     STDMETHOD(OnPosRectChange)(LPCRECT);
+    STDMETHOD(OnInPlaceActivateEx)(BOOL*, DWORD);
+    STDMETHOD(OnInPlaceDeactivateEx)(BOOL);
+    STDMETHOD(RequestUIActivate)();
+    STDMETHOD(CanWindowlessActivate)();
+    STDMETHOD(GetCapture)();
+    STDMETHOD(SetCapture)(BOOL);
+    STDMETHOD(GetFocus)();
+    STDMETHOD(SetFocus)(BOOL);
+    STDMETHOD(GetDC)(LPCRECT, DWORD, HDC*);
+    STDMETHOD(ReleaseDC)(HDC);
+    STDMETHOD(InvalidateRect)(LPCRECT, BOOL);
+    STDMETHOD(InvalidateRgn)(HRGN, BOOL);
+    STDMETHOD(ScrollRect)(INT, INT, LPCRECT, LPCRECT);
+    STDMETHOD(AdjustRect)(LPRECT);
+    STDMETHOD(OnDefWindowMessage)(UINT, WPARAM, LPARAM, LRESULT*);
   END_INTERFACE_PART(OleIPSite)
 
   BEGIN_INTERFACE_PART(OleControlSite, IOleControlSite)
@@ -211,6 +234,15 @@ public:
   virtual void CreateOleFont(CFont* pFont);
   // Closes every control, before the window goes.
   virtual void DestroyAll();
+
+  // Windowless controls: they draw on the window's DC when it paints,
+  // and get its mouse messages over them and its keys when they have the
+  // focus.
+  virtual BOOL OnPaint(CDC* pDC);
+  virtual BOOL HandleWindowlessMessage(UINT message, WPARAM wParam, LPARAM lParam,
+                                       LRESULT* plResult);
+  // The visible windowless control at a point of the window, the topmost.
+  COleControlSite* FindWindowlessSite(CPoint point) const;
 
   // Dialog item functions that also reach controls.
   virtual CWnd* GetDlgItem(int nID) const;

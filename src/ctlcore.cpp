@@ -54,6 +54,7 @@ END_CONNECTION_MAP()
 BEGIN_INTERFACE_MAP(COleControl, CWnd)
   INTERFACE_PART(COleControl, IID_IOleObject, OleObject)
   INTERFACE_PART(COleControl, IID_IOleInPlaceObject, OleInPlaceObject)
+  INTERFACE_PART(COleControl, IID_IOleInPlaceObjectWindowless, OleInPlaceObject)
   INTERFACE_PART(COleControl, IID_IOleWindow, OleInPlaceObject)
   INTERFACE_PART(COleControl, IID_IOleInPlaceActiveObject, OleInPlaceActiveObject)
   INTERFACE_PART(COleControl, IID_IOleControl, OleControl)
@@ -89,6 +90,8 @@ COleControl::COleControl()
       m_bInPlaceActive(FALSE),
       m_bUIActive(FALSE),
       m_bInPlaceSiteEx(FALSE),
+      m_bInPlaceSiteWndless(FALSE),
+      m_pInPlaceSiteWndless(NULL),
       m_nFreezeEvents(0),
       m_bPendingUIActivation(FALSE),
       m_rcPos(0, 0, 0, 0),
@@ -339,7 +342,15 @@ BOOL COleControl::OnEraseBkgnd(CDC* pDC) {
 }
 
 void COleControl::InvalidateControl(LPCRECT lpRect, BOOL bErase) {
-  if (m_hWnd != NULL && m_bInPlaceActive)
+  if (m_bInPlaceSiteWndless && m_bInPlaceActive) {
+    // The rectangle is the control's; the container's is offset.
+    CRect rect;
+    if (lpRect != NULL) {
+      rect = *lpRect;
+      rect.OffsetRect(m_rcPos.TopLeft());
+    }
+    m_pInPlaceSiteWndless->InvalidateRect(lpRect != NULL ? &rect : NULL, bErase);
+  } else if (m_hWnd != NULL && m_bInPlaceActive)
     InvalidateRect(lpRect, bErase);
   else
     SendAdvise(OBJECTCODE_VIEWCHANGED);
@@ -796,7 +807,7 @@ void COleControl::ButtonDown(USHORT iButton, UINT, CPoint point) {
 void COleControl::ButtonUp(USHORT iButton, UINT nFlags, CPoint point) {
   if (GetStockEventMask() & STOCKEVENT_MOUSEUP)
     FireMouseUp((short)iButton, ShiftState(), point.x, point.y);
-  if (ButtonState(nFlags) == 0 && GetCapture() == this) ::ReleaseCapture();
+  if (ButtonState(nFlags) == 0 && GetCapture() == this) ReleaseCapture();
   CRect rcClient;
   GetClientRect(&rcClient);
   if (rcClient.PtInRect(point) && (GetStockEventMask() & STOCKEVENT_CLICK)) OnClick(iButton);
@@ -1032,7 +1043,29 @@ HRESULT COleControl::OnActivateInPlace(BOOL bUIActivate, LPMSG) {
       return E_FAIL;
     }
     m_pInPlaceSite = pSite;
-    m_pInPlaceSite->OnInPlaceActivate();
+    // Windowless, when the control and the container both can.
+    m_bInPlaceSiteWndless = FALSE;
+    m_bInPlaceSiteEx = FALSE;
+    if (GetControlFlags() & windowlessActivate) {
+      LPOLEINPLACESITEWINDOWLESS pWndless = NULL;
+      if (SUCCEEDED(pSite->QueryInterface(IID_IOleInPlaceSiteWindowless, (void**)&pWndless))) {
+        if (pWndless->CanWindowlessActivate() == S_OK) {
+          m_pInPlaceSiteWndless = pWndless;
+          m_bInPlaceSiteWndless = TRUE;
+        } else {
+          pWndless->Release();
+        }
+      }
+    }
+    LPOLEINPLACESITEEX pSiteEx = NULL;
+    if (SUCCEEDED(pSite->QueryInterface(IID_IOleInPlaceSiteEx, (void**)&pSiteEx))) {
+      m_bInPlaceSiteEx = TRUE;
+      BOOL bNoRedraw = FALSE;
+      pSiteEx->OnInPlaceActivateEx(&bNoRedraw, m_bInPlaceSiteWndless ? ACTIVATE_WINDOWLESS : 0);
+      pSiteEx->Release();
+    } else {
+      m_pInPlaceSite->OnInPlaceActivate();
+    }
     HWND hWndParent = NULL;
     m_pInPlaceSite->GetWindow(&hWndParent);
     memset(&m_frameInfo, 0, sizeof(m_frameInfo));
@@ -1045,7 +1078,13 @@ HRESULT COleControl::OnActivateInPlace(BOOL bUIActivate, LPMSG) {
     }
     m_rcPos = rcPos;
     m_rcClip = rcClip;
-    if (!CreateControlWindow(hWndParent, m_rcPos, &m_rcClip)) {
+    if (m_bInPlaceSiteWndless) {
+      // No window: the container's is the control's.
+      SIZEL sizeHm;
+      _AfxCtlPixelsToHimetric(m_rcPos.Width(), m_rcPos.Height(), &sizeHm);
+      m_cxExtent = sizeHm.cx;
+      m_cyExtent = sizeHm.cy;
+    } else if (!CreateControlWindow(hWndParent, m_rcPos, &m_rcClip)) {
       if (m_pInPlaceFrame != NULL) m_pInPlaceFrame->Release();
       if (m_pInPlaceDoc != NULL) m_pInPlaceDoc->Release();
       m_pInPlaceFrame = NULL;
@@ -1053,6 +1092,7 @@ HRESULT COleControl::OnActivateInPlace(BOOL bUIActivate, LPMSG) {
       m_pInPlaceSite->OnInPlaceDeactivate();
       m_pInPlaceSite->Release();
       m_pInPlaceSite = NULL;
+      m_bInPlaceSiteEx = FALSE;
       return E_FAIL;
     }
     m_bInPlaceActive = TRUE;
@@ -1066,7 +1106,10 @@ HRESULT COleControl::OnActivateInPlace(BOOL bUIActivate, LPMSG) {
     // Controls have no menus or tools of their own.
     if (m_pInPlaceFrame != NULL) m_pInPlaceFrame->SetMenu(NULL, NULL, NULL);
     HWND hWndFocus = ::GetFocus();
-    if (m_hWnd != NULL && hWndFocus != m_hWnd && !::IsChild(m_hWnd, hWndFocus)) ::SetFocus(m_hWnd);
+    if (m_bInPlaceSiteWndless)
+      m_pInPlaceSiteWndless->SetFocus(TRUE);
+    else if (m_hWnd != NULL && hWndFocus != m_hWnd && !::IsChild(m_hWnd, hWndFocus))
+      ::SetFocus(m_hWnd);
   }
   return S_OK;
 }
@@ -1096,9 +1139,172 @@ void COleControl::InPlaceDeactivate() {
   if (m_pInPlaceSite != NULL) {
     LPOLEINPLACESITE pSite = m_pInPlaceSite;
     m_pInPlaceSite = NULL;
-    pSite->OnInPlaceDeactivate();
+    if (m_bInPlaceSiteWndless) {
+      // The mouse and the keyboard go back to the container.
+      if (m_pInPlaceSiteWndless->GetCapture() == S_OK) m_pInPlaceSiteWndless->SetCapture(FALSE);
+      if (m_pInPlaceSiteWndless->GetFocus() == S_OK) m_pInPlaceSiteWndless->SetFocus(FALSE);
+      m_pInPlaceSiteWndless->Release();
+      m_pInPlaceSiteWndless = NULL;
+      m_bInPlaceSiteWndless = FALSE;
+    }
+    LPOLEINPLACESITEEX pSiteEx = NULL;
+    if (m_bInPlaceSiteEx &&
+        SUCCEEDED(pSite->QueryInterface(IID_IOleInPlaceSiteEx, (void**)&pSiteEx))) {
+      pSiteEx->OnInPlaceDeactivateEx(TRUE);
+      pSiteEx->Release();
+    } else {
+      pSite->OnInPlaceDeactivate();
+    }
+    m_bInPlaceSiteEx = FALSE;
     pSite->Release();
   }
+}
+
+// ---------------------------------------------------------------------
+// Windowless activation
+
+DWORD COleControl::GetControlFlags() { return fastBeginPaint | clipPaintDC; }
+
+IDropTarget* COleControl::GetWindowlessDropTarget() { return NULL; }
+
+BOOL COleControl::OnWindowlessMessage(UINT msg, WPARAM wParam, LPARAM lParam,
+                                      LRESULT* plResult) {
+  // The mouse's position, in the control's own coordinates.
+  if (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST && msg != WM_MOUSEWHEEL)
+    lParam = MAKELPARAM((short)LOWORD(lParam) - m_rcPos.left, (short)HIWORD(lParam) - m_rcPos.top);
+  AFX_THREAD_STATE* pState = AfxGetThreadState();
+  MSG msgOld = pState->m_lastSentMsg;
+  pState->m_lastSentMsg.hwnd = NULL;
+  pState->m_lastSentMsg.message = msg;
+  pState->m_lastSentMsg.wParam = wParam;
+  pState->m_lastSentMsg.lParam = lParam;
+  LRESULT lResult = 0;
+  if (!OnWndMsg(msg, wParam, lParam, &lResult)) lResult = DefWindowProc(msg, wParam, lParam);
+  pState->m_lastSentMsg = msgOld;
+  *plResult = lResult;
+  return TRUE;
+}
+
+LRESULT COleControl::DefWindowProc(UINT message, WPARAM wParam, LPARAM lParam) {
+  if (m_hWnd == NULL && m_bInPlaceSiteWndless) {
+    // The container's own handling, except for the focus, which is the
+    // control's and not the window's.
+    if (message == WM_SETFOCUS || message == WM_KILLFOCUS) return 0;
+    LRESULT lResult = 0;
+    if (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST && message != WM_MOUSEWHEEL)
+      lParam = MAKELPARAM((short)LOWORD(lParam) + m_rcPos.left,
+                          (short)HIWORD(lParam) + m_rcPos.top);
+    m_pInPlaceSiteWndless->OnDefWindowMessage(message, wParam, lParam, &lResult);
+    return lResult;
+  }
+  return CWnd::DefWindowProc(message, wParam, lParam);
+}
+
+CWnd* COleControl::SetCapture() {
+  if (m_bInPlaceSiteWndless) {
+    CWnd* pOld = GetCapture();
+    m_pInPlaceSiteWndless->SetCapture(TRUE);
+    return pOld;
+  }
+  return CWnd::SetCapture();
+}
+
+BOOL COleControl::ReleaseCapture() {
+  if (m_bInPlaceSiteWndless) return SUCCEEDED(m_pInPlaceSiteWndless->SetCapture(FALSE));
+  return ::ReleaseCapture();
+}
+
+CWnd* COleControl::GetCapture() {
+  if (m_bInPlaceSiteWndless) return m_pInPlaceSiteWndless->GetCapture() == S_OK ? this : NULL;
+  return CWnd::GetCapture();
+}
+
+CWnd* COleControl::SetFocus() {
+  if (m_bInPlaceSiteWndless) {
+    CWnd* pOld = GetFocus();
+    m_pInPlaceSiteWndless->SetFocus(TRUE);
+    return pOld;
+  }
+  return CWnd::SetFocus();
+}
+
+CWnd* COleControl::GetFocus() {
+  if (m_bInPlaceSiteWndless) return m_pInPlaceSiteWndless->GetFocus() == S_OK ? this : NULL;
+  return CWnd::GetFocus();
+}
+
+// Windowless, the DC is the container's, with the control's top left at
+// the origin.
+CDC* COleControl::GetDC(LPCRECT lprcRect, DWORD dwFlags) {
+  if (!m_bInPlaceSiteWndless) return CWnd::GetDC();
+  CRect rect;
+  if (lprcRect != NULL) {
+    rect = *lprcRect;
+    rect.OffsetRect(m_rcPos.TopLeft());
+  }
+  HDC hDC = NULL;
+  if (FAILED(m_pInPlaceSiteWndless->GetDC(lprcRect != NULL ? &rect : NULL, dwFlags, &hDC)) ||
+      hDC == NULL)
+    return NULL;
+  ::OffsetViewportOrgEx(hDC, m_rcPos.left, m_rcPos.top, NULL);
+  return CDC::FromHandle(hDC);
+}
+
+int COleControl::ReleaseDC(CDC* pDC) {
+  if (pDC == NULL) return 0;
+  if (!m_bInPlaceSiteWndless) return CWnd::ReleaseDC(pDC);
+  return SUCCEEDED(m_pInPlaceSiteWndless->ReleaseDC(pDC->m_hDC)) ? 1 : 0;
+}
+
+void COleControl::GetClientRect(LPRECT lpRect) const {
+  if (m_bInPlaceSiteWndless || m_hWnd == NULL) {
+    ::SetRect(lpRect, 0, 0, m_rcPos.Width(), m_rcPos.Height());
+    return;
+  }
+  CWnd::GetClientRect(lpRect);
+}
+
+void COleControl::InvalidateRgn(CRgn* pRgn, BOOL bErase) {
+  if (!m_bInPlaceSiteWndless) {
+    if (m_hWnd != NULL) CWnd::InvalidateRgn(pRgn, bErase);
+    return;
+  }
+  if (pRgn == NULL) {
+    m_pInPlaceSiteWndless->InvalidateRgn(NULL, bErase);
+    return;
+  }
+  // The region in the container's coordinates.
+  HRGN hRgn = ::CreateRectRgn(0, 0, 0, 0);
+  ::CombineRgn(hRgn, (HRGN)pRgn->GetSafeHandle(), NULL, RGN_COPY);
+  ::OffsetRgn(hRgn, m_rcPos.left, m_rcPos.top);
+  m_pInPlaceSiteWndless->InvalidateRgn(hRgn, bErase);
+  ::DeleteObject(hRgn);
+}
+
+void COleControl::ScrollWindow(int xAmount, int yAmount, LPCRECT lpRect, LPCRECT lpClipRect) {
+  if (!m_bInPlaceSiteWndless) {
+    if (m_hWnd != NULL) CWnd::ScrollWindow(xAmount, yAmount, lpRect, lpClipRect);
+    return;
+  }
+  CRect rcScroll(lpRect != NULL ? *lpRect : CRect(0, 0, m_rcPos.Width(), m_rcPos.Height()));
+  rcScroll.OffsetRect(m_rcPos.TopLeft());
+  CRect rcClip;
+  if (lpClipRect != NULL) {
+    rcClip = *lpClipRect;
+    rcClip.OffsetRect(m_rcPos.TopLeft());
+  }
+  m_pInPlaceSiteWndless->ScrollRect(xAmount, yAmount, &rcScroll,
+                                    lpClipRect != NULL ? &rcClip : NULL);
+}
+
+void COleControl::ClientToParent(LPCRECT lprcBounds, LPPOINT pPoint) const {
+  pPoint->x += lprcBounds->left;
+  pPoint->y += lprcBounds->top;
+}
+
+void COleControl::ParentToClient(LPCRECT lprcBounds, LPPOINT pPoint, BOOL) const {
+  pPoint->x -= lprcBounds->left;
+  pPoint->y -= lprcBounds->top;
 }
 
 BOOL COleControl::OnEdit(LPMSG lpMsg, HWND, LPCRECT) {

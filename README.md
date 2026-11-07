@@ -213,6 +213,12 @@ when there is no display:
   from CreateControl; and downloads of a local file through
   CMonikerFile, CAsyncMonikerFile and a CCachedDataPathProperty loaded
   from a property bag (PX_DataPath).
+* `wltest`: windowless controls, with a COleControl of the test's own
+  in a frame window: drawing in the container's window (checked by its
+  pixels) and InvalidateControl, mouse messages with capture, focus and
+  keys, the control's own GetDC, moving, hiding and destroying, and the
+  same control made windowed when it does not ask for windowless
+  activation.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -281,13 +287,18 @@ request with the stock MinGW-w64 toolchain.
   position, enabling, focus) go to the control; controls in dialog
   templates with their DLGINIT state; event sink maps (ON_EVENT,
   ON_EVENT_RANGE, ON_EVENT_REFLECT, ON_PROPNOTIFY) and the DDX_OC
-  functions.
+  functions. Windowless controls (IOleInPlaceSiteWindowless): the
+  container draws them in its window's WM_PAINT and passes them mouse,
+  keyboard and focus messages.
 * `afxctl.h`: writing ActiveX controls: COleControl (the OLE control
   interfaces, in-place activation, stock properties, methods and events,
   ambient properties, IViewObject drawing and persistence through
   streams, storages and property bags), COleControlModule, event maps,
   verb maps (ON_OLEVERB, ON_STDOLEVERB), IPerPropertyBrowsing,
-  IQuickActivate, DECLARE_OLECREATE_EX, DECLARE_OLECTLTYPE,
+  IQuickActivate, windowless activation (the windowlessActivate flag of
+  GetControlFlags, IOleInPlaceObjectWindowless and COleControl's
+  windowless SetCapture, SetFocus, GetDC and InvalidateControl),
+  DECLARE_OLECREATE_EX, DECLARE_OLECTLTYPE,
   DECLARE_PROPPAGEIDS, CFontHolder, CPropExchange and the PX_
   functions, AfxOleRegisterControlClass, licensing (IClassFactory2,
   AfxVerifyLicFile), data path properties (CDataPathProperty,
@@ -348,9 +359,11 @@ request with the stock MinGW-w64 toolchain.
   overloaded. Drag scrolling starts as soon as the pointer is in the
   inset, without waiting nScrollDelay. A connection point's cookie is
   the sink's interface pointer.
-* Containment hosts windowed controls only: windowless controls,
-  extended controls (IOleControlSite::GetExtendedControl), data binding
-  and property pages are not implemented.
+* Containment does not implement extended controls
+  (IOleControlSite::GetExtendedControl), data binding or property pages.
+  Windowless controls are drawn after the container's own painting,
+  in the order they were made, and are not given drag and drop
+  (GetWindowlessDropTarget is not called).
 * A regular DLL runs in the program's message loop, so its CWinApp's
   OnIdle and PreTranslateMessage are not called (as with Visual C++
   MFC's static library), and the temporary window objects its copy of
@@ -381,8 +394,8 @@ request with the stock MinGW-w64 toolchain.
   IPropertyPage::Apply, so under Wine the OK and Apply buttons of a
   control's property frame do not change the control; Windows applies
   the pages.
-* COleControl makes windowed controls only (no windowless or
-  IOleInPlaceObjectWindowless controls). A
+* COleControl's windowless controls ignore the other GetControlFlags
+  flags (flicker-free and unclipped drawing, pointer inactivity). A
   control's binary stream (IPersistStreamInit, IPersistStorage, DLGINIT
   data) has this library's own format, not the one Visual C++ MFC
   writes; property bags hold the same names and values.
