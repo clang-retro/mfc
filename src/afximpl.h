@@ -39,6 +39,14 @@ struct _AFX_OCC_HOOKS {
   void(AFXAPI* pfnPaintWindowless)(CWnd* pWnd, HRGN hRgnUpdate);
 };
 extern const _AFX_OCC_HOOKS* _afxOccHooks;
+// What a control site calls once a control is data bound (occdb.cpp):
+// a control's bound property changed, and a site goes.
+class COleControlSite;
+struct _AFX_OCC_BIND_HOOKS {
+  void(AFXAPI* pfnChanged)(COleControlSite* pSite, DISPID dispid);
+  void(AFXAPI* pfnRelease)(COleControlSite* pSite);
+};
+extern const _AFX_OCC_BIND_HOOKS* _afxOccBindHooks;
 
 // Empties the type library caches (oleconn.cpp), before OLE goes.
 void AFXAPI _AfxReleaseTypeLibCaches();

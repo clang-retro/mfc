@@ -219,6 +219,13 @@ when there is no display:
   keys, the control's own GetDC, moving, hiding and destroying, and the
   same control made windowed when it does not ask for windowless
   activation.
+* `bindtest`: data binding, with a data source control and bound
+  controls of the test's own: properties bound to fields follow the
+  current row (and null fields and no row), changes to the fields, and
+  set the fields, and the other controls bound to them; a property
+  given the data source; the data source control's rowset; unbinding;
+  destroying the bound controls or the data source control first; and
+  a data source without a row position.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -289,7 +296,10 @@ request with the stock MinGW-w64 toolchain.
   ON_EVENT_RANGE, ON_EVENT_REFLECT, ON_PROPNOTIFY) and the DDX_OC
   functions. Windowless controls (IOleInPlaceSiteWindowless): the
   container draws them in its window's WM_PAINT and passes them mouse,
-  keyboard and focus messages.
+  keyboard and focus messages. Data binding to OLE DB data source
+  controls (DataSource): CWnd::BindDefaultProperty binds a control's
+  property to a field of the current row, both ways, BindProperty gives
+  a property the data source, and GetDSCCursor gives its rowset.
 * `afxctl.h`: writing ActiveX controls: COleControl (the OLE control
   interfaces, in-place activation, stock properties, methods and events,
   ambient properties, IViewObject drawing and persistence through
@@ -360,7 +370,12 @@ request with the stock MinGW-w64 toolchain.
   inset, without waiting nScrollDelay. A connection point's cookie is
   the sink's interface pointer.
 * Containment does not implement extended controls
-  (IOleControlSite::GetExtendedControl), data binding or property pages.
+  (IOleControlSite::GetExtendedControl) or property pages. Data binding
+  works with OLE DB data sources only (DataSource and its default data
+  member, with IRowPosition or else the rowset's first row), not with
+  the older ICursor data source controls, and there is no ON_DSCNOTIFY
+  or binding through dialog templates; a field is set as soon as its
+  bound property changes.
   Windowless controls are drawn after the container's own painting,
   in the order they were made, and are not given drag and drop
   (GetWindowlessDropTarget is not called).

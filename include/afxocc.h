@@ -11,6 +11,8 @@
 
 class COleControlContainer;
 class COleControlSite;
+class CDataSourceControl;
+struct CDataBoundProperty;
 
 // The OLE controls of a dialog template, kept between creating the
 // dialog without them and making them on WM_INITDIALOG.
@@ -88,6 +90,14 @@ public:
   virtual BOOL GetEventIID(IID* piid);
   virtual BOOL IsWindowlessControl() { return m_bIsWindowless; }
 
+  // Data binding to a data source control (an OLE DB DataSource): a
+  // property bound to a field of the current row, or given the data
+  // source; and, for a data source control's site, its rowset.
+  virtual void BindDefaultProperty(DISPID dwDispID, VARTYPE vtProp, LPCTSTR szFieldName,
+                                   CWnd* pDSCWnd);
+  virtual void BindProperty(DISPID dwDispId, CWnd* pWndDSC);
+  virtual IUnknown* GetDSCCursor();
+
   COleControlContainer* m_pCtrlCont;
   HWND m_hWnd;
   CWnd* m_pWndCtrl;
@@ -112,6 +122,9 @@ public:
   CLSID m_clsid;
   void* m_pWindowlessObject;  // a windowless control's IOleInPlaceObjectWindowless
   int m_nFreezeEvents;
+  CDataSourceControl* m_pDataSourceControl;  // when this control is a data source
+  CDataBoundProperty* m_pBindings;           // this control's bound properties
+  BOOL m_bIgnoreNotify;                      // setting a bound property from its field
 
 protected:
   HRESULT CreateOrLoad(REFCLSID clsid, CFile* pPersist, BOOL bStorage, BSTR bstrLicKey);
