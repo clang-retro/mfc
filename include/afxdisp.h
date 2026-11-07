@@ -1,8 +1,9 @@
 // afxdisp.h - OLE automation: the variant, date, currency and safe array
-// wrappers, COleDispatchDriver for calling automation objects, and the
-// OLE exceptions. Exposing automation objects and containing ActiveX
-// controls are not part of this library yet; the start-up calls that
-// application wizards generate are here so such programs still build.
+// wrappers, COleDispatchDriver for calling automation objects, dispatch
+// maps and class factories for exposing them, and the OLE exceptions.
+// Containing ActiveX controls is not part of this library yet; the
+// start-up call that application wizards generate is here so such
+// programs still build.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 #ifndef __AFXDISP_H__
@@ -11,6 +12,9 @@
 #include "afxwin.h"
 #include <ole2.h>
 #include <oleauto.h>
+#include <olectl.h>
+#include <type_traits>
+#include <utility>
 
 typedef const VARIANT* LPCVARIANT;
 typedef const SAFEARRAY* LPCSAFEARRAY;
@@ -29,8 +33,6 @@ void AFXAPI AfxOleTerm(BOOL bJustRevoke = FALSE);
 // Control containment is not implemented; this lets programs start up.
 class COccManager;
 void AFXAPI AfxEnableControlContainer(COccManager* pOccManager = NULL);
-inline BOOL AFXAPI AfxOleGetUserCtrl() { return TRUE; }
-inline void AFXAPI AfxOleSetUserCtrl(BOOL) {}
 
 // ---------------------------------------------------------------------
 // Parameter types for COleDispatchDriver::InvokeHelper: one byte per
@@ -462,6 +464,345 @@ public:
   const COleDispatchDriver& operator=(const COleDispatchDriver& dispatchSrc);
   operator LPDISPATCH() { return m_lpDispatch; }
 };
+
+// ---------------------------------------------------------------------
+// Dispatch maps: the methods and properties a CCmdTarget exposes through
+// IDispatch after EnableAutomation.
+//
+// Each entry holds a thunk made from the member function's own type, so
+// the arguments reach the function as the C++ types it declares, without
+// knowledge of the processor's calling convention. The VTS_ string still
+// says what each argument is converted to first, as in MFC.
+
+enum {
+  _AFX_DISP_END = 0,
+  _AFX_DISP_METHOD,
+  _AFX_DISP_PROPERTY,     // a member variable
+  _AFX_DISP_PROPERTY_EX,  // get and set functions
+  _AFX_DISP_DEFVALUE      // DISPID_VALUE names another entry
+};
+
+// One argument of a call, converted to its parameter's type.
+struct AFX_DISPARG {
+  VARIANT v;       // the value; the function gets a pointer into it for by-reference types
+  VARIANT* pVar;   // the caller's VARIANT, for VTS_VARIANT and VTS_PVARIANT
+  VARIANT* pRef;   // the caller's by-reference argument, written back after the call
+  BOOL bVal;       // a BOOL for VTS_PBOOL
+  CStringA strA;   // the text of a VTS_BSTR argument in an ANSI program
+  AFX_DISPARG() : pVar(NULL), pRef(NULL), bVal(FALSE) { ::VariantInit(&v); }
+  ~AFX_DISPARG() { ::VariantClear(&v); }
+};
+
+typedef HRESULT (*AFX_DISPINVOKE)(CCmdTarget* pThis, AFX_PMSG pfn, AFX_DISPARG* pArgs, UINT nArgs,
+                                  VARIANT* pResult);
+
+struct AFX_DISPMAP_ENTRY {
+  LPCTSTR lpszName;
+  long lDispID;          // DISPID_UNKNOWN: numbered by position
+  LPCSTR lpszParams;     // VTS_ string
+  WORD vt;               // return or property type
+  WORD nKind;
+  AFX_PMSG pfn;          // method or get function
+  AFX_DISPINVOKE pfnInvoke;
+  AFX_PMSG pfnSet;       // set function
+  AFX_DISPINVOKE pfnSetInvoke;
+  void* (*pfnMember)(CCmdTarget*);  // address of the property's member variable
+  void (*pfnNotify)(CCmdTarget*);   // called after the property is set
+};
+
+LONGLONG AFXAPI _AfxDispGetInt(const VARIANT& v);
+double AFXAPI _AfxDispGetReal(const VARIANT& v);
+
+// Reading an argument as the parameter's type. The tag pointer picks the
+// overload: the parameter's type with references and const removed.
+template <class T>
+inline typename std::enable_if<std::is_integral<T>::value || std::is_enum<T>::value, T>::type
+_AfxDispGet(AFX_DISPARG& a, T*) {
+  return (T)_AfxDispGetInt(a.v);
+}
+template <class T>
+inline typename std::enable_if<std::is_floating_point<T>::value, T>::type _AfxDispGet(AFX_DISPARG& a,
+                                                                                    T*) {
+  return (T)_AfxDispGetReal(a.v);
+}
+inline CY _AfxDispGet(AFX_DISPARG& a, CY*) { return a.v.cyVal; }
+inline VARIANT& _AfxDispGet(AFX_DISPARG& a, VARIANT*) { return *a.pVar; }
+inline VARIANT* _AfxDispGet(AFX_DISPARG& a, VARIANT**) { return a.pVar; }
+inline const char* _AfxDispGet(AFX_DISPARG& a, const char**) {
+  if (a.v.vt == VT_BSTR) a.strA = a.v.bstrVal;
+  return a.strA;
+}
+inline const wchar_t* _AfxDispGet(AFX_DISPARG& a, const wchar_t**) { return a.v.bstrVal; }
+inline wchar_t* _AfxDispGet(AFX_DISPARG& a, wchar_t**) { return a.v.bstrVal; }
+// An interface pointer, or a pointer to a by-reference value.
+template <class T>
+inline T* _AfxDispPtr(AFX_DISPARG& a, std::true_type) {
+  return static_cast<T*>(a.v.punkVal);
+}
+template <class T>
+inline T* _AfxDispPtr(AFX_DISPARG& a, std::false_type) {
+  if (a.v.vt == VT_BOOL && sizeof(T) == sizeof(BOOL)) return (T*)&a.bVal;
+  return (T*)&a.v.llVal;  // the union's members all start here
+}
+template <class T>
+inline T* _AfxDispGet(AFX_DISPARG& a, T**) {
+  return _AfxDispPtr<T>(a, std::integral_constant<bool, std::is_base_of<IUnknown, T>::value>());
+}
+
+// Storing a return value; the caller converts it to the entry's type.
+template <class T>
+inline typename std::enable_if<std::is_integral<T>::value || std::is_enum<T>::value>::type
+_AfxDispSet(VARIANT& r, T value) {
+  if (std::is_same<T, bool>::value) {
+    r.vt = VT_BOOL;
+    r.boolVal = value ? VARIANT_TRUE : VARIANT_FALSE;
+  } else if (sizeof(T) > 4) {
+    r.vt = std::is_unsigned<T>::value ? VT_UI8 : VT_I8;
+    r.llVal = (LONGLONG)value;
+  } else if (std::is_unsigned<T>::value && sizeof(T) == 4) {
+    r.vt = VT_UI4;
+    r.ulVal = (ULONG)value;
+  } else {
+    r.vt = VT_I4;
+    r.lVal = (LONG)value;
+  }
+}
+inline void _AfxDispSet(VARIANT& r, float value) {
+  r.vt = VT_R4;
+  r.fltVal = value;
+}
+inline void _AfxDispSet(VARIANT& r, double value) {
+  r.vt = VT_R8;
+  r.dblVal = value;
+}
+inline void _AfxDispSet(VARIANT& r, CY value) {
+  r.vt = VT_CY;
+  r.cyVal = value;
+}
+inline void _AfxDispSet(VARIANT& r, BSTR value) {  // the caller owns it
+  r.vt = VT_BSTR;
+  r.bstrVal = value;
+}
+inline void _AfxDispSet(VARIANT& r, VARIANT value) { r = value; }  // the caller owns it
+inline void _AfxDispSet(VARIANT& r, const COleVariant& value) {  // a copy
+  ::VariantCopy(&r, const_cast<COleVariant*>(&value));
+}
+inline void _AfxDispSet(VARIANT& r, IDispatch* value) {  // the caller owns the reference
+  r.vt = VT_DISPATCH;
+  r.pdispVal = value;
+}
+inline void _AfxDispSet(VARIANT& r, IUnknown* value) {
+  r.vt = VT_UNKNOWN;
+  r.punkVal = value;
+}
+
+template <class R>
+struct _AfxDispRet {
+  template <class F>
+  static void Call(VARIANT* r, F f) {
+    _AfxDispSet(*r, f());
+  }
+};
+template <>
+struct _AfxDispRet<void> {
+  template <class F>
+  static void Call(VARIANT*, F f) {
+    f();
+  }
+};
+
+template <class C, class M, class R, class... A, size_t... I>
+inline void _AfxDispCall(C* p, M pfn, AFX_DISPARG* args, VARIANT* r, std::index_sequence<I...>) {
+  (void)args;
+  _AfxDispRet<R>::Call(
+      r, [&]() -> R { return (p->*pfn)(_AfxDispGet(args[I], (typename std::decay<A>::type*)0)...); });
+}
+
+template <class C, class R, class... A>
+HRESULT _AfxDispInvoke(CCmdTarget* pThis, AFX_PMSG pfn, AFX_DISPARG* args, UINT nArgs,
+                       VARIANT* r) {
+  typedef R (C::*M)(A...);
+  if (nArgs < sizeof...(A)) return DISP_E_BADPARAMCOUNT;
+  _AfxDispCall<C, M, R, A...>(static_cast<C*>(pThis), reinterpret_cast<M>(pfn), args, r,
+                              std::index_sequence_for<A...>());
+  return S_OK;
+}
+template <class C, class R, class... A>
+HRESULT _AfxDispInvokeConst(CCmdTarget* pThis, AFX_PMSG pfn, AFX_DISPARG* args, UINT nArgs,
+                            VARIANT* r) {
+  typedef R (C::*M)(A...) const;
+  if (nArgs < sizeof...(A)) return DISP_E_BADPARAMCOUNT;
+  _AfxDispCall<C, M, R, A...>(static_cast<C*>(pThis), reinterpret_cast<M>(pfn), args, r,
+                              std::index_sequence_for<A...>());
+  return S_OK;
+}
+
+template <class C, class R, class... A>
+inline AFX_DISPINVOKE _AfxDispThunk(R (C::*)(A...)) {
+  return &_AfxDispInvoke<C, R, A...>;
+}
+template <class C, class R, class... A>
+inline AFX_DISPINVOKE _AfxDispThunk(R (C::*)(A...) const) {
+  return &_AfxDispInvokeConst<C, R, A...>;
+}
+
+#define _AFX_DISP_FN(theClass, pfn) \
+  reinterpret_cast<AFX_PMSG>(&theClass::pfn), _AfxDispThunk(&theClass::pfn)
+#define _AFX_DISP_NOFN (AFX_PMSG)0, (AFX_DISPINVOKE)0
+#define _AFX_DISP_MEMBER(theClass, memberName) \
+  [](CCmdTarget* p) -> void* { return (void*)&static_cast<theClass*>(p)->memberName; }
+#define _AFX_DISP_NOTIFY(theClass, pfnAfterSet) \
+  [](CCmdTarget* p) { static_cast<theClass*>(p)->pfnAfterSet(); }
+
+#define BEGIN_DISPATCH_MAP(theClass, baseClass) \
+  const AFX_DISPMAP* theClass::GetDispatchMap() const { return GetThisDispatchMap(); } \
+  const AFX_DISPMAP* PASCAL theClass::GetThisDispatchMap() { \
+    typedef baseClass TheBaseClass; \
+    static const AFX_DISPMAP_ENTRY _dispatchEntries[] = {
+
+#define END_DISPATCH_MAP() \
+      {NULL, DISPID_UNKNOWN, NULL, VT_EMPTY, _AFX_DISP_END, _AFX_DISP_NOFN, _AFX_DISP_NOFN, NULL, \
+       NULL}}; \
+    static const AFX_DISPMAP dispatchMap = {&TheBaseClass::GetThisDispatchMap, \
+                                            &_dispatchEntries[0]}; \
+    return &dispatchMap; \
+  }
+
+#define DISP_FUNCTION_ID(theClass, szExternalName, dispid, pfnMember, vtRetVal, vtsParams) \
+  {_T(szExternalName), (long)(dispid), vtsParams, (WORD)(vtRetVal), _AFX_DISP_METHOD, \
+   _AFX_DISP_FN(theClass, pfnMember), _AFX_DISP_NOFN, NULL, NULL},
+#define DISP_FUNCTION(theClass, szExternalName, pfnMember, vtRetVal, vtsParams) \
+  DISP_FUNCTION_ID(theClass, szExternalName, DISPID_UNKNOWN, pfnMember, vtRetVal, vtsParams)
+
+#define DISP_PROPERTY_ID(theClass, szExternalName, dispid, memberName, vtPropType) \
+  {_T(szExternalName), (long)(dispid), NULL, (WORD)(vtPropType), _AFX_DISP_PROPERTY, \
+   _AFX_DISP_NOFN, _AFX_DISP_NOFN, _AFX_DISP_MEMBER(theClass, memberName), NULL},
+#define DISP_PROPERTY(theClass, szExternalName, memberName, vtPropType) \
+  DISP_PROPERTY_ID(theClass, szExternalName, DISPID_UNKNOWN, memberName, vtPropType)
+
+#define DISP_PROPERTY_NOTIFY_ID(theClass, szExternalName, dispid, memberName, pfnAfterSet, \
+                                vtPropType) \
+  {_T(szExternalName), (long)(dispid), NULL, (WORD)(vtPropType), _AFX_DISP_PROPERTY, \
+   _AFX_DISP_NOFN, _AFX_DISP_NOFN, _AFX_DISP_MEMBER(theClass, memberName), \
+   _AFX_DISP_NOTIFY(theClass, pfnAfterSet)},
+#define DISP_PROPERTY_NOTIFY(theClass, szExternalName, memberName, pfnAfterSet, vtPropType) \
+  DISP_PROPERTY_NOTIFY_ID(theClass, szExternalName, DISPID_UNKNOWN, memberName, pfnAfterSet, \
+                          vtPropType)
+
+#define DISP_PROPERTY_PARAM_ID(theClass, szExternalName, dispid, pfnGet, pfnSet, vtPropType, \
+                               vtsParams) \
+  {_T(szExternalName), (long)(dispid), vtsParams, (WORD)(vtPropType), _AFX_DISP_PROPERTY_EX, \
+   _AFX_DISP_FN(theClass, pfnGet), _AFX_DISP_FN(theClass, pfnSet), NULL, NULL},
+#define DISP_PROPERTY_PARAM(theClass, szExternalName, pfnGet, pfnSet, vtPropType, vtsParams) \
+  DISP_PROPERTY_PARAM_ID(theClass, szExternalName, DISPID_UNKNOWN, pfnGet, pfnSet, vtPropType, \
+                         vtsParams)
+#define DISP_PROPERTY_EX_ID(theClass, szExternalName, dispid, pfnGet, pfnSet, vtPropType) \
+  DISP_PROPERTY_PARAM_ID(theClass, szExternalName, dispid, pfnGet, pfnSet, vtPropType, NULL)
+#define DISP_PROPERTY_EX(theClass, szExternalName, pfnGet, pfnSet, vtPropType) \
+  DISP_PROPERTY_PARAM_ID(theClass, szExternalName, DISPID_UNKNOWN, pfnGet, pfnSet, vtPropType, \
+                         NULL)
+
+// DISPID_VALUE, the default member, is another name for an entry.
+#define DISP_DEFVALUE(theClass, szExternalName) \
+  {_T(szExternalName), DISPID_UNKNOWN, NULL, VT_EMPTY, _AFX_DISP_DEFVALUE, _AFX_DISP_NOFN, \
+   _AFX_DISP_NOFN, NULL, NULL},
+#define DISP_DEFVALUE_ID(theClass, dispid) \
+  {NULL, (long)(dispid), NULL, VT_EMPTY, _AFX_DISP_DEFVALUE, _AFX_DISP_NOFN, _AFX_DISP_NOFN, \
+   NULL, NULL},
+
+// ---------------------------------------------------------------------
+// Class factories. DECLARE_OLECREATE gives a class a COleObjectFactory
+// that creates it for COM clients; IMPLEMENT_OLECREATE names its CLSID
+// and ProgID.
+
+enum AFX_REG_FLAGS {
+  afxRegDefault = 0x0000,
+  afxRegInsertable = 0x0001,
+  afxRegApartmentThreading = 0x0002,
+  afxRegFreeThreading = 0x0004
+};
+
+class COleObjectFactory : public CCmdTarget {
+  DECLARE_DYNAMIC(COleObjectFactory)
+public:
+  COleObjectFactory(REFCLSID clsid, CRuntimeClass* pRuntimeClass, BOOL bMultiInstance,
+                    LPCTSTR lpszProgID);
+  COleObjectFactory(REFCLSID clsid, CRuntimeClass* pRuntimeClass, BOOL bMultiInstance, int nFlags,
+                    LPCTSTR lpszProgID);
+  virtual ~COleObjectFactory();
+
+  BOOL IsRegistered() const { return m_dwRegister != 0; }
+  REFCLSID GetClassID() const { return m_clsid; }
+  LPCTSTR GetProgID() const { return m_lpszProgID; }
+
+  virtual BOOL Register();
+  BOOL Unregister();
+  void Revoke();
+  void UpdateRegistry(LPCTSTR lpszProgID = NULL);
+  virtual BOOL UpdateRegistry(BOOL bRegister);
+  BOOL IsLicenseValid();
+
+  static BOOL PASCAL RegisterAll();
+  static void PASCAL RevokeAll();
+  static BOOL PASCAL UpdateRegistryAll(BOOL bRegister = TRUE);
+
+  // The factories in the program, in the order they were constructed.
+  COleObjectFactory* m_pNextFactory;
+  static COleObjectFactory* PASCAL GetFirstFactory();
+
+protected:
+  virtual CCmdTarget* OnCreateObject();
+  virtual BOOL VerifyUserLicense() { return TRUE; }
+  virtual BOOL GetLicenseKey(DWORD dwReserved, BSTR* pbstrKey);
+  virtual BOOL VerifyLicenseKey(BSTR bstrKey);
+
+public:
+  DWORD m_dwRegister;
+  CLSID m_clsid;
+  CRuntimeClass* m_pRuntimeClass;
+  BOOL m_bMultiInstance;
+  LPCTSTR m_lpszProgID;
+  int m_nFlags;
+  BOOL m_bLicenseChecked;
+  BOOL m_bLicenseValid;
+
+  BEGIN_INTERFACE_PART(ClassFactory, IClassFactory2)
+    STDMETHOD(CreateInstance)(LPUNKNOWN pUnkOuter, REFIID riid, LPVOID* ppvObject);
+    STDMETHOD(LockServer)(BOOL fLock);
+    STDMETHOD(GetLicInfo)(LPLICINFO pLicInfo);
+    STDMETHOD(RequestLicKey)(DWORD dwReserved, BSTR* pbstrKey);
+    STDMETHOD(CreateInstanceLic)(LPUNKNOWN pUnkOuter, LPUNKNOWN pUnkReserved, REFIID riid,
+                                 BSTR bstrKey, LPVOID* ppvObject);
+  END_INTERFACE_PART(ClassFactory)
+
+  // Creates an object for a client; with a license key when bstrKey is not NULL.
+  HRESULT CreateObjectFor(LPUNKNOWN pUnkOuter, REFIID riid, LPVOID* ppvObject, BSTR bstrKey);
+
+  virtual void OnFinalRelease() {}  // factories are static objects
+
+  DECLARE_INTERFACE_MAP()
+};
+typedef COleObjectFactory COleObjectFactoryEx;
+
+#define DECLARE_OLECREATE(class_name) \
+public: \
+  static COleObjectFactory factory; \
+  static const GUID guid;
+
+#define IMPLEMENT_OLECREATE(class_name, external_name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
+  const GUID class_name::guid = {l, w1, w2, {b1, b2, b3, b4, b5, b6, b7, b8}}; \
+  COleObjectFactory class_name::factory(class_name::guid, RUNTIME_CLASS(class_name), FALSE, \
+                                        _T(external_name));
+
+#define IMPLEMENT_OLECREATE_FLAGS(class_name, external_name, nFlags, l, w1, w2, b1, b2, b3, b4, \
+                                  b5, b6, b7, b8) \
+  const GUID class_name::guid = {l, w1, w2, {b1, b2, b3, b4, b5, b6, b7, b8}}; \
+  COleObjectFactory class_name::factory(class_name::guid, RUNTIME_CLASS(class_name), FALSE, \
+                                        nFlags, _T(external_name));
+
+// For a DLL server's DllGetClassObject and DllCanUnloadNow.
+HRESULT AFXAPI AfxDllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv);
+HRESULT AFXAPI AfxDllCanUnloadNow();
 
 // ---------------------------------------------------------------------
 // Dialog data exchange with dates and currency.

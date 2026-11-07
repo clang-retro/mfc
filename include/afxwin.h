@@ -925,41 +925,176 @@ public:
 // ---------------------------------------------------------------------
 // CCmdTarget
 
+// ---------------------------------------------------------------------
+// COM support in CCmdTarget: interface maps, the IDispatch that a
+// dispatch map drives, and aggregation.
+
+struct AFX_DISPMAP_ENTRY;
+struct AFX_DISPMAP {
+  const AFX_DISPMAP* (PASCAL* pfnGetBaseMap)();
+  const AFX_DISPMAP_ENTRY* lpEntries;
+};
+
+struct AFX_INTERFACEMAP_ENTRY {
+  const void* piid;  // NULL for an aggregate (nOffset is then the LPUNKNOWN member)
+  size_t nOffset;    // (size_t)-1 ends the map
+};
+struct AFX_INTERFACEMAP {
+  const AFX_INTERFACEMAP* (PASCAL* pfnGetBaseMap)();
+  const AFX_INTERFACEMAP_ENTRY* pEntry;
+};
+
+// offsetof of a member of a class with virtual functions, which the
+// interface maps need, works with clang and GCC but warns.
+#define _AFX_NO_OFFSETOF_WARNING_BEGIN \
+  _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Winvalid-offsetof\"")
+#define _AFX_NO_OFFSETOF_WARNING_END _Pragma("GCC diagnostic pop")
+
+#define DECLARE_INTERFACE_MAP() \
+protected: \
+  static const AFX_INTERFACEMAP* PASCAL GetThisInterfaceMap(); \
+  virtual const AFX_INTERFACEMAP* GetInterfaceMap() const;
+
+#define BEGIN_INTERFACE_MAP(theClass, theBase) \
+  const AFX_INTERFACEMAP* theClass::GetInterfaceMap() const { return GetThisInterfaceMap(); } \
+  const AFX_INTERFACEMAP* PASCAL theClass::GetThisInterfaceMap() { \
+    typedef theBase TheBaseClass; \
+    _AFX_NO_OFFSETOF_WARNING_BEGIN \
+    static const AFX_INTERFACEMAP_ENTRY _interfaceEntries[] = {
+
+#define INTERFACE_PART(theClass, iid, localClass) {&iid, offsetof(theClass, m_x##localClass)},
+#define INTERFACE_AGGREGATE(theClass, theAggr) {NULL, offsetof(theClass, theAggr)},
+
+#define END_INTERFACE_MAP() \
+      {NULL, (size_t)-1}}; \
+    _AFX_NO_OFFSETOF_WARNING_END \
+    static const AFX_INTERFACEMAP interfaceMap = {&TheBaseClass::GetThisInterfaceMap, \
+                                                  &_interfaceEntries[0]}; \
+    return &interfaceMap; \
+  }
+
+// A nested class that implements one interface. Its methods find the
+// object with METHOD_PROLOGUE and forward IUnknown to it.
+#define BEGIN_INTERFACE_PART(localClass, baseClass) \
+  class X##localClass : public baseClass { \
+  public: \
+    STDMETHOD_(ULONG, AddRef)(); \
+    STDMETHOD_(ULONG, Release)(); \
+    STDMETHOD(QueryInterface)(REFIID iid, LPVOID* ppvObj);
+#define BEGIN_INTERFACE_PART_DERIVE(localClass, baseClass) \
+  class X##localClass : public baseClass { \
+  public:
+#define INIT_INTERFACE_PART(theClass, localClass)
+#define INIT_INTERFACE_PART_DERIVE(theClass, localClass)
+#define END_INTERFACE_PART(localClass) \
+  } m_x##localClass; \
+  friend class X##localClass;
+#define END_INTERFACE_PART_OPTIONAL(localClass) END_INTERFACE_PART(localClass)
+#define END_INTERFACE_PART_STATIC END_INTERFACE_PART
+
+#define METHOD_PROLOGUE(theClass, localClass) \
+  _AFX_NO_OFFSETOF_WARNING_BEGIN \
+  theClass* pThis = (theClass*)((BYTE*)this - offsetof(theClass, m_x##localClass)); \
+  _AFX_NO_OFFSETOF_WARNING_END \
+  (void)pThis;
+#define METHOD_PROLOGUE_EX(theClass, localClass) METHOD_PROLOGUE(theClass, localClass)
+#define METHOD_PROLOGUE_EX_(theClass, localClass) METHOD_PROLOGUE(theClass, localClass)
+#define METHOD_MANAGE_STATE(theClass, localClass) METHOD_PROLOGUE(theClass, localClass)
+
+#define DECLARE_DISPATCH_MAP() \
+protected: \
+  static const AFX_DISPMAP* PASCAL GetThisDispatchMap(); \
+  virtual const AFX_DISPMAP* GetDispatchMap() const;
+
+struct AFX_DISPARGS;
+class _AfxDispatchImpl : public IDispatch {
+public:
+  STDMETHOD(QueryInterface)(REFIID iid, LPVOID* ppvObj);
+  STDMETHOD_(ULONG, AddRef)();
+  STDMETHOD_(ULONG, Release)();
+  STDMETHOD(GetTypeInfoCount)(UINT* pctinfo);
+  STDMETHOD(GetTypeInfo)(UINT itinfo, LCID lcid, ITypeInfo** pptinfo);
+  STDMETHOD(GetIDsOfNames)(REFIID riid, LPOLESTR* rgszNames, UINT cNames, LCID lcid,
+                           DISPID* rgdispid);
+  STDMETHOD(Invoke)(DISPID dispid, REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS* pdispparams,
+                    VARIANT* pvarResult, EXCEPINFO* pexcepinfo, UINT* puArgErr);
+};
+
+class _AfxInnerUnknownImpl : public IUnknown {
+public:
+  STDMETHOD(QueryInterface)(REFIID iid, LPVOID* ppvObj);
+  STDMETHOD_(ULONG, AddRef)();
+  STDMETHOD_(ULONG, Release)();
+};
+
 class CCmdTarget : public CObject {
   DECLARE_DYNAMIC(CCmdTarget)
-protected:
 public:
   CCmdTarget();
-  virtual ~CCmdTarget() {}
+  virtual ~CCmdTarget();
 
   void BeginWaitCursor();
   void EndWaitCursor();
   void RestoreWaitCursor();
 
   virtual BOOL OnCmdMsg(UINT nID, int nCode, void* pExtra, AFX_CMDHANDLERINFO* pHandlerInfo);
-  virtual BOOL IsInvokeAllowed(LONG) { return TRUE; }
+  virtual BOOL IsInvokeAllowed(DISPID) { return TRUE; }
 
-  // OLE automation is not supported; these keep programs that mention it
-  // compiling.
-  void EnableAutomation() {}
+  // Automation: after EnableAutomation, GetIDispatch returns an IDispatch
+  // that the class's dispatch map implements.
+  void EnableAutomation();
   void EnableConnections() {}
   void EnableTypeLib() {}
-  LPDISPATCH GetIDispatch(BOOL) { return NULL; }
-  static CCmdTarget* PASCAL FromIDispatch(LPDISPATCH) { return NULL; }
-  virtual void OnFinalRelease() { delete this; }
-  DWORD InternalAddRef() { return (DWORD)++m_dwRef; }
-  DWORD InternalRelease() {
-    DWORD n = (DWORD)--m_dwRef;
-    if (n == 0) OnFinalRelease();
-    return n;
+  LPDISPATCH GetIDispatch(BOOL bAddRef);
+  static CCmdTarget* PASCAL FromIDispatch(LPDISPATCH lpDispatch);
+  BOOL IsResultExpected() { return m_bResultExpected; }
+  virtual BOOL GetDispatchIID(IID*) { return FALSE; }
+  // For DISP_PROPERTY_EX entries of read-only and write-only properties.
+  void GetNotSupported();
+  void SetNotSupported();
+  virtual UINT GetTypeInfoCount() { return 0; }
+  virtual HRESULT GetTypeInfoOfGuid(LCID, REFGUID, LPTYPEINFO* ppTypeInfo) {
+    *ppTypeInfo = NULL;
+    return TYPE_E_ELEMENTNOTFOUND;
   }
+
+  // Reference counting and interfaces. The External functions go to the
+  // controlling unknown when the object is aggregated.
+  virtual void OnFinalRelease();
+  DWORD InternalAddRef();
+  DWORD InternalRelease();
+  DWORD InternalQueryInterface(const void* iid, LPVOID* ppvObj);
+  DWORD ExternalAddRef();
+  DWORD ExternalRelease();
+  DWORD ExternalQueryInterface(const void* iid, LPVOID* ppvObj);
+  LPUNKNOWN GetControllingUnknown();
+  LPUNKNOWN GetInterface(const void* iid);  // no AddRef
+  LPUNKNOWN QueryAggregates(const void* iid);
+  void EnableAggregation();
+  virtual BOOL OnCreateAggregates() { return TRUE; }
+  virtual LPUNKNOWN GetInterfaceHook(const void*) { return NULL; }
+
   long m_dwRef;
+  LPUNKNOWN m_pOuterUnknown;
+  _AfxInnerUnknownImpl m_xInnerUnknown;
+  _AfxDispatchImpl m_xDispatch;
+  BOOL m_bAutomation;
+  BOOL m_bAggregation;
+  BOOL m_bResultExpected;
 
   // Searches a message map for an entry. Used by CWnd and CWinThread.
   static const AFX_MSGMAP_ENTRY* PASCAL FindMessageEntry(const AFX_MSGMAP_ENTRY* lpEntry,
                                                          UINT nMsg, UINT nCode, UINT nID);
 
+  // Used by the IDispatch implementation.
+  const AFX_DISPMAP_ENTRY* GetDispEntry(DISPID dispid);
+  HRESULT InvokeEntry(const AFX_DISPMAP_ENTRY* pEntry, WORD wFlags, DISPPARAMS* pDispParams,
+                      VARIANT* pvarResult, EXCEPINFO* pExcepInfo, UINT* puArgErr);
+
+  friend class _AfxDispatchImpl;
   DECLARE_MESSAGE_MAP()
+  DECLARE_DISPATCH_MAP()
+  DECLARE_INTERFACE_MAP()
 };
 
 class CCmdUI {
@@ -2761,6 +2896,15 @@ BOOL AFXAPI AfxRegisterClass(WNDCLASS* lpWndClass);
 LPCTSTR AFXAPI AfxRegisterWndClass(UINT nClassStyle, HCURSOR hCursor = 0,
                                    HBRUSH hbrBackground = 0, HICON hIcon = 0);
 void AFXAPI AfxPostQuitMessage(int nExitCode);
+
+// The program's count of live OLE objects (afxdisp.h). When it falls to
+// zero in a program the user did not start (it was run with /Automation
+// or /Embedding), the program closes.
+void AFXAPI AfxOleLockApp();
+void AFXAPI AfxOleUnlockApp();
+BOOL AFXAPI AfxOleCanExitApp();
+BOOL AFXAPI AfxOleGetUserCtrl();
+void AFXAPI AfxOleSetUserCtrl(BOOL bUserCtrl);
 int AFXAPI AfxMessageBox(LPCTSTR lpszText, UINT nType = MB_OK, UINT nIDHelp = 0);
 int AFXAPI AfxMessageBox(UINT nIDPrompt, UINT nType = MB_OK, UINT nIDHelp = (UINT)-1);
 void AFXAPI AfxFormatString1(CString& rString, UINT nIDS, LPCTSTR lpsz1);

@@ -55,6 +55,12 @@ when there is no display:
   its span, COleCurrency, COleVariant, COleSafeArray) and a
   COleDispatchDriver calling an IDispatch written in the test, on the
   console.
+* `autotest`: automation servers: a dispatch map's methods and
+  properties called through IDispatch and COleDispatchDriver (argument
+  conversion, by-reference arguments, errors, exceptions, the default
+  member, derived classes), interface maps, aggregation, a
+  COleObjectFactory in the same process and its registry entries, and
+  the program started again by COM as a local server, on the console.
 * `socktest`: `afxsock.h` over the loopback interface: CAsyncSocket
   events, blocking CSocket calls against a server thread, CArchive
   through a CSocketFile, datagrams, errors and cancelling a blocking
@@ -110,6 +116,10 @@ request with the stock MinGW-w64 toolchain.
 * `afxdb.h`: CDatabase, CRecordset (snapshot, dynaset and forward-only,
   with RFX for the usual types, bookmarks and parameters),
   CRecordView and the DDX_Field functions, CDBException, CDBVariant.
+* `afxdisp.h`: automation clients (COleDispatchDriver and the variant,
+  date, currency and safe array classes) and servers: dispatch maps on
+  any CCmdTarget, interface maps, aggregation, COleObjectFactory with
+  registration and licensing, AfxOleLockApp and the /Automation start.
 * `afxdlgs.h`: the common dialogs (file, color, font, print, page setup,
   find/replace) and CPropertySheet/CPropertyPage, wizards included.
 * `afxcmn.h`, `afxcview.h`: the common controls, CImageList, CListView,
@@ -131,11 +141,13 @@ request with the stock MinGW-w64 toolchain.
   the OLE container classes, which are not there yet.
 * Wine's rich edit control does not implement EM_FORMATRANGE yet, so
   under Wine a CRichEditView prints blank pages; Windows prints them.
-* `afxdisp.h` has the automation client side: the date, currency,
-  variant and safe array classes and COleDispatchDriver. Automation
-  servers (COleDispatchImpl, dispatch maps, COleObjectFactory), the OLE
-  document classes and ActiveX control containment are not implemented
-  yet.
+* A dispatch map entry calls its member function through a template
+  made from the function's own type, not through assembly that pushes
+  the arguments, so the function's parameter types must be the ones its
+  VTS_ string describes (as they must in MFC) and it must not be
+  overloaded. Type libraries (EnableTypeLib), connection points and
+  events, the OLE document classes and ActiveX control containment are
+  not implemented yet.
 * Sockets are IPv4, as in MFC 6. `CAsyncSocket::FromHandle` returns
   only sockets attached in the calling thread, and NULL for others,
   rather than making a temporary object.

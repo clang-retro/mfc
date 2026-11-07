@@ -44,21 +44,6 @@ BOOL CTreeView::PreCreateWindow(CREATESTRUCT& cs) {
 
 void CTreeView::OnDestroy() { CCtrlView::OnDestroy(); }
 
-static BOOL g_bOleInit = FALSE;
-
-BOOL AFXAPI AfxOleInit() {
-  if (g_bOleInit) return TRUE;
-  if (FAILED(::OleInitialize(NULL))) return FALSE;
-  g_bOleInit = TRUE;
-  return TRUE;
-}
-
-void AFXAPI AfxOleTerm(BOOL bJustRevoke) {
-  if (bJustRevoke || !g_bOleInit) return;
-  ::OleUninitialize();
-  g_bOleInit = FALSE;
-}
-
 // Control containment is not implemented; programs that ask for it start
 // up and get no ActiveX controls.
 void AFXAPI AfxEnableControlContainer(COccManager*) {}

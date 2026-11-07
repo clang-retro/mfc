@@ -647,7 +647,7 @@ public:
     if (p != AfxStrNil()) p->nRefs = 1;
   }
 
-#ifdef __OLEAUTO_H__
+#if defined(_OLEAUTO_H_) || defined(__OLEAUTO_H__)
   BSTR AllocSysString() const {
     CStringT<WCHAR> w(*this);
     return ::SysAllocStringLen(w.GetString(), w.GetLength());

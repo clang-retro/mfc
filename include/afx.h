@@ -134,10 +134,6 @@ inline bool _AfxIsNullPtr(const void* p) {
 struct AFX_MODULE_STATE;
 AFX_MODULE_STATE* __stdcall AfxGetModuleState();
 #define AfxGetStaticModuleState() AfxGetModuleState()
-#define METHOD_PROLOGUE(theClass, localClass) \
-  theClass* pThis = ((theClass*)((BYTE*)this - offsetof(theClass, m_x##localClass)));
-#define METHOD_PROLOGUE_EX(theClass, localClass) METHOD_PROLOGUE(theClass, localClass)
-#define METHOD_PROLOGUE_EX_(theClass, localClass) METHOD_PROLOGUE(theClass, localClass)
 
 #ifndef _countof
 #define _countof(a) (sizeof(a) / sizeof((a)[0]))

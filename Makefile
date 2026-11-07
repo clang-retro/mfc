@@ -31,7 +31,7 @@ CXXFLAGS ?= -O2
 STDLIB ?= -stdlib=libc++
 TEST_RC ?=
 ALL_CXXFLAGS = $(TARGET_FLAGS) $(STDLIB) \
-  -std=c++17 -Wall -Wno-invalid-offsetof -Wno-overloaded-virtual -Wno-unused-private-field \
+  -std=c++17 -Wall -Wno-invalid-offsetof -Wno-missing-exception-spec -Wno-overloaded-virtual -Wno-unused-private-field \
   -Iinclude -Isrc $(CXXFLAGS)
 
 SRCS = $(wildcard src/*.cpp)
