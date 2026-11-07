@@ -46,6 +46,9 @@ class CPaintDC;
 class CMenu;
 class CCmdTarget;
 class CCmdUI;
+class COleDropTarget;
+class COleDataObject;
+typedef DWORD DROPEFFECT;
 class CWnd;
 class CDialog;
 class CStatic;
@@ -1145,6 +1148,7 @@ protected:
 
 public:
   HWND m_hWnd;
+  COleDropTarget* m_pDropTarget;  // revoked when the window goes
   static const CWnd wndTop;
   static const CWnd wndBottom;
   static const CWnd wndTopMost;
@@ -2381,6 +2385,15 @@ public:
   virtual void OnPrint(CDC* pDC, CPrintInfo* pInfo);
   virtual void OnEndPrinting(CDC* pDC, CPrintInfo* pInfo);
   virtual void OnEndPrintPreview(CDC* pDC, CPrintInfo* pInfo, POINT point, CPreviewView* pView);
+
+  // Drag and drop, when a COleDropTarget is registered for the view.
+  virtual DROPEFFECT OnDragEnter(COleDataObject* pDataObject, DWORD dwKeyState, CPoint point);
+  virtual DROPEFFECT OnDragOver(COleDataObject* pDataObject, DWORD dwKeyState, CPoint point);
+  virtual void OnDragLeave();
+  virtual BOOL OnDrop(COleDataObject* pDataObject, DROPEFFECT dropEffect, CPoint point);
+  virtual DROPEFFECT OnDropEx(COleDataObject* pDataObject, DROPEFFECT dropDefault,
+                              DROPEFFECT dropList, CPoint point);
+  virtual DROPEFFECT OnDragScroll(DWORD dwKeyState, CPoint point);
   BOOL DoPrintPreview(UINT nIDResource, CView* pPrintView, CRuntimeClass* pPreviewViewClass,
                       CPrintPreviewState* pState);
   BOOL DoPreparePrinting(CPrintInfo* pInfo);
