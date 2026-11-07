@@ -170,7 +170,9 @@ BOOL CWinApp::InitApplication() {
 BOOL CWinApp::InitInstance() { return TRUE; }
 
 int CWinApp::Run() {
-  if (m_pMainWnd == NULL) {
+  // A program run for OLE clients may have no window; it ends when its
+  // last object goes.
+  if (m_pMainWnd == NULL && AfxOleGetUserCtrl()) {
     // Without a main window nothing would ever end the message loop.
     TRACE(_T("Warning: m_pMainWnd is NULL in CWinApp::Run - quitting.\n"));
     AfxPostQuitMessage(0);
@@ -178,8 +180,11 @@ int CWinApp::Run() {
   return CWinThread::Run();
 }
 
+void (AFXAPI* _afxPfnOleTerm)(BOOL) = NULL;  // set by AfxOleInit
+
 int CWinApp::ExitInstance() {
   SaveStdProfileSettings();
+  if (_afxPfnOleTerm != NULL) _afxPfnOleTerm(FALSE);
   return (int)m_msgCur.wParam;
 }
 
@@ -611,11 +616,35 @@ void CCommandLineInfo::ParseParamFlag(const char* pszParam) {
     m_nShellCommand = AppUnregister;
   else if (lstrcmpiA(pszParam, "dde") == 0)
     m_nShellCommand = FileDDE;
-  else if (lstrcmpiA(pszParam, "Embedding") == 0)
+  else if (lstrcmpiA(pszParam, "Embedding") == 0) {
     m_bRunEmbedded = TRUE;
-  else if (lstrcmpiA(pszParam, "Automation") == 0)
+    AfxOleSetUserCtrl(FALSE);
+  } else if (lstrcmpiA(pszParam, "Automation") == 0) {
     m_bRunAutomated = TRUE;
+    AfxOleSetUserCtrl(FALSE);
+  }
 }
+
+// ---------------------------------------------------------------------
+// The OLE object count
+
+static LONG g_nOleObjects = 0;
+static BOOL g_bOleUserCtrl = TRUE;
+
+void AFXAPI AfxOleLockApp() { ::InterlockedIncrement(&g_nOleObjects); }
+
+void AFXAPI AfxOleUnlockApp() {
+  if (::InterlockedDecrement(&g_nOleObjects) != 0 || AfxOleGetUserCtrl()) return;
+  CWnd* pMainWnd = AfxGetApp() != NULL ? AfxGetMainWnd() : NULL;
+  if (pMainWnd != NULL && pMainWnd->m_hWnd != NULL)
+    pMainWnd->PostMessage(WM_CLOSE);
+  else
+    AfxPostQuitMessage(0);
+}
+
+BOOL AFXAPI AfxOleCanExitApp() { return g_nOleObjects == 0; }
+BOOL AFXAPI AfxOleGetUserCtrl() { return g_bOleUserCtrl; }
+void AFXAPI AfxOleSetUserCtrl(BOOL bUserCtrl) { g_bOleUserCtrl = bUserCtrl; }
 
 void CCommandLineInfo::ParseParamNotFlag(const TCHAR* pszParam) {
   if (m_strFileName.IsEmpty())

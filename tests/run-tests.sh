@@ -18,7 +18,7 @@ BIN=${BIN:-}
 CXX=${BIN:+$BIN/}clang++
 RC=${RC:-${BIN:+$BIN/}llvm-windres}
 LDFLAGS=${LDFLAGS:-}
-TESTS=${TESTS:-"core disptest socktest dlgtest sditest mditest docktest splittest richtest dbtest rvtest"}
+TESTS=${TESTS:-"core disptest socktest dlgtest sditest mditest docktest splittest richtest dbtest rvtest autotest"}
 
 if [ -z "${DISPLAY:-}" ] && [ -z "${MFC_TEST_NO_XVFB:-}" ] && command -v xvfb-run >/dev/null 2>&1; then
   MFC_TEST_NO_XVFB=1 exec xvfb-run -a -s "-screen 0 1024x768x24" "$0" "$@"
@@ -40,7 +40,7 @@ else
   CXXFLAGS="--target=$TARGET ${SYSROOT:+--sysroot=$SYSROOT}"
 fi
 CXXFLAGS="$CXXFLAGS -fuse-ld=lld ${STDLIB--stdlib=libc++} -std=c++17"
-CXXFLAGS="$CXXFLAGS -Wall -Wno-unused-function -Wno-overloaded-virtual -Iinclude -Itests"
+CXXFLAGS="$CXXFLAGS -Wall -Wno-unused-function -Wno-overloaded-virtual -Wno-missing-exception-spec -Iinclude -Itests"
 RCFLAGS="--target=i686-w64-mingw32 -I tests -I include -I $T ${SYSROOT:+-I $SYSROOT/include}"
 
 nfail=0
