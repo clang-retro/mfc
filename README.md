@@ -95,6 +95,11 @@ when there is no display:
   and read back (cached, rendered when asked for, and as a file),
   a COleDropTarget fed enter, over, leave and drop by hand, scrolling
   near the edges, and a real DoDragDrop from the view onto itself.
+* `oletest`: an OLE container: objects of a class the test registers
+  itself, embedded in a COleDocument, drawn by its view, opened and
+  changed through their verbs and the verb menu, saved to flat and
+  compound files and loaded again (Save As included), deleted, copied
+  through the clipboard and cloned.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -126,7 +131,11 @@ request with the stock MinGW-w64 toolchain.
   registration and licensing, AfxOleLockApp and the /Automation start.
 * `afxole.h`: data transfer: COleDataSource (cached and delayed data,
   the clipboard, DoDragDrop), COleDataObject, COleDropSource and
-  COleDropTarget, with the CView drag and drop handlers.
+  COleDropTarget, with the CView drag and drop handlers. Containers:
+  COleDocument (flat or compound files), COleClientItem (new, pasted,
+  dropped, linked, static and cloned objects, verbs, drawing, the
+  clipboard), COleStreamFile, AfxOleSetEditMenu. Programs can include
+  `afxolecl.rc` for the container messages.
 * `afxdlgs.h`: the common dialogs (file, color, font, print, page setup,
   find/replace) and CPropertySheet/CPropertyPage, wizards included.
 * `afxcmn.h`, `afxcview.h`: the common controls, CImageList, CListView,
@@ -154,8 +163,13 @@ request with the stock MinGW-w64 toolchain.
   VTS_ string describes (as they must in MFC) and it must not be
   overloaded. Drag scrolling starts as soon as the pointer is in the
   inset, without waiting nScrollDelay. Type libraries (EnableTypeLib), connection points and
-  events, the OLE document classes and ActiveX control containment are
-  not implemented yet.
+  events, OLE servers and ActiveX control containment are not
+  implemented yet.
+* Container items are not activated in place yet: objects open in
+  their own windows. COleDocument saves its items in its own format,
+  which is not the one Visual C++ MFC writes. Wine's
+  OleCreateStaticFromData makes objects without IOleObject, so static
+  items cannot be created under Wine.
 * Sockets are IPv4, as in MFC 6. `CAsyncSocket::FromHandle` returns
   only sockets attached in the calling thread, and NULL for others,
   rather than making a temporary object.

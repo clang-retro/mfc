@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate include/afxres.rc and include/afxprint.rc.
+"""Generate include/afxres.rc, include/afxprint.rc and include/afxolecl.rc.
 
 Programs written for MFC include these from their own resource scripts
 (AppWizard puts `#include "afxres.rc"` and `#include "afxprint.rc"` in
@@ -25,14 +25,22 @@ def rc_string(text):
     return '"' + text.replace('\\"', '""') + '"'
 
 PROGRAM_STRINGS = ('AFX_IDS_IDLEMESSAGE', 'AFX_IDS_HELPMODEMESSAGE', 'AFX_IDS_PREVIEW_CLOSE')
+OLE_CONTAINER_STRINGS = ('AFX_IDP_STATIC_OBJECT', 'AFX_IDP_FAILED_TO_CONNECT',
+                         'AFX_IDP_SERVER_BUSY', 'AFX_IDP_BAD_VERB', 'AFX_IDP_FAILED_TO_NOTIFY',
+                         'AFX_IDP_FAILED_TO_LAUNCH', 'AFX_IDP_ASK_TO_UPDATE',
+                         'AFX_IDP_FAILED_TO_UPDATE', 'AFX_IDP_FAILED_TO_CONVERT',
+                         'AFX_IDP_FAILED_TO_CREATE', 'AFX_IDS_UNKNOWNTYPE')
 PRINT_PREFIXES = ('AFX_IDS_PRINT', 'AFX_IDS_ONEPAGE', 'AFX_IDS_TWOPAGE', 'AFX_IDS_PREVIEWPAGEDESC')
 
 def main():
-    res, prn = [], []
+    res, prn, ole = [], [], []
     for name, text in strings():
         if name in PROGRAM_STRINGS or name.startswith(('ID_', 'AFX_ID_PREVIEW', 'AFX_IDS_SC')):
             continue
         if name == 'AFX_IDS_MDICHILD':
+            continue
+        if name in OLE_CONTAINER_STRINGS:
+            ole.append((name, text))
             continue
         (prn if name.startswith(PRINT_PREFIXES) else res).append((name, text))
 
@@ -80,6 +88,14 @@ END
 ''')
         f.write('STRINGTABLE\nBEGIN\n')
         for name, text in prn:
+            f.write('  {0} {1}\n'.format(name, rc_string(text)))
+        f.write('END\n')
+
+    with open(os.path.join(ROOT, 'include', 'afxolecl.rc'), 'w') as f:
+        f.write(head.format('afxolecl.rc', 'The OLE container messages. Without it, the library uses\n'
+                            '// the same built-in text.'))
+        f.write('STRINGTABLE\nBEGIN\n')
+        for name, text in ole:
             f.write('  {0} {1}\n'.format(name, rc_string(text)))
         f.write('END\n')
 

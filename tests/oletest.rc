@@ -1,0 +1,27 @@
+// oletest.rc - resources for oletest.
+#include <windows.h>
+#include <afxres.h>
+#include "oletest.h"
+
+IDR_MAINFRAME MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&Save", ID_FILE_SAVE
+  END
+  POPUP "&Edit"
+  BEGIN
+    MENUITEM "&Paste", ID_EDIT_PASTE
+    MENUITEM "Paste &Link", ID_EDIT_PASTE_LINK
+    MENUITEM "&Links...", ID_OLE_EDIT_LINKS
+    MENUITEM "&Object", ID_OLE_VERB_FIRST
+  END
+END
+
+STRINGTABLE
+BEGIN
+  IDR_MAINFRAME "OleTest\n\nOleTest\nOleTest Files (*.olt)\n.olt\nOleTest.Document\nOleTest Document"
+END
+
+#include "afxres.rc"
+#include "afxolecl.rc"
