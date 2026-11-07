@@ -180,6 +180,8 @@ void COleDocument::DeleteContents() {
   m_dwNextItemNumber = 1;
 }
 
+LPMONIKER COleDocument::GetMoniker(OLEGETMONIKER) { return NULL; }
+
 BOOL COleDocument::OnNewDocument() {
   if (!CDocument::OnNewDocument()) return FALSE;
   ReleaseRoot();

@@ -1,0 +1,23 @@
+// linktest.rc - resources for linktest.
+#include <windows.h>
+#include <afxres.h>
+#include "linktest.h"
+
+IDR_LINKTYPE MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&Save", ID_FILE_SAVE
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+END
+
+STRINGTABLE
+BEGIN
+  IDR_LINKTYPE "LinkTest\n\nLinkTest\nLinkTest Files (*.lkt)\n.lkt\nLinkTest.Document\nLinkTest Document"
+  AFX_IDS_APP_TITLE "LinkTest"
+END
+
+#include "afxres.rc"
+#include "afxolecl.rc"
+#include "afxolesv.rc"
