@@ -38,6 +38,7 @@ BOOL CCmdTarget::OnEvent(UINT idCtrl, AFX_EVENT* pEvent, AFX_CMDHANDLERINFO* pHa
     case AFX_EVENT::event: nKind = _AFX_EVENTSINK_EVENT; break;
     case AFX_EVENT::propRequest: nKind = _AFX_EVENTSINK_REQUEST; break;
     case AFX_EVENT::propChanged: nKind = _AFX_EVENTSINK_CHANGED; break;
+    case AFX_EVENT::propDSCNotify: nKind = _AFX_EVENTSINK_DSCNOTIFY; break;
     default: return FALSE;
   }
   const AFX_EVENTSINKMAP_ENTRY* pEntry =
@@ -61,6 +62,18 @@ BOOL CCmdTarget::OnEvent(UINT idCtrl, AFX_EVENT* pEvent, AFX_CMDHANDLERINFO* pHa
     pParams = &requestParams;
   } else if (nKind == _AFX_EVENTSINK_CHANGED) {
     pParams = &noParams;
+  }
+  // A data source notification's state, reason and BOOL*, in reverse.
+  VARIANT dscArgs[3];
+  DISPPARAMS dscParams = {dscArgs, NULL, 3, 0};
+  if (nKind == _AFX_EVENTSINK_DSCNOTIFY) {
+    dscArgs[0].vt = VT_BYREF | VT_BOOL;
+    dscArgs[0].pboolVal = &bAllow;
+    dscArgs[1].vt = VT_I4;
+    dscArgs[1].lVal = (LONG)pEvent->m_nDSCReason;
+    dscArgs[2].vt = VT_I4;
+    dscArgs[2].lVal = (LONG)pEvent->m_nDSCState;
+    pParams = &dscParams;
   }
 
   AFX_DISPMAP_ENTRY entry = pEntry->dispEntry;
@@ -101,7 +114,9 @@ BOOL CCmdTarget::OnEvent(UINT idCtrl, AFX_EVENT* pEvent, AFX_CMDHANDLERINFO* pHa
   else if (result.vt == VT_I4 || result.vt == VT_UI4)
     bHandled = result.lVal != 0;
   ::VariantClear(&result);
-  if (nKind == _AFX_EVENTSINK_REQUEST && bAllow == VARIANT_FALSE) pEvent->m_hResult = S_FALSE;
+  if ((nKind == _AFX_EVENTSINK_REQUEST || nKind == _AFX_EVENTSINK_DSCNOTIFY) &&
+      bAllow == VARIANT_FALSE)
+    pEvent->m_hResult = S_FALSE;
   if (nKind == _AFX_EVENTSINK_CHANGED) pEvent->m_bPropChanged = TRUE;
   return bHandled;
 }

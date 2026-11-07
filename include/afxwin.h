@@ -1079,6 +1079,29 @@ class CConnectionPoint;
 
 // An event, a property change or a request to change a property, from an
 // ActiveX control to its container's event sink map (CN_EVENT).
+// A data source control's notification (ON_DSCNOTIFY): the step of
+// the change, and what the change is.
+enum DSCSTATE {
+  dscNoState = 0,
+  dscOKToDo,
+  dscCancelled,
+  dscSyncBefore,
+  dscAboutToDo,
+  dscFailedToDo,
+  dscSyncAfter,
+  dscDidEvent
+};
+enum DSCREASON {
+  dscNoReason = 0,
+  dscClose,
+  dscCommit,
+  dscDelete,
+  dscEdit,
+  dscInsert,
+  dscModify,
+  dscMove
+};
+
 struct AFX_EVENT {
   enum { event, propRequest, propChanged, propDSCNotify };
   AFX_EVENT(int eventKind)
@@ -1088,7 +1111,9 @@ struct AFX_EVENT {
         m_pExcepInfo(NULL),
         m_puArgError(NULL),
         m_bPropChanged(FALSE),
-        m_hResult(S_OK) {}
+        m_hResult(S_OK),
+        m_nDSCState(dscNoState),
+        m_nDSCReason(dscNoReason) {}
   AFX_EVENT(int eventKind, DISPID dispid, DISPPARAMS* pDispParams = NULL,
             EXCEPINFO* pExcepInfo = NULL, UINT* puArgError = NULL)
       : m_eventKind(eventKind),
@@ -1097,7 +1122,9 @@ struct AFX_EVENT {
         m_pExcepInfo(pExcepInfo),
         m_puArgError(puArgError),
         m_bPropChanged(FALSE),
-        m_hResult(S_OK) {}
+        m_hResult(S_OK),
+        m_nDSCState(dscNoState),
+        m_nDSCReason(dscNoReason) {}
   int m_eventKind;
   DISPID m_dispid;
   DISPPARAMS* m_pDispParams;
@@ -1105,6 +1132,8 @@ struct AFX_EVENT {
   UINT* m_puArgError;
   BOOL m_bPropChanged;
   HRESULT m_hResult;
+  DSCSTATE m_nDSCState;
+  DSCREASON m_nDSCReason;
 };
 
 // Event sink maps, filled by the ON_EVENT macros of afxdisp.h.

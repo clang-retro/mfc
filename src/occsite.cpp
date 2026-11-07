@@ -208,6 +208,7 @@ BEGIN_INTERFACE_MAP(COleControlSite, CCmdTarget)
   INTERFACE_PART(COleControlSite, IID_IOleControlSite, OleControlSite)
   INTERFACE_PART(COleControlSite, IID_IDispatch, AmbientProps)
   INTERFACE_PART(COleControlSite, IID_IPropertyNotifySink, PropertyNotifySink)
+  INTERFACE_PART(COleControlSite, IID_INotifyDBEvents, NotifyDBEvents)
 END_INTERFACE_MAP()
 
 COleControlSite::COleControlSite(COleControlContainer* pCtrlCont)
@@ -222,6 +223,7 @@ COleControlSite::COleControlSite(COleControlContainer* pCtrlCont)
       m_pActiveObject(NULL),
       m_dwEventSink(0),
       m_dwPropNotifySink(0),
+      m_dwNotifyDBEvents(0),
       m_dwMiscStatus(0),
       m_dwStyleMask(WS_GROUP | WS_TABSTOP),
       m_dwStyle(0),
@@ -292,6 +294,7 @@ HRESULT COleControlSite::CreateControl(CWnd* pWndCtrl, REFCLSID clsid, LPCTSTR l
   if (!::IsEqualIID(m_iidEvents, GUID_NULL))
     ConnectSink(m_iidEvents, &m_xEventSink, &m_dwEventSink);
   ConnectSink(IID_IPropertyNotifySink, &m_xPropertyNotifySink, &m_dwPropNotifySink);
+  ConnectSink(IID_INotifyDBEvents, &m_xNotifyDBEvents, &m_dwNotifyDBEvents);
   GetControlInfo();
 
   // Active in place, with a window, unless it is invisible at run time.
@@ -299,9 +302,10 @@ HRESULT COleControlSite::CreateControl(CWnd* pWndCtrl, REFCLSID clsid, LPCTSTR l
   hr = m_pObject->DoVerb(OLEIVERB_INPLACEACTIVATE, NULL, &m_xOleClientSite, 0, hWndParent,
                          &m_rect);
   if (FAILED(hr) && !(m_dwMiscStatus & OLEMISC_INVISIBLEATRUNTIME)) {
+    DisconnectSink(IID_INotifyDBEvents, m_dwNotifyDBEvents);
     DisconnectSink(IID_IPropertyNotifySink, m_dwPropNotifySink);
     DisconnectSink(m_iidEvents, m_dwEventSink);
-    m_dwEventSink = m_dwPropNotifySink = 0;
+    m_dwEventSink = m_dwPropNotifySink = m_dwNotifyDBEvents = 0;
     m_dispDriver.ReleaseDispatch();
     m_pObject->Close(OLECLOSE_NOSAVE);
     m_pObject->SetClientSite(NULL);
@@ -546,9 +550,10 @@ BOOL COleControlSite::DestroyControl() {
     if (::GetCapture() == m_pCtrlCont->m_pWnd->GetSafeHwnd()) ::ReleaseCapture();
   }
   if (m_pObject != NULL) {
+    DisconnectSink(IID_INotifyDBEvents, m_dwNotifyDBEvents);
     DisconnectSink(IID_IPropertyNotifySink, m_dwPropNotifySink);
     DisconnectSink(m_iidEvents, m_dwEventSink);
-    m_dwEventSink = m_dwPropNotifySink = 0;
+    m_dwEventSink = m_dwPropNotifySink = m_dwNotifyDBEvents = 0;
     m_dispDriver.ReleaseDispatch();
     // Closing deactivates it, which destroys its window.
     m_pObject->Close(OLECLOSE_NOSAVE);
@@ -1275,6 +1280,86 @@ STDMETHODIMP COleControlSite::XPropertyNotifySink::OnRequestEdit(DISPID dispid) 
   AFX_EVENT event(AFX_EVENT::propRequest, dispid);
   return pThis->FireEvent(&event) == S_FALSE ? S_FALSE : S_OK;
 }
+
+// INotifyDBEvents: each step of a change to a data source control's
+// cursor is an ON_DSCNOTIFY notification, for the changes to the current
+// row; the binding (occdb.cpp) then sets the bound controls.
+HRESULT AFXAPI _AfxFireDSCNotify(COleControlSite* pSite, DSCSTATE nState, DSCREASON nReason) {
+  AFX_EVENT event(AFX_EVENT::propDSCNotify);
+  event.m_nDSCState = nState;
+  event.m_nDSCReason = nReason;
+  return pSite->FireEvent(&event);
+}
+
+static DSCREASON DSCReason(DWORD dwReason) {
+  switch (dwReason) {
+    case DBREASON_CLOSE: return dscClose;
+    case DBREASON_FIND:
+    case DBREASON_MOVE:
+    case DBREASON_MOVEPERCENT:
+    case DBREASON_NEWINDEX:
+    case DBREASON_NEWPARAMETERS:
+    case DBREASON_QUERYSPECCHANGED:
+    case DBREASON_REFRESH:
+    case DBREASON_SEEK:
+    case DBREASON_SETRANGECHANGED: return dscMove;
+    case DBREASON_ADDNEW:
+    case DBREASON_INSERTED: return dscInsert;
+    case DBREASON_EDIT: return dscEdit;
+    case DBREASON_MODIFIED:
+    case DBREASON_RECALC:
+    case DBREASON_ROLLBACK:
+    case DBREASON_ROWFIXUP: return dscModify;
+    case DBREASON_DELETED: return dscDelete;
+    case DBREASON_COMMIT: return dscCommit;
+    default: return dscNoReason;
+  }
+}
+
+HRESULT COleControlSite::XNotifyDBEvents::Notify(DSCSTATE nState, DWORD dwEventWhat,
+                                                 ULONG cReasons, DBNOTIFYREASON rgReasons[]) {
+  SITE(NotifyDBEvents);
+  HRESULT hr = S_OK;
+  if (dwEventWhat & (DBEVENT_CURRENT_ROW_CHANGED | DBEVENT_CURRENT_ROW_DATA_CHANGED)) {
+    // The first reason that is one of ON_DSCNOTIFY's.
+    for (ULONG i = 0; i < cReasons; i++) {
+      DSCREASON nReason = DSCReason(rgReasons[i].dwReason);
+      if (nReason == dscNoReason) continue;
+      hr = _AfxFireDSCNotify(pThis, nState, nReason);
+      break;
+    }
+  }
+  if (hr != S_OK) return hr;
+  if (pThis->m_pDataSourceControl != NULL && _afxOccBindHooks != NULL)
+    hr = _afxOccBindHooks->pfnDBEvent(pThis, nState, dwEventWhat, cReasons, rgReasons);
+  return hr;
+}
+
+STDMETHODIMP_(ULONG) COleControlSite::XNotifyDBEvents::AddRef() {
+  SITE(NotifyDBEvents);
+  return pThis->ExternalAddRef();
+}
+STDMETHODIMP_(ULONG) COleControlSite::XNotifyDBEvents::Release() {
+  SITE(NotifyDBEvents);
+  return pThis->ExternalRelease();
+}
+STDMETHODIMP COleControlSite::XNotifyDBEvents::QueryInterface(REFIID iid, LPVOID* ppvObj) {
+  SITE(NotifyDBEvents);
+  return (HRESULT)pThis->ExternalQueryInterface(&iid, ppvObj);
+}
+#define _AFX_DBEVENT(name, state)                                                      \
+  STDMETHODIMP COleControlSite::XNotifyDBEvents::name(DWORD dwEventWhat, ULONG cReasons, \
+                                                      DBNOTIFYREASON rgReasons[]) {      \
+    return Notify(state, dwEventWhat, cReasons, rgReasons);                              \
+  }
+_AFX_DBEVENT(OKToDo, dscOKToDo)
+_AFX_DBEVENT(Cancelled, dscCancelled)
+_AFX_DBEVENT(SyncBefore, dscSyncBefore)
+_AFX_DBEVENT(AboutToDo, dscAboutToDo)
+_AFX_DBEVENT(FailedToDo, dscFailedToDo)
+_AFX_DBEVENT(SyncAfter, dscSyncAfter)
+_AFX_DBEVENT(DidEvent, dscDidEvent)
+#undef _AFX_DBEVENT
 
 STDMETHODIMP_(ULONG) COleControlSite::XEventSink::AddRef() {
   SITE(EventSink);
