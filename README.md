@@ -142,6 +142,13 @@ when there is no display:
   and a dialog template with controls among ordinary items (made on
   WM_INITDIALOG in the template's tab order, state from DLGINIT,
   DDX_Control and the DDX_OC functions).
+* `ctltest`: writing a control with COleControl, the test being both
+  its server and its container: stock and custom properties, a method,
+  stock and custom events, the font object, ambient properties, frozen
+  events, activation and focus, drawing in its window and through
+  IViewObject, its state through IPersistStreamInit,
+  IPersistPropertyBag and IPersistStorage into new instances, and the
+  registry keys of AfxOleRegisterControlClass.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -209,6 +216,13 @@ request with the stock MinGW-w64 toolchain.
   templates with their DLGINIT state; event sink maps (ON_EVENT,
   ON_EVENT_RANGE, ON_EVENT_REFLECT, ON_PROPNOTIFY) and the DDX_OC
   functions.
+* `afxctl.h`: writing ActiveX controls: COleControl (the OLE control
+  interfaces, in-place activation, stock properties, methods and events,
+  ambient properties, IViewObject drawing and persistence through
+  streams, storages and property bags), COleControlModule, event maps,
+  DECLARE_OLECREATE_EX, DECLARE_OLECTLTYPE, DECLARE_PROPPAGEIDS,
+  CFontHolder, CPropExchange and the PX_ functions, and
+  AfxOleRegisterControlClass.
 * `afxodlgs.h`: the OLE dialogs over oledlg: COleInsertDialog,
   COlePasteSpecialDialog, COleLinksDialog, COleUpdateDialog,
   COleChangeIconDialog, COleConvertDialog and COleBusyDialog, and the
@@ -247,8 +261,14 @@ request with the stock MinGW-w64 toolchain.
   the sink's interface pointer.
 * Containment hosts windowed controls only: windowless controls,
   extended controls (IOleControlSite::GetExtendedControl), data binding
-  and property pages are not implemented, and nor is COleControl, the
-  control side.
+  and property pages are not implemented.
+* COleControl makes windowed controls only (no windowless or
+  IOleInPlaceObjectWindowless controls, no IQuickActivate, no
+  IPerPropertyBrowsing), and COlePropertyPage, verb maps, data path
+  properties (CDataPathProperty) and licensing are not implemented. A
+  control's binary stream (IPersistStreamInit, IPersistStorage, DLGINIT
+  data) has this library's own format, not the one Visual C++ MFC
+  writes; property bags hold the same names and values.
 * COleDocument saves its items in its own format,
   which is not the one Visual C++ MFC writes. Wine's
   OleCreateStaticFromData makes objects without IOleObject, so static
