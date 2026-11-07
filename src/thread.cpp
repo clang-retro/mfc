@@ -182,8 +182,10 @@ BOOL CWinThread::PreTranslateMessage(MSG* pMsg) {
   // Thread messages go to the thread's message map.
   if (pMsg->hwnd == NULL && DispatchThreadMessageEx(pMsg)) return TRUE;
 
+  // A server started by COM may have no main window yet.
   CWnd* pMainWnd = AfxGetMainWnd();
-  if (CWnd::WalkPreTranslateTree(pMainWnd->GetSafeHwnd(), pMsg)) return TRUE;
+  HWND hWndMain = pMainWnd != NULL ? pMainWnd->m_hWnd : NULL;
+  if (CWnd::WalkPreTranslateTree(hWndMain, pMsg)) return TRUE;
 
   // Modeless dialogs and other top-level windows still get the main
   // window's accelerators.

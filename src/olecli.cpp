@@ -282,12 +282,19 @@ BOOL COleClientItem::CreateCloneFrom(const COleClientItem* pSrcItem) {
   if (pSrcItem->m_lpObject == NULL) return FALSE;
   GetItemStorage();
   m_nDrawAspect = pSrcItem->m_nDrawAspect;
-  LPPERSISTSTORAGE lpPersist = NULL;
-  SCODE sc = pSrcItem->m_lpObject->QueryInterface(IID_IPersistStorage, (void**)&lpPersist);
-  if (SUCCEEDED(sc)) {
-    sc = ::OleSave(lpPersist, m_lpStorage, FALSE);
-    lpPersist->SaveCompleted(NULL);
-    lpPersist->Release();
+  SCODE sc;
+  if (pSrcItem->m_lpStorage != NULL && !::OleIsRunning(pSrcItem->m_lpObject)) {
+    // Not running: its storage is all there is to it. (Wine's object
+    // handler saves only the pictures of an object that is not running.)
+    sc = pSrcItem->m_lpStorage->CopyTo(0, NULL, NULL, m_lpStorage);
+  } else {
+    LPPERSISTSTORAGE lpPersist = NULL;
+    sc = pSrcItem->m_lpObject->QueryInterface(IID_IPersistStorage, (void**)&lpPersist);
+    if (SUCCEEDED(sc)) {
+      sc = ::OleSave(lpPersist, m_lpStorage, FALSE);
+      lpPersist->SaveCompleted(NULL);
+      lpPersist->Release();
+    }
   }
   if (SUCCEEDED(sc))
     sc = ::OleLoad(m_lpStorage, IID_IOleObject, GetClientSite(), (void**)&m_lpObject);

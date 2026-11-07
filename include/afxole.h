@@ -1,7 +1,8 @@
 // afxole.h - OLE: data transfer through the clipboard and drag and drop
 // (COleDataSource, COleDataObject, COleDropSource, COleDropTarget), and
 // documents that contain linked and embedded objects (COleDocument,
-// COleClientItem), with COleStreamFile for streams in a storage.
+// COleClientItem), with COleStreamFile for streams in a storage, and
+// servers (COleServerDoc, COleServerItem, COleTemplateServer).
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 #ifndef __AFXOLE_H__
@@ -25,6 +26,10 @@ class COleDocument;
 class COleClientItem;
 class COleStreamFile;
 class CDocItem;
+class COleLinkingDoc;
+class COleServerDoc;
+class COleServerItem;
+class COleTemplateServer;
 
 // Defaults for drag scrolling and starting a drag, in pixels and
 // milliseconds; the [windows] section of win.ini can change them.
@@ -489,6 +494,262 @@ public:
   END_INTERFACE_PART(AdviseSink)
 
   DECLARE_INTERFACE_MAP()
+};
+
+// ---------------------------------------------------------------------
+// Servers
+
+// What COleTemplateServer::UpdateRegistry registers the program as.
+enum OLE_APPTYPE {
+  OAT_UNKNOWN = -1,
+  OAT_INPLACE_SERVER = 0,  // a full server (in-place activation is not there yet)
+  OAT_SERVER = 1,          // a server that opens its objects in its own window
+  OAT_CONTAINER = 2,       // a container that links to its embeddings
+  OAT_DISPATCH_OBJECT = 3, // an automation object
+  OAT_DOC_OBJECT_SERVER = 4,
+  OAT_DOC_OBJECT_CONTAINER = 5
+};
+
+// COleLinkingDoc: a document that other programs can find in the running
+// object table while it is open.
+class COleLinkingDoc : public COleDocument {
+  DECLARE_DYNAMIC(COleLinkingDoc)
+public:
+  COleLinkingDoc();
+  virtual ~COleLinkingDoc();
+
+  // Puts the document in the running object table under its path; the
+  // factory's class is the one other programs see.
+  BOOL Register(COleObjectFactory* pFactory, LPCTSTR lpszPathName);
+  void Revoke();
+
+  virtual COleServerItem* OnGetLinkedItem(LPCTSTR lpszItemName);
+  virtual COleClientItem* OnFindEmbeddedItem(LPCTSTR lpszItemName);
+
+  virtual BOOL OnNewDocument();
+  virtual BOOL OnOpenDocument(LPCTSTR lpszPathName);
+  virtual BOOL OnSaveDocument(LPCTSTR lpszPathName);
+  virtual void OnCloseDocument();
+
+  COleObjectFactory* m_pFactory;
+  DWORD m_dwRegister;  // the running object table's cookie
+
+public:
+  BEGIN_INTERFACE_PART(PersistFile, IPersistFile)
+    STDMETHOD(GetClassID)(LPCLSID lpClassID);
+    STDMETHOD(IsDirty)();
+    STDMETHOD(Load)(LPCOLESTR lpszFileName, DWORD dwMode);
+    STDMETHOD(Save)(LPCOLESTR lpszFileName, BOOL fRemember);
+    STDMETHOD(SaveCompleted)(LPCOLESTR lpszFileName);
+    STDMETHOD(GetCurFile)(LPOLESTR* lplpszFileName);
+  END_INTERFACE_PART(PersistFile)
+
+  DECLARE_INTERFACE_MAP()
+};
+
+// COleServerDoc: the document of a server. COM creates one for each
+// embedded object (through COleTemplateServer); the container sees the
+// document as the object, and OnGetEmbeddedItem gives the item that
+// draws it and hands out its data.
+class COleServerDoc : public COleLinkingDoc {
+  DECLARE_DYNAMIC(COleServerDoc)
+public:
+  COleServerDoc();
+  virtual ~COleServerDoc();
+
+  COleServerItem* GetEmbeddedItem();
+  BOOL IsEmbedded() const { return m_bEmbedded; }
+  // FALSE: the container has no client site, or it has been closed.
+  LPOLECLIENTSITE GetClientSite() const { return m_lpClientSite; }
+
+  // Calls OnUpdate on each item, which sends the new picture to the
+  // containers by default.
+  void UpdateAllItems(COleServerItem* pSender, LPARAM lHint = 0L, CObject* pHint = NULL,
+                      DVASPECT nDrawAspect = DVASPECT_CONTENT);
+  void NotifyChanged();
+  void NotifyClosed();
+  void NotifySaved();
+  void NotifyRename(LPCTSTR lpszNewName);
+  // Has the container save the object (IOleClientSite::SaveObject).
+  void SaveEmbedding();
+
+  virtual BOOL OnUpdateDocument();
+  virtual void OnShowDocument(BOOL bShow);
+  virtual void OnSetHostNames(LPCTSTR lpszHost, LPCTSTR lpszHostObj);
+  virtual void OnClose(OLECLOSE dwCloseOption);
+
+  virtual void OnCloseDocument();
+  virtual BOOL SaveModified();
+  virtual HMENU GetDefaultMenu();
+  virtual HACCEL GetDefaultAccelerator();
+  virtual void OnFinalRelease();
+
+  CString m_strHostObj;  // the container's name for the object
+  CString m_strHostApp;
+  LPOLECLIENTSITE m_lpClientSite;
+  LPOLEADVISEHOLDER m_lpOleAdviseHolder;
+  LPDATAADVISEHOLDER m_lpDataAdviseHolder;
+  COleServerItem* m_pEmbeddedItem;
+  BOOL m_bCntrVisible;  // the container shows the object open
+  BOOL m_bClosing;
+  BOOL m_bOwnRef;  // the reference the document starts with is its own
+  BOOL m_bShownBefore;
+
+protected:
+  // Make the item that stands for the whole document.
+  virtual COleServerItem* OnGetEmbeddedItem() = 0;
+  virtual void OnNewEmbedding(LPSTORAGE lpStorage);
+  virtual void OnOpenEmbedding(LPSTORAGE lpStorage);
+  virtual void OnSaveEmbedding(LPSTORAGE lpStorage);
+  void GetClassIDOf(LPCLSID lpClassID);
+  void UpdateMenuText(CMenu* pMenu);
+
+  afx_msg void OnFileUpdate();
+  afx_msg void OnFileSaveCopyAs();
+  afx_msg void OnUpdateFileUpdate(CCmdUI* pCmdUI);
+
+public:
+  BEGIN_INTERFACE_PART(PersistStorage, IPersistStorage)
+    STDMETHOD(GetClassID)(LPCLSID lpClassID);
+    STDMETHOD(IsDirty)();
+    STDMETHOD(InitNew)(LPSTORAGE pStg);
+    STDMETHOD(Load)(LPSTORAGE pStg);
+    STDMETHOD(Save)(LPSTORAGE pStgSave, BOOL fSameAsLoad);
+    STDMETHOD(SaveCompleted)(LPSTORAGE pStgNew);
+    STDMETHOD(HandsOffStorage)();
+  END_INTERFACE_PART(PersistStorage)
+
+  BEGIN_INTERFACE_PART(OleObject, IOleObject)
+    STDMETHOD(SetClientSite)(LPOLECLIENTSITE pClientSite);
+    STDMETHOD(GetClientSite)(LPOLECLIENTSITE* ppClientSite);
+    STDMETHOD(SetHostNames)(LPCOLESTR szContainerApp, LPCOLESTR szContainerObj);
+    STDMETHOD(Close)(DWORD dwSaveOption);
+    STDMETHOD(SetMoniker)(DWORD dwWhichMoniker, LPMONIKER pmk);
+    STDMETHOD(GetMoniker)(DWORD dwAssign, DWORD dwWhichMoniker, LPMONIKER* ppmk);
+    STDMETHOD(InitFromData)(LPDATAOBJECT pDataObject, BOOL fCreation, DWORD dwReserved);
+    STDMETHOD(GetClipboardData)(DWORD dwReserved, LPDATAOBJECT* ppDataObject);
+    STDMETHOD(DoVerb)(LONG iVerb, LPMSG lpmsg, LPOLECLIENTSITE pActiveSite, LONG lindex,
+                      HWND hwndParent, LPCRECT lprcPosRect);
+    STDMETHOD(EnumVerbs)(LPENUMOLEVERB* ppEnumOleVerb);
+    STDMETHOD(Update)();
+    STDMETHOD(IsUpToDate)();
+    STDMETHOD(GetUserClassID)(LPCLSID pClsid);
+    STDMETHOD(GetUserType)(DWORD dwFormOfType, LPOLESTR* pszUserType);
+    STDMETHOD(SetExtent)(DWORD dwDrawAspect, LPSIZEL psizel);
+    STDMETHOD(GetExtent)(DWORD dwDrawAspect, LPSIZEL psizel);
+    STDMETHOD(Advise)(LPADVISESINK pAdvSink, DWORD* pdwConnection);
+    STDMETHOD(Unadvise)(DWORD dwConnection);
+    STDMETHOD(EnumAdvise)(LPENUMSTATDATA* ppenumAdvise);
+    STDMETHOD(GetMiscStatus)(DWORD dwAspect, DWORD* pdwStatus);
+    STDMETHOD(SetColorScheme)(LPLOGPALETTE pLogpal);
+  END_INTERFACE_PART(OleObject)
+
+  BEGIN_INTERFACE_PART(DataObject, IDataObject)
+    STDMETHOD(GetData)(LPFORMATETC pformatetcIn, LPSTGMEDIUM pmedium);
+    STDMETHOD(GetDataHere)(LPFORMATETC pformatetc, LPSTGMEDIUM pmedium);
+    STDMETHOD(QueryGetData)(LPFORMATETC pformatetc);
+    STDMETHOD(GetCanonicalFormatEtc)(LPFORMATETC pformatetcIn, LPFORMATETC pformatetcOut);
+    STDMETHOD(SetData)(LPFORMATETC pformatetc, LPSTGMEDIUM pmedium, BOOL fRelease);
+    STDMETHOD(EnumFormatEtc)(DWORD dwDirection, LPENUMFORMATETC* ppenumFormatEtc);
+    STDMETHOD(DAdvise)(LPFORMATETC pformatetc, DWORD advf, LPADVISESINK pAdvSink,
+                       DWORD* pdwConnection);
+    STDMETHOD(DUnadvise)(DWORD dwConnection);
+    STDMETHOD(EnumDAdvise)(LPENUMSTATDATA* ppenumAdvise);
+  END_INTERFACE_PART(DataObject)
+
+  DECLARE_INTERFACE_MAP()
+  DECLARE_MESSAGE_MAP()
+  friend class COleServerItem;
+};
+
+// COleServerItem: what a server shows a container: the whole document
+// (the embedded item) or a part of it. OnDraw draws it, its data source
+// hands out its data, and NotifyChanged tells the containers.
+class COleServerItem : public CDocItem {
+  DECLARE_DYNAMIC(COleServerItem)
+public:
+  COleServerItem(COleServerDoc* pServerDoc, BOOL bAutoDelete);
+  virtual ~COleServerItem();
+
+  COleServerDoc* GetDocument() const { return (COleServerDoc*)m_pDocument; }
+  COleDataSource* GetDataSource() { return &m_dataSource; }
+  BOOL IsConnected() const;
+  BOOL IsLinkedItem() const;
+  const CString& GetItemName() const { return m_strItemName; }
+  void SetItemName(LPCTSTR lpszItemName) { m_strItemName = lpszItemName; }
+
+  void NotifyChanged(DVASPECT nDrawAspect = DVASPECT_CONTENT);
+  void CopyToClipboard(BOOL bIncludeLink = FALSE);
+  DROPEFFECT DoDragDrop(LPCRECT lpItemRect, CPoint ptOffset, BOOL bIncludeLink = FALSE,
+                        DWORD dwEffects = DROPEFFECT_COPY | DROPEFFECT_MOVE,
+                        LPCRECT lpRectStartDrag = NULL);
+  // Puts the item's data in pDataSource, as CopyToClipboard does.
+  void GetClipboardData(COleDataSource* pDataSource, BOOL bIncludeLink = FALSE,
+                        LPPOINT lpOffset = NULL, LPSIZE lpSize = NULL);
+  // The document saved into a new storage ("Embed Source").
+  void GetEmbedSourceData(LPSTGMEDIUM lpStgMedium);
+  void GetObjectDescriptorData(LPPOINT lpOffset, LPSIZE lpSize, LPSTGMEDIUM lpStgMedium);
+  BOOL GetMetafileData(LPFORMATETC lpFormatEtc, LPSTGMEDIUM lpStgMedium);
+  virtual void AddOtherClipboardData(COleDataSource* pDataSource);
+
+  // Overridables
+  // Draws the item; rSize is its extent in HIMETRIC.
+  virtual BOOL OnDraw(CDC* pDC, CSize& rSize) = 0;
+  virtual BOOL OnDrawEx(CDC* pDC, DVASPECT nDrawAspect, CSize& rSize);
+  virtual BOOL OnGetExtent(DVASPECT nDrawAspect, CSize& rSize);
+  virtual BOOL OnSetExtent(DVASPECT nDrawAspect, const CSize& size);
+  virtual void OnUpdate(COleServerItem* pSender, LPARAM lHint, CObject* pHint,
+                        DVASPECT nDrawAspect);
+  virtual void OnDoVerb(LONG iVerb);
+  virtual void OnShow();
+  virtual void OnOpen();
+  virtual void OnHide();
+  virtual BOOL OnRenderData(LPFORMATETC lpFormatEtc, LPSTGMEDIUM lpStgMedium);
+  virtual BOOL OnRenderGlobalData(LPFORMATETC lpFormatEtc, HGLOBAL* phGlobal);
+  virtual BOOL OnRenderFileData(LPFORMATETC lpFormatEtc, CFile* pFile);
+  virtual BOOL OnSetData(LPFORMATETC lpFormatEtc, LPSTGMEDIUM lpStgMedium, BOOL bRelease);
+  virtual void OnFinalRelease();
+
+  BOOL m_bAutoDelete;
+  CString m_strItemName;
+  CSize m_sizeExtent;  // HIMETRIC, for OnGetExtent's default
+
+protected:
+  // The data source that asks the item to render.
+  class CItemDataSource : public COleDataSource {
+  public:
+    COleServerItem* m_pItem;
+    virtual BOOL OnRenderData(LPFORMATETC lpFormatEtc, LPSTGMEDIUM lpStgMedium);
+    virtual BOOL OnRenderFileData(LPFORMATETC lpFormatEtc, CFile* pFile);
+    virtual BOOL OnRenderGlobalData(LPFORMATETC lpFormatEtc, HGLOBAL* phGlobal);
+    virtual BOOL OnSetData(LPFORMATETC lpFormatEtc, LPSTGMEDIUM lpStgMedium, BOOL bRelease);
+    virtual void OnFinalRelease() {}  // part of the item
+  };
+  CItemDataSource m_dataSource;
+  friend class CItemDataSource;
+};
+
+// COleTemplateServer: the class factory that makes a new document of a
+// template for each object a container creates.
+class COleTemplateServer : public COleObjectFactory {
+  DECLARE_DYNAMIC(COleTemplateServer)
+public:
+  COleTemplateServer();
+
+  void ConnectTemplate(REFCLSID clsid, CDocTemplate* pDocTemplate, BOOL bMultiInstance);
+  // Registers the template's document type as an OLE server under the
+  // ProgID, type name and short name of its document strings.
+  void UpdateRegistry(OLE_APPTYPE nAppType = OAT_INPLACE_SERVER,
+                      LPCTSTR* rglpszRegister = NULL, LPCTSTR* rglpszOverwrite = NULL,
+                      BOOL bRegister = TRUE);
+  virtual BOOL UpdateRegistry(BOOL bRegister);
+  BOOL Unregister();
+
+  CDocTemplate* m_pDocTemplate;
+  OLE_APPTYPE m_nAppType;
+
+protected:
+  virtual CCmdTarget* OnCreateObject();
 };
 
 // Fills the object verb item of an Edit menu ("&Object" at nPosition) with

@@ -285,6 +285,8 @@ static const AfxDefaultString g_defaultStrings[] = {
     {AFX_IDS_UPDATING_ITEMS, "Updating links"},
     {AFX_IDS_RTF_FORMAT_TEXT,
      "Unformatted Text\nInserts the contents of the clipboard as text without any formatting."},
+    {AFX_IDS_UPDATE_MENU, "&Update %1"},
+    {AFX_IDS_EXIT_MENU, "E&xit && Return to %1"},
     {AFX_IDS_SCSIZE, "Change the window size"},
     {AFX_IDS_SCMOVE, "Change the window position"},
     {AFX_IDS_SCMINIMIZE, "Reduce the window to an icon"},

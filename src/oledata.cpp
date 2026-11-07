@@ -39,10 +39,33 @@ static BOOL CopyStgMedium(CLIPFORMAT cfFormat, LPSTGMEDIUM lpDest, const STGMEDI
     lpDest->hGlobal = (HGLOBAL)::OleDuplicateData(lpSource->hGlobal, cfFormat, GMEM_MOVEABLE);
     return lpDest->hGlobal != NULL;
   case TYMED_GDI:
-  case TYMED_MFPICT:
+    lpDest->hBitmap = (HBITMAP)::OleDuplicateData(lpSource->hBitmap, cfFormat, 0);
+    break;
+  case TYMED_MFPICT: {
+    // Copied by hand: Wine's OleDuplicateData does not copy a picture.
+    lpDest->hMetaFilePict = NULL;
+    const METAFILEPICT* pSrc = (const METAFILEPICT*)::GlobalLock(lpSource->hMetaFilePict);
+    if (pSrc == NULL) break;
+    HGLOBAL h = ::GlobalAlloc(GMEM_MOVEABLE | GMEM_SHARE, sizeof(METAFILEPICT));
+    METAFILEPICT* pDest = h != NULL ? (METAFILEPICT*)::GlobalLock(h) : NULL;
+    if (pDest != NULL) {
+      *pDest = *pSrc;
+      pDest->hMF = ::CopyMetaFile(pSrc->hMF, NULL);
+      BOOL bOk = pDest->hMF != NULL;
+      ::GlobalUnlock(h);
+      if (bOk)
+        lpDest->hMetaFilePict = h;
+      else
+        ::GlobalFree(h);
+    } else if (h != NULL) {
+      ::GlobalFree(h);
+    }
+    ::GlobalUnlock(lpSource->hMetaFilePict);
+    break;
+  }
   case TYMED_ENHMF:
-    lpDest->hGlobal = (HGLOBAL)::OleDuplicateData(lpSource->hGlobal, cfFormat, 0);
-    return lpDest->hGlobal != NULL;
+    lpDest->hEnhMetaFile = ::CopyEnhMetaFile(lpSource->hEnhMetaFile, NULL);
+    break;
   case TYMED_ISTREAM:
   case TYMED_ISTORAGE:
     lpDest->pstm = lpSource->pstm;
@@ -56,8 +79,12 @@ static BOOL CopyStgMedium(CLIPFORMAT cfFormat, LPSTGMEDIUM lpDest, const STGMEDI
     return TRUE;
   }
   default:
-    return FALSE;
+    break;
   }
+  // The handle forms end here.
+  if (lpDest->hGlobal != NULL) return TRUE;
+  lpDest->tymed = TYMED_NULL;
+  return FALSE;
 }
 
 // ---------------------------------------------------------------------

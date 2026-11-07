@@ -2590,8 +2590,11 @@ public:
   virtual void SetDefaultTitle(CDocument* pDocument) = 0;
   virtual void OnIdle();
   virtual BOOL OnCmdMsg(UINT nID, int nCode, void* pExtra, AFX_CMDHANDLERINFO* pHandlerInfo);
-  void SetContainerInfo(UINT) {}
-  void SetServerInfo(UINT, UINT = 0, CRuntimeClass* = NULL, CRuntimeClass* = NULL) {}
+  void SetContainerInfo(UINT nIDOleInPlaceContainer);
+  // The menu and accelerators (nIDOleEmbedding) a server document uses
+  // while it edits an embedded object, and those for in-place editing.
+  void SetServerInfo(UINT nIDOleEmbedding, UINT nIDOleInPlaceServer = 0,
+                     CRuntimeClass* pOleFrameClass = NULL, CRuntimeClass* pOleViewClass = NULL);
 
   UINT m_nIDResource;
   CRuntimeClass* m_pDocClass;
@@ -2609,6 +2612,8 @@ public:
   HACCEL m_hAccelEmbedding;
   HMENU m_hMenuInPlaceServer;
   HACCEL m_hAccelInPlaceServer;
+  CRuntimeClass* m_pOleFrameClass;
+  CRuntimeClass* m_pOleViewClass;
 };
 
 class CSingleDocTemplate : public CDocTemplate {

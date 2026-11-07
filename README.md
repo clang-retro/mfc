@@ -102,6 +102,11 @@ when there is no display:
   changed through their verbs and the verb menu, saved to flat and
   compound files and loaded again (Save As included), deleted, copied
   through the clipboard and cloned.
+* `srvtest`: an OLE server and its container in one program, which COM
+  starts again as the server: registration, an embedded object made,
+  shown, changed, updated and closed through COleServerDoc and
+  COleServerItem, the server's embedded menu and data, the object
+  loaded again by a second server process, and its clipboard copy.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -139,7 +144,11 @@ request with the stock MinGW-w64 toolchain.
   COleDocument (flat or compound files), COleClientItem (new, pasted,
   dropped, linked, static and cloned objects, verbs, drawing, the
   clipboard), COleStreamFile, AfxOleSetEditMenu. Programs can include
-  `afxolecl.rc` for the container messages.
+  `afxolecl.rc` for the container messages. Servers: COleServerDoc,
+  COleServerItem (drawing, extents, verbs, data, the clipboard),
+  COleLinkingDoc, COleTemplateServer (registration, one object per
+  process for SDI), and the embedded menus of SetServerInfo, with
+  `afxolesv.rc` for the Update and Exit menu text.
 * `afxodlgs.h`: the OLE dialogs over oledlg: COleInsertDialog,
   COlePasteSpecialDialog, COleLinksDialog, COleUpdateDialog,
   COleChangeIconDialog, COleConvertDialog and COleBusyDialog, and the
@@ -161,7 +170,7 @@ request with the stock MinGW-w64 toolchain.
 * Floating bars are tool windows, so the system draws their captions,
   and they resize with the system's sizing border.
 * CRichEditDoc derives from COleDocument rather than COleServerDoc
-  (OLE servers are not there yet). Wine's rich edit control draws an
+  (it becomes a server document with in-place activation). Wine's rich edit control draws an
   embedded object from its data rather than through IViewObject, and
   writes only the object's picture into rich text, so there a saved
   object comes back as a picture.
@@ -176,13 +185,21 @@ request with the stock MinGW-w64 toolchain.
   VTS_ string describes (as they must in MFC) and it must not be
   overloaded. Drag scrolling starts as soon as the pointer is in the
   inset, without waiting nScrollDelay. Type libraries (EnableTypeLib), connection points and
-  events, OLE servers and ActiveX control containment are not
+  events and ActiveX control containment are not
   implemented yet.
-* Container items are not activated in place yet: objects open in
-  their own windows. COleDocument saves its items in its own format,
+* Objects are not activated in place yet, on either side: they open in
+  their own windows, and servers do not give links to their items yet. COleDocument saves its items in its own format,
   which is not the one Visual C++ MFC writes. Wine's
   OleCreateStaticFromData makes objects without IOleObject, so static
   items cannot be created under Wine.
+* Under Wine, a container's OLERENDER_DRAW cache never takes a picture
+  from a local server, so such objects draw blank; OLERENDER_FORMAT
+  with CF_METAFILEPICT works. Wine has no REGCLS_SINGLEUSE, so a
+  single-instance COleObjectFactory revokes itself once it has made
+  its object. Wine's object handler calls InitNew again when it runs
+  an object it created, even after a save, so a container should clone
+  such an object rather than run it again. Menus and clipboard data do
+  not cross processes under Wine.
 * Sockets are IPv4, as in MFC 6. `CAsyncSocket::FromHandle` returns
   only sockets attached in the calling thread, and NULL for others,
   rather than making a temporary object.

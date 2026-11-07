@@ -1,0 +1,47 @@
+// srvtest.rc - resources for srvtest.
+#include <windows.h>
+#include <afxres.h>
+#include "srvtest.h"
+
+IDR_MAINFRAME MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&New", ID_FILE_NEW
+    MENUITEM "&Save", ID_FILE_SAVE
+    MENUITEM SEPARATOR
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+  POPUP "&Edit"
+  BEGIN
+    MENUITEM "&Copy", ID_EDIT_COPY
+    MENUITEM "&Recolor", ID_EDIT_RECOLOR
+  END
+END
+
+// The menu while the program edits an object for a container.
+IDR_SRVR_EMBEDDED MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&Update", ID_FILE_UPDATE
+    MENUITEM "Save Copy &As...", ID_FILE_SAVE_COPY_AS
+    MENUITEM SEPARATOR
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+  POPUP "&Edit"
+  BEGIN
+    MENUITEM "&Copy", ID_EDIT_COPY
+    MENUITEM "&Recolor", ID_EDIT_RECOLOR
+  END
+END
+
+STRINGTABLE
+BEGIN
+  IDR_MAINFRAME "SrvTest\n\nSrvTest\nSrvTest Files (*.srt)\n.srt\nSrvTest.Document\nSrvTest Document"
+  AFX_IDS_APP_TITLE "SrvTest"
+END
+
+#include "afxres.rc"
+#include "afxolecl.rc"
+#include "afxolesv.rc"
