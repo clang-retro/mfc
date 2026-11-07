@@ -620,9 +620,11 @@ void CFileFind::Close() {
   m_pFoundInfo = NULL;
   delete m_pNextInfo;
   m_pNextInfo = NULL;
-  if (m_hContext != NULL && m_hContext != INVALID_HANDLE_VALUE) FindClose(m_hContext);
+  if (m_hContext != NULL && m_hContext != INVALID_HANDLE_VALUE) CloseContext();
   m_hContext = NULL;
 }
+
+void CFileFind::CloseContext() { ::FindClose(m_hContext); }
 
 BOOL CFileFind::FindFile(LPCTSTR pstrName, DWORD) {
   Close();
