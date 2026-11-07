@@ -1,0 +1,61 @@
+// docobtest.rc - resources for docobtest.
+#include <windows.h>
+#include <afxres.h>
+#include "docobtest.h"
+
+IDR_CNTR MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+END
+
+IDR_CNTR_INPLACE MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+  MENUITEM SEPARATOR
+  MENUITEM SEPARATOR
+END
+
+IDR_SRVR MENU
+BEGIN
+  POPUP "&Edit"
+  BEGIN
+    MENUITEM "&Copy", ID_EDIT_COPY
+  END
+END
+
+IDR_SRVR_EMBEDDED MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&Update", ID_FILE_UPDATE
+  END
+END
+
+IDR_SRVR_INPLACE MENU
+BEGIN
+  POPUP "&Edit"
+  BEGIN
+    MENUITEM "Cu&t", ID_EDIT_CUT
+    MENUITEM "&Copy", ID_EDIT_COPY
+    MENUITEM "&Recolor", ID_EDIT_RECOLOR
+  END
+  MENUITEM SEPARATOR
+  MENUITEM SEPARATOR
+END
+
+STRINGTABLE
+BEGIN
+  IDR_CNTR "DocCntr\n\nDocCntr"
+  IDR_SRVR "DocObTest\n\nDocObTest\nDocObTest Files (*.dob)\n.dob\nDocObTest.Document\nDocObTest Document"
+  AFX_IDS_APP_TITLE "DocObTest"
+END
+
+#include "afxres.rc"
+#include "afxolecl.rc"
+#include "afxolesv.rc"

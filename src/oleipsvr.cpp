@@ -6,6 +6,7 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 #include "afximpl.h"
 #include <afxole.h>
+#include <afxdocob.h>
 #include <afxpriv.h>
 
 #define OLE_TRY try {
@@ -389,10 +390,15 @@ BOOL COleServerDoc::ActivateInPlace() {
   CDocTemplate* pTemplate = GetDocTemplate();
   if (pTemplate == NULL || pTemplate->m_pOleFrameClass == NULL) return FALSE;
 
+  // A DocObject's view is active in the site its container gave the view.
   LPOLEINPLACESITE lpSite = NULL;
-  if (FAILED(m_lpClientSite->QueryInterface(IID_IOleInPlaceSite, (void**)&lpSite)) ||
-      lpSite == NULL)
+  if (m_pDocObjectServer != NULL && m_pDocObjectServer->m_pViewSite != NULL) {
+    lpSite = m_pDocObjectServer->m_pViewSite;
+    lpSite->AddRef();
+  } else if (FAILED(m_lpClientSite->QueryInterface(IID_IOleInPlaceSite, (void**)&lpSite)) ||
+             lpSite == NULL) {
     return FALSE;
+  }
   if (lpSite->CanInPlaceActivate() != S_OK || FAILED(lpSite->OnInPlaceActivate())) {
     lpSite->Release();
     return FALSE;

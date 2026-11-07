@@ -129,6 +129,12 @@ when there is no display:
   shared menu, both sides' accelerators, the server's toolbar in the
   container's frame, resizing through the resize bar, UI deactivation
   and full deactivation, and CRectTracker.
+* `docobtest`: Active Documents, with the container and the server in
+  one program: a COleDocObjectItem's document site makes the server's
+  document a DocObject, which shows over the whole of the container's
+  view; the test checks the view's rectangle, commands through
+  IOleCommandTarget (standard ones and an OLE command map's own), the
+  view state, closing the view, and the DocObject registration.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -182,6 +188,12 @@ request with the stock MinGW-w64 toolchain.
   shared menu through COleFrameHook (IOleInPlaceFrame), and the server
   shows its view in a COleIPFrameWnd with a COleResizeBar, from the
   in-place resources of SetServerInfo and CDocTemplate::CreateOleFrame.
+* `afxdocob.h`: Active Documents: CDocObjectServer (IOleDocument,
+  IOleDocumentView, IOleCommandTarget, IPrint) made by
+  COleServerDoc::GetDocObjectServer, CDocObjectServerItem, OLE command
+  maps (BEGIN_OLECMD_MAP, ON_OLECMD and the ON_OLECMD_* entries), and the
+  container's COleDocObjectItem; COleTemplateServer registers
+  OAT_DOC_OBJECT_SERVER classes as DocObjects.
 * `afxodlgs.h`: the OLE dialogs over oledlg: COleInsertDialog,
   COlePasteSpecialDialog, COleLinksDialog, COleUpdateDialog,
   COleChangeIconDialog, COleConvertDialog and COleBusyDialog, and the
@@ -234,6 +246,9 @@ request with the stock MinGW-w64 toolchain.
   with the container and server in one process. There Wine gives the
   container the server's own object rather than OLE's handler, and
   COleClientItem::Draw then draws from the object's metafile.
+* A DocObject prints through its Print command (OLECMDID_PRINT):
+  IPrint::Print and GetPageInfo are not implemented, so
+  COleDocObjectItem::GetPageCount says it does not know the pages.
 * The running object table holds a stand-in for a document or a linked
   item, which hands out the object's interfaces, so that the table does
   not keep open a document a link opened; asking it for IUnknown gives
