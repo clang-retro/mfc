@@ -1,11 +1,15 @@
 // richtest.cpp - a rich edit document and view: character and paragraph
 // formatting of the selection, finding and replacing, saving and loading
-// rich text and plain text, laying out printed pages, and word wrap.
+// rich text and plain text, laying out printed pages, word wrap, objects
+// embedded in the text, and the OLE dialogs.
 #include <afxwin.h>
 #include <afxext.h>
 #include <afxrich.h>
+#include <afxodlgs.h>
+#include <richole.h>
 #include "richtest.h"
 #include "testutil.h"
+#include "testobj.h"
 
 class CRichDoc : public CRichEditDoc {
   DECLARE_DYNCREATE(CRichDoc)
@@ -39,6 +43,37 @@ static CString ReadFileText(LPCTSTR lpszPath) {
   str = CString(p);
   delete[] p;
   return str;
+}
+
+// Ends the next dialog of this thread with nCloseID, from a thread timer
+// that runs inside the dialog's own message loop.
+static UINT_PTR s_nCloseTimer = 0;
+static int s_nCloseID = IDCANCEL;
+
+static BOOL CALLBACK FindDialog(HWND hWnd, LPARAM lParam) {
+  TCHAR szClass[16];
+  ::GetClassName(hWnd, szClass, 16);
+  if (lstrcmp(szClass, _T("#32770")) == 0 && ::IsWindowVisible(hWnd) && ::IsWindowEnabled(hWnd)) {
+    *(HWND*)lParam = hWnd;
+    return FALSE;
+  }
+  return TRUE;
+}
+
+static void CALLBACK CloseDialogTimer(HWND, UINT, UINT_PTR, DWORD) {
+  HWND hDlg = NULL;
+  ::EnumThreadWindows(::GetCurrentThreadId(), FindDialog, (LPARAM)&hDlg);
+  if (hDlg == NULL) return;
+  ::KillTimer(NULL, s_nCloseTimer);
+  s_nCloseTimer = 0;
+  ::PostMessage(hDlg, WM_COMMAND, MAKEWPARAM(s_nCloseID, BN_CLICKED),
+                (LPARAM)::GetDlgItem(hDlg, s_nCloseID));
+}
+
+static void AutoCloseDialog(int nID) {
+  if (s_nCloseTimer != 0) ::KillTimer(NULL, s_nCloseTimer);
+  s_nCloseID = nID;
+  s_nCloseTimer = ::SetTimer(NULL, 0, 300, CloseDialogTimer);
 }
 
 class CMainFrame : public CFrameWnd {
@@ -261,11 +296,115 @@ public:
         pView->m_nWordWrap = CRichEditView::WrapToWindow;
         pView->WrapChanged();
         Doc()->SetModifiedFlag(FALSE);
+        break;
+      }
+      case 5: {
+        // An object embedded in the text, through the view.
+        ctrl.SetWindowText(_T("ab"));
+        ctrl.SetSel(1, 1);
+        CRichEditCntrItem* pItem = Doc()->CreateClientItem(NULL);
+        BOOL bCreated = pItem->CreateNewItem(CLSID_TestObject);
+        CHECK(bCreated);
+        if (!bCreated) {
+          pItem->Delete();
+          break;
+        }
+        pView->InsertItem(pItem);
+        IRichEditOle* pReOle = ctrl.GetIRichEditOle();
+        CHECK(pReOle != NULL);
+        if (pReOle != NULL) {
+          TestLog("objects %ld", pReOle->GetObjectCount());
+          CHECK(pReOle->GetObjectCount() == 1);
+          pReOle->Release();
+        }
+        CHECK(pView->GetTextLength() == 3);
+        CHECK(Doc()->IsModified());
+        // Selecting the object's character selects the item.
+        ctrl.SetSel(1, 2);
+        CHECK(pView->GetSelectedItem() == pItem);
+        CHECK(pView->IsSelected(pItem));
+        ctrl.SetSel(0, 1);
+        CHECK(pView->GetSelectedItem() == NULL);
+        CHECK(!pView->IsSelected(pItem));
+        pView->UpdateWindow();
+        TestSaveWindowBitmap(m_hWnd, _T("richobj.bmp"));
+
+        // Saved as rich text the object goes with it, and comes back.
+        TCHAR szTemp[MAX_PATH];
+        ::GetTempPath(MAX_PATH, szTemp);
+        CString strRtf = CString(szTemp) + _T("richobj.rtf");
+        CHECK(Doc()->OnSaveDocument(strRtf));
+        CString strFile = ReadFileText(strRtf);
+        TestLog("rtf %d chars, object at %d", strFile.GetLength(), strFile.Find(_T("\\object")));
+        // Wine's rich edit writes only the object's picture.
+        CHECK(strFile.Find(_T("\\object")) >= 0 || strFile.Find(_T("\\pict")) >= 0);
+        CHECK(Doc()->OnOpenDocument(strRtf));
+        pReOle = ctrl.GetIRichEditOle();
+        if (pReOle != NULL) {
+          TestLog("objects after loading %ld", pReOle->GetObjectCount());
+          CHECK(pReOle->GetObjectCount() == 1);
+          pReOle->Release();
+        }
+        ctrl.SetSel(1, 2);
+        CRichEditCntrItem* pLoaded = pView->GetSelectedItem();
+        CHECK(pLoaded != NULL);
+        if (pLoaded != NULL) CHECK(pLoaded->GetDocument() == Doc());
+        ::DeleteFile(strRtf);
+        Doc()->SetModifiedFlag(FALSE);
+        break;
+      }
+      case 6: {
+        // The OLE dialogs: Insert Object, cancelled.
         KillTimer(1);
-        PostMessage(WM_CLOSE);
+        {
+          COleInsertDialog dlg;
+          AutoCloseDialog(IDCANCEL);
+          INT_PTR nResult = dlg.DoModal();
+          TestLog("insert object: %d (%u)", (int)nResult, dlg.GetLastError());
+          // Wine's oledlg ends a cancelled Insert Object with OLEUI_FALSE.
+          CHECK(nResult == IDCANCEL || (nResult == IDABORT && dlg.GetLastError() == OLEUI_FALSE));
+        }
+        // Paste Special over text on the clipboard: OK takes the text.
+        COleDataSource* pSource = new COleDataSource;
+        HGLOBAL hText = ::GlobalAlloc(GMEM_MOVEABLE, 6);
+        memcpy(::GlobalLock(hText), "paste", 6);
+        ::GlobalUnlock(hText);
+        pSource->CacheGlobalData(CF_TEXT, hText);
+        pSource->SetClipboard();
+        {
+          COlePasteSpecialDialog dlg;
+          dlg.AddFormat(CF_TEXT, TYMED_HGLOBAL, AFX_IDS_RTF_FORMAT_TEXT, FALSE, FALSE);
+          dlg.AddStandardFormats();
+          AutoCloseDialog(IDOK);
+          INT_PTR nResult = dlg.DoModal();
+          TestLog("paste special: %d (%u), index %d, type %u", (int)nResult, dlg.GetLastError(),
+                  dlg.GetPasteIndex(), dlg.GetSelectionType());
+          CHECK(nResult == IDOK);
+          CHECK(dlg.GetPasteIndex() == 0);
+          CHECK(dlg.GetSelectionType() == COlePasteSpecialDialog::pasteOther);
+        }
+        // ...and the view's command pastes it into the text.
+        ctrl.SetWindowText(_T(""));
+        AutoCloseDialog(IDOK);
+        pView->SendMessage(WM_COMMAND, ID_EDIT_PASTE_SPECIAL);
+        TestLog("after paste special: %s", (const char*)CStringA(Text()));
+        CHECK(Text() == _T("paste"));
+        ::OleSetClipboard(NULL);
+        // Links: no links, so whatever oledlg does with that, it ends.
+        {
+          COleLinksDialog dlg(Doc(), pView);
+          AutoCloseDialog(IDCANCEL);
+          INT_PTR nResult = dlg.DoModal();
+          TestLog("links: %d (%u)", (int)nResult, dlg.GetLastError());
+          CHECK(nResult == IDOK || nResult == IDCANCEL || nResult == IDABORT);
+        }
+        ::KillTimer(NULL, s_nCloseTimer);
+        s_nCloseTimer = 0;
+        SetTimer(1, 250, NULL);
         break;
       }
       default:
+        Doc()->SetModifiedFlag(FALSE);
         KillTimer(1);
         PostMessage(WM_CLOSE);
         break;
@@ -283,6 +422,12 @@ class CRichApp : public CWinApp {
 public:
   virtual BOOL InitInstance() {
     TestOpenLog(_T("richtest.log"));
+    if (!AfxOleInit()) {
+      TestLog("AfxOleInit failed");
+      g_nFailures++;
+      return FALSE;
+    }
+    RegisterTestObject();
     CSingleDocTemplate* pTemplate =
         new CSingleDocTemplate(IDR_MAINFRAME, RUNTIME_CLASS(CRichDoc), RUNTIME_CLASS(CMainFrame),
                                RUNTIME_CLASS(CRichEditView));
@@ -300,6 +445,7 @@ public:
     return TRUE;
   }
   virtual int ExitInstance() {
+    UnregisterTestObject();
     CWinApp::ExitInstance();
     return TestFinish();
   }
