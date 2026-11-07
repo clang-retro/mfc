@@ -15,9 +15,12 @@ static CLIPFORMAT RegisteredFormat(CLIPFORMAT& cf, LPCTSTR lpszName) {
   if (cf == 0) cf = (CLIPFORMAT)::RegisterClipboardFormat(lpszName);
   return cf;
 }
-static CLIPFORMAT s_cfEmbedSource, s_cfObjectDescriptor;
+static CLIPFORMAT s_cfEmbedSource, s_cfObjectDescriptor, s_cfLinkSource, s_cfLinkSrcDescriptor;
 #define CF_EMBEDSOURCE_ RegisteredFormat(s_cfEmbedSource, _T("Embed Source"))
 #define CF_OBJECTDESCRIPTOR_ RegisteredFormat(s_cfObjectDescriptor, _T("Object Descriptor"))
+#define CF_LINKSOURCE_ RegisteredFormat(s_cfLinkSource, _T("Link Source"))
+#define CF_LINKSRCDESCRIPTOR_ \
+  RegisteredFormat(s_cfLinkSrcDescriptor, _T("Link Source Descriptor"))
 
 // Runs an OLE call's work and turns an exception into its HRESULT.
 #define OLE_TRY try {
@@ -37,14 +40,82 @@ static LPOLESTR TaskString(LPCTSTR lpsz) {
 }
 
 // ---------------------------------------------------------------------
+// The running object table
+
+// What the running object table holds for a document or an item while it
+// runs. It hands out the target's interfaces, but the table's reference
+// is its own: a document a link opened closes when the links let go,
+// though the table still lists it. (Its IUnknown is its own, so COM keys
+// the table's stub on it and not on the target.)
+class CRunningStandIn : public IUnknown {
+public:
+  CCmdTarget* m_pTarget;
+  LONG m_cRef;
+  explicit CRunningStandIn(CCmdTarget* pTarget) : m_pTarget(pTarget), m_cRef(1) {}
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (ppv == NULL) return E_POINTER;
+    *ppv = NULL;
+    if (::IsEqualIID(iid, IID_IUnknown)) {
+      *ppv = this;
+      AddRef();
+      return S_OK;
+    }
+    if (m_pTarget == NULL) return CO_E_OBJNOTCONNECTED;
+    return (HRESULT)m_pTarget->ExternalQueryInterface(&iid, ppv);
+  }
+  STDMETHOD_(ULONG, AddRef)() { return (ULONG)::InterlockedIncrement(&m_cRef); }
+  STDMETHOD_(ULONG, Release)() {
+    LONG n = ::InterlockedDecrement(&m_cRef);
+    if (n == 0) delete this;
+    return (ULONG)n;
+  }
+};
+
+// Puts pTarget in the table under lpMoniker; FALSE if it could not.
+static BOOL RegisterRunning(CCmdTarget* pTarget, LPMONIKER lpMoniker, DWORD& dwRegister,
+                            LPUNKNOWN& lpRunning) {
+  dwRegister = 0;
+  lpRunning = NULL;
+  LPRUNNINGOBJECTTABLE lpROT = NULL;
+  if (FAILED(::GetRunningObjectTable(0, &lpROT))) return FALSE;
+  CRunningStandIn* pStandIn = new CRunningStandIn(pTarget);
+  HRESULT hr = lpROT->Register(0, pStandIn, lpMoniker, &dwRegister);
+  lpROT->Release();
+  if (FAILED(hr)) {
+    dwRegister = 0;
+    pStandIn->Release();
+    return FALSE;
+  }
+  lpRunning = pStandIn;
+  return TRUE;
+}
+
+static void RevokeRunning(DWORD& dwRegister, LPUNKNOWN& lpRunning) {
+  if (lpRunning != NULL) ((CRunningStandIn*)lpRunning)->m_pTarget = NULL;
+  if (dwRegister != 0) {
+    LPRUNNINGOBJECTTABLE lpROT = NULL;
+    if (SUCCEEDED(::GetRunningObjectTable(0, &lpROT))) {
+      lpROT->Revoke(dwRegister);
+      lpROT->Release();
+    }
+  }
+  if (lpRunning != NULL) lpRunning->Release();
+  dwRegister = 0;
+  lpRunning = NULL;
+}
+
+// ---------------------------------------------------------------------
 // COleLinkingDoc
 
 BEGIN_INTERFACE_MAP(COleLinkingDoc, COleDocument)
   INTERFACE_PART(COleLinkingDoc, IID_IPersist, PersistFile)
   INTERFACE_PART(COleLinkingDoc, IID_IPersistFile, PersistFile)
+  INTERFACE_PART(COleLinkingDoc, IID_IParseDisplayName, OleItemContainer)
+  INTERFACE_PART(COleLinkingDoc, IID_IOleContainer, OleItemContainer)
+  INTERFACE_PART(COleLinkingDoc, IID_IOleItemContainer, OleItemContainer)
 END_INTERFACE_MAP()
 
-COleLinkingDoc::COleLinkingDoc() : m_pFactory(NULL), m_dwRegister(0) {}
+COleLinkingDoc::COleLinkingDoc() : m_pFactory(NULL), m_dwRegister(0), m_lpRunning(NULL) {}
 
 COleLinkingDoc::~COleLinkingDoc() { Revoke(); }
 
@@ -55,26 +126,12 @@ BOOL COleLinkingDoc::Register(COleObjectFactory* pFactory, LPCTSTR lpszPathName)
   LPMONIKER lpMoniker = NULL;
   CStringW strPath(lpszPathName);
   if (FAILED(::CreateFileMoniker(strPath, &lpMoniker))) return FALSE;
-  LPRUNNINGOBJECTTABLE lpROT = NULL;
-  BOOL bResult = FALSE;
-  if (SUCCEEDED(::GetRunningObjectTable(0, &lpROT))) {
-    bResult = SUCCEEDED(lpROT->Register(0, (LPUNKNOWN)&m_xPersistFile, lpMoniker, &m_dwRegister));
-    if (!bResult) m_dwRegister = 0;
-    lpROT->Release();
-  }
+  BOOL bResult = RegisterRunning(this, lpMoniker, m_dwRegister, m_lpRunning);
   lpMoniker->Release();
   return bResult;
 }
 
-void COleLinkingDoc::Revoke() {
-  if (m_dwRegister == 0) return;
-  LPRUNNINGOBJECTTABLE lpROT = NULL;
-  if (SUCCEEDED(::GetRunningObjectTable(0, &lpROT))) {
-    lpROT->Revoke(m_dwRegister);
-    lpROT->Release();
-  }
-  m_dwRegister = 0;
-}
+void COleLinkingDoc::Revoke() { RevokeRunning(m_dwRegister, m_lpRunning); }
 
 // The factory this document's class comes from: the one it was registered
 // or created with, or its template's.
@@ -98,7 +155,26 @@ COleServerItem* COleLinkingDoc::OnGetLinkedItem(LPCTSTR lpszItemName) {
   return NULL;
 }
 
-COleClientItem* COleLinkingDoc::OnFindEmbeddedItem(LPCTSTR) { return NULL; }
+COleClientItem* COleLinkingDoc::OnFindEmbeddedItem(LPCTSTR lpszItemName) {
+  CStringW strName(lpszItemName);
+  POSITION pos = GetStartPosition();
+  while (pos != NULL) {
+    COleClientItem* pItem = GetNextClientItem(pos);
+    if (pItem == NULL || pItem->m_dwItemNumber == 0) continue;
+    WCHAR szName[64];
+    pItem->GetItemName(szName);
+    if (strName == szName) return pItem;
+  }
+  return NULL;
+}
+
+LPMONIKER COleLinkingDoc::GetMoniker(OLEGETMONIKER) {
+  if (m_strPathName.IsEmpty()) return NULL;
+  LPMONIKER lpMoniker = NULL;
+  CStringW strPath(m_strPathName);
+  if (FAILED(::CreateFileMoniker(strPath, &lpMoniker))) return NULL;
+  return lpMoniker;
+}
 
 BOOL COleLinkingDoc::OnNewDocument() {
   Revoke();
@@ -160,6 +236,8 @@ STDMETHODIMP COleLinkingDoc::XPersistFile::Load(LPCOLESTR lpszFileName, DWORD) {
   HRESULT hr = S_OK;
   OLE_TRY
     CString strPath(lpszFileName);
+    // A document made for a link (hidden, as for an embedding) is a file's.
+    pThis->m_bEmbedded = FALSE;
     if (!pThis->OnOpenDocument(strPath)) return E_FAIL;
     pThis->SetPathName(strPath, FALSE);
   OLE_CATCH(hr)
@@ -191,6 +269,135 @@ STDMETHODIMP COleLinkingDoc::XPersistFile::GetCurFile(LPOLESTR* lplpszFileName) 
                                                                : pThis->GetPathName());
   if (*lplpszFileName == NULL) return E_OUTOFMEMORY;
   return pThis->GetPathName().IsEmpty() ? S_FALSE : S_OK;
+}
+
+// IOleItemContainer: items are named after the document's moniker with
+// "!" before each name.
+
+STDMETHODIMP_(ULONG) COleLinkingDoc::XOleItemContainer::AddRef() {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, OleItemContainer)
+  return pThis->ExternalAddRef();
+}
+
+STDMETHODIMP_(ULONG) COleLinkingDoc::XOleItemContainer::Release() {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, OleItemContainer)
+  return pThis->ExternalRelease();
+}
+
+STDMETHODIMP COleLinkingDoc::XOleItemContainer::QueryInterface(REFIID iid, LPVOID* ppvObj) {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, OleItemContainer)
+  return pThis->ExternalQueryInterface(&iid, ppvObj);
+}
+
+STDMETHODIMP COleLinkingDoc::XOleItemContainer::ParseDisplayName(LPBC, LPOLESTR pszDisplayName,
+                                                                 ULONG* pchEaten,
+                                                                 LPMONIKER* ppmkOut) {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, OleItemContainer)
+  if (pszDisplayName == NULL || pchEaten == NULL || ppmkOut == NULL) return E_POINTER;
+  *ppmkOut = NULL;
+  *pchEaten = 0;
+  // The delimiter, then the name up to the next one.
+  LPCOLESTR p = pszDisplayName;
+  if (*p == L'!' || *p == L'/' || *p == L'\\' || *p == L':') p++;
+  LPCOLESTR pEnd = p;
+  while (*pEnd != 0 && *pEnd != L'!' && *pEnd != L'/' && *pEnd != L'\\' && *pEnd != L':')
+    pEnd++;
+  if (pEnd == p) return MK_E_SYNTAX;
+  CStringW strItem(p, (int)(pEnd - p));
+  HRESULT hr = S_OK;
+  OLE_TRY
+    CString strName(strItem);
+    if (pThis->OnFindEmbeddedItem(strName) == NULL && pThis->OnGetLinkedItem(strName) == NULL)
+      return MK_E_NOOBJECT;
+    hr = ::CreateItemMoniker(L"!", strItem, ppmkOut);
+  OLE_CATCH(hr)
+  if (SUCCEEDED(hr)) *pchEaten = (ULONG)(pEnd - pszDisplayName);
+  return hr;
+}
+
+STDMETHODIMP COleLinkingDoc::XOleItemContainer::EnumObjects(DWORD, LPENUMUNKNOWN* ppenum) {
+  if (ppenum != NULL) *ppenum = NULL;
+  return E_NOTIMPL;
+}
+
+// While a link is binding, the document stays.
+STDMETHODIMP COleLinkingDoc::XOleItemContainer::LockContainer(BOOL fLock) {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, OleItemContainer)
+  if (fLock)
+    pThis->ExternalAddRef();
+  else
+    pThis->ExternalRelease();
+  return S_OK;
+}
+
+STDMETHODIMP COleLinkingDoc::XOleItemContainer::GetObject(LPOLESTR pszItem, DWORD dwSpeedNeeded,
+                                                          LPBINDCTX, REFIID riid,
+                                                          LPVOID* ppvObject) {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, OleItemContainer)
+  if (pszItem == NULL || ppvObject == NULL) return E_POINTER;
+  *ppvObject = NULL;
+  HRESULT hr = MK_E_NOOBJECT;
+  OLE_TRY
+    CString strName(pszItem);
+    // An object embedded here, run for the link.
+    COleClientItem* pClient = pThis->OnFindEmbeddedItem(strName);
+    if (pClient != NULL) {
+      if (pClient->m_lpObject == NULL) return MK_E_NOOBJECT;
+      if (!::OleIsRunning(pClient->m_lpObject)) {
+        if (dwSpeedNeeded == BINDSPEED_IMMEDIATE) return MK_E_EXCEEDEDDEADLINE;
+        hr = ::OleRun(pClient->m_lpObject);
+        if (FAILED(hr)) return hr;
+      }
+      return pClient->m_lpObject->QueryInterface(riid, ppvObject);
+    }
+    COleServerItem* pItem = pThis->OnGetLinkedItem(strName);
+    if (pItem == NULL) return MK_E_NOOBJECT;
+    hr = (HRESULT)pItem->ExternalQueryInterface(&riid, ppvObject);
+    if (SUCCEEDED(hr) && !pItem->m_bLinkLocked &&
+        pItem->GetDocument() == (COleServerDoc*)pThis) {
+      // The links own the item from here and keep its document open; the
+      // last to go hands the item back (OnFinalRelease).
+      pItem->m_bLinkLocked = TRUE;
+      pThis->InternalAddRef();
+      pItem->InternalRelease();
+      pItem->RegisterLinked();
+    }
+  OLE_CATCH(hr)
+  return hr;
+}
+
+STDMETHODIMP COleLinkingDoc::XOleItemContainer::GetObjectStorage(LPOLESTR pszItem, LPBINDCTX,
+                                                                 REFIID riid,
+                                                                 LPVOID* ppvStorage) {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, OleItemContainer)
+  if (pszItem == NULL || ppvStorage == NULL) return E_POINTER;
+  *ppvStorage = NULL;
+  HRESULT hr = MK_E_NOOBJECT;
+  OLE_TRY
+    CString strName(pszItem);
+    COleClientItem* pClient = pThis->OnFindEmbeddedItem(strName);
+    if (pClient != NULL)
+      hr = pClient->m_lpStorage != NULL ? pClient->m_lpStorage->QueryInterface(riid, ppvStorage)
+                                        : MK_E_NOSTORAGE;
+    else if (pThis->OnGetLinkedItem(strName) != NULL)
+      hr = MK_E_NOSTORAGE;  // a server's items live in its document
+  OLE_CATCH(hr)
+  return hr;
+}
+
+STDMETHODIMP COleLinkingDoc::XOleItemContainer::IsRunning(LPOLESTR pszItem) {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, OleItemContainer)
+  if (pszItem == NULL) return E_POINTER;
+  HRESULT hr = MK_E_NOOBJECT;
+  OLE_TRY
+    CString strName(pszItem);
+    COleClientItem* pClient = pThis->OnFindEmbeddedItem(strName);
+    if (pClient != NULL)
+      hr = pClient->m_lpObject != NULL && ::OleIsRunning(pClient->m_lpObject) ? S_OK : S_FALSE;
+    else if (pThis->OnGetLinkedItem(strName) != NULL)
+      hr = S_OK;
+  OLE_CATCH(hr)
+  return hr;
 }
 
 // ---------------------------------------------------------------------
@@ -259,27 +466,113 @@ void COleServerDoc::UpdateAllItems(COleServerItem* pSender, LPARAM lHint, CObjec
   }
 }
 
+// The document's notifications go to its container and to the links to it
+// and to its items.
+
+// The server items, held while a notification goes out: a link that lets
+// go of its item there can delete it.
+static void ServerItems(COleServerDoc* pDoc, CPtrArray& items) {
+  POSITION pos = pDoc->GetStartPosition();
+  while (pos != NULL) {
+    CDocItem* pItem = pDoc->GetNextItem(pos);
+    if (pItem->IsKindOf(RUNTIME_CLASS(COleServerItem))) {
+      pItem->InternalAddRef();
+      items.Add(pItem);
+    }
+  }
+}
+
+static void ReleaseItems(CPtrArray& items) {
+  for (INT_PTR i = 0; i < items.GetSize(); i++) ((CDocItem*)items[i])->InternalRelease();
+}
+
 void COleServerDoc::NotifyChanged() {
   if (m_lpDataAdviseHolder != NULL)
     m_lpDataAdviseHolder->SendOnDataChange((LPDATAOBJECT)&m_xDataObject, 0, 0);
+  CPtrArray items;
+  ServerItems(this, items);
+  for (INT_PTR i = 0; i < items.GetSize(); i++) {
+    COleServerItem* pItem = (COleServerItem*)items[i];
+    if (pItem->m_lpDataAdviseHolder != NULL)
+      pItem->m_lpDataAdviseHolder->SendOnDataChange((LPDATAOBJECT)&pItem->m_xDataObject, 0, 0);
+  }
+  ReleaseItems(items);
 }
 
 void COleServerDoc::NotifyClosed() {
   if (m_lpOleAdviseHolder != NULL) m_lpOleAdviseHolder->SendOnClose();
+  CPtrArray items;
+  ServerItems(this, items);
+  for (INT_PTR i = 0; i < items.GetSize(); i++) {
+    COleServerItem* pItem = (COleServerItem*)items[i];
+    if (pItem->m_lpOleAdviseHolder != NULL) pItem->m_lpOleAdviseHolder->SendOnClose();
+  }
+  ReleaseItems(items);
 }
 
 void COleServerDoc::NotifySaved() {
   if (m_lpOleAdviseHolder != NULL) m_lpOleAdviseHolder->SendOnSave();
+  CPtrArray items;
+  ServerItems(this, items);
+  for (INT_PTR i = 0; i < items.GetSize(); i++) {
+    COleServerItem* pItem = (COleServerItem*)items[i];
+    if (pItem->m_lpOleAdviseHolder != NULL) pItem->m_lpOleAdviseHolder->SendOnSave();
+  }
+  ReleaseItems(items);
+}
+
+// The moniker of an item of the document at lpDoc: the document's own for
+// the embedded item, and "!name" after it for the others.
+static LPMONIKER ItemMoniker(COleServerItem* pItem, LPMONIKER lpDoc) {
+  if (lpDoc == NULL) return NULL;
+  if (!pItem->IsLinkedItem()) {
+    lpDoc->AddRef();
+    return lpDoc;
+  }
+  if (pItem->GetItemName().IsEmpty()) return NULL;
+  CStringW strName(pItem->GetItemName());
+  LPMONIKER lpItem = NULL;
+  if (FAILED(::CreateItemMoniker(L"!", strName, &lpItem))) return NULL;
+  LPMONIKER lpFull = NULL;
+  HRESULT hr = ::CreateGenericComposite(lpDoc, lpItem, &lpFull);
+  lpItem->Release();
+  return SUCCEEDED(hr) ? lpFull : NULL;
 }
 
 void COleServerDoc::NotifyRename(LPCTSTR lpszNewName) {
-  if (m_lpOleAdviseHolder == NULL) return;
   LPMONIKER lpMoniker = NULL;
   CStringW strName(lpszNewName);
-  if (SUCCEEDED(::CreateFileMoniker(strName, &lpMoniker))) {
-    m_lpOleAdviseHolder->SendOnRename(lpMoniker);
-    lpMoniker->Release();
+  if (FAILED(::CreateFileMoniker(strName, &lpMoniker))) return;
+  if (m_lpOleAdviseHolder != NULL) m_lpOleAdviseHolder->SendOnRename(lpMoniker);
+  CPtrArray items;
+  ServerItems(this, items);
+  for (INT_PTR i = 0; i < items.GetSize(); i++) {
+    COleServerItem* pItem = (COleServerItem*)items[i];
+    if (pItem->m_lpOleAdviseHolder == NULL) continue;
+    LPMONIKER lpItem = ItemMoniker(pItem, lpMoniker);
+    if (lpItem != NULL) {
+      pItem->m_lpOleAdviseHolder->SendOnRename(lpItem);
+      lpItem->Release();
+    }
   }
+  ReleaseItems(items);
+  lpMoniker->Release();
+}
+
+LPMONIKER COleServerDoc::GetMoniker(OLEGETMONIKER nAssign) {
+  if (!IsEmbedded()) return COleLinkingDoc::GetMoniker(nAssign);
+  if (m_lpClientSite == NULL) return NULL;
+  LPMONIKER lpMoniker = NULL;
+  if (FAILED(m_lpClientSite->GetMoniker(nAssign, OLEWHICHMK_OBJFULL, &lpMoniker))) return NULL;
+  return lpMoniker;
+}
+
+// Saving a file the links name tells them.
+BOOL COleServerDoc::OnSaveDocument(LPCTSTR lpszPathName) {
+  BOOL bRemember = m_bRemember;
+  if (!COleLinkingDoc::OnSaveDocument(lpszPathName)) return FALSE;
+  if (bRemember && !IsEmbedded()) NotifySaved();
+  return TRUE;
 }
 
 void COleServerDoc::SaveEmbedding() {
@@ -435,6 +728,13 @@ void COleServerDoc::OnCloseDocument() {
     m_lpClientSite->OnShowWindow(FALSE);
   }
   NotifyClosed();
+  // The links to the items let go of them.
+  {
+    CPtrArray items;
+    ServerItems(this, items);
+    for (INT_PTR i = 0; i < items.GetSize(); i++) ((COleServerItem*)items[i])->Disconnect();
+    ReleaseItems(items);
+  }
   ::CoDisconnectObject((LPUNKNOWN)&m_xOleObject, 0);
   if (m_lpClientSite != NULL) {
     m_lpClientSite->Release();
@@ -684,8 +984,12 @@ STDMETHODIMP COleServerDoc::XOleObject::GetMoniker(DWORD dwAssign, DWORD dwWhich
   METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
   if (ppmk == NULL) return E_POINTER;
   *ppmk = NULL;
-  if (pThis->m_lpClientSite == NULL) return E_UNEXPECTED;
-  return pThis->m_lpClientSite->GetMoniker(dwAssign, dwWhichMoniker, ppmk);
+  if (pThis->m_lpClientSite != NULL)
+    return pThis->m_lpClientSite->GetMoniker(dwAssign, dwWhichMoniker, ppmk);
+  if (pThis->IsEmbedded()) return E_UNEXPECTED;
+  // A link to the whole file: its moniker.
+  *ppmk = pThis->GetMoniker((OLEGETMONIKER)dwAssign);
+  return *ppmk != NULL ? S_OK : MK_E_UNAVAILABLE;
 }
 
 STDMETHODIMP COleServerDoc::XOleObject::InitFromData(LPDATAOBJECT, BOOL, DWORD) {
@@ -913,8 +1217,19 @@ STDMETHODIMP COleServerDoc::XDataObject::EnumDAdvise(LPENUMSTATDATA* ppenumAdvis
 // ---------------------------------------------------------------------
 // COleServerItem
 
+BEGIN_INTERFACE_MAP(COleServerItem, CDocItem)
+  INTERFACE_PART(COleServerItem, IID_IOleObject, OleObject)
+  INTERFACE_PART(COleServerItem, IID_IDataObject, DataObject)
+END_INTERFACE_MAP()
+
 COleServerItem::COleServerItem(COleServerDoc* pServerDoc, BOOL bAutoDelete)
-    : m_bAutoDelete(bAutoDelete), m_sizeExtent(0, 0) {
+    : m_bAutoDelete(bAutoDelete),
+      m_sizeExtent(0, 0),
+      m_lpOleAdviseHolder(NULL),
+      m_lpDataAdviseHolder(NULL),
+      m_bLinkLocked(FALSE),
+      m_dwRegister(0),
+      m_lpRunning(NULL) {
   m_dataSource.m_pItem = this;
   if (pServerDoc != NULL) pServerDoc->AddItem(this);
   // The picture, drawn by OnDraw when a container asks for it.
@@ -923,12 +1238,47 @@ COleServerItem::COleServerItem(COleServerDoc* pServerDoc, BOOL bAutoDelete)
 }
 
 COleServerItem::~COleServerItem() {
+  RevokeLinked();
+  if (m_lpOleAdviseHolder != NULL) m_lpOleAdviseHolder->Release();
+  if (m_lpDataAdviseHolder != NULL) m_lpDataAdviseHolder->Release();
   COleServerDoc* pDoc = GetDocument();
   if (pDoc != NULL && pDoc->m_pEmbeddedItem == this) pDoc->m_pEmbeddedItem = NULL;
 }
 
+// The last link let go: the item goes back to its document, or goes, and
+// lets the document close.
 void COleServerItem::OnFinalRelease() {
+  COleServerDoc* pDoc = m_bLinkLocked ? GetDocument() : NULL;
+  m_bLinkLocked = FALSE;
+  RevokeLinked();
   if (m_bAutoDelete) delete this;
+  if (pDoc != NULL) pDoc->InternalRelease();
+}
+
+// The links' connections end; their references go with the stubs.
+// A linked item is running while links hold it: the running object table
+// has it under its full moniker, which links ask to see that it runs.
+void COleServerItem::RegisterLinked() {
+  if (m_dwRegister != 0) return;
+  LPMONIKER lpMoniker = GetMoniker(OLEGETMONIKER_ONLYIFTHERE);
+  if (lpMoniker == NULL) return;
+  RegisterRunning(this, lpMoniker, m_dwRegister, m_lpRunning);
+  lpMoniker->Release();
+}
+
+void COleServerItem::RevokeLinked() { RevokeRunning(m_dwRegister, m_lpRunning); }
+
+void COleServerItem::Disconnect() {
+  RevokeLinked();
+  if (m_lpOleAdviseHolder != NULL) {
+    m_lpOleAdviseHolder->Release();
+    m_lpOleAdviseHolder = NULL;
+  }
+  if (m_lpDataAdviseHolder != NULL) {
+    m_lpDataAdviseHolder->Release();
+    m_lpDataAdviseHolder = NULL;
+  }
+  if (IsLinkedItem()) ::CoDisconnectObject((LPUNKNOWN)&m_xOleObject, 0);
 }
 
 BOOL COleServerItem::IsLinkedItem() const {
@@ -940,12 +1290,24 @@ BOOL COleServerItem::IsConnected() const {
   COleServerDoc* pDoc = GetDocument();
   if (pDoc == NULL) return FALSE;
   if (!IsLinkedItem()) return pDoc->m_lpClientSite != NULL;
-  return m_dwRef > 1;
+  return m_bLinkLocked || m_dwRef > 1;
 }
 
 void COleServerItem::NotifyChanged(DVASPECT) {
+  if (m_lpDataAdviseHolder != NULL)
+    m_lpDataAdviseHolder->SendOnDataChange((LPDATAOBJECT)&m_xDataObject, 0, 0);
   COleServerDoc* pDoc = GetDocument();
-  if (pDoc != NULL && !IsLinkedItem()) pDoc->NotifyChanged();
+  if (pDoc != NULL && !IsLinkedItem() && pDoc->m_lpDataAdviseHolder != NULL)
+    pDoc->m_lpDataAdviseHolder->SendOnDataChange((LPDATAOBJECT)&pDoc->m_xDataObject, 0, 0);
+}
+
+LPMONIKER COleServerItem::GetMoniker(OLEGETMONIKER nAssign) {
+  COleServerDoc* pDoc = GetDocument();
+  if (pDoc == NULL) return NULL;
+  LPMONIKER lpDoc = pDoc->GetMoniker(nAssign);
+  LPMONIKER lpMoniker = ItemMoniker(this, lpDoc);
+  if (lpDoc != NULL) lpDoc->Release();
+  return lpMoniker;
 }
 
 void COleServerItem::OnUpdate(COleServerItem*, LPARAM, CObject*, DVASPECT nDrawAspect) {
@@ -976,10 +1338,11 @@ void COleServerItem::OnDoVerb(LONG iVerb) {
 }
 
 // Showing the item activates it in place where the container and the
-// template allow, and opens it in a window otherwise.
+// template allow, and opens it in a window otherwise. A link's item opens
+// in the document's window.
 void COleServerItem::OnShow() {
   COleServerDoc* pDoc = GetDocument();
-  if (pDoc != NULL && pDoc->ActivateInPlace()) return;
+  if (pDoc != NULL && !IsLinkedItem() && pDoc->ActivateInPlace()) return;
   OnOpen();
 }
 
@@ -1169,14 +1532,47 @@ void COleServerItem::AddOtherClipboardData(COleDataSource* pDataSource) {
     pDataSource->CacheData(CF_METAFILEPICT, &stgMedium, &formatEtc);
 }
 
-void COleServerItem::GetClipboardData(COleDataSource* pDataSource, BOOL, LPPOINT lpOffset,
-                                      LPSIZE lpSize) {
+BOOL COleServerItem::GetLinkSourceData(LPSTGMEDIUM lpStgMedium) {
+  LPMONIKER lpMoniker = GetMoniker(OLEGETMONIKER_FORCEASSIGN);
+  if (lpMoniker == NULL) return FALSE;
+  LPSTREAM lpStream = NULL;
+  SCODE sc = ::CreateStreamOnHGlobal(NULL, TRUE, &lpStream);
+  if (SUCCEEDED(sc)) {
+    sc = ::OleSaveToStream((LPPERSISTSTREAM)lpMoniker, lpStream);
+    if (SUCCEEDED(sc)) {
+      CLSID clsid;
+      GetDocument()->GetClassIDOf(&clsid);
+      sc = ::WriteClassStm(lpStream, clsid);
+    }
+  }
+  lpMoniker->Release();
+  if (FAILED(sc)) {
+    if (lpStream != NULL) lpStream->Release();
+    return FALSE;
+  }
+  LARGE_INTEGER zero = {};
+  lpStream->Seek(zero, STREAM_SEEK_SET, NULL);
+  lpStgMedium->tymed = TYMED_ISTREAM;
+  lpStgMedium->pstm = lpStream;
+  lpStgMedium->pUnkForRelease = NULL;
+  return TRUE;
+}
+
+void COleServerItem::GetClipboardData(COleDataSource* pDataSource, BOOL bIncludeLink,
+                                      LPPOINT lpOffset, LPSIZE lpSize) {
   FORMATETC formatEtc = {CF_EMBEDSOURCE_, NULL, DVASPECT_CONTENT, -1, TYMED_ISTORAGE};
   STGMEDIUM stgMedium;
   GetEmbedSourceData(&stgMedium);
   pDataSource->CacheData(CF_EMBEDSOURCE_, &stgMedium, &formatEtc);
   GetObjectDescriptorData(lpOffset, lpSize, &stgMedium);
   pDataSource->CacheData(CF_OBJECTDESCRIPTOR_, &stgMedium);
+  // What Paste Link makes a link from, when the document has a file.
+  if (bIncludeLink && GetLinkSourceData(&stgMedium)) {
+    FORMATETC feLink = {CF_LINKSOURCE_, NULL, DVASPECT_CONTENT, -1, TYMED_ISTREAM};
+    pDataSource->CacheData(CF_LINKSOURCE_, &stgMedium, &feLink);
+    GetObjectDescriptorData(lpOffset, lpSize, &stgMedium);
+    pDataSource->CacheData(CF_LINKSRCDESCRIPTOR_, &stgMedium);
+  }
   AddOtherClipboardData(pDataSource);
 }
 
@@ -1216,6 +1612,270 @@ DROPEFFECT COleServerItem::DoDragDrop(LPCRECT lpItemRect, CPoint ptOffset, BOOL 
   }
   pDataSource->InternalRelease();
   return dropEffect;
+}
+
+// COleServerItem's IOleObject and IDataObject: what a link to one of the
+// document's items binds to (the embedded item is the document's).
+
+STDMETHODIMP_(ULONG) COleServerItem::XOleObject::AddRef() {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  return pThis->ExternalAddRef();
+}
+
+STDMETHODIMP_(ULONG) COleServerItem::XOleObject::Release() {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  return pThis->ExternalRelease();
+}
+
+STDMETHODIMP COleServerItem::XOleObject::QueryInterface(REFIID iid, LPVOID* ppvObj) {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  return pThis->ExternalQueryInterface(&iid, ppvObj);
+}
+
+// A link has no client site of the object's own.
+STDMETHODIMP COleServerItem::XOleObject::SetClientSite(LPOLECLIENTSITE) { return S_OK; }
+
+STDMETHODIMP COleServerItem::XOleObject::GetClientSite(LPOLECLIENTSITE* ppClientSite) {
+  if (ppClientSite == NULL) return E_POINTER;
+  *ppClientSite = NULL;
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP COleServerItem::XOleObject::SetHostNames(LPCOLESTR, LPCOLESTR) { return S_OK; }
+
+// Closing a link's item leaves the document open.
+STDMETHODIMP COleServerItem::XOleObject::Close(DWORD) { return S_OK; }
+
+STDMETHODIMP COleServerItem::XOleObject::SetMoniker(DWORD, LPMONIKER) { return S_OK; }
+
+STDMETHODIMP COleServerItem::XOleObject::GetMoniker(DWORD dwAssign, DWORD dwWhichMoniker,
+                                                    LPMONIKER* ppmk) {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  if (ppmk == NULL) return E_POINTER;
+  *ppmk = NULL;
+  COleServerDoc* pDoc = pThis->GetDocument();
+  if (pDoc == NULL) return E_UNEXPECTED;
+  HRESULT hr = MK_E_UNAVAILABLE;
+  OLE_TRY
+    switch (dwWhichMoniker) {
+      case OLEWHICHMK_CONTAINER:
+        *ppmk = pDoc->GetMoniker((OLEGETMONIKER)dwAssign);
+        break;
+      case OLEWHICHMK_OBJREL:
+        if (!pThis->GetItemName().IsEmpty()) {
+          CStringW strName(pThis->GetItemName());
+          if (FAILED(::CreateItemMoniker(L"!", strName, ppmk))) *ppmk = NULL;
+        }
+        break;
+      default:
+        *ppmk = pThis->GetMoniker((OLEGETMONIKER)dwAssign);
+        break;
+    }
+    if (*ppmk != NULL) hr = S_OK;
+  OLE_CATCH(hr)
+  return hr;
+}
+
+STDMETHODIMP COleServerItem::XOleObject::InitFromData(LPDATAOBJECT, BOOL, DWORD) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP COleServerItem::XOleObject::GetClipboardData(DWORD, LPDATAOBJECT* ppDataObject) {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  if (ppDataObject == NULL) return E_POINTER;
+  *ppDataObject = NULL;
+  HRESULT hr = S_OK;
+  COleDataSource* pDataSource = NULL;
+  OLE_TRY
+    pDataSource = new COleDataSource;
+    pThis->GetClipboardData(pDataSource, FALSE, NULL, NULL);
+    *ppDataObject = (LPDATAOBJECT)pDataSource->GetInterface(&IID_IDataObject);
+    pDataSource = NULL;  // its first reference is the caller's
+  OLE_CATCH(hr)
+  if (pDataSource != NULL) pDataSource->InternalRelease();
+  return hr;
+}
+
+STDMETHODIMP COleServerItem::XOleObject::DoVerb(LONG iVerb, LPMSG, LPOLECLIENTSITE, LONG, HWND,
+                                                LPCRECT) {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  HRESULT hr = S_OK;
+  pThis->InternalAddRef();
+  OLE_TRY
+    pThis->OnDoVerb(iVerb);
+  OLE_CATCH(hr)
+  pThis->InternalRelease();
+  return hr;
+}
+
+STDMETHODIMP COleServerItem::XOleObject::EnumVerbs(LPENUMOLEVERB* ppEnumOleVerb) {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  if (pThis->GetDocument() == NULL) return E_UNEXPECTED;
+  CLSID clsid;
+  pThis->GetDocument()->GetClassIDOf(&clsid);
+  return ::OleRegEnumVerbs(clsid, ppEnumOleVerb);
+}
+
+STDMETHODIMP COleServerItem::XOleObject::Update() {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  pThis->NotifyChanged();
+  return S_OK;
+}
+
+STDMETHODIMP COleServerItem::XOleObject::IsUpToDate() { return S_OK; }
+
+STDMETHODIMP COleServerItem::XOleObject::GetUserClassID(LPCLSID pClsid) {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  if (pClsid == NULL) return E_POINTER;
+  if (pThis->GetDocument() == NULL) return E_UNEXPECTED;
+  pThis->GetDocument()->GetClassIDOf(pClsid);
+  return S_OK;
+}
+
+STDMETHODIMP COleServerItem::XOleObject::GetUserType(DWORD dwFormOfType, LPOLESTR* pszUserType) {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  if (pThis->GetDocument() == NULL) return E_UNEXPECTED;
+  CLSID clsid;
+  pThis->GetDocument()->GetClassIDOf(&clsid);
+  return ::OleRegGetUserType(clsid, dwFormOfType, pszUserType);
+}
+
+STDMETHODIMP COleServerItem::XOleObject::SetExtent(DWORD dwDrawAspect, LPSIZEL psizel) {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  if (psizel == NULL) return E_POINTER;
+  HRESULT hr = E_FAIL;
+  OLE_TRY
+    if (pThis->OnSetExtent((DVASPECT)dwDrawAspect, CSize(psizel->cx, psizel->cy))) hr = S_OK;
+  OLE_CATCH(hr)
+  return hr;
+}
+
+STDMETHODIMP COleServerItem::XOleObject::GetExtent(DWORD dwDrawAspect, LPSIZEL psizel) {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  if (psizel == NULL) return E_POINTER;
+  HRESULT hr = E_FAIL;
+  OLE_TRY
+    CSize size(0, 0);
+    if (pThis->OnGetExtent((DVASPECT)dwDrawAspect, size)) {
+      psizel->cx = size.cx;
+      psizel->cy = size.cy;
+      hr = S_OK;
+    }
+  OLE_CATCH(hr)
+  return hr;
+}
+
+STDMETHODIMP COleServerItem::XOleObject::Advise(LPADVISESINK pAdvSink, DWORD* pdwConnection) {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  if (pThis->m_lpOleAdviseHolder == NULL &&
+      FAILED(::CreateOleAdviseHolder(&pThis->m_lpOleAdviseHolder)))
+    return E_OUTOFMEMORY;
+  return pThis->m_lpOleAdviseHolder->Advise(pAdvSink, pdwConnection);
+}
+
+STDMETHODIMP COleServerItem::XOleObject::Unadvise(DWORD dwConnection) {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  if (pThis->m_lpOleAdviseHolder == NULL) return OLE_E_NOCONNECTION;
+  return pThis->m_lpOleAdviseHolder->Unadvise(dwConnection);
+}
+
+STDMETHODIMP COleServerItem::XOleObject::EnumAdvise(LPENUMSTATDATA* ppenumAdvise) {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  if (ppenumAdvise == NULL) return E_POINTER;
+  *ppenumAdvise = NULL;
+  if (pThis->m_lpOleAdviseHolder == NULL) return E_FAIL;
+  return pThis->m_lpOleAdviseHolder->EnumAdvise(ppenumAdvise);
+}
+
+STDMETHODIMP COleServerItem::XOleObject::GetMiscStatus(DWORD dwAspect, DWORD* pdwStatus) {
+  METHOD_PROLOGUE_EX_(COleServerItem, OleObject)
+  if (pThis->GetDocument() == NULL) return E_UNEXPECTED;
+  CLSID clsid;
+  pThis->GetDocument()->GetClassIDOf(&clsid);
+  return ::OleRegGetMiscStatus(clsid, dwAspect, pdwStatus);
+}
+
+STDMETHODIMP COleServerItem::XOleObject::SetColorScheme(LPLOGPALETTE) { return E_NOTIMPL; }
+
+// IDataObject: the item's data source, and the link's advise connections.
+
+STDMETHODIMP_(ULONG) COleServerItem::XDataObject::AddRef() {
+  METHOD_PROLOGUE_EX_(COleServerItem, DataObject)
+  return pThis->ExternalAddRef();
+}
+
+STDMETHODIMP_(ULONG) COleServerItem::XDataObject::Release() {
+  METHOD_PROLOGUE_EX_(COleServerItem, DataObject)
+  return pThis->ExternalRelease();
+}
+
+STDMETHODIMP COleServerItem::XDataObject::QueryInterface(REFIID iid, LPVOID* ppvObj) {
+  METHOD_PROLOGUE_EX_(COleServerItem, DataObject)
+  return pThis->ExternalQueryInterface(&iid, ppvObj);
+}
+
+static LPDATAOBJECT SourceOf(COleServerItem* pItem) {
+  return (LPDATAOBJECT)pItem->GetDataSource()->GetInterface(&IID_IDataObject);
+}
+
+STDMETHODIMP COleServerItem::XDataObject::GetData(LPFORMATETC pformatetcIn, LPSTGMEDIUM pmedium) {
+  METHOD_PROLOGUE_EX_(COleServerItem, DataObject)
+  FORMATETC formatEtc;
+  return SourceOf(pThis)->GetData(PictureFormat(pformatetcIn, formatEtc), pmedium);
+}
+
+STDMETHODIMP COleServerItem::XDataObject::GetDataHere(LPFORMATETC pformatetc,
+                                                      LPSTGMEDIUM pmedium) {
+  METHOD_PROLOGUE_EX_(COleServerItem, DataObject)
+  return SourceOf(pThis)->GetDataHere(pformatetc, pmedium);
+}
+
+STDMETHODIMP COleServerItem::XDataObject::QueryGetData(LPFORMATETC pformatetc) {
+  METHOD_PROLOGUE_EX_(COleServerItem, DataObject)
+  FORMATETC formatEtc;
+  return SourceOf(pThis)->QueryGetData(PictureFormat(pformatetc, formatEtc));
+}
+
+STDMETHODIMP COleServerItem::XDataObject::GetCanonicalFormatEtc(LPFORMATETC pformatetcIn,
+                                                                LPFORMATETC pformatetcOut) {
+  METHOD_PROLOGUE_EX_(COleServerItem, DataObject)
+  return SourceOf(pThis)->GetCanonicalFormatEtc(pformatetcIn, pformatetcOut);
+}
+
+STDMETHODIMP COleServerItem::XDataObject::SetData(LPFORMATETC pformatetc, LPSTGMEDIUM pmedium,
+                                                  BOOL fRelease) {
+  METHOD_PROLOGUE_EX_(COleServerItem, DataObject)
+  return SourceOf(pThis)->SetData(pformatetc, pmedium, fRelease);
+}
+
+STDMETHODIMP COleServerItem::XDataObject::EnumFormatEtc(DWORD dwDirection,
+                                                        LPENUMFORMATETC* ppenumFormatEtc) {
+  METHOD_PROLOGUE_EX_(COleServerItem, DataObject)
+  return SourceOf(pThis)->EnumFormatEtc(dwDirection, ppenumFormatEtc);
+}
+
+STDMETHODIMP COleServerItem::XDataObject::DAdvise(LPFORMATETC pformatetc, DWORD advf,
+                                                  LPADVISESINK pAdvSink, DWORD* pdwConnection) {
+  METHOD_PROLOGUE_EX_(COleServerItem, DataObject)
+  if (pThis->m_lpDataAdviseHolder == NULL &&
+      FAILED(::CreateDataAdviseHolder(&pThis->m_lpDataAdviseHolder)))
+    return E_OUTOFMEMORY;
+  return pThis->m_lpDataAdviseHolder->Advise((LPDATAOBJECT)this, pformatetc, advf, pAdvSink,
+                                             pdwConnection);
+}
+
+STDMETHODIMP COleServerItem::XDataObject::DUnadvise(DWORD dwConnection) {
+  METHOD_PROLOGUE_EX_(COleServerItem, DataObject)
+  if (pThis->m_lpDataAdviseHolder == NULL) return OLE_E_NOCONNECTION;
+  return pThis->m_lpDataAdviseHolder->Unadvise(dwConnection);
+}
+
+STDMETHODIMP COleServerItem::XDataObject::EnumDAdvise(LPENUMSTATDATA* ppenumAdvise) {
+  METHOD_PROLOGUE_EX_(COleServerItem, DataObject)
+  if (ppenumAdvise == NULL) return E_POINTER;
+  *ppenumAdvise = NULL;
+  if (pThis->m_lpDataAdviseHolder == NULL) return E_FAIL;
+  return pThis->m_lpDataAdviseHolder->EnumAdvise(ppenumAdvise);
 }
 
 // ---------------------------------------------------------------------

@@ -310,6 +310,9 @@ public:
   virtual void LoadFromStorage();
   virtual void SaveToStorage(CObject* pObject = NULL);
   DWORD GetNewItemNumber() { return m_dwNextItemNumber++; }
+  // The document's moniker, which links to it and its items start with;
+  // NULL here, as only a COleLinkingDoc can be linked to.
+  virtual LPMONIKER GetMoniker(OLEGETMONIKER nAssign);
 
   LPSTORAGE m_lpRootStg;  // the open compound file, or a temporary one
   BOOL m_bCompoundFile;
@@ -533,6 +536,7 @@ public:
 
   DECLARE_INTERFACE_MAP()
   friend class COleFrameHook;
+  friend class COleLinkingDoc;
 };
 
 // COleFrameHook: a container frame as an object active in place sees it
@@ -611,8 +615,14 @@ public:
   BOOL Register(COleObjectFactory* pFactory, LPCTSTR lpszPathName);
   void Revoke();
 
+  // The item a link names ("!name" after the document's moniker): the
+  // server item of that name, or the embedded object of that name in a
+  // container. Override OnGetLinkedItem to make items as links ask.
   virtual COleServerItem* OnGetLinkedItem(LPCTSTR lpszItemName);
   virtual COleClientItem* OnFindEmbeddedItem(LPCTSTR lpszItemName);
+
+  // A file moniker of the document's path; NULL while it has none.
+  virtual LPMONIKER GetMoniker(OLEGETMONIKER nAssign);
 
   virtual BOOL OnNewDocument();
   virtual BOOL OnOpenDocument(LPCTSTR lpszPathName);
@@ -621,6 +631,9 @@ public:
 
   COleObjectFactory* m_pFactory;
   DWORD m_dwRegister;  // the running object table's cookie
+  // What the table holds: it hands out the document's interfaces without
+  // holding the document open itself.
+  LPUNKNOWN m_lpRunning;
 
 public:
   BEGIN_INTERFACE_PART(PersistFile, IPersistFile)
@@ -631,6 +644,19 @@ public:
     STDMETHOD(SaveCompleted)(LPCOLESTR lpszFileName);
     STDMETHOD(GetCurFile)(LPOLESTR* lplpszFileName);
   END_INTERFACE_PART(PersistFile)
+
+  // What an item moniker binds through: the document finds its items.
+  BEGIN_INTERFACE_PART(OleItemContainer, IOleItemContainer)
+    STDMETHOD(ParseDisplayName)(LPBC pbc, LPOLESTR pszDisplayName, ULONG* pchEaten,
+                                LPMONIKER* ppmkOut);
+    STDMETHOD(EnumObjects)(DWORD grfFlags, LPENUMUNKNOWN* ppenum);
+    STDMETHOD(LockContainer)(BOOL fLock);
+    STDMETHOD(GetObject)(LPOLESTR pszItem, DWORD dwSpeedNeeded, LPBINDCTX pbc, REFIID riid,
+                         LPVOID* ppvObject);
+    STDMETHOD(GetObjectStorage)(LPOLESTR pszItem, LPBINDCTX pbc, REFIID riid,
+                                LPVOID* ppvStorage);
+    STDMETHOD(IsRunning)(LPOLESTR pszItem);
+  END_INTERFACE_PART(OleItemContainer)
 
   DECLARE_INTERFACE_MAP()
 };
@@ -663,6 +689,9 @@ public:
 
   virtual BOOL OnUpdateDocument();
   virtual void OnShowDocument(BOOL bShow);
+  // An embedded document's moniker comes from its container.
+  virtual LPMONIKER GetMoniker(OLEGETMONIKER nAssign);
+  virtual BOOL OnSaveDocument(LPCTSTR lpszPathName);
 
   // In-place activation. ActivateInPlace makes the in-place frame in the
   // container's window and puts the menus and bars up; FALSE when the
@@ -921,6 +950,11 @@ public:
   // The document saved into a new storage ("Embed Source").
   void GetEmbedSourceData(LPSTGMEDIUM lpStgMedium);
   void GetObjectDescriptorData(LPPOINT lpOffset, LPSIZE lpSize, LPSTGMEDIUM lpStgMedium);
+  // The item's moniker and class in a stream ("Link Source"): what a
+  // container makes a link from. FALSE when the item has no moniker.
+  BOOL GetLinkSourceData(LPSTGMEDIUM lpStgMedium);
+  // The document's moniker, then "!" and the item's name for a linked item.
+  LPMONIKER GetMoniker(OLEGETMONIKER nAssign);
   BOOL GetMetafileData(LPFORMATETC lpFormatEtc, LPSTGMEDIUM lpStgMedium);
   virtual void AddOtherClipboardData(COleDataSource* pDataSource);
 
@@ -945,6 +979,12 @@ public:
   BOOL m_bAutoDelete;
   CString m_strItemName;
   CSize m_sizeExtent;  // HIMETRIC, for OnGetExtent's default
+  // A linked item's own connections; the embedded item uses its document's.
+  LPOLEADVISEHOLDER m_lpOleAdviseHolder;
+  LPDATAADVISEHOLDER m_lpDataAdviseHolder;
+  BOOL m_bLinkLocked;  // a link holds the item, and the item its document
+  DWORD m_dwRegister;  // while linked to: its running object table cookie
+  LPUNKNOWN m_lpRunning;
 
 protected:
   // The data source that asks the item to render.
@@ -959,6 +999,53 @@ protected:
   };
   CItemDataSource m_dataSource;
   friend class CItemDataSource;
+  friend class COleServerDoc;
+  friend class COleLinkingDoc;
+  void Disconnect();
+  void RegisterLinked();
+  void RevokeLinked();
+
+public:
+  // What a link to the item binds to.
+  BEGIN_INTERFACE_PART(OleObject, IOleObject)
+    STDMETHOD(SetClientSite)(LPOLECLIENTSITE pClientSite);
+    STDMETHOD(GetClientSite)(LPOLECLIENTSITE* ppClientSite);
+    STDMETHOD(SetHostNames)(LPCOLESTR szContainerApp, LPCOLESTR szContainerObj);
+    STDMETHOD(Close)(DWORD dwSaveOption);
+    STDMETHOD(SetMoniker)(DWORD dwWhichMoniker, LPMONIKER pmk);
+    STDMETHOD(GetMoniker)(DWORD dwAssign, DWORD dwWhichMoniker, LPMONIKER* ppmk);
+    STDMETHOD(InitFromData)(LPDATAOBJECT pDataObject, BOOL fCreation, DWORD dwReserved);
+    STDMETHOD(GetClipboardData)(DWORD dwReserved, LPDATAOBJECT* ppDataObject);
+    STDMETHOD(DoVerb)(LONG iVerb, LPMSG lpmsg, LPOLECLIENTSITE pActiveSite, LONG lindex,
+                      HWND hwndParent, LPCRECT lprcPosRect);
+    STDMETHOD(EnumVerbs)(LPENUMOLEVERB* ppEnumOleVerb);
+    STDMETHOD(Update)();
+    STDMETHOD(IsUpToDate)();
+    STDMETHOD(GetUserClassID)(LPCLSID pClsid);
+    STDMETHOD(GetUserType)(DWORD dwFormOfType, LPOLESTR* pszUserType);
+    STDMETHOD(SetExtent)(DWORD dwDrawAspect, LPSIZEL psizel);
+    STDMETHOD(GetExtent)(DWORD dwDrawAspect, LPSIZEL psizel);
+    STDMETHOD(Advise)(LPADVISESINK pAdvSink, DWORD* pdwConnection);
+    STDMETHOD(Unadvise)(DWORD dwConnection);
+    STDMETHOD(EnumAdvise)(LPENUMSTATDATA* ppenumAdvise);
+    STDMETHOD(GetMiscStatus)(DWORD dwAspect, DWORD* pdwStatus);
+    STDMETHOD(SetColorScheme)(LPLOGPALETTE pLogpal);
+  END_INTERFACE_PART(OleObject)
+
+  BEGIN_INTERFACE_PART(DataObject, IDataObject)
+    STDMETHOD(GetData)(LPFORMATETC pformatetcIn, LPSTGMEDIUM pmedium);
+    STDMETHOD(GetDataHere)(LPFORMATETC pformatetc, LPSTGMEDIUM pmedium);
+    STDMETHOD(QueryGetData)(LPFORMATETC pformatetc);
+    STDMETHOD(GetCanonicalFormatEtc)(LPFORMATETC pformatetcIn, LPFORMATETC pformatetcOut);
+    STDMETHOD(SetData)(LPFORMATETC pformatetc, LPSTGMEDIUM pmedium, BOOL fRelease);
+    STDMETHOD(EnumFormatEtc)(DWORD dwDirection, LPENUMFORMATETC* ppenumFormatEtc);
+    STDMETHOD(DAdvise)(LPFORMATETC pformatetc, DWORD advf, LPADVISESINK pAdvSink,
+                       DWORD* pdwConnection);
+    STDMETHOD(DUnadvise)(DWORD dwConnection);
+    STDMETHOD(EnumDAdvise)(LPENUMSTATDATA* ppenumAdvise);
+  END_INTERFACE_PART(DataObject)
+
+  DECLARE_INTERFACE_MAP()
 };
 
 // COleTemplateServer: the class factory that makes a new document of a

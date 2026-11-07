@@ -179,7 +179,9 @@ BOOL PASCAL COleClientItem::CanCreateFromData(const COleDataObject* pDataObject)
 
 BOOL PASCAL COleClientItem::CanCreateLinkFromData(const COleDataObject* pDataObject) {
   if (pDataObject == NULL || pDataObject->m_lpDataObject == NULL) return FALSE;
-  return ::OleQueryLinkFromData(pDataObject->m_lpDataObject) == S_OK;
+  if (::OleQueryLinkFromData(pDataObject->m_lpDataObject) == S_OK) return TRUE;
+  // What OleQueryLinkFromData looks for (Wine's always says no).
+  return const_cast<COleDataObject*>(pDataObject)->IsDataAvailable(CF_LINKSOURCE_);
 }
 
 BOOL PASCAL COleClientItem::CanPaste() {
@@ -1248,14 +1250,52 @@ STDMETHODIMP COleClientItem::XOleClientSite::SaveObject() {
   return S_OK;
 }
 
-STDMETHODIMP COleClientItem::XOleClientSite::GetMoniker(DWORD, DWORD, LPMONIKER* ppmk) {
+// The object's moniker in a container that can be linked to (a
+// COleLinkingDoc): the document's, then "!Embedding n".
+STDMETHODIMP COleClientItem::XOleClientSite::GetMoniker(DWORD dwAssign, DWORD dwWhichMoniker,
+                                                        LPMONIKER* ppmk) {
+  METHOD_PROLOGUE_EX(COleClientItem, OleClientSite)
+  if (ppmk == NULL) return E_POINTER;
   *ppmk = NULL;
-  return E_NOTIMPL;
+  COleDocument* pDoc = pThis->GetDocument();
+  if (pDoc == NULL) return E_FAIL;
+  LPMONIKER lpItem = NULL;
+  if (dwWhichMoniker != OLEWHICHMK_CONTAINER) {
+    if (pThis->m_dwItemNumber == 0) return E_FAIL;
+    WCHAR szName[64];
+    pThis->GetItemName(szName);
+    if (FAILED(::CreateItemMoniker(L"!", szName, &lpItem))) return E_FAIL;
+    if (dwWhichMoniker == OLEWHICHMK_OBJREL) {
+      *ppmk = lpItem;
+      return S_OK;
+    }
+  }
+  LPMONIKER lpDoc = NULL;
+  try {
+    lpDoc = pDoc->GetMoniker((OLEGETMONIKER)dwAssign);
+  } catch (CException* e) {
+    e->Delete();
+  }
+  HRESULT hr = E_FAIL;
+  if (lpDoc != NULL) {
+    if (lpItem == NULL) {
+      *ppmk = lpDoc;
+      return S_OK;
+    }
+    hr = ::CreateGenericComposite(lpDoc, lpItem, ppmk);
+    lpDoc->Release();
+  }
+  if (lpItem != NULL) lpItem->Release();
+  return hr;
 }
 
 STDMETHODIMP COleClientItem::XOleClientSite::GetContainer(LPOLECONTAINER* ppContainer) {
+  METHOD_PROLOGUE_EX(COleClientItem, OleClientSite)
+  if (ppContainer == NULL) return E_POINTER;
   *ppContainer = NULL;
-  return E_NOINTERFACE;
+  COleDocument* pDoc = pThis->GetDocument();
+  if (pDoc == NULL) return E_NOINTERFACE;
+  return (HRESULT)pDoc->ExternalQueryInterface(&IID_IOleContainer, (LPVOID*)ppContainer);
 }
 
 STDMETHODIMP COleClientItem::XOleClientSite::ShowObject() {

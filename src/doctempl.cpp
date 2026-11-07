@@ -394,6 +394,106 @@ CDocManager::~CDocManager() {
   }
 }
 
+static BOOL SetShellKey(LPCTSTR lpszKey, LPCTSTR lpszValue) {
+  HKEY hKey;
+  if (::RegCreateKeyEx(HKEY_CLASSES_ROOT, lpszKey, 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) !=
+      ERROR_SUCCESS)
+    return FALSE;
+  LONG l = ::RegSetValueEx(hKey, NULL, 0, REG_SZ, (const BYTE*)lpszValue,
+                           (DWORD)((lstrlen(lpszValue) + 1) * sizeof(TCHAR)));
+  ::RegCloseKey(hKey);
+  return l == ERROR_SUCCESS;
+}
+
+static CString ShellKeyValue(LPCTSTR lpszKey) {
+  TCHAR sz[MAX_PATH];
+  LONG cb = sizeof(sz);
+  if (::RegQueryValue(HKEY_CLASSES_ROOT, lpszKey, sz, &cb) != ERROR_SUCCESS) return CString();
+  return sz;
+}
+
+static void DeleteShellTree(HKEY hParent, LPCTSTR lpszKey) {
+  HKEY hKey;
+  if (::RegOpenKeyEx(hParent, lpszKey, 0, KEY_READ | KEY_WRITE, &hKey) != ERROR_SUCCESS) return;
+  TCHAR szName[256];
+  while (::RegEnumKey(hKey, 0, szName, _countof(szName)) == ERROR_SUCCESS)
+    DeleteShellTree(hKey, szName);
+  ::RegCloseKey(hKey);
+  ::RegDeleteKey(hParent, lpszKey);
+}
+
+// The extensions of a filter string such as ".txt;.log" (or "*.txt").
+static void ShellExtensions(const CString& strFilter, CStringArray& exts) {
+  int nStart = 0;
+  while (nStart < strFilter.GetLength()) {
+    int nEnd = strFilter.Find(_T(';'), nStart);
+    if (nEnd < 0) nEnd = strFilter.GetLength();
+    CString str = strFilter.Mid(nStart, nEnd - nStart);
+    str.TrimLeft();
+    str.TrimRight();
+    if (!str.IsEmpty() && str[0] == _T('*')) str = str.Mid(1);
+    if (str.GetLength() > 1 && str[0] == _T('.')) exts.Add(str);
+    nStart = nEnd + 1;
+  }
+}
+
+void CDocManager::RegisterShellFileTypes(BOOL bCompat) {
+  TCHAR szPath[MAX_PATH];
+  ::GetModuleFileName(AfxGetInstanceHandle(), szPath, MAX_PATH);
+  CString strPath = CString(_T("\"")) + szPath + _T("\"");
+  int nTemplate = 0;
+  POSITION pos = GetFirstDocTemplatePosition();
+  while (pos != NULL) {
+    CDocTemplate* pTemplate = GetNextDocTemplate(pos);
+    nTemplate++;
+    CString strTypeId, strTypeName, strFilter;
+    if (!pTemplate->GetDocString(strTypeId, CDocTemplate::regFileTypeId) || strTypeId.IsEmpty())
+      continue;
+    pTemplate->GetDocString(strTypeName, CDocTemplate::regFileTypeName);
+    pTemplate->GetDocString(strFilter, CDocTemplate::filterExt);
+    // The type's name, icon and commands; the name the user sees stays as
+    // the program first registered it.
+    if (strTypeName.IsEmpty()) strTypeName = strTypeId;
+    if (ShellKeyValue(strTypeId).IsEmpty()) SetShellKey(strTypeId, strTypeName);
+    CString strIcon;
+    strIcon.Format(_T("%s,%d"), szPath, nTemplate);
+    SetShellKey(strTypeId + _T("\\DefaultIcon"), strIcon);
+    SetShellKey(strTypeId + _T("\\shell\\open\\command"), strPath + _T(" \"%1\""));
+    if (bCompat) {
+      SetShellKey(strTypeId + _T("\\shell\\print\\command"), strPath + _T(" /p \"%1\""));
+      SetShellKey(strTypeId + _T("\\shell\\printto\\command"),
+                  strPath + _T(" /pt \"%1\" \"%2\" \"%3\" \"%4\""));
+    }
+    // Each extension is a file of the type, unless another program's
+    // type already has it.
+    CStringArray exts;
+    ShellExtensions(strFilter, exts);
+    for (INT_PTR i = 0; i < exts.GetSize(); i++) {
+      CString strOld = ShellKeyValue(exts[i]);
+      if (strOld.IsEmpty() || strOld == strTypeId) {
+        SetShellKey(exts[i], strTypeId);
+        if (bCompat) SetShellKey(exts[i] + _T("\\ShellNew\\NullFile"), _T(""));
+      }
+    }
+  }
+}
+
+void CDocManager::UnregisterShellFileTypes() {
+  POSITION pos = GetFirstDocTemplatePosition();
+  while (pos != NULL) {
+    CDocTemplate* pTemplate = GetNextDocTemplate(pos);
+    CString strTypeId, strFilter;
+    if (!pTemplate->GetDocString(strTypeId, CDocTemplate::regFileTypeId) || strTypeId.IsEmpty())
+      continue;
+    pTemplate->GetDocString(strFilter, CDocTemplate::filterExt);
+    CStringArray exts;
+    ShellExtensions(strFilter, exts);
+    for (INT_PTR i = 0; i < exts.GetSize(); i++)
+      if (ShellKeyValue(exts[i]) == strTypeId) DeleteShellTree(HKEY_CLASSES_ROOT, exts[i]);
+    DeleteShellTree(HKEY_CLASSES_ROOT, strTypeId);
+  }
+}
+
 void CDocManager::AddDocTemplate(CDocTemplate* pTemplate) {
   if (pTemplate == NULL) return;
   pTemplate->LoadTemplate();

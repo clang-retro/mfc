@@ -113,6 +113,13 @@ when there is no display:
   shown, changed, updated and closed through COleServerDoc and
   COleServerItem, the server's embedded menu and data, the object
   loaded again by a second server process, and its clipboard copy.
+* `linktest`: links to a server's files and their items, bound as a
+  container's link binds them: to an open document through the running
+  object table, and to a closed file whose class the shell registration
+  gives, which COM opens hidden and closes when the link lets go. It
+  checks the item's moniker, data and notifications, the item container,
+  the Link Source data Paste Link uses, and links to an object embedded
+  in a container's file.
 * `iptest`: in-place activation, with the container and the server in
   one program: the object activated in the container's view, the
   shared menu, both sides' accelerators, the server's toolbar in the
@@ -160,8 +167,11 @@ request with the stock MinGW-w64 toolchain.
   clipboard), COleStreamFile, AfxOleSetEditMenu. Programs can include
   `afxolecl.rc` for the container messages. Servers: COleServerDoc,
   COleServerItem (drawing, extents, verbs, data, the clipboard),
-  COleLinkingDoc, COleTemplateServer (registration, one object per
-  process for SDI), and the embedded menus of SetServerInfo, with
+  COleLinkingDoc (links to a file and to its items through monikers,
+  the running object table and IOleItemContainer, Link Source data on
+  the clipboard, and links to the objects a container embeds),
+  COleTemplateServer (registration, one object per process for SDI),
+  CWinApp::RegisterShellFileTypes, and the embedded menus of SetServerInfo, with
   `afxolesv.rc` for the Update and Exit menu text. In-place activation
   on both sides: the container's frame takes the object's toolbars and
   shared menu through COleFrameHook (IOleInPlaceFrame), and the server
@@ -205,7 +215,7 @@ request with the stock MinGW-w64 toolchain.
   inset, without waiting nScrollDelay. ActiveX control containment is
   not implemented yet. A connection point's cookie is the sink's
   interface pointer.
-* Servers do not give links to their items yet. COleDocument saves its items in its own format,
+* COleDocument saves its items in its own format,
   which is not the one Visual C++ MFC writes. Wine's
   OleCreateStaticFromData makes objects without IOleObject, so static
   items cannot be created under Wine.
@@ -220,6 +230,14 @@ request with the stock MinGW-w64 toolchain.
   with the container and server in one process. There Wine gives the
   container the server's own object rather than OLE's handler, and
   COleClientItem::Draw then draws from the object's metafile.
+* The running object table holds a stand-in for a document or a linked
+  item, which hands out the object's interfaces, so that the table does
+  not keep open a document a link opened; asking it for IUnknown gives
+  the stand-in. Wine's composite monikers bind only through the running
+  object table, so under Wine a link binds to an item whose document is
+  not open only when the item moniker is bound with the file's at its
+  left, and Wine's OleCreateLink and OleQueryLinkFromData are stubs
+  (CanPasteLink looks for Link Source itself).
 * Sockets are IPv4, as in MFC 6. `CAsyncSocket::FromHandle` returns
   only sockets attached in the calling thread, and NULL for others,
   rather than making a temporary object.

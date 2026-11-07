@@ -2943,8 +2943,10 @@ public:
   virtual void AddDocTemplate(CDocTemplate* pTemplate);
   virtual POSITION GetFirstDocTemplatePosition() const;
   virtual CDocTemplate* GetNextDocTemplate(POSITION& pos) const;
-  virtual void RegisterShellFileTypes(BOOL bCompat) { (void)bCompat; }
-  virtual void UnregisterShellFileTypes() {}
+  // Registers each template's file extension as its document type, which
+  // the shell opens (and with bCompat prints) with this program.
+  virtual void RegisterShellFileTypes(BOOL bCompat);
+  virtual void UnregisterShellFileTypes();
   virtual CDocument* OpenDocumentFile(LPCTSTR lpszFileName);
   virtual CDocument* OpenDocumentFile(LPCTSTR lpszFileName, BOOL bAddToMRU);
   virtual BOOL SaveAllModified();
