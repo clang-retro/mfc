@@ -18,7 +18,7 @@ BIN=${BIN:-}
 CXX=${BIN:+$BIN/}clang++
 RC=${RC:-${BIN:+$BIN/}llvm-windres}
 LDFLAGS=${LDFLAGS:-}
-TESTS=${TESTS:-"core disptest socktest dlgtest sditest mditest docktest splittest richtest dbtest rvtest autotest conntest dragtest oletest srvtest linktest richsrvtest iptest docobtest occtest ctltest"}
+TESTS=${TESTS:-"core disptest socktest dlgtest sditest mditest docktest splittest richtest dbtest rvtest autotest conntest dragtest oletest srvtest linktest richsrvtest iptest docobtest occtest ctltest dlltest"}
 
 if [ -z "${DISPLAY:-}" ] && [ -z "${MFC_TEST_NO_XVFB:-}" ] && command -v xvfb-run >/dev/null 2>&1; then
   MFC_TEST_NO_XVFB=1 exec xvfb-run -a -s "-screen 0 1024x768x24" "$0" "$@"
@@ -100,6 +100,20 @@ for v in a u; do
   for name in $TESTS; do
     exe=$T/$name-$v.exe
     srcs=tests/$name.cpp
+    # A test with a DLL of its own: tests/NAME-dll.cpp, with its exports
+    # in tests/NAME-dll.def and resources in tests/NAME-dll.rc.
+    if [ -f tests/$name-dll.cpp ]; then
+      dllsrcs="tests/$name-dll.cpp tests/$name-dll.def"
+      if [ -f tests/$name-dll.rc ]; then
+        "$RC" $RCFLAGS tests/$name-dll.rc -o "$T/$name-dll-res.o" 2>"$T/$name-dll-rc.log" || {
+          echo "FAIL   $name-$v (DLL resources)"; cat "$T/$name-dll-rc.log"; nfail=$((nfail + 1)); continue; }
+        dllsrcs="$dllsrcs $T/$name-dll-res.o"
+      fi
+      # shellcheck disable=SC2086
+      "$CXX" $CXXFLAGS $flags -shared $dllsrcs -L"$OUT" $LDFLAGS -o "$T/$name-dll-$v.dll" \
+        2>"$T/$name-dll-$v-build.log" || {
+        echo "FAIL   $name-$v (DLL build)"; cat "$T/$name-dll-$v-build.log"; nfail=$((nfail + 1)); continue; }
+    fi
     if [ -f tests/$name.rc ]; then
       "$RC" $RCFLAGS tests/$name.rc -o "$T/$name-res.o" 2>"$T/$name-rc.log" || {
         echo "FAIL   $name-$v (resources)"; cat "$T/$name-rc.log"; nfail=$((nfail + 1)); continue; }

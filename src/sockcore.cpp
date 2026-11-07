@@ -63,15 +63,15 @@ SockState* GetSockState() {
 HWND GetSocketWindow() {
   SockState* pState = GetSockState();
   if (pState->hSocketWindow == NULL) {
-    HINSTANCE hInst = ::GetModuleHandle(NULL);
+    // The module's own instance: a DLL with this library has its own
+    // window procedure.
+    HINSTANCE hInst = AfxGetInstanceHandle();
     WNDCLASS wc;
-    if (!::GetClassInfo(hInst, szSocketWindowClass, &wc)) {
-      memset(&wc, 0, sizeof(wc));
-      wc.lpfnWndProc = SocketWndProc;
-      wc.hInstance = hInst;
-      wc.lpszClassName = szSocketWindowClass;
-      ::RegisterClass(&wc);
-    }
+    memset(&wc, 0, sizeof(wc));
+    wc.lpfnWndProc = SocketWndProc;
+    wc.hInstance = hInst;
+    wc.lpszClassName = szSocketWindowClass;
+    AfxRegisterClass(&wc);
     // A hidden top-level window rather than a message-only one, which
     // Windows 95 and NT 4 do not have.
     pState->hSocketWindow = ::CreateWindowEx(0, szSocketWindowClass, _T("Socket Notification Sink"),

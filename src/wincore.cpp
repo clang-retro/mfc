@@ -678,7 +678,19 @@ void CWnd::OnNcDestroy() {
 BOOL AFXAPI AfxRegisterClass(WNDCLASS* lpWndClass) {
   WNDCLASS wndcls;
   if (::GetClassInfo(lpWndClass->hInstance, lpWndClass->lpszClassName, &wndcls)) return TRUE;
-  return ::RegisterClass(lpWndClass) != 0;
+  if (::RegisterClass(lpWndClass) == 0) return FALSE;
+  // Windows keeps a DLL's classes after the DLL unloads, with window
+  // procedures that are gone, so a DLL remembers its classes and takes
+  // them away in DllMain.
+  AFX_MODULE_STATE* pModuleState = AfxGetModuleState();
+  if (pModuleState->m_bDLL && !IS_INTRESOURCE(lpWndClass->lpszClassName)) {
+    AfxLockGlobals(0);
+    if (pModuleState->m_pstrUnregisterList == NULL)
+      pModuleState->m_pstrUnregisterList = new CStringArray;
+    pModuleState->m_pstrUnregisterList->Add(lpWndClass->lpszClassName);
+    AfxUnlockGlobals(0);
+  }
+  return TRUE;
 }
 
 LPCTSTR AFXAPI AfxRegisterWndClass(UINT nClassStyle, HCURSOR hCursor, HBRUSH hbrBackground,

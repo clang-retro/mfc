@@ -1,0 +1,18 @@
+// dlltest-dll.rc - resources of dlltest's DLL: strings with the same IDs
+// as the program's, and a dialog.
+#include <windows.h>
+#include <afxres.h>
+#include "dlltest.h"
+
+STRINGTABLE
+BEGIN
+  IDS_DLLCTL "DllTest Control"
+  IDS_FROMDLL "From the DLL"
+END
+
+IDD_DLLDLG DIALOGEX 0, 0, 160, 60
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 8, "MS Shell Dlg"
+BEGIN
+  LTEXT "", IDC_DLLTEXT, 7, 7, 146, 14
+END
