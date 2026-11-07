@@ -3,6 +3,9 @@
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 #include "afximpl.h"
+#include <afxocc.h>
+
+const _AFX_OCC_HOOKS* _afxOccHooks = NULL;
 
 IMPLEMENT_DYNCREATE(CWnd, CCmdTarget)
 
@@ -16,12 +19,15 @@ const TCHAR _afxWndControlBar[] = AFX_WNDCONTROLBAR;
 const TCHAR _afxWndMDIFrame[] = AFX_WNDMDIFRAME;
 const TCHAR _afxWndFrameOrView[] = AFX_WNDFRAMEORVIEW;
 
-CWnd::CWnd() : m_hWnd(NULL), m_pDropTarget(NULL), m_pfnSuper(NULL), m_hWndOwner(NULL), m_nFlags(0), m_nModalResult(0) {}
+CWnd::CWnd()
+    : m_hWnd(NULL), m_pDropTarget(NULL), m_pCtrlCont(NULL), m_pCtrlSite(NULL), m_pOccDialogInfo(NULL), m_pfnSuper(NULL), m_hWndOwner(NULL), m_nFlags(0), m_nModalResult(0) {}
 
 CWnd::CWnd(HWND hWnd)
-    : m_hWnd(hWnd), m_pDropTarget(NULL), m_pfnSuper(NULL), m_hWndOwner(NULL), m_nFlags(0), m_nModalResult(0) {}
+    : m_hWnd(hWnd), m_pDropTarget(NULL), m_pCtrlCont(NULL), m_pCtrlSite(NULL), m_pOccDialogInfo(NULL), m_pfnSuper(NULL), m_hWndOwner(NULL), m_nFlags(0), m_nModalResult(0) {}
 
 CWnd::~CWnd() {
+  // A hosted control's window object takes the control with it.
+  if (m_pCtrlSite != NULL && _afxOccHooks != NULL) _afxOccHooks->pfnDestroyControl(this);
   if (m_hWnd != NULL && this != &wndTop && this != &wndBottom && this != &wndTopMost &&
       this != &wndNoTopMost) {
     // Destroying the C++ object first destroys the window it owns.
@@ -200,6 +206,8 @@ BOOL CWnd::PreCreateWindow(CREATESTRUCT& cs) {
 }
 
 BOOL CWnd::DestroyWindow() {
+  // A hosted control's window goes with the control.
+  if (m_pCtrlSite != NULL && _afxOccHooks != NULL) return _afxOccHooks->pfnDestroyControl(this);
   if (m_hWnd == NULL) return FALSE;
   HWND hWndOrig = m_hWnd;
   CWnd* pWnd = FromHandlePermanent(hWndOrig);
@@ -279,10 +287,20 @@ LRESULT AFXAPI AfxCallWndProc(CWnd* pWnd, HWND hWnd, UINT nMsg, WPARAM wParam, L
 }
 
 LRESULT CWnd::WindowProc(UINT message, WPARAM wParam, LPARAM lParam) {
+  // A dialog template's ActiveX controls are there before OnInitDialog.
+  if (message == WM_INITDIALOG && m_pOccDialogInfo != NULL && _afxOccHooks != NULL)
+    _afxOccHooks->pfnInitDialog(this);
   LRESULT lResult = 0;
   if (!OnWndMsg(message, wParam, lParam, &lResult))
     lResult = DefWindowProc(message, wParam, lParam);
+  // The hosted controls close after the window's own OnDestroy.
+  if (message == WM_DESTROY && m_pCtrlCont != NULL && _afxOccHooks != NULL)
+    _afxOccHooks->pfnDestroy(this);
   return lResult;
+}
+
+BOOL CWnd::OnAmbientProperty(COleControlSite* pSite, DISPID dispid, VARIANT* pvar) {
+  return m_pCtrlCont != NULL && m_pCtrlCont->GetAmbientProp(pSite, dispid, pvar);
 }
 
 LRESULT CWnd::DefWindowProc(UINT nMsg, WPARAM wParam, LPARAM lParam) {
@@ -628,6 +646,8 @@ void CWnd::OnNcDestroy() {
   if (m_pDropTarget != NULL && _afxPfnRevokeDropTarget != NULL)
     _afxPfnRevokeDropTarget(m_pDropTarget);
   m_pDropTarget = NULL;
+  if ((m_pCtrlCont != NULL || m_pCtrlSite != NULL) && _afxOccHooks != NULL)
+    _afxOccHooks->pfnNcDestroy(this);
 
   // The main window going away ends the thread's message loop.
   CWinThread* pThread = AfxGetThread();

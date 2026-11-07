@@ -1,0 +1,25 @@
+// occtest.rc - resources for occtest: a dialog with two ActiveX controls
+// among ordinary ones, and the saved state of one of them.
+#include <windows.h>
+#include <afxres.h>
+#include "occtest.h"
+
+IDD_CTLDLG DIALOGEX 0, 0, 220, 120
+STYLE DS_SETFONT | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+CAPTION "Controls"
+FONT 8, "MS Shell Dlg"
+BEGIN
+  EDITTEXT IDC_EDIT1, 7, 7, 100, 14
+  CONTROL "Dialog control", IDC_DLGCTL, "{5B7C2E41-9D3A-4C6F-8E12-7A4D0B9C3E51}", WS_TABSTOP, 7, 28, 100, 30
+  CONTROL "", IDC_DLGCTL2, "{5B7C2E41-9D3A-4C6F-8E12-7A4D0B9C3E51}", WS_TABSTOP | WS_DISABLED, 113, 28, 100, 30
+  DEFPUSHBUTTON "OK", IDOK, 109, 99, 50, 14
+  PUSHBUTTON "Cancel", IDCANCEL, 163, 99, 50, 14
+END
+
+// DLGINIT (type 240): the second control loads Value 1234 from a stream;
+// the first starts new.
+IDD_CTLDLG 240
+BEGIN
+  IDC_DLGCTL2, 0x0376, 4, 0, 1234, 0,
+  0
+END

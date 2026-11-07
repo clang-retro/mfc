@@ -711,6 +711,90 @@ inline AFX_DISPINVOKE _AfxDispThunk(R (C::*)(A...) const) {
    NULL, NULL},
 
 // ---------------------------------------------------------------------
+// Event sink maps: a container's handlers for the events of the controls
+// it hosts, by control ID and dispatch ID. A handler returns void, or
+// BOOL with FALSE to let the event go on to other handlers.
+
+enum {
+  _AFX_EVENTSINK_END = 0,
+  _AFX_EVENTSINK_EVENT,
+  _AFX_EVENTSINK_REQUEST,  // a property's OnRequestEdit
+  _AFX_EVENTSINK_CHANGED   // a property's OnChanged
+};
+
+struct AFX_EVENTSINKMAP_ENTRY {
+  AFX_DISPMAP_ENTRY dispEntry;
+  UINT nCtrlIDFirst;  // (UINT)-1 for the _REFLECT entries of a control's own window
+  UINT nCtrlIDLast;
+  int nEventKind;
+  BOOL bRange;  // the handler takes the control ID first
+};
+
+#define BEGIN_EVENTSINK_MAP(theClass, baseClass) \
+  const AFX_EVENTSINKMAP* theClass::GetEventSinkMap() const { return GetThisEventSinkMap(); } \
+  const AFX_EVENTSINKMAP* PASCAL theClass::GetThisEventSinkMap() { \
+    typedef baseClass TheBaseClass; \
+    static const AFX_EVENTSINKMAP_ENTRY _eventsinkEntries[] = {
+
+#define END_EVENTSINK_MAP() \
+      {{NULL, DISPID_UNKNOWN, NULL, VT_EMPTY, _AFX_DISP_END, _AFX_DISP_NOFN, _AFX_DISP_NOFN, NULL, \
+        NULL}, \
+       0, 0, _AFX_EVENTSINK_END, FALSE}}; \
+    static const AFX_EVENTSINKMAP eventsinkMap = {&TheBaseClass::GetThisEventSinkMap, \
+                                                  &_eventsinkEntries[0]}; \
+    return &eventsinkMap; \
+  }
+
+#define _AFX_EVENTSINK_ENTRY(theClass, idFirst, idLast, dispid, pfn, vtsParams, kind, bRange) \
+  {{_T(""), (long)(dispid), vtsParams, VT_EMPTY, _AFX_DISP_METHOD, _AFX_DISP_FN(theClass, pfn), \
+    _AFX_DISP_NOFN, NULL, NULL}, \
+   (UINT)(idFirst), (UINT)(idLast), kind, bRange},
+
+#define ON_EVENT(theClass, id, dispid, pfnHandler, vtsParams) \
+  _AFX_EVENTSINK_ENTRY(theClass, id, id, dispid, pfnHandler, vtsParams, _AFX_EVENTSINK_EVENT, FALSE)
+#define ON_EVENT_RANGE(theClass, idFirst, idLast, dispid, pfnHandler, vtsParams) \
+  _AFX_EVENTSINK_ENTRY(theClass, idFirst, idLast, dispid, pfnHandler, vtsParams, \
+                       _AFX_EVENTSINK_EVENT, TRUE)
+#define ON_EVENT_REFLECT(theClass, dispid, pfnHandler, vtsParams) \
+  _AFX_EVENTSINK_ENTRY(theClass, -1, -1, dispid, pfnHandler, vtsParams, _AFX_EVENTSINK_EVENT, \
+                       FALSE)
+// pfnRequest is BOOL (BOOL* pbAllow): it sets *pbAllow to FALSE to keep
+// the property as it is. pfnChanged is BOOL ().
+#define ON_PROPNOTIFY(theClass, id, dispid, pfnRequest, pfnChanged) \
+  _AFX_EVENTSINK_ENTRY(theClass, id, id, dispid, pfnRequest, VTS_PBOOL, _AFX_EVENTSINK_REQUEST, \
+                       FALSE) \
+  _AFX_EVENTSINK_ENTRY(theClass, id, id, dispid, pfnChanged, VTS_NONE, _AFX_EVENTSINK_CHANGED, \
+                       FALSE)
+#define ON_PROPNOTIFY_RANGE(theClass, idFirst, idLast, dispid, pfnRequest, pfnChanged) \
+  _AFX_EVENTSINK_ENTRY(theClass, idFirst, idLast, dispid, pfnRequest, VTS_PBOOL, \
+                       _AFX_EVENTSINK_REQUEST, TRUE) \
+  _AFX_EVENTSINK_ENTRY(theClass, idFirst, idLast, dispid, pfnChanged, VTS_NONE, \
+                       _AFX_EVENTSINK_CHANGED, TRUE)
+#define ON_PROPNOTIFY_REFLECT(theClass, dispid, pfnRequest, pfnChanged) \
+  _AFX_EVENTSINK_ENTRY(theClass, -1, -1, dispid, pfnRequest, VTS_PBOOL, _AFX_EVENTSINK_REQUEST, \
+                       FALSE) \
+  _AFX_EVENTSINK_ENTRY(theClass, -1, -1, dispid, pfnChanged, VTS_NONE, _AFX_EVENTSINK_CHANGED, \
+                       FALSE)
+
+// Dialog data exchange with the properties of a control in a dialog.
+void AFXAPI DDX_OCText(CDataExchange* pDX, int nIDC, DISPID dispid, CString& value);
+void AFXAPI DDX_OCTextRO(CDataExchange* pDX, int nIDC, DISPID dispid, CString& value);
+void AFXAPI DDX_OCBool(CDataExchange* pDX, int nIDC, DISPID dispid, BOOL& value);
+void AFXAPI DDX_OCBoolRO(CDataExchange* pDX, int nIDC, DISPID dispid, BOOL& value);
+void AFXAPI DDX_OCInt(CDataExchange* pDX, int nIDC, DISPID dispid, int& value);
+void AFXAPI DDX_OCInt(CDataExchange* pDX, int nIDC, DISPID dispid, long& value);
+void AFXAPI DDX_OCIntRO(CDataExchange* pDX, int nIDC, DISPID dispid, int& value);
+void AFXAPI DDX_OCIntRO(CDataExchange* pDX, int nIDC, DISPID dispid, long& value);
+void AFXAPI DDX_OCShort(CDataExchange* pDX, int nIDC, DISPID dispid, short& value);
+void AFXAPI DDX_OCShortRO(CDataExchange* pDX, int nIDC, DISPID dispid, short& value);
+void AFXAPI DDX_OCColor(CDataExchange* pDX, int nIDC, DISPID dispid, OLE_COLOR& value);
+void AFXAPI DDX_OCColorRO(CDataExchange* pDX, int nIDC, DISPID dispid, OLE_COLOR& value);
+void AFXAPI DDX_OCFloat(CDataExchange* pDX, int nIDC, DISPID dispid, float& value);
+void AFXAPI DDX_OCFloat(CDataExchange* pDX, int nIDC, DISPID dispid, double& value);
+void AFXAPI DDX_OCFloatRO(CDataExchange* pDX, int nIDC, DISPID dispid, float& value);
+void AFXAPI DDX_OCFloatRO(CDataExchange* pDX, int nIDC, DISPID dispid, double& value);
+
+// ---------------------------------------------------------------------
 // Class factories. DECLARE_OLECREATE gives a class a COleObjectFactory
 // that creates it for COM clients; IMPLEMENT_OLECREATE names its CLSID
 // and ProgID.

@@ -334,7 +334,10 @@ void AFXAPI DDX_Slider(CDataExchange* pDX, int nIDC, int& value) {
 }
 
 void AFXAPI DDX_Control(CDataExchange* pDX, int nIDC, CWnd& rControl) {
-  if (rControl.m_hWnd == NULL) {  // only subclass once
+  if (rControl.m_hWnd == NULL && rControl.m_pCtrlSite == NULL) {  // only subclass once
+    // An ActiveX control's window object takes its site.
+    if (_afxOccHooks != NULL && _afxOccHooks->pfnDDXControl(pDX->m_pDlgWnd, nIDC, rControl))
+      return;
     HWND hWndCtrl = pDX->PrepareCtrl(nIDC);
     if (!rControl.SubclassWindow(hWndCtrl)) AfxThrowNotSupportedException();
   }

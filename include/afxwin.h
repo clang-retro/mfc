@@ -48,6 +48,9 @@ class CMenu;
 class CCmdTarget;
 class CCmdUI;
 class COleDropTarget;
+class COleControlContainer;
+class COleControlSite;
+struct _AFX_OCC_DIALOG_INFO;
 class COleDataObject;
 typedef DWORD DROPEFFECT;
 class CWnd;
@@ -1072,6 +1075,48 @@ public:
 class CTypeLibCache;
 class CConnectionPoint;
 
+// An event, a property change or a request to change a property, from an
+// ActiveX control to its container's event sink map (CN_EVENT).
+struct AFX_EVENT {
+  enum { event, propRequest, propChanged, propDSCNotify };
+  AFX_EVENT(int eventKind)
+      : m_eventKind(eventKind),
+        m_dispid(DISPID_UNKNOWN),
+        m_pDispParams(NULL),
+        m_pExcepInfo(NULL),
+        m_puArgError(NULL),
+        m_bPropChanged(FALSE),
+        m_hResult(S_OK) {}
+  AFX_EVENT(int eventKind, DISPID dispid, DISPPARAMS* pDispParams = NULL,
+            EXCEPINFO* pExcepInfo = NULL, UINT* puArgError = NULL)
+      : m_eventKind(eventKind),
+        m_dispid(dispid),
+        m_pDispParams(pDispParams),
+        m_pExcepInfo(pExcepInfo),
+        m_puArgError(puArgError),
+        m_bPropChanged(FALSE),
+        m_hResult(S_OK) {}
+  int m_eventKind;
+  DISPID m_dispid;
+  DISPPARAMS* m_pDispParams;
+  EXCEPINFO* m_pExcepInfo;
+  UINT* m_puArgError;
+  BOOL m_bPropChanged;
+  HRESULT m_hResult;
+};
+
+// Event sink maps, filled by the ON_EVENT macros of afxdisp.h.
+struct AFX_EVENTSINKMAP_ENTRY;
+struct AFX_EVENTSINKMAP {
+  const AFX_EVENTSINKMAP* (PASCAL* pfnGetBaseMap)();
+  const AFX_EVENTSINKMAP_ENTRY* lpEntries;
+};
+
+#define DECLARE_EVENTSINK_MAP() \
+protected: \
+  static const AFX_EVENTSINKMAP* PASCAL GetThisEventSinkMap(); \
+  virtual const AFX_EVENTSINKMAP* GetEventSinkMap() const;
+
 class _AfxInnerUnknownImpl : public IUnknown {
 public:
   STDMETHOD(QueryInterface)(REFIID iid, LPVOID* ppvObj);
@@ -1119,6 +1164,9 @@ public:
   virtual BOOL GetExtraConnectionPoints(CPtrArray*) { return FALSE; }
   CConnectionPoint* FindConnection(REFIID iid);
 
+  // An event from a control, through the event sink map (CN_EVENT).
+  virtual BOOL OnEvent(UINT idCtrl, AFX_EVENT* pEvent, AFX_CMDHANDLERINFO* pHandlerInfo);
+
   // Reference counting and interfaces. The External functions go to the
   // controlling unknown when the object is aggregated.
   virtual void OnFinalRelease();
@@ -1160,6 +1208,7 @@ public:
   DECLARE_DISPATCH_MAP()
   DECLARE_INTERFACE_MAP()
   DECLARE_CONNECTION_MAP()
+  DECLARE_EVENTSINK_MAP()
 };
 
 class CCmdUI {
@@ -1221,14 +1270,12 @@ public:
   BOOL operator==(const CWnd& wnd) const { return wnd.m_hWnd == m_hWnd; }
   BOOL operator!=(const CWnd& wnd) const { return wnd.m_hWnd != m_hWnd; }
 
-  DWORD GetStyle() const { return (DWORD)::GetWindowLong(m_hWnd, GWL_STYLE); }
-  DWORD GetExStyle() const { return (DWORD)::GetWindowLong(m_hWnd, GWL_EXSTYLE); }
-  BOOL ModifyStyle(DWORD dwRemove, DWORD dwAdd, UINT nFlags = 0) {
-    return ModifyStyle(m_hWnd, dwRemove, dwAdd, nFlags);
-  }
-  BOOL ModifyStyleEx(DWORD dwRemove, DWORD dwAdd, UINT nFlags = 0) {
-    return ModifyStyleEx(m_hWnd, dwRemove, dwAdd, nFlags);
-  }
+  // These go to the control, for the window object of an ActiveX
+  // control (winocc.cpp).
+  DWORD GetStyle() const;
+  DWORD GetExStyle() const;
+  BOOL ModifyStyle(DWORD dwRemove, DWORD dwAdd, UINT nFlags = 0);
+  BOOL ModifyStyleEx(DWORD dwRemove, DWORD dwAdd, UINT nFlags = 0);
   static BOOL PASCAL ModifyStyle(HWND hWnd, DWORD dwRemove, DWORD dwAdd, UINT nFlags);
   static BOOL PASCAL ModifyStyleEx(HWND hWnd, DWORD dwRemove, DWORD dwAdd, UINT nFlags);
 
@@ -1259,6 +1306,32 @@ public:
   BOOL ExecuteDlgInit(LPCTSTR lpszResourceName);
   BOOL ExecuteDlgInit(LPVOID lpResource);
 
+  // ActiveX controls: this object becomes a window for a control that
+  // pParentWnd hosts. The control's own window does the work, and its
+  // properties and methods are reached through InvokeHelper.
+  BOOL CreateControl(REFCLSID clsid, LPCTSTR pszWindowName, DWORD dwStyle, const RECT& rect,
+                     CWnd* pParentWnd, UINT nID, CFile* pPersist = NULL, BOOL bStorage = FALSE,
+                     BSTR bstrLicKey = NULL);
+  BOOL CreateControl(LPCTSTR pszClass, LPCTSTR pszWindowName, DWORD dwStyle, const RECT& rect,
+                     CWnd* pParentWnd, UINT nID, CFile* pPersist = NULL, BOOL bStorage = FALSE,
+                     BSTR bstrLicKey = NULL);
+  BOOL CreateControl(REFCLSID clsid, LPCTSTR pszWindowName, DWORD dwStyle, const POINT* ppt,
+                     const SIZE* psize, CWnd* pParentWnd, UINT nID, CFile* pPersist = NULL,
+                     BOOL bStorage = FALSE, BSTR bstrLicKey = NULL);
+  LPUNKNOWN GetControlUnknown();
+  void AFX_CDECL InvokeHelper(DISPID dwDispID, WORD wFlags, VARTYPE vtRet, void* pvRet,
+                              const BYTE* pbParamInfo, ...);
+  void AFX_CDECL SetProperty(DISPID dwDispID, VARTYPE vtProp, ...);
+  void GetProperty(DISPID dwDispID, VARTYPE vtProp, void* pvProp) const;
+  // Ambient properties for the controls this window hosts; FALSE for the
+  // container's defaults.
+  virtual BOOL OnAmbientProperty(COleControlSite* pSite, DISPID dispid, VARIANT* pvar);
+  BOOL InitControlContainer();
+
+  COleControlContainer* m_pCtrlCont;  // the controls this window hosts
+  COleControlSite* m_pCtrlSite;       // the site, when this is a control's window
+  _AFX_OCC_DIALOG_INFO* m_pOccDialogInfo;  // controls of a dialog template still to make
+
   virtual BOOL Create(LPCTSTR lpszClassName, LPCTSTR lpszWindowName, DWORD dwStyle,
                       const RECT& rect, CWnd* pParentWnd, UINT nID,
                       CCreateContext* pContext = NULL);
@@ -1275,10 +1348,10 @@ public:
   enum AdjustType { adjustBorder = 0, adjustOutside = 1 };
 
   // Window tree
-  CWnd* GetDlgItem(int nID) const { return CWnd::FromHandle(::GetDlgItem(m_hWnd, nID)); }
+  CWnd* GetDlgItem(int nID) const;
   void GetDlgItem(int nID, HWND* phWnd) const { *phWnd = ::GetDlgItem(m_hWnd, nID); }
-  int GetDlgCtrlID() const { return ::GetDlgCtrlID(m_hWnd); }
-  int SetDlgCtrlID(int nID) { return (int)::SetWindowLong(m_hWnd, GWL_ID, nID); }
+  int GetDlgCtrlID() const;
+  int SetDlgCtrlID(int nID);
   CWnd* GetDescendantWindow(int nID, BOOL bOnlyPerm = FALSE) const;
   void SendMessageToDescendants(UINT message, WPARAM wParam = 0, LPARAM lParam = 0,
                                 BOOL bDeep = TRUE, BOOL bOnlyPerm = FALSE);
@@ -1304,12 +1377,10 @@ public:
   BOOL SendChildNotifyLastMsg(LRESULT* pResult, int) { return SendChildNotifyLastMsg(pResult); }
 
   // Text and fonts
-  void SetWindowText(LPCTSTR lpszString) { ::SetWindowText(m_hWnd, lpszString); }
-  int GetWindowText(LPTSTR lpszStringBuf, int nMaxCount) const {
-    return ::GetWindowText(m_hWnd, lpszStringBuf, nMaxCount);
-  }
+  void SetWindowText(LPCTSTR lpszString);
+  int GetWindowText(LPTSTR lpszStringBuf, int nMaxCount) const;
   void GetWindowText(CString& rString) const;
-  int GetWindowTextLength() const { return ::GetWindowTextLength(m_hWnd); }
+  int GetWindowTextLength() const;
   void SetFont(CFont* pFont, BOOL bRedraw = TRUE) {
     ::SendMessage(m_hWnd, WM_SETFONT, (WPARAM)pFont->GetSafeHandle(), bRedraw);
   }
@@ -1331,18 +1402,14 @@ public:
   // Window size and position
   BOOL IsIconic() const { return ::IsIconic(m_hWnd); }
   BOOL IsZoomed() const { return ::IsZoomed(m_hWnd); }
-  void MoveWindow(int x, int y, int nWidth, int nHeight, BOOL bRepaint = TRUE) {
-    ::MoveWindow(m_hWnd, x, y, nWidth, nHeight, bRepaint);
-  }
+  void MoveWindow(int x, int y, int nWidth, int nHeight, BOOL bRepaint = TRUE);
   void MoveWindow(LPCRECT lpRect, BOOL bRepaint = TRUE) {
-    ::MoveWindow(m_hWnd, lpRect->left, lpRect->top, lpRect->right - lpRect->left,
-                 lpRect->bottom - lpRect->top, bRepaint);
+    MoveWindow(lpRect->left, lpRect->top, lpRect->right - lpRect->left,
+               lpRect->bottom - lpRect->top, bRepaint);
   }
   int SetWindowRgn(HRGN hRgn, BOOL bRedraw) { return ::SetWindowRgn(m_hWnd, hRgn, bRedraw); }
   int GetWindowRgn(HRGN hRgn) const { return ::GetWindowRgn(m_hWnd, hRgn); }
-  BOOL SetWindowPos(const CWnd* pWndInsertAfter, int x, int y, int cx, int cy, UINT nFlags) {
-    return ::SetWindowPos(m_hWnd, pWndInsertAfter->GetSafeInsertAfter(), x, y, cx, cy, nFlags);
-  }
+  BOOL SetWindowPos(const CWnd* pWndInsertAfter, int x, int y, int cx, int cy, UINT nFlags);
   UINT ArrangeIconicWindows() { return ::ArrangeIconicWindows(m_hWnd); }
   void BringWindowToTop() { ::BringWindowToTop(m_hWnd); }
   void GetWindowRect(LPRECT lpRect) const { ::GetWindowRect(m_hWnd, lpRect); }
@@ -1401,7 +1468,7 @@ public:
   }
   void ValidateRect(LPCRECT lpRect) { ::ValidateRect(m_hWnd, lpRect); }
   void ValidateRgn(CRgn* pRgn) { ::ValidateRgn(m_hWnd, (HRGN)pRgn->GetSafeHandle()); }
-  BOOL ShowWindow(int nCmdShow) { return ::ShowWindow(m_hWnd, nCmdShow); }
+  BOOL ShowWindow(int nCmdShow);
   BOOL IsWindowVisible() const { return ::IsWindowVisible(m_hWnd); }
   void ShowOwnedPopups(BOOL bShow = TRUE) { ::ShowOwnedPopups(m_hWnd, bShow); }
   CDC* GetDCEx(CRgn* prgnClip, DWORD flags) {
@@ -1432,8 +1499,8 @@ public:
   BOOL KillTimer(UINT_PTR nIDEvent) { return ::KillTimer(m_hWnd, nIDEvent); }
 
   // State
-  BOOL IsWindowEnabled() const { return ::IsWindowEnabled(m_hWnd); }
-  BOOL EnableWindow(BOOL bEnable = TRUE) { return ::EnableWindow(m_hWnd, bEnable); }
+  BOOL IsWindowEnabled() const;
+  BOOL EnableWindow(BOOL bEnable = TRUE);
   static CWnd* PASCAL GetActiveWindow() { return CWnd::FromHandle(::GetActiveWindow()); }
   CWnd* SetActiveWindow() { return CWnd::FromHandle(::SetActiveWindow(m_hWnd)); }
   static CWnd* PASCAL GetForegroundWindow() { return CWnd::FromHandle(::GetForegroundWindow()); }
@@ -1441,7 +1508,7 @@ public:
   static CWnd* PASCAL GetCapture() { return CWnd::FromHandle(::GetCapture()); }
   CWnd* SetCapture() { return CWnd::FromHandle(::SetCapture(m_hWnd)); }
   static CWnd* PASCAL GetFocus() { return CWnd::FromHandle(::GetFocus()); }
-  CWnd* SetFocus() { return CWnd::FromHandle(::SetFocus(m_hWnd)); }
+  CWnd* SetFocus();
   static CWnd* PASCAL GetDesktopWindow() { return CWnd::FromHandle(::GetDesktopWindow()); }
 
   // Dialog items
@@ -1462,12 +1529,8 @@ public:
   BOOL DlgDirSelectComboBox(LPTSTR lpString, int nCount, int nIDComboBox) {
     return ::DlgDirSelectComboBoxEx(m_hWnd, lpString, nCount, nIDComboBox);
   }
-  UINT GetDlgItemInt(int nID, BOOL* lpTrans = NULL, BOOL bSigned = TRUE) const {
-    return ::GetDlgItemInt(m_hWnd, nID, lpTrans, bSigned);
-  }
-  int GetDlgItemText(int nID, LPTSTR lpStr, int nMaxCount) const {
-    return ::GetDlgItemText(m_hWnd, nID, lpStr, nMaxCount);
-  }
+  UINT GetDlgItemInt(int nID, BOOL* lpTrans = NULL, BOOL bSigned = TRUE) const;
+  int GetDlgItemText(int nID, LPTSTR lpStr, int nMaxCount) const;
   int GetDlgItemText(int nID, CString& rString) const;
   CWnd* GetNextDlgGroupItem(CWnd* pWndCtl, BOOL bPrevious = FALSE) const {
     return CWnd::FromHandle(::GetNextDlgGroupItem(m_hWnd, pWndCtl->GetSafeHwnd(), bPrevious));
@@ -1479,10 +1542,8 @@ public:
   LRESULT SendDlgItemMessage(int nID, UINT message, WPARAM wParam = 0, LPARAM lParam = 0) {
     return ::SendDlgItemMessage(m_hWnd, nID, message, wParam, lParam);
   }
-  void SetDlgItemInt(int nID, UINT nValue, BOOL bSigned = TRUE) {
-    ::SetDlgItemInt(m_hWnd, nID, nValue, bSigned);
-  }
-  void SetDlgItemText(int nID, LPCTSTR lpszString) { ::SetDlgItemText(m_hWnd, nID, lpszString); }
+  void SetDlgItemInt(int nID, UINT nValue, BOOL bSigned = TRUE);
+  void SetDlgItemText(int nID, LPCTSTR lpszString);
 
   // Scrolling
   // The position and range calls go to GetScrollBarCtrl's control when

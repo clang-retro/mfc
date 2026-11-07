@@ -4,6 +4,7 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 #include "afximpl.h"
 #include <afxext.h>
+#include <afxocc.h>
 
 // ---------------------------------------------------------------------
 // Styles and ownership
@@ -187,6 +188,10 @@ void CWnd::SendMessageToDescendants(UINT message, WPARAM wParam, LPARAM lParam, 
 // Text
 
 void CWnd::GetWindowText(CString& rString) const {
+  if (m_pCtrlSite != NULL) {
+    m_pCtrlSite->GetWindowText(rString);
+    return;
+  }
   int nLen = ::GetWindowTextLength(m_hWnd);
   ::GetWindowText(m_hWnd, rString.GetBufferSetLength(nLen), nLen + 1);
   rString.ReleaseBuffer();
@@ -194,6 +199,13 @@ void CWnd::GetWindowText(CString& rString) const {
 
 int CWnd::GetDlgItemText(int nID, CString& rString) const {
   rString.Empty();
+  if (m_pCtrlCont != NULL) {
+    COleControlSite* pSite = m_pCtrlCont->FindItem((UINT)nID);
+    if (pSite != NULL) {
+      pSite->GetWindowText(rString);
+      return rString.GetLength();
+    }
+  }
   HWND hWnd = ::GetDlgItem(m_hWnd, nID);
   if (hWnd == NULL) return 0;
   int nLen = ::GetWindowTextLength(hWnd);
