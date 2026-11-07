@@ -278,6 +278,10 @@
 #define AFX_IDS_UPDATING_ITEMS 0xF196
 #define AFX_IDS_RTF_FORMAT_TEXT 0xF197
 
+// OLE server messages (afxolesv.rc)
+#define AFX_IDS_UPDATE_MENU 0xF1A0
+#define AFX_IDS_EXIT_MENU 0xF1A1
+
 // Dialog templates
 #define AFX_IDD_FILEOPEN 28676
 #define AFX_IDD_FILESAVE 28677

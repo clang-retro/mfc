@@ -77,6 +77,7 @@ COleObjectFactory::~COleObjectFactory() {
 
 BOOL COleObjectFactory::Register() {
   if (m_dwRegister != 0) return TRUE;
+  if (::IsEqualCLSID(m_clsid, CLSID_NULL)) return FALSE;  // a template server not connected yet
   DWORD dwFlags = m_bMultiInstance ? REGCLS_SINGLEUSE : REGCLS_MULTIPLEUSE;
   HRESULT hr = ::CoRegisterClassObject(m_clsid, (LPUNKNOWN)&m_xClassFactory, CLSCTX_LOCAL_SERVER,
                                        dwFlags, &m_dwRegister);
@@ -281,7 +282,12 @@ STDMETHODIMP COleObjectFactory::XClassFactory::QueryInterface(REFIID iid, LPVOID
 STDMETHODIMP COleObjectFactory::XClassFactory::CreateInstance(LPUNKNOWN pUnkOuter, REFIID riid,
                                                               LPVOID* ppvObject) {
   METHOD_PROLOGUE(COleObjectFactory, ClassFactory)
-  return pThis->CreateObjectFor(pUnkOuter, riid, ppvObject, NULL);
+  HRESULT hr = pThis->CreateObjectFor(pUnkOuter, riid, ppvObject, NULL);
+  // A single-use class makes one object for each copy of the program: the
+  // next client starts another. (COM hides a REGCLS_SINGLEUSE class after
+  // one object; Wine does not, so the factory takes itself away.)
+  if (SUCCEEDED(hr) && pThis->m_bMultiInstance) pThis->Revoke();
+  return hr;
 }
 
 STDMETHODIMP COleObjectFactory::XClassFactory::LockServer(BOOL fLock) {
@@ -315,7 +321,9 @@ STDMETHODIMP COleObjectFactory::XClassFactory::CreateInstanceLic(LPUNKNOWN pUnkO
                                                                  REFIID riid, BSTR bstrKey,
                                                                  LPVOID* ppvObject) {
   METHOD_PROLOGUE(COleObjectFactory, ClassFactory)
-  return pThis->CreateObjectFor(pUnkOuter, riid, ppvObject, bstrKey);
+  HRESULT hr = pThis->CreateObjectFor(pUnkOuter, riid, ppvObject, bstrKey);
+  if (SUCCEEDED(hr) && pThis->m_bMultiInstance) pThis->Revoke();
+  return hr;
 }
 
 // ---------------------------------------------------------------------

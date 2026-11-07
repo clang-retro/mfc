@@ -25,9 +25,44 @@ CDocTemplate::CDocTemplate(UINT nIDResource, CRuntimeClass* pDocClass,
   m_hAccelEmbedding = NULL;
   m_hMenuInPlaceServer = NULL;
   m_hAccelInPlaceServer = NULL;
+  m_pOleFrameClass = NULL;
+  m_pOleViewClass = NULL;
 }
 
-CDocTemplate::~CDocTemplate() {}
+CDocTemplate::~CDocTemplate() {
+  HMENU menus[] = {m_hMenuInPlace, m_hMenuEmbedding, m_hMenuInPlaceServer};
+  for (HMENU hMenu : menus)
+    if (hMenu != NULL) ::DestroyMenu(hMenu);
+  HACCEL accels[] = {m_hAccelInPlace, m_hAccelEmbedding, m_hAccelInPlaceServer};
+  for (HACCEL hAccel : accels)
+    if (hAccel != NULL) ::DestroyAcceleratorTable(hAccel);
+}
+
+void CDocTemplate::SetContainerInfo(UINT nIDOleInPlaceContainer) {
+  m_nIDContainerResource = nIDOleInPlaceContainer;
+  HINSTANCE hInst = AfxGetResourceHandle();
+  if (m_hMenuInPlace == NULL)
+    m_hMenuInPlace = ::LoadMenu(hInst, MAKEINTRESOURCE(nIDOleInPlaceContainer));
+  if (m_hAccelInPlace == NULL)
+    m_hAccelInPlace = ::LoadAccelerators(hInst, MAKEINTRESOURCE(nIDOleInPlaceContainer));
+}
+
+void CDocTemplate::SetServerInfo(UINT nIDOleEmbedding, UINT nIDOleInPlaceServer,
+                                 CRuntimeClass* pOleFrameClass, CRuntimeClass* pOleViewClass) {
+  m_nIDEmbeddingResource = nIDOleEmbedding;
+  m_nIDServerResource = nIDOleInPlaceServer;
+  m_pOleFrameClass = pOleFrameClass;
+  m_pOleViewClass = pOleViewClass;
+  HINSTANCE hInst = AfxGetResourceHandle();
+  if (m_hMenuEmbedding == NULL && nIDOleEmbedding != 0) {
+    m_hMenuEmbedding = ::LoadMenu(hInst, MAKEINTRESOURCE(nIDOleEmbedding));
+    m_hAccelEmbedding = ::LoadAccelerators(hInst, MAKEINTRESOURCE(nIDOleEmbedding));
+  }
+  if (m_hMenuInPlaceServer == NULL && nIDOleInPlaceServer != 0) {
+    m_hMenuInPlaceServer = ::LoadMenu(hInst, MAKEINTRESOURCE(nIDOleInPlaceServer));
+    m_hAccelInPlaceServer = ::LoadAccelerators(hInst, MAKEINTRESOURCE(nIDOleInPlaceServer));
+  }
+}
 
 void CDocTemplate::LoadTemplate() {
   if (m_strDocStrings.IsEmpty()) m_strDocStrings.LoadString(m_nIDResource);

@@ -30,7 +30,10 @@ AR = $(if $(BIN),$(BIN)/,)llvm-ar
 CXXFLAGS ?= -O2
 STDLIB ?= -stdlib=libc++
 TEST_RC ?=
-ALL_CXXFLAGS = $(TARGET_FLAGS) $(STDLIB) \
+# MFC code calls GetSafeHwnd and friends on pointers that may be NULL;
+# -fno-delete-null-pointer-checks keeps the compiler from assuming that
+# such a pointer, having been used as `this`, cannot be NULL afterwards.
+ALL_CXXFLAGS = $(TARGET_FLAGS) $(STDLIB) -fno-delete-null-pointer-checks \
   -std=c++17 -Wall -Wno-invalid-offsetof -Wno-missing-exception-spec -Wno-overloaded-virtual -Wno-unused-private-field \
   -Iinclude -Isrc $(CXXFLAGS)
 

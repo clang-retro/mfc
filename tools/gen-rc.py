@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Generate include/afxres.rc, include/afxprint.rc and include/afxolecl.rc.
+"""Generate include/afxres.rc, include/afxprint.rc, include/afxolecl.rc and
+include/afxolesv.rc.
 
 Programs written for MFC include these from their own resource scripts
 (AppWizard puts `#include "afxres.rc"` and `#include "afxprint.rc"` in
@@ -33,10 +34,11 @@ OLE_CONTAINER_STRINGS = ('AFX_IDP_STATIC_OBJECT', 'AFX_IDP_FAILED_TO_CONNECT',
                          'AFX_IDS_EMBED_FORMAT', 'AFX_IDS_LINKSOURCE_FORMAT',
                          'AFX_IDS_METAFILE_FORMAT', 'AFX_IDS_DIB_FORMAT', 'AFX_IDS_BITMAP_FORMAT',
                          'AFX_IDS_UPDATING_ITEMS', 'AFX_IDS_RTF_FORMAT_TEXT')
+OLE_SERVER_STRINGS = ('AFX_IDS_UPDATE_MENU', 'AFX_IDS_EXIT_MENU')
 PRINT_PREFIXES = ('AFX_IDS_PRINT', 'AFX_IDS_ONEPAGE', 'AFX_IDS_TWOPAGE', 'AFX_IDS_PREVIEWPAGEDESC')
 
 def main():
-    res, prn, ole = [], [], []
+    res, prn, ole, svr = [], [], [], []
     for name, text in strings():
         if name in PROGRAM_STRINGS or name.startswith(('ID_', 'AFX_ID_PREVIEW', 'AFX_IDS_SC')):
             continue
@@ -44,6 +46,9 @@ def main():
             continue
         if name in OLE_CONTAINER_STRINGS:
             ole.append((name, text))
+            continue
+        if name in OLE_SERVER_STRINGS:
+            svr.append((name, text))
             continue
         (prn if name.startswith(PRINT_PREFIXES) else res).append((name, text))
 
@@ -99,6 +104,14 @@ END
                             '// the same built-in text.'))
         f.write('STRINGTABLE\nBEGIN\n')
         for name, text in ole:
+            f.write('  {0} {1}\n'.format(name, rc_string(text)))
+        f.write('END\n')
+
+    with open(os.path.join(ROOT, 'include', 'afxolesv.rc'), 'w') as f:
+        f.write(head.format('afxolesv.rc', 'The OLE server menu text. Without it, the library uses the\n'
+                            '// same built-in text.'))
+        f.write('STRINGTABLE\nBEGIN\n')
+        for name, text in svr:
             f.write('  {0} {1}\n'.format(name, rc_string(text)))
         f.write('END\n')
 

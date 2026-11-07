@@ -1,0 +1,1317 @@
+// olesvr.cpp - OLE servers: COleLinkingDoc, COleServerDoc (the document a
+// container embeds), COleServerItem (what it draws and hands out) and
+// COleTemplateServer (the class factory that makes the documents).
+//
+// Part of clang-retro MFC, an independent implementation of the MFC API.
+#include "afximpl.h"
+#include <afxole.h>
+
+IMPLEMENT_DYNAMIC(COleLinkingDoc, COleDocument)
+IMPLEMENT_DYNAMIC(COleServerDoc, COleLinkingDoc)
+IMPLEMENT_DYNAMIC(COleServerItem, CDocItem)
+IMPLEMENT_DYNAMIC(COleTemplateServer, COleObjectFactory)
+
+static CLIPFORMAT RegisteredFormat(CLIPFORMAT& cf, LPCTSTR lpszName) {
+  if (cf == 0) cf = (CLIPFORMAT)::RegisterClipboardFormat(lpszName);
+  return cf;
+}
+static CLIPFORMAT s_cfEmbedSource, s_cfObjectDescriptor;
+#define CF_EMBEDSOURCE_ RegisteredFormat(s_cfEmbedSource, _T("Embed Source"))
+#define CF_OBJECTDESCRIPTOR_ RegisteredFormat(s_cfObjectDescriptor, _T("Object Descriptor"))
+
+// Runs an OLE call's work and turns an exception into its HRESULT.
+#define OLE_TRY try {
+#define OLE_CATCH(hr)                 \
+  }                                   \
+  catch (CException * e) {            \
+    hr = COleException::Process(e);   \
+    e->Delete();                      \
+  }
+
+static LPOLESTR TaskString(LPCTSTR lpsz) {
+  CStringW str(lpsz);
+  UINT cb = (str.GetLength() + 1) * sizeof(WCHAR);
+  LPOLESTR p = (LPOLESTR)::CoTaskMemAlloc(cb);
+  if (p != NULL) memcpy(p, (LPCWSTR)str, cb);
+  return p;
+}
+
+// ---------------------------------------------------------------------
+// COleLinkingDoc
+
+BEGIN_INTERFACE_MAP(COleLinkingDoc, COleDocument)
+  INTERFACE_PART(COleLinkingDoc, IID_IPersist, PersistFile)
+  INTERFACE_PART(COleLinkingDoc, IID_IPersistFile, PersistFile)
+END_INTERFACE_MAP()
+
+COleLinkingDoc::COleLinkingDoc() : m_pFactory(NULL), m_dwRegister(0) {}
+
+COleLinkingDoc::~COleLinkingDoc() { Revoke(); }
+
+BOOL COleLinkingDoc::Register(COleObjectFactory* pFactory, LPCTSTR lpszPathName) {
+  Revoke();
+  if (pFactory != NULL) m_pFactory = pFactory;
+  if (lpszPathName == NULL || *lpszPathName == 0) return TRUE;
+  LPMONIKER lpMoniker = NULL;
+  CStringW strPath(lpszPathName);
+  if (FAILED(::CreateFileMoniker(strPath, &lpMoniker))) return FALSE;
+  LPRUNNINGOBJECTTABLE lpROT = NULL;
+  BOOL bResult = FALSE;
+  if (SUCCEEDED(::GetRunningObjectTable(0, &lpROT))) {
+    bResult = SUCCEEDED(lpROT->Register(0, (LPUNKNOWN)&m_xPersistFile, lpMoniker, &m_dwRegister));
+    if (!bResult) m_dwRegister = 0;
+    lpROT->Release();
+  }
+  lpMoniker->Release();
+  return bResult;
+}
+
+void COleLinkingDoc::Revoke() {
+  if (m_dwRegister == 0) return;
+  LPRUNNINGOBJECTTABLE lpROT = NULL;
+  if (SUCCEEDED(::GetRunningObjectTable(0, &lpROT))) {
+    lpROT->Revoke(m_dwRegister);
+    lpROT->Release();
+  }
+  m_dwRegister = 0;
+}
+
+// The factory this document's class comes from: the one it was registered
+// or created with, or its template's.
+static COleObjectFactory* FactoryOf(COleLinkingDoc* pDoc) {
+  if (pDoc->m_pFactory != NULL) return pDoc->m_pFactory;
+  CDocTemplate* pTemplate = pDoc->GetDocTemplate();
+  if (pTemplate != NULL && pTemplate->m_pAttachedFactory != NULL &&
+      pTemplate->m_pAttachedFactory->IsKindOf(RUNTIME_CLASS(COleObjectFactory)))
+    return (COleObjectFactory*)pTemplate->m_pAttachedFactory;
+  return NULL;
+}
+
+COleServerItem* COleLinkingDoc::OnGetLinkedItem(LPCTSTR lpszItemName) {
+  POSITION pos = GetStartPosition();
+  while (pos != NULL) {
+    CDocItem* pItem = GetNextItem(pos);
+    if (pItem->IsKindOf(RUNTIME_CLASS(COleServerItem)) &&
+        ((COleServerItem*)pItem)->GetItemName() == lpszItemName)
+      return (COleServerItem*)pItem;
+  }
+  return NULL;
+}
+
+COleClientItem* COleLinkingDoc::OnFindEmbeddedItem(LPCTSTR) { return NULL; }
+
+BOOL COleLinkingDoc::OnNewDocument() {
+  Revoke();
+  return COleDocument::OnNewDocument();
+}
+
+BOOL COleLinkingDoc::OnOpenDocument(LPCTSTR lpszPathName) {
+  Revoke();
+  if (!COleDocument::OnOpenDocument(lpszPathName)) return FALSE;
+  Register(FactoryOf(this), lpszPathName);
+  return TRUE;
+}
+
+BOOL COleLinkingDoc::OnSaveDocument(LPCTSTR lpszPathName) {
+  BOOL bRemember = m_bRemember;
+  if (!COleDocument::OnSaveDocument(lpszPathName)) return FALSE;
+  if (bRemember && (m_dwRegister == 0 || !AfxComparePath(m_strPathName, lpszPathName)))
+    Register(FactoryOf(this), lpszPathName);
+  return TRUE;
+}
+
+void COleLinkingDoc::OnCloseDocument() {
+  Revoke();
+  COleDocument::OnCloseDocument();
+}
+
+// IPersistFile
+
+STDMETHODIMP_(ULONG) COleLinkingDoc::XPersistFile::AddRef() {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, PersistFile)
+  return pThis->ExternalAddRef();
+}
+
+STDMETHODIMP_(ULONG) COleLinkingDoc::XPersistFile::Release() {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, PersistFile)
+  return pThis->ExternalRelease();
+}
+
+STDMETHODIMP COleLinkingDoc::XPersistFile::QueryInterface(REFIID iid, LPVOID* ppvObj) {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, PersistFile)
+  return pThis->ExternalQueryInterface(&iid, ppvObj);
+}
+
+STDMETHODIMP COleLinkingDoc::XPersistFile::GetClassID(LPCLSID lpClassID) {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, PersistFile)
+  COleObjectFactory* pFactory = FactoryOf(pThis);
+  *lpClassID = pFactory != NULL ? pFactory->GetClassID() : CLSID_NULL;
+  return pFactory != NULL ? S_OK : E_FAIL;
+}
+
+STDMETHODIMP COleLinkingDoc::XPersistFile::IsDirty() {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, PersistFile)
+  pThis->UpdateModifiedFlag();
+  return pThis->IsModified() ? S_OK : S_FALSE;
+}
+
+STDMETHODIMP COleLinkingDoc::XPersistFile::Load(LPCOLESTR lpszFileName, DWORD) {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, PersistFile)
+  HRESULT hr = S_OK;
+  OLE_TRY
+    CString strPath(lpszFileName);
+    if (!pThis->OnOpenDocument(strPath)) return E_FAIL;
+    pThis->SetPathName(strPath, FALSE);
+  OLE_CATCH(hr)
+  return hr;
+}
+
+STDMETHODIMP COleLinkingDoc::XPersistFile::Save(LPCOLESTR lpszFileName, BOOL fRemember) {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, PersistFile)
+  HRESULT hr = S_OK;
+  OLE_TRY
+    if (lpszFileName == NULL) return pThis->DoFileSave() ? S_OK : E_FAIL;
+    CString strPath(lpszFileName);
+    BOOL bRemember = pThis->m_bRemember;
+    pThis->m_bRemember = fRemember;
+    BOOL bOk = pThis->OnSaveDocument(strPath);
+    pThis->m_bRemember = bRemember;
+    if (!bOk) return E_FAIL;
+    if (fRemember) pThis->SetPathName(strPath, FALSE);
+  OLE_CATCH(hr)
+  return hr;
+}
+
+STDMETHODIMP COleLinkingDoc::XPersistFile::SaveCompleted(LPCOLESTR) { return S_OK; }
+
+STDMETHODIMP COleLinkingDoc::XPersistFile::GetCurFile(LPOLESTR* lplpszFileName) {
+  METHOD_PROLOGUE_EX_(COleLinkingDoc, PersistFile)
+  if (lplpszFileName == NULL) return E_POINTER;
+  *lplpszFileName = TaskString(pThis->GetPathName().IsEmpty() ? pThis->GetTitle()
+                                                               : pThis->GetPathName());
+  if (*lplpszFileName == NULL) return E_OUTOFMEMORY;
+  return pThis->GetPathName().IsEmpty() ? S_FALSE : S_OK;
+}
+
+// ---------------------------------------------------------------------
+// COleServerDoc
+
+BEGIN_INTERFACE_MAP(COleServerDoc, COleLinkingDoc)
+  INTERFACE_PART(COleServerDoc, IID_IPersistStorage, PersistStorage)
+  INTERFACE_PART(COleServerDoc, IID_IOleObject, OleObject)
+  INTERFACE_PART(COleServerDoc, IID_IDataObject, DataObject)
+END_INTERFACE_MAP()
+
+BEGIN_MESSAGE_MAP(COleServerDoc, COleLinkingDoc)
+  ON_COMMAND(ID_FILE_UPDATE, OnFileUpdate)
+  ON_UPDATE_COMMAND_UI(ID_FILE_UPDATE, OnUpdateFileUpdate)
+  ON_COMMAND(ID_FILE_SAVE_COPY_AS, OnFileSaveCopyAs)
+END_MESSAGE_MAP()
+
+COleServerDoc::COleServerDoc()
+    : m_lpClientSite(NULL),
+      m_lpOleAdviseHolder(NULL),
+      m_lpDataAdviseHolder(NULL),
+      m_pEmbeddedItem(NULL),
+      m_bCntrVisible(FALSE),
+      m_bClosing(FALSE),
+      m_bOwnRef(TRUE),
+      m_bShownBefore(FALSE) {
+  // A server program runs as long as it has documents.
+  AfxOleLockApp();
+}
+
+COleServerDoc::~COleServerDoc() {
+  if (m_lpClientSite != NULL) m_lpClientSite->Release();
+  if (m_lpOleAdviseHolder != NULL) m_lpOleAdviseHolder->Release();
+  if (m_lpDataAdviseHolder != NULL) m_lpDataAdviseHolder->Release();
+  // The items go before the lock, with the rest of the document.
+  while (!m_docItemList.IsEmpty()) delete (CDocItem*)m_docItemList.GetHead();
+  AfxOleUnlockApp();
+}
+
+COleServerItem* COleServerDoc::GetEmbeddedItem() {
+  if (m_pEmbeddedItem == NULL) m_pEmbeddedItem = OnGetEmbeddedItem();
+  return m_pEmbeddedItem;
+}
+
+void COleServerDoc::GetClassIDOf(LPCLSID lpClassID) {
+  COleObjectFactory* pFactory = FactoryOf(this);
+  *lpClassID = pFactory != NULL ? pFactory->GetClassID() : CLSID_NULL;
+}
+
+void COleServerDoc::UpdateAllItems(COleServerItem* pSender, LPARAM lHint, CObject* pHint,
+                                   DVASPECT nDrawAspect) {
+  POSITION pos = GetStartPosition();
+  while (pos != NULL) {
+    CDocItem* pItem = GetNextItem(pos);
+    if (pItem != pSender && pItem->IsKindOf(RUNTIME_CLASS(COleServerItem)))
+      ((COleServerItem*)pItem)->OnUpdate(pSender, lHint, pHint, nDrawAspect);
+  }
+}
+
+void COleServerDoc::NotifyChanged() {
+  if (m_lpDataAdviseHolder != NULL)
+    m_lpDataAdviseHolder->SendOnDataChange((LPDATAOBJECT)&m_xDataObject, 0, 0);
+}
+
+void COleServerDoc::NotifyClosed() {
+  if (m_lpOleAdviseHolder != NULL) m_lpOleAdviseHolder->SendOnClose();
+}
+
+void COleServerDoc::NotifySaved() {
+  if (m_lpOleAdviseHolder != NULL) m_lpOleAdviseHolder->SendOnSave();
+}
+
+void COleServerDoc::NotifyRename(LPCTSTR lpszNewName) {
+  if (m_lpOleAdviseHolder == NULL) return;
+  LPMONIKER lpMoniker = NULL;
+  CStringW strName(lpszNewName);
+  if (SUCCEEDED(::CreateFileMoniker(strName, &lpMoniker))) {
+    m_lpOleAdviseHolder->SendOnRename(lpMoniker);
+    lpMoniker->Release();
+  }
+}
+
+void COleServerDoc::SaveEmbedding() {
+  if (m_lpClientSite == NULL) return;
+  SCODE sc = m_lpClientSite->SaveObject();
+  if (FAILED(sc)) AfxThrowOleException(sc);
+}
+
+BOOL COleServerDoc::OnUpdateDocument() {
+  if (!IsEmbedded()) return DoFileSave();
+  try {
+    NotifyChanged();
+    SaveEmbedding();
+  } catch (CException* e) {
+    e->Delete();
+    AfxMessageBox(AFX_IDP_FAILED_TO_UPDATE);
+    return FALSE;
+  }
+  return TRUE;
+}
+
+// The first frame of the document, and the frame that holds it when that
+// is an MDI child.
+static CFrameWnd* FirstFrame(CDocument* pDoc) {
+  POSITION pos = pDoc->GetFirstViewPosition();
+  if (pos == NULL) return NULL;
+  return pDoc->GetNextView(pos)->GetParentFrame();
+}
+
+void COleServerDoc::UpdateMenuText(CMenu* pMenu) {
+  if (pMenu == NULL || m_strHostObj.IsEmpty()) return;
+  CString str;
+  AfxFormatString1(str, AFX_IDS_UPDATE_MENU, m_strHostObj);
+  if (::GetMenuState(pMenu->m_hMenu, ID_FILE_UPDATE, MF_BYCOMMAND) != (UINT)-1)
+    ::ModifyMenu(pMenu->m_hMenu, ID_FILE_UPDATE, MF_BYCOMMAND | MF_STRING, ID_FILE_UPDATE, str);
+  AfxFormatString1(str, AFX_IDS_EXIT_MENU, m_strHostObj);
+  if (::GetMenuState(pMenu->m_hMenu, ID_APP_EXIT, MF_BYCOMMAND) != (UINT)-1)
+    ::ModifyMenu(pMenu->m_hMenu, ID_APP_EXIT, MF_BYCOMMAND | MF_STRING, ID_APP_EXIT, str);
+}
+
+void COleServerDoc::OnShowDocument(BOOL bShow) {
+  CFrameWnd* pFrame = FirstFrame(this);
+  CWnd* pMainWnd = AfxGetMainWnd();
+  if (bShow) {
+    if (m_lpClientSite != NULL) m_lpClientSite->ShowObject();
+    if (pFrame != NULL) {
+      CFrameWnd* pTopFrame = pFrame->GetTopLevelFrame();
+      if (pTopFrame != NULL && pTopFrame != pFrame && !pTopFrame->IsWindowVisible())
+        pTopFrame->ShowWindow(SW_SHOW);
+      if (pTopFrame == NULL) pTopFrame = pFrame;
+      // The frame's menu comes from its active document: the embedding menu.
+      if (pFrame->GetActiveView() == NULL) {
+        POSITION pos = GetFirstViewPosition();
+        pFrame->SetActiveView(GetNextView(pos), FALSE);
+      }
+      if (!m_bShownBefore) {
+        // The views have their initial update when they first show.
+        m_bShownBefore = TRUE;
+        pFrame->InitialUpdateFrame(this, TRUE);
+      } else {
+        pFrame->ActivateFrame(SW_SHOW);
+      }
+      pTopFrame->OnUpdateFrameMenu(NULL);
+      UpdateMenuText(pTopFrame->GetMenu());
+      pTopFrame->DrawMenuBar();
+      pTopFrame->SetForegroundWindow();
+    }
+    if (!m_bCntrVisible && m_lpClientSite != NULL) {
+      m_bCntrVisible = TRUE;
+      m_lpClientSite->OnShowWindow(TRUE);
+    }
+  } else {
+    if (m_bCntrVisible && m_lpClientSite != NULL) {
+      m_bCntrVisible = FALSE;
+      m_lpClientSite->OnShowWindow(FALSE);
+    }
+    if (pFrame != NULL) {
+      pFrame->ShowWindow(SW_HIDE);
+      // The program's main window goes too unless the user started it.
+      if (pMainWnd != NULL && pMainWnd != pFrame && !AfxOleGetUserCtrl())
+        pMainWnd->ShowWindow(SW_HIDE);
+    }
+  }
+}
+
+void COleServerDoc::OnSetHostNames(LPCTSTR lpszHost, LPCTSTR lpszHostObj) {
+  m_strHostApp = lpszHost;
+  m_strHostObj = lpszHostObj;
+  if (!m_strHostObj.IsEmpty()) SetTitle(m_strHostObj);
+  CFrameWnd* pFrame = FirstFrame(this);
+  if (pFrame != NULL) {
+    CFrameWnd* pTop = pFrame->GetTopLevelFrame();
+    if (pTop == NULL) pTop = pFrame;
+    if (pTop->IsWindowVisible()) UpdateMenuText(pTop->GetMenu());
+  }
+}
+
+void COleServerDoc::OnClose(OLECLOSE dwCloseOption) {
+  if (m_bClosing) return;
+  UpdateModifiedFlag();
+  switch (dwCloseOption) {
+  case OLECLOSE_PROMPTSAVE: {
+    CFrameWnd* pFrame = FirstFrame(this);
+    if (pFrame != NULL && pFrame->IsWindowVisible()) {
+      if (!SaveModified()) AfxThrowOleException(OLE_E_PROMPTSAVECANCELLED);
+      break;
+    }
+    // Nobody to ask: save, as for OLECLOSE_SAVEIFDIRTY.
+  }
+  // fallthrough
+  case OLECLOSE_SAVEIFDIRTY:
+    if (IsModified()) {
+      NotifyChanged();
+      SaveEmbedding();
+    }
+    break;
+  default:
+    break;
+  }
+  OnCloseDocument();
+}
+
+// An embedded document asks to update its container, not to save itself.
+BOOL COleServerDoc::SaveModified() {
+  if (!IsEmbedded()) return COleLinkingDoc::SaveModified();
+  UpdateModifiedFlag();
+  if (!IsModified() || m_lpClientSite == NULL) return TRUE;
+  CString strPrompt;
+  AfxFormatString1(strPrompt, AFX_IDP_ASK_TO_UPDATE,
+                   m_strHostObj.IsEmpty() ? (LPCTSTR)GetTitle() : (LPCTSTR)m_strHostObj);
+  switch (AfxMessageBox(strPrompt, MB_YESNOCANCEL | MB_ICONQUESTION, AFX_IDP_ASK_TO_UPDATE)) {
+  case IDCANCEL:
+    return FALSE;
+  case IDYES:
+    return OnUpdateDocument();
+  default:
+    return TRUE;
+  }
+}
+
+void COleServerDoc::OnCloseDocument() {
+  if (m_bClosing) return;
+  m_bClosing = TRUE;
+  // Keep the document while its containers let go of it.
+  InternalAddRef();
+  if (m_bCntrVisible && m_lpClientSite != NULL) {
+    m_bCntrVisible = FALSE;
+    m_lpClientSite->OnShowWindow(FALSE);
+  }
+  NotifyClosed();
+  ::CoDisconnectObject((LPUNKNOWN)&m_xOleObject, 0);
+  if (m_lpClientSite != NULL) {
+    m_lpClientSite->Release();
+    m_lpClientSite = NULL;
+  }
+  if (m_lpOleAdviseHolder != NULL) {
+    m_lpOleAdviseHolder->Release();
+    m_lpOleAdviseHolder = NULL;
+  }
+  if (m_lpDataAdviseHolder != NULL) {
+    m_lpDataAdviseHolder->Release();
+    m_lpDataAdviseHolder = NULL;
+  }
+
+  BOOL bAutoDelete = m_bAutoDelete;
+  m_bAutoDelete = FALSE;
+  COleLinkingDoc::OnCloseDocument();
+  m_bAutoDelete = bAutoDelete;
+
+  // The document's own reference, then the one above: the last reference
+  // gone deletes it (OnFinalRelease).
+  if (m_bOwnRef) {
+    m_bOwnRef = FALSE;
+    InternalRelease();
+  }
+  InternalRelease();
+}
+
+void COleServerDoc::OnFinalRelease() {
+  if (m_bClosing) {
+    if (m_bAutoDelete) delete this;
+    return;
+  }
+  // The containers let go first: close, which ends with the last release.
+  m_dwRef = 0;
+  m_bOwnRef = FALSE;
+  OnCloseDocument();
+}
+
+HMENU COleServerDoc::GetDefaultMenu() {
+  CDocTemplate* pTemplate = GetDocTemplate();
+  if (IsEmbedded() && pTemplate != NULL && pTemplate->m_hMenuEmbedding != NULL)
+    return pTemplate->m_hMenuEmbedding;
+  return COleLinkingDoc::GetDefaultMenu();
+}
+
+HACCEL COleServerDoc::GetDefaultAccelerator() {
+  CDocTemplate* pTemplate = GetDocTemplate();
+  if (IsEmbedded() && pTemplate != NULL && pTemplate->m_hAccelEmbedding != NULL)
+    return pTemplate->m_hAccelEmbedding;
+  return COleLinkingDoc::GetDefaultAccelerator();
+}
+
+void COleServerDoc::OnNewEmbedding(LPSTORAGE lpStorage) {
+  ReleaseRoot();
+  lpStorage->AddRef();
+  m_lpRootStg = lpStorage;
+  m_bEmbedded = TRUE;
+}
+
+void COleServerDoc::OnOpenEmbedding(LPSTORAGE lpStorage) {
+  DeleteContents();
+  ReleaseRoot();
+  lpStorage->AddRef();
+  m_lpRootStg = lpStorage;
+  m_bEmbedded = TRUE;
+  try {
+    LoadFromStorage();
+  } catch (CException*) {
+    DeleteContents();
+    throw;
+  }
+  SetModifiedFlag(FALSE);
+}
+
+void COleServerDoc::OnSaveEmbedding(LPSTORAGE lpStorage) {
+  LPSTORAGE lpOldRoot = m_lpRootStg;
+  m_bSameAsLoad = lpStorage == lpOldRoot;
+  m_lpRootStg = lpStorage;
+  try {
+    SaveToStorage();
+  } catch (CException*) {
+    m_lpRootStg = lpOldRoot;
+    m_bSameAsLoad = TRUE;
+    throw;
+  }
+  m_lpRootStg = lpOldRoot;
+  m_bSameAsLoad = TRUE;
+}
+
+void COleServerDoc::OnFileUpdate() { OnUpdateDocument(); }
+
+void COleServerDoc::OnUpdateFileUpdate(CCmdUI* pCmdUI) { pCmdUI->Enable(IsEmbedded()); }
+
+// A copy in a file of its own; the document stays as it was.
+void COleServerDoc::OnFileSaveCopyAs() {
+  BOOL bModified = IsModified();
+  BOOL bRemember = m_bRemember;
+  m_bRemember = FALSE;
+  DoSave(NULL, FALSE);
+  m_bRemember = bRemember;
+  SetModifiedFlag(bModified);
+}
+
+// IPersistStorage
+
+STDMETHODIMP_(ULONG) COleServerDoc::XPersistStorage::AddRef() {
+  METHOD_PROLOGUE_EX_(COleServerDoc, PersistStorage)
+  return pThis->ExternalAddRef();
+}
+
+STDMETHODIMP_(ULONG) COleServerDoc::XPersistStorage::Release() {
+  METHOD_PROLOGUE_EX_(COleServerDoc, PersistStorage)
+  return pThis->ExternalRelease();
+}
+
+STDMETHODIMP COleServerDoc::XPersistStorage::QueryInterface(REFIID iid, LPVOID* ppvObj) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, PersistStorage)
+  return pThis->ExternalQueryInterface(&iid, ppvObj);
+}
+
+STDMETHODIMP COleServerDoc::XPersistStorage::GetClassID(LPCLSID lpClassID) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, PersistStorage)
+  if (lpClassID == NULL) return E_POINTER;
+  pThis->GetClassIDOf(lpClassID);
+  return S_OK;
+}
+
+STDMETHODIMP COleServerDoc::XPersistStorage::IsDirty() {
+  METHOD_PROLOGUE_EX_(COleServerDoc, PersistStorage)
+  pThis->UpdateModifiedFlag();
+  return pThis->IsModified() ? S_OK : S_FALSE;
+}
+
+STDMETHODIMP COleServerDoc::XPersistStorage::InitNew(LPSTORAGE pStg) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, PersistStorage)
+  if (pStg == NULL) return E_INVALIDARG;
+  HRESULT hr = S_OK;
+  OLE_TRY
+    pThis->OnNewEmbedding(pStg);
+  OLE_CATCH(hr)
+  return hr;
+}
+
+STDMETHODIMP COleServerDoc::XPersistStorage::Load(LPSTORAGE pStg) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, PersistStorage)
+  if (pStg == NULL) return E_INVALIDARG;
+  HRESULT hr = S_OK;
+  OLE_TRY
+    pThis->OnOpenEmbedding(pStg);
+  OLE_CATCH(hr)
+  return hr;
+}
+
+STDMETHODIMP COleServerDoc::XPersistStorage::Save(LPSTORAGE pStgSave, BOOL) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, PersistStorage)
+  if (pStgSave == NULL) return E_INVALIDARG;
+  HRESULT hr = S_OK;
+  OLE_TRY
+    pThis->OnSaveEmbedding(pStgSave);
+  OLE_CATCH(hr)
+  return hr;
+}
+
+STDMETHODIMP COleServerDoc::XPersistStorage::SaveCompleted(LPSTORAGE pStgNew) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, PersistStorage)
+  if (pStgNew != NULL) {
+    pStgNew->AddRef();
+    pThis->ReleaseRoot();
+    pThis->m_lpRootStg = pStgNew;
+  }
+  pThis->SetModifiedFlag(FALSE);
+  pThis->NotifySaved();
+  return S_OK;
+}
+
+STDMETHODIMP COleServerDoc::XPersistStorage::HandsOffStorage() {
+  METHOD_PROLOGUE_EX_(COleServerDoc, PersistStorage)
+  pThis->ReleaseRoot();
+  return S_OK;
+}
+
+// IOleObject
+
+STDMETHODIMP_(ULONG) COleServerDoc::XOleObject::AddRef() {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  return pThis->ExternalAddRef();
+}
+
+STDMETHODIMP_(ULONG) COleServerDoc::XOleObject::Release() {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  return pThis->ExternalRelease();
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::QueryInterface(REFIID iid, LPVOID* ppvObj) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  return pThis->ExternalQueryInterface(&iid, ppvObj);
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::SetClientSite(LPOLECLIENTSITE pClientSite) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  if (pClientSite != NULL) pClientSite->AddRef();
+  if (pThis->m_lpClientSite != NULL) pThis->m_lpClientSite->Release();
+  pThis->m_lpClientSite = pClientSite;
+  return S_OK;
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::GetClientSite(LPOLECLIENTSITE* ppClientSite) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  if (ppClientSite == NULL) return E_POINTER;
+  *ppClientSite = pThis->m_lpClientSite;
+  if (*ppClientSite != NULL) (*ppClientSite)->AddRef();
+  return S_OK;
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::SetHostNames(LPCOLESTR szContainerApp,
+                                                     LPCOLESTR szContainerObj) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  HRESULT hr = S_OK;
+  OLE_TRY
+    CString strApp(szContainerApp != NULL ? szContainerApp : L"");
+    CString strObj(szContainerObj != NULL ? szContainerObj : L"");
+    pThis->OnSetHostNames(strApp, strObj);
+  OLE_CATCH(hr)
+  return hr;
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::Close(DWORD dwSaveOption) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  HRESULT hr = S_OK;
+  pThis->InternalAddRef();
+  OLE_TRY
+    pThis->OnClose((OLECLOSE)dwSaveOption);
+  OLE_CATCH(hr)
+  pThis->InternalRelease();
+  return hr;
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::SetMoniker(DWORD, LPMONIKER) { return S_OK; }
+
+STDMETHODIMP COleServerDoc::XOleObject::GetMoniker(DWORD dwAssign, DWORD dwWhichMoniker,
+                                                   LPMONIKER* ppmk) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  if (ppmk == NULL) return E_POINTER;
+  *ppmk = NULL;
+  if (pThis->m_lpClientSite == NULL) return E_UNEXPECTED;
+  return pThis->m_lpClientSite->GetMoniker(dwAssign, dwWhichMoniker, ppmk);
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::InitFromData(LPDATAOBJECT, BOOL, DWORD) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::GetClipboardData(DWORD, LPDATAOBJECT* ppDataObject) {
+  if (ppDataObject != NULL) *ppDataObject = NULL;
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::DoVerb(LONG iVerb, LPMSG, LPOLECLIENTSITE, LONG, HWND,
+                                               LPCRECT) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  HRESULT hr = S_OK;
+  pThis->InternalAddRef();
+  OLE_TRY
+    COleServerItem* pItem = pThis->GetEmbeddedItem();
+    if (pItem == NULL)
+      hr = E_UNEXPECTED;
+    else
+      pItem->OnDoVerb(iVerb);
+  OLE_CATCH(hr)
+  pThis->InternalRelease();
+  return hr;
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::EnumVerbs(LPENUMOLEVERB* ppEnumOleVerb) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  CLSID clsid;
+  pThis->GetClassIDOf(&clsid);
+  return ::OleRegEnumVerbs(clsid, ppEnumOleVerb);
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::Update() {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  pThis->NotifyChanged();
+  return S_OK;
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::IsUpToDate() { return S_OK; }
+
+STDMETHODIMP COleServerDoc::XOleObject::GetUserClassID(LPCLSID pClsid) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  if (pClsid == NULL) return E_POINTER;
+  pThis->GetClassIDOf(pClsid);
+  return S_OK;
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::GetUserType(DWORD dwFormOfType, LPOLESTR* pszUserType) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  CLSID clsid;
+  pThis->GetClassIDOf(&clsid);
+  return ::OleRegGetUserType(clsid, dwFormOfType, pszUserType);
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::SetExtent(DWORD dwDrawAspect, LPSIZEL psizel) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  if (psizel == NULL) return E_POINTER;
+  HRESULT hr = E_FAIL;
+  OLE_TRY
+    COleServerItem* pItem = pThis->GetEmbeddedItem();
+    if (pItem != NULL &&
+        pItem->OnSetExtent((DVASPECT)dwDrawAspect, CSize(psizel->cx, psizel->cy)))
+      hr = S_OK;
+  OLE_CATCH(hr)
+  return hr;
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::GetExtent(DWORD dwDrawAspect, LPSIZEL psizel) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  if (psizel == NULL) return E_POINTER;
+  HRESULT hr = E_FAIL;
+  OLE_TRY
+    COleServerItem* pItem = pThis->GetEmbeddedItem();
+    CSize size(0, 0);
+    if (pItem != NULL && pItem->OnGetExtent((DVASPECT)dwDrawAspect, size)) {
+      psizel->cx = size.cx;
+      psizel->cy = size.cy;
+      hr = S_OK;
+    }
+  OLE_CATCH(hr)
+  return hr;
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::Advise(LPADVISESINK pAdvSink, DWORD* pdwConnection) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  if (pThis->m_lpOleAdviseHolder == NULL &&
+      FAILED(::CreateOleAdviseHolder(&pThis->m_lpOleAdviseHolder)))
+    return E_OUTOFMEMORY;
+  return pThis->m_lpOleAdviseHolder->Advise(pAdvSink, pdwConnection);
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::Unadvise(DWORD dwConnection) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  if (pThis->m_lpOleAdviseHolder == NULL) return OLE_E_NOCONNECTION;
+  return pThis->m_lpOleAdviseHolder->Unadvise(dwConnection);
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::EnumAdvise(LPENUMSTATDATA* ppenumAdvise) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  if (ppenumAdvise == NULL) return E_POINTER;
+  *ppenumAdvise = NULL;
+  if (pThis->m_lpOleAdviseHolder == NULL) return E_FAIL;
+  return pThis->m_lpOleAdviseHolder->EnumAdvise(ppenumAdvise);
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::GetMiscStatus(DWORD dwAspect, DWORD* pdwStatus) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
+  CLSID clsid;
+  pThis->GetClassIDOf(&clsid);
+  return ::OleRegGetMiscStatus(clsid, dwAspect, pdwStatus);
+}
+
+STDMETHODIMP COleServerDoc::XOleObject::SetColorScheme(LPLOGPALETTE) { return E_NOTIMPL; }
+
+// IDataObject: the embedded item's data, and the advise connections that
+// keep the container's copy of it current.
+
+static LPDATAOBJECT ItemDataObject(COleServerDoc* pDoc) {
+  COleServerItem* pItem = NULL;
+  try {
+    pItem = pDoc->GetEmbeddedItem();
+  } catch (CException* e) {
+    e->Delete();
+  }
+  if (pItem == NULL) return NULL;
+  return (LPDATAOBJECT)pItem->GetDataSource()->GetInterface(&IID_IDataObject);
+}
+
+STDMETHODIMP_(ULONG) COleServerDoc::XDataObject::AddRef() {
+  METHOD_PROLOGUE_EX_(COleServerDoc, DataObject)
+  return pThis->ExternalAddRef();
+}
+
+STDMETHODIMP_(ULONG) COleServerDoc::XDataObject::Release() {
+  METHOD_PROLOGUE_EX_(COleServerDoc, DataObject)
+  return pThis->ExternalRelease();
+}
+
+STDMETHODIMP COleServerDoc::XDataObject::QueryInterface(REFIID iid, LPVOID* ppvObj) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, DataObject)
+  return pThis->ExternalQueryInterface(&iid, ppvObj);
+}
+
+// A request with no format is the object handler's cache asking for a
+// picture to draw: it gets the metafile.
+static LPFORMATETC PictureFormat(LPFORMATETC lpFormatEtc, FORMATETC& formatEtc) {
+  if (lpFormatEtc == NULL || lpFormatEtc->cfFormat != 0) return lpFormatEtc;
+  formatEtc = *lpFormatEtc;
+  formatEtc.cfFormat = CF_METAFILEPICT;
+  formatEtc.tymed = TYMED_MFPICT;
+  return &formatEtc;
+}
+
+STDMETHODIMP COleServerDoc::XDataObject::GetData(LPFORMATETC pformatetcIn, LPSTGMEDIUM pmedium) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, DataObject)
+  LPDATAOBJECT lpData = ItemDataObject(pThis);
+  FORMATETC formatEtc;
+  return lpData != NULL ? lpData->GetData(PictureFormat(pformatetcIn, formatEtc), pmedium)
+                        : E_UNEXPECTED;
+}
+
+STDMETHODIMP COleServerDoc::XDataObject::GetDataHere(LPFORMATETC pformatetc,
+                                                     LPSTGMEDIUM pmedium) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, DataObject)
+  LPDATAOBJECT lpData = ItemDataObject(pThis);
+  return lpData != NULL ? lpData->GetDataHere(pformatetc, pmedium) : E_UNEXPECTED;
+}
+
+STDMETHODIMP COleServerDoc::XDataObject::QueryGetData(LPFORMATETC pformatetc) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, DataObject)
+  LPDATAOBJECT lpData = ItemDataObject(pThis);
+  FORMATETC formatEtc;
+  return lpData != NULL ? lpData->QueryGetData(PictureFormat(pformatetc, formatEtc))
+                        : E_UNEXPECTED;
+}
+
+STDMETHODIMP COleServerDoc::XDataObject::GetCanonicalFormatEtc(LPFORMATETC pformatetcIn,
+                                                               LPFORMATETC pformatetcOut) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, DataObject)
+  LPDATAOBJECT lpData = ItemDataObject(pThis);
+  return lpData != NULL ? lpData->GetCanonicalFormatEtc(pformatetcIn, pformatetcOut)
+                        : E_UNEXPECTED;
+}
+
+STDMETHODIMP COleServerDoc::XDataObject::SetData(LPFORMATETC pformatetc, LPSTGMEDIUM pmedium,
+                                                 BOOL fRelease) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, DataObject)
+  LPDATAOBJECT lpData = ItemDataObject(pThis);
+  return lpData != NULL ? lpData->SetData(pformatetc, pmedium, fRelease) : E_UNEXPECTED;
+}
+
+STDMETHODIMP COleServerDoc::XDataObject::EnumFormatEtc(DWORD dwDirection,
+                                                       LPENUMFORMATETC* ppenumFormatEtc) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, DataObject)
+  LPDATAOBJECT lpData = ItemDataObject(pThis);
+  return lpData != NULL ? lpData->EnumFormatEtc(dwDirection, ppenumFormatEtc) : E_UNEXPECTED;
+}
+
+STDMETHODIMP COleServerDoc::XDataObject::DAdvise(LPFORMATETC pformatetc, DWORD advf,
+                                                 LPADVISESINK pAdvSink, DWORD* pdwConnection) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, DataObject)
+  if (pThis->m_lpDataAdviseHolder == NULL &&
+      FAILED(::CreateDataAdviseHolder(&pThis->m_lpDataAdviseHolder)))
+    return E_OUTOFMEMORY;
+  return pThis->m_lpDataAdviseHolder->Advise((LPDATAOBJECT)this, pformatetc, advf, pAdvSink,
+                                             pdwConnection);
+}
+
+STDMETHODIMP COleServerDoc::XDataObject::DUnadvise(DWORD dwConnection) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, DataObject)
+  if (pThis->m_lpDataAdviseHolder == NULL) return OLE_E_NOCONNECTION;
+  return pThis->m_lpDataAdviseHolder->Unadvise(dwConnection);
+}
+
+STDMETHODIMP COleServerDoc::XDataObject::EnumDAdvise(LPENUMSTATDATA* ppenumAdvise) {
+  METHOD_PROLOGUE_EX_(COleServerDoc, DataObject)
+  if (ppenumAdvise == NULL) return E_POINTER;
+  *ppenumAdvise = NULL;
+  if (pThis->m_lpDataAdviseHolder == NULL) return E_FAIL;
+  return pThis->m_lpDataAdviseHolder->EnumAdvise(ppenumAdvise);
+}
+
+// ---------------------------------------------------------------------
+// COleServerItem
+
+COleServerItem::COleServerItem(COleServerDoc* pServerDoc, BOOL bAutoDelete)
+    : m_bAutoDelete(bAutoDelete), m_sizeExtent(0, 0) {
+  m_dataSource.m_pItem = this;
+  if (pServerDoc != NULL) pServerDoc->AddItem(this);
+  // The picture, drawn by OnDraw when a container asks for it.
+  FORMATETC formatEtc = {CF_METAFILEPICT, NULL, DVASPECT_CONTENT, -1, TYMED_MFPICT};
+  m_dataSource.DelayRenderData(CF_METAFILEPICT, &formatEtc);
+}
+
+COleServerItem::~COleServerItem() {
+  COleServerDoc* pDoc = GetDocument();
+  if (pDoc != NULL && pDoc->m_pEmbeddedItem == this) pDoc->m_pEmbeddedItem = NULL;
+}
+
+void COleServerItem::OnFinalRelease() {
+  if (m_bAutoDelete) delete this;
+}
+
+BOOL COleServerItem::IsLinkedItem() const {
+  COleServerDoc* pDoc = GetDocument();
+  return pDoc == NULL || pDoc->m_pEmbeddedItem != this;
+}
+
+BOOL COleServerItem::IsConnected() const {
+  COleServerDoc* pDoc = GetDocument();
+  if (pDoc == NULL) return FALSE;
+  if (!IsLinkedItem()) return pDoc->m_lpClientSite != NULL;
+  return m_dwRef > 1;
+}
+
+void COleServerItem::NotifyChanged(DVASPECT) {
+  COleServerDoc* pDoc = GetDocument();
+  if (pDoc != NULL && !IsLinkedItem()) pDoc->NotifyChanged();
+}
+
+void COleServerItem::OnUpdate(COleServerItem*, LPARAM, CObject*, DVASPECT nDrawAspect) {
+  NotifyChanged(nDrawAspect);
+}
+
+void COleServerItem::OnDoVerb(LONG iVerb) {
+  switch (iVerb) {
+  case OLEIVERB_HIDE:
+    OnHide();
+    break;
+  case OLEIVERB_OPEN:
+    OnOpen();
+    break;
+  case OLEIVERB_PRIMARY:
+  case OLEIVERB_SHOW:
+  case OLEIVERB_UIACTIVATE:
+  case OLEIVERB_INPLACEACTIVATE:
+    OnShow();
+    break;
+  default:
+    // The program's own verbs show the item unless overridden; the other
+    // standard verbs mean nothing here.
+    if (iVerb < 0) AfxThrowOleException(E_NOTIMPL);
+    OnShow();
+    break;
+  }
+}
+
+// Without in-place editing, showing the item opens it in a window.
+void COleServerItem::OnShow() { OnOpen(); }
+
+void COleServerItem::OnOpen() {
+  COleServerDoc* pDoc = GetDocument();
+  if (pDoc != NULL) pDoc->OnShowDocument(TRUE);
+}
+
+void COleServerItem::OnHide() {
+  COleServerDoc* pDoc = GetDocument();
+  if (pDoc != NULL) pDoc->OnShowDocument(FALSE);
+}
+
+BOOL COleServerItem::OnDrawEx(CDC* pDC, DVASPECT nDrawAspect, CSize& rSize) {
+  if (nDrawAspect != DVASPECT_CONTENT) return FALSE;
+  return OnDraw(pDC, rSize);
+}
+
+BOOL COleServerItem::OnGetExtent(DVASPECT nDrawAspect, CSize& rSize) {
+  if (nDrawAspect != DVASPECT_CONTENT || m_sizeExtent.cx == 0 || m_sizeExtent.cy == 0)
+    return FALSE;
+  rSize = m_sizeExtent;
+  return TRUE;
+}
+
+BOOL COleServerItem::OnSetExtent(DVASPECT nDrawAspect, const CSize& size) {
+  if (nDrawAspect != DVASPECT_CONTENT) return FALSE;
+  m_sizeExtent = size;
+  return TRUE;
+}
+
+BOOL COleServerItem::GetMetafileData(LPFORMATETC lpFormatEtc, LPSTGMEDIUM lpStgMedium) {
+  if (!(lpFormatEtc->tymed & TYMED_MFPICT)) return FALSE;
+  DVASPECT nAspect = (DVASPECT)lpFormatEtc->dwAspect;
+  CSize size(0, 0);
+  if (!OnGetExtent(nAspect, size)) size = CSize(0, 0);
+
+  HDC hMetaDC = ::CreateMetaFile(NULL);
+  if (hMetaDC == NULL) return FALSE;
+  CDC dc;
+  dc.Attach(hMetaDC);
+  dc.SetMapMode(MM_ANISOTROPIC);
+  dc.SetWindowOrg(0, 0);
+  if (size.cx > 0 && size.cy > 0) dc.SetWindowExt(size);
+  BOOL bDrawn = FALSE;
+  try {
+    bDrawn = OnDrawEx(&dc, nAspect, size);
+  } catch (CException*) {
+    dc.Detach();
+    ::DeleteMetaFile(::CloseMetaFile(hMetaDC));
+    throw;
+  }
+  dc.Detach();
+  HMETAFILE hMF = ::CloseMetaFile(hMetaDC);
+  if (!bDrawn || hMF == NULL) {
+    if (hMF != NULL) ::DeleteMetaFile(hMF);
+    return FALSE;
+  }
+  HGLOBAL hPict = ::GlobalAlloc(GMEM_MOVEABLE | GMEM_SHARE, sizeof(METAFILEPICT));
+  if (hPict == NULL) {
+    ::DeleteMetaFile(hMF);
+    return FALSE;
+  }
+  METAFILEPICT* pPict = (METAFILEPICT*)::GlobalLock(hPict);
+  pPict->mm = MM_ANISOTROPIC;
+  pPict->xExt = size.cx;
+  pPict->yExt = size.cy;
+  pPict->hMF = hMF;
+  ::GlobalUnlock(hPict);
+  lpStgMedium->tymed = TYMED_MFPICT;
+  lpStgMedium->hMetaFilePict = hPict;
+  lpStgMedium->pUnkForRelease = NULL;
+  return TRUE;
+}
+
+BOOL COleServerItem::OnRenderData(LPFORMATETC lpFormatEtc, LPSTGMEDIUM lpStgMedium) {
+  if (lpFormatEtc->cfFormat == CF_METAFILEPICT && (lpFormatEtc->tymed & TYMED_MFPICT))
+    return GetMetafileData(lpFormatEtc, lpStgMedium);
+  // The global and file forms, through OnRenderGlobalData and OnRenderFileData.
+  return m_dataSource.COleDataSource::OnRenderData(lpFormatEtc, lpStgMedium);
+}
+
+BOOL COleServerItem::OnRenderGlobalData(LPFORMATETC, HGLOBAL*) { return FALSE; }
+
+BOOL COleServerItem::OnRenderFileData(LPFORMATETC, CFile*) { return FALSE; }
+
+BOOL COleServerItem::OnSetData(LPFORMATETC, LPSTGMEDIUM, BOOL) { return FALSE; }
+
+BOOL COleServerItem::CItemDataSource::OnRenderData(LPFORMATETC lpFormatEtc,
+                                                   LPSTGMEDIUM lpStgMedium) {
+  return m_pItem->OnRenderData(lpFormatEtc, lpStgMedium);
+}
+
+BOOL COleServerItem::CItemDataSource::OnRenderFileData(LPFORMATETC lpFormatEtc, CFile* pFile) {
+  return m_pItem->OnRenderFileData(lpFormatEtc, pFile);
+}
+
+BOOL COleServerItem::CItemDataSource::OnRenderGlobalData(LPFORMATETC lpFormatEtc,
+                                                         HGLOBAL* phGlobal) {
+  return m_pItem->OnRenderGlobalData(lpFormatEtc, phGlobal);
+}
+
+BOOL COleServerItem::CItemDataSource::OnSetData(LPFORMATETC lpFormatEtc,
+                                                LPSTGMEDIUM lpStgMedium, BOOL bRelease) {
+  return m_pItem->OnSetData(lpFormatEtc, lpStgMedium, bRelease);
+}
+
+void COleServerItem::GetEmbedSourceData(LPSTGMEDIUM lpStgMedium) {
+  COleServerDoc* pDoc = GetDocument();
+  LPLOCKBYTES lpLockBytes = NULL;
+  SCODE sc = ::CreateILockBytesOnHGlobal(NULL, TRUE, &lpLockBytes);
+  if (FAILED(sc)) AfxThrowOleException(sc);
+  LPSTORAGE lpStorage = NULL;
+  sc = ::StgCreateDocfileOnILockBytes(
+      lpLockBytes, STGM_SHARE_EXCLUSIVE | STGM_CREATE | STGM_READWRITE, 0, &lpStorage);
+  lpLockBytes->Release();
+  if (FAILED(sc)) AfxThrowOleException(sc);
+  try {
+    CLSID clsid;
+    pDoc->GetClassIDOf(&clsid);
+    sc = ::WriteClassStg(lpStorage, clsid);
+    if (FAILED(sc)) AfxThrowOleException(sc);
+    pDoc->OnSaveEmbedding(lpStorage);
+    sc = lpStorage->Commit(STGC_OVERWRITE);
+    if (FAILED(sc)) AfxThrowOleException(sc);
+  } catch (CException*) {
+    lpStorage->Release();
+    throw;
+  }
+  lpStgMedium->tymed = TYMED_ISTORAGE;
+  lpStgMedium->pstg = lpStorage;
+  lpStgMedium->pUnkForRelease = NULL;
+}
+
+void COleServerItem::GetObjectDescriptorData(LPPOINT lpOffset, LPSIZE lpSize,
+                                             LPSTGMEDIUM lpStgMedium) {
+  COleServerDoc* pDoc = GetDocument();
+  CLSID clsid;
+  pDoc->GetClassIDOf(&clsid);
+  CStringW strType;
+  LPOLESTR lpszType = NULL;
+  if (SUCCEEDED(::OleRegGetUserType(clsid, USERCLASSTYPE_FULL, &lpszType)) && lpszType != NULL) {
+    strType = lpszType;
+    ::CoTaskMemFree(lpszType);
+  }
+  CStringW strSource(pDoc->GetPathName().IsEmpty() ? pDoc->GetTitle() : pDoc->GetPathName());
+  CSize size(0, 0);
+  if (lpSize != NULL && (lpSize->cx != 0 || lpSize->cy != 0))
+    size = *lpSize;
+  else
+    OnGetExtent(DVASPECT_CONTENT, size);
+
+  UINT cbType = (strType.GetLength() + 1) * sizeof(WCHAR);
+  UINT cbSource = (strSource.GetLength() + 1) * sizeof(WCHAR);
+  HGLOBAL hDesc = ::GlobalAlloc(GMEM_MOVEABLE | GMEM_SHARE | GMEM_ZEROINIT,
+                                sizeof(OBJECTDESCRIPTOR) + cbType + cbSource);
+  if (hDesc == NULL) AfxThrowMemoryException();
+  OBJECTDESCRIPTOR* pod = (OBJECTDESCRIPTOR*)::GlobalLock(hDesc);
+  pod->cbSize = sizeof(OBJECTDESCRIPTOR) + cbType + cbSource;
+  pod->clsid = clsid;
+  pod->dwDrawAspect = DVASPECT_CONTENT;
+  pod->sizel.cx = size.cx;
+  pod->sizel.cy = size.cy;
+  if (lpOffset != NULL) {
+    pod->pointl.x = lpOffset->x;
+    pod->pointl.y = lpOffset->y;
+  }
+  ::OleRegGetMiscStatus(clsid, DVASPECT_CONTENT, &pod->dwStatus);
+  pod->dwFullUserTypeName = sizeof(OBJECTDESCRIPTOR);
+  pod->dwSrcOfCopy = sizeof(OBJECTDESCRIPTOR) + cbType;
+  memcpy((BYTE*)pod + pod->dwFullUserTypeName, (LPCWSTR)strType, cbType);
+  memcpy((BYTE*)pod + pod->dwSrcOfCopy, (LPCWSTR)strSource, cbSource);
+  ::GlobalUnlock(hDesc);
+  lpStgMedium->tymed = TYMED_HGLOBAL;
+  lpStgMedium->hGlobal = hDesc;
+  lpStgMedium->pUnkForRelease = NULL;
+}
+
+void COleServerItem::AddOtherClipboardData(COleDataSource* pDataSource) {
+  FORMATETC formatEtc = {CF_METAFILEPICT, NULL, DVASPECT_CONTENT, -1, TYMED_MFPICT};
+  STGMEDIUM stgMedium;
+  if (GetMetafileData(&formatEtc, &stgMedium))
+    pDataSource->CacheData(CF_METAFILEPICT, &stgMedium, &formatEtc);
+}
+
+void COleServerItem::GetClipboardData(COleDataSource* pDataSource, BOOL, LPPOINT lpOffset,
+                                      LPSIZE lpSize) {
+  FORMATETC formatEtc = {CF_EMBEDSOURCE_, NULL, DVASPECT_CONTENT, -1, TYMED_ISTORAGE};
+  STGMEDIUM stgMedium;
+  GetEmbedSourceData(&stgMedium);
+  pDataSource->CacheData(CF_EMBEDSOURCE_, &stgMedium, &formatEtc);
+  GetObjectDescriptorData(lpOffset, lpSize, &stgMedium);
+  pDataSource->CacheData(CF_OBJECTDESCRIPTOR_, &stgMedium);
+  AddOtherClipboardData(pDataSource);
+}
+
+void COleServerItem::CopyToClipboard(BOOL bIncludeLink) {
+  COleDataSource* pDataSource = new COleDataSource;
+  try {
+    GetClipboardData(pDataSource, bIncludeLink, NULL, NULL);
+  } catch (CException*) {
+    pDataSource->InternalRelease();
+    throw;
+  }
+  pDataSource->SetClipboard();
+}
+
+DROPEFFECT COleServerItem::DoDragDrop(LPCRECT lpItemRect, CPoint ptOffset, BOOL bIncludeLink,
+                                      DWORD dwEffects, LPCRECT lpRectStartDrag) {
+  CSize size(0, 0);
+  CSize offset(ptOffset.x, ptOffset.y);
+  {
+    // The descriptor wants HIMETRIC.
+    CClientDC dc(NULL);
+    if (lpItemRect != NULL) {
+      size = CSize(lpItemRect->right - lpItemRect->left, lpItemRect->bottom - lpItemRect->top);
+      dc.DPtoHIMETRIC(&size);
+    }
+    dc.DPtoHIMETRIC(&offset);
+  }
+  CPoint ptHimetric(offset.cx, offset.cy);
+  COleDataSource* pDataSource = new COleDataSource;
+  DROPEFFECT dropEffect = DROPEFFECT_NONE;
+  try {
+    GetClipboardData(pDataSource, bIncludeLink, &ptHimetric, &size);
+    dropEffect = pDataSource->DoDragDrop(dwEffects, lpRectStartDrag);
+  } catch (CException*) {
+    pDataSource->InternalRelease();
+    throw;
+  }
+  pDataSource->InternalRelease();
+  return dropEffect;
+}
+
+// ---------------------------------------------------------------------
+// COleTemplateServer
+
+COleTemplateServer::COleTemplateServer()
+    : COleObjectFactory(CLSID_NULL, NULL, FALSE, NULL),
+      m_pDocTemplate(NULL),
+      m_nAppType(OAT_UNKNOWN) {}
+
+void COleTemplateServer::ConnectTemplate(REFCLSID clsid, CDocTemplate* pDocTemplate,
+                                         BOOL bMultiInstance) {
+  m_clsid = clsid;
+  m_pDocTemplate = pDocTemplate;
+  m_bMultiInstance = bMultiInstance;
+  if (pDocTemplate != NULL) pDocTemplate->m_pAttachedFactory = this;
+}
+
+CCmdTarget* COleTemplateServer::OnCreateObject() {
+  if (m_pDocTemplate == NULL) return NULL;
+  // A new document, its frame hidden until a verb shows it.
+  CDocument* pDoc = m_pDocTemplate->OpenDocumentFile(NULL, FALSE);
+  if (pDoc == NULL) return NULL;
+  if (pDoc->IsKindOf(RUNTIME_CLASS(COleServerDoc))) {
+    COleServerDoc* pServerDoc = (COleServerDoc*)pDoc;
+    pServerDoc->m_pFactory = this;
+    // The reference it starts with goes to the container.
+    pServerDoc->m_bOwnRef = FALSE;
+  }
+  return pDoc;
+}
+
+static BOOL SetClassKey(LPCTSTR lpszKey, LPCTSTR lpszValue, LPCTSTR lpszValueName = NULL) {
+  HKEY hKey;
+  if (::RegCreateKeyEx(HKEY_CLASSES_ROOT, lpszKey, 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) !=
+      ERROR_SUCCESS)
+    return FALSE;
+  LONG l = ::RegSetValueEx(hKey, lpszValueName, 0, REG_SZ, (const BYTE*)lpszValue,
+                           (DWORD)((lstrlen(lpszValue) + 1) * sizeof(TCHAR)));
+  ::RegCloseKey(hKey);
+  return l == ERROR_SUCCESS;
+}
+
+static void DeleteClassTree(HKEY hParent, LPCTSTR lpszKey) {
+  HKEY hKey;
+  if (::RegOpenKeyEx(hParent, lpszKey, 0, KEY_READ | KEY_WRITE, &hKey) != ERROR_SUCCESS) return;
+  TCHAR szName[256];
+  while (::RegEnumKey(hKey, 0, szName, _countof(szName)) == ERROR_SUCCESS)
+    DeleteClassTree(hKey, szName);
+  ::RegCloseKey(hKey);
+  ::RegDeleteKey(hParent, lpszKey);
+}
+
+static CString ClassIDString(REFCLSID clsid) {
+  LPOLESTR psz = NULL;
+  if (FAILED(::StringFromCLSID(clsid, &psz))) return CString();
+  CString str(psz);
+  ::CoTaskMemFree(psz);
+  return str;
+}
+
+void COleTemplateServer::UpdateRegistry(OLE_APPTYPE nAppType, LPCTSTR*, LPCTSTR*,
+                                        BOOL bRegister) {
+  m_nAppType = nAppType;
+  if (!bRegister) {
+    Unregister();
+    return;
+  }
+  if (m_pDocTemplate == NULL) return;
+  CString strClsid = ClassIDString(m_clsid);
+  if (strClsid.IsEmpty()) return;
+
+  CString strProgID, strName, strShort;
+  m_pDocTemplate->GetDocString(strProgID, CDocTemplate::regFileTypeId);
+  m_pDocTemplate->GetDocString(strName, CDocTemplate::regFileTypeName);
+  m_pDocTemplate->GetDocString(strShort, CDocTemplate::fileNewName);
+  if (strName.IsEmpty()) strName = strProgID;
+  if (strShort.IsEmpty()) strShort = strName;
+
+  TCHAR szPath[MAX_PATH];
+  ::GetModuleFileName(AfxGetInstanceHandle(), szPath, MAX_PATH);
+  CString strPath = szPath;
+  if (strPath.Find(_T(' ')) >= 0) strPath = _T("\"") + strPath + _T("\"");
+  BOOL bServer = nAppType == OAT_INPLACE_SERVER || nAppType == OAT_SERVER ||
+                 nAppType == OAT_DOC_OBJECT_SERVER;
+
+  CString strKey = _T("CLSID\\") + strClsid;
+  SetClassKey(strKey, strName);
+  if (!strProgID.IsEmpty()) {
+    SetClassKey(strProgID, strName);
+    SetClassKey(strProgID + _T("\\CLSID"), strClsid);
+    SetClassKey(strKey + _T("\\ProgID"), strProgID);
+    if (bServer) SetClassKey(strProgID + _T("\\Insertable"), _T(""));
+  }
+  SetClassKey(strKey + _T("\\LocalServer32"),
+              nAppType == OAT_DISPATCH_OBJECT ? strPath + _T(" /Automation") : strPath);
+  if (nAppType == OAT_DISPATCH_OBJECT) return;
+  SetClassKey(strKey + _T("\\InprocHandler32"), _T("ole32.dll"));
+  SetClassKey(strKey + _T("\\DefaultIcon"), strPath + _T(",0"));
+  SetClassKey(strKey + _T("\\AuxUserType\\2"), strShort);
+  SetClassKey(strKey + _T("\\AuxUserType\\3"), AfxGetAppName());
+  if (!bServer) return;
+  SetClassKey(strKey + _T("\\Insertable"), _T(""));
+  SetClassKey(strKey + _T("\\MiscStatus"), _T("32"));  // OLEMISC_RECOMPOSEONRESIZE
+  SetClassKey(strKey + _T("\\verb\\0"), _T("&Edit,0,2"));
+  if (nAppType != OAT_SERVER) SetClassKey(strKey + _T("\\verb\\1"), _T("&Open,0,2"));
+}
+
+BOOL COleTemplateServer::UpdateRegistry(BOOL bRegister) {
+  if (m_pDocTemplate == NULL) return COleObjectFactory::UpdateRegistry(bRegister);
+  UpdateRegistry(m_nAppType == OAT_UNKNOWN ? OAT_INPLACE_SERVER : m_nAppType, NULL, NULL,
+                 bRegister);
+  return TRUE;
+}
+
+BOOL COleTemplateServer::Unregister() {
+  CString strClsid = ClassIDString(m_clsid);
+  if (strClsid.IsEmpty()) return FALSE;
+  DeleteClassTree(HKEY_CLASSES_ROOT, _T("CLSID\\") + strClsid);
+  if (m_pDocTemplate != NULL) {
+    CString strProgID;
+    m_pDocTemplate->GetDocString(strProgID, CDocTemplate::regFileTypeId);
+    if (!strProgID.IsEmpty()) DeleteClassTree(HKEY_CLASSES_ROOT, strProgID);
+  }
+  return TRUE;
+}
