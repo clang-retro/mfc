@@ -82,6 +82,20 @@ __asm__(".section .drectve,\"yn\"\n"
         " -defaultlib:winspool -defaultlib:ole32 -defaultlib:oleaut32 -defaultlib:uuid\"\n"
         ".text");
 #endif
+// A DLL built with the library (an MFC regular DLL, such as an .ocx)
+// takes its DllMain from the library: dllmodul.cpp starts and ends the
+// DLL's CWinApp. The C runtime has an empty DllMain of its own, which
+// the linker would find first, so every module made with the library
+// carries this one, which only calls the library's. Like Visual C++ MFC,
+// that means such a DLL does not write a DllMain; _AFX_NO_DLLMAIN turns
+// it off for one that must.
+#ifndef _AFX_NO_DLLMAIN
+extern "C" BOOL WINAPI _AfxDllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved);
+extern "C" __attribute__((used)) inline BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason,
+                                                            LPVOID lpReserved) {
+  return _AfxDllMain(hInstance, dwReason, lpReserved);
+}
+#endif
 
 #define _MFC_VER 0x0600
 #define _CLANG_RETRO_MFC 1

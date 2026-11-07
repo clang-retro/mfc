@@ -1,0 +1,10 @@
+// dlltest.rc - resources of dlltest: a string with the number the DLL
+// also uses.
+#include <windows.h>
+#include <afxres.h>
+#include "dlltest.h"
+
+STRINGTABLE
+BEGIN
+  IDS_FROMEXE "From the program"
+END

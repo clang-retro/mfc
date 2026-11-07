@@ -43,6 +43,24 @@ Define `_AFX_NOFORCE_LIBS` to turn that off. The library provides
 `WinMain` (and `wWinMain`), so Unicode programs link with or without
 `-municode`.
 
+A regular DLL (an MFC DLL with a CWinApp of its own, such as a
+control's `.ocx`) builds the same way with `-shared` and a `.def` file
+for its exports:
+
+```sh
+clang++ --config=winxp.cfg -Ipath/to/mfc/include -shared ctl.cpp ctl.def ctl-res.o \
+  -Lpath/to/build/i586-pc-windows5.1-gnu -o ctl.ocx
+```
+
+The library provides its `DllMain`, which starts the DLL's CWinApp
+(InitInstance) when it loads and ends it (ExitInstance) when it unloads,
+so such a DLL does not write one; `_AFX_NO_DLLMAIN` turns that off. The
+DLL has its own copy of the library, with its own instance handle,
+resources, window classes and window objects, so `AFX_MANAGE_STATE` has
+nothing to do and the program and the DLL need not use the same
+library build. `AfxDllGetClassObject`, `AfxDllCanUnloadNow` and
+`COleObjectFactory::UpdateRegistryAll` implement the usual exports.
+
 ## Testing
 
 `make check` (with the same variables as the build) builds the programs
@@ -142,6 +160,13 @@ when there is no display:
   and a dialog template with controls among ordinary items (made on
   WM_INITDIALOG in the template's tab order, state from DLGINIT,
   DDX_Control and the DDX_OC functions).
+* `dlltest`: MFC in a DLL: a control in a regular DLL (`dlltest-dll`,
+  built like an `.ocx`) registered through DllRegisterServer, made by
+  COM from the registry and hosted by the program (properties, methods
+  and events across the two copies of the library), the DLL's own
+  instance, resources and CWinApp, a dialog from the DLL's template, and
+  unloading through DllCanUnloadNow, with the DLL's ExitInstance and
+  window classes.
 * `ctltest`: writing a control with COleControl, the test being both
   its server and its container: stock and custom properties, a method,
   stock and custom events, the font object, ambient properties, frozen
@@ -262,6 +287,13 @@ request with the stock MinGW-w64 toolchain.
 * Containment hosts windowed controls only: windowless controls,
   extended controls (IOleControlSite::GetExtendedControl), data binding
   and property pages are not implemented.
+* A regular DLL runs in the program's message loop, so its CWinApp's
+  OnIdle and PreTranslateMessage are not called (as with Visual C++
+  MFC's static library), and the temporary window objects its copy of
+  the library makes are freed when the DLL unloads. Extension DLLs
+  (`AFX_EXT_CLASS`, CDynLinkLibrary), which share one MFC DLL with the
+  program, are not supported, since the library is only linked
+  statically.
 * COleControl makes windowed controls only (no windowless or
   IOleInPlaceObjectWindowless controls, no IQuickActivate, no
   IPerPropertyBrowsing), and COlePropertyPage, verb maps, data path

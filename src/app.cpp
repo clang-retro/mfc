@@ -636,6 +636,8 @@ void AFXAPI AfxOleLockApp() { ::InterlockedIncrement(&g_nOleObjects); }
 
 void AFXAPI AfxOleUnlockApp() {
   if (::InterlockedDecrement(&g_nOleObjects) != 0 || AfxOleGetUserCtrl()) return;
+  // A DLL waits for DllCanUnloadNow; the program it is in goes on.
+  if (AfxGetModuleState()->m_bDLL) return;
   CWnd* pMainWnd = AfxGetApp() != NULL ? AfxGetMainWnd() : NULL;
   if (pMainWnd != NULL && pMainWnd->m_hWnd != NULL)
     pMainWnd->PostMessage(WM_CLOSE);

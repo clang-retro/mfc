@@ -99,8 +99,9 @@ struct AFX_MODULE_STATE {
   HINSTANCE m_hCurrentResourceHandle;
   LPCTSTR m_lpszCurrentAppName;
   LONG m_fRegisteredClasses;
-  CStringArray* m_pstrUnregisterList;
+  CStringArray* m_pstrUnregisterList;  // the window classes a DLL takes away when it unloads
   BOOL m_bInitialized;
+  BOOL m_bDLL;  // the library is in a DLL (DllMain ran)
 };
 AFX_MODULE_STATE* AFXAPI AfxGetModuleState();
 
