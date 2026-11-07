@@ -1324,6 +1324,14 @@ public:
                               const BYTE* pbParamInfo, ...);
   void AFX_CDECL SetProperty(DISPID dwDispID, VARTYPE vtProp, ...);
   void GetProperty(DISPID dwDispID, VARTYPE vtProp, void* pvProp) const;
+  // Data binding (afxocc.h): this control's property dwDispID follows the
+  // field szFieldName of the data source control pDSCWnd's current row,
+  // and the field follows the property; BindProperty gives the property
+  // the data source itself. A NULL data source control unbinds.
+  void BindDefaultProperty(DISPID dwDispID, VARTYPE vtProp, LPCTSTR szFieldName, CWnd* pDSCWnd);
+  void BindProperty(DISPID dwDispId, CWnd* pWndDSC);
+  // A data source control's rowset, which the window keeps.
+  IUnknown* GetDSCCursor();
   // Ambient properties for the controls this window hosts; FALSE for the
   // container's defaults.
   virtual BOOL OnAmbientProperty(COleControlSite* pSite, DISPID dispid, VARIANT* pvar);

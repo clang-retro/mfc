@@ -8,6 +8,8 @@
 #include <afxocc.h>
 #include <olectl.h>
 
+const _AFX_OCC_BIND_HOOKS* _afxOccBindHooks = NULL;
+
 // HIMETRIC and pixels, at the screen's resolution.
 static void PixelsToHimetric(const SIZE& sizePix, SIZEL* pSizeHm) {
   HDC hDC = ::GetDC(NULL);
@@ -61,7 +63,10 @@ COleControlSite::COleControlSite(COleControlContainer* pCtrlCont)
       m_pWndOwned(NULL),
       m_clsid(GUID_NULL),
       m_pWindowlessObject(NULL),
-      m_nFreezeEvents(0) {
+      m_nFreezeEvents(0),
+      m_pDataSourceControl(NULL),
+      m_pBindings(NULL),
+      m_bIgnoreNotify(FALSE) {
   memset(&m_ctlInfo, 0, sizeof(m_ctlInfo));
   m_ctlInfo.cb = sizeof(m_ctlInfo);
 }
@@ -360,6 +365,7 @@ void COleControlSite::DetachWindow() {
 }
 
 BOOL COleControlSite::DestroyControl() {
+  if (_afxOccBindHooks != NULL) _afxOccBindHooks->pfnRelease(this);
   DetachWindow();
   if (m_hWnd != NULL) m_pCtrlCont->m_siteMap.RemoveKey(m_hWnd);
   if (m_pCtrlCont->m_pSiteUIActive == this) m_pCtrlCont->m_pSiteUIActive = NULL;
@@ -1085,6 +1091,8 @@ STDMETHODIMP COleControlSite::XPropertyNotifySink::QueryInterface(REFIID iid, LP
 }
 STDMETHODIMP COleControlSite::XPropertyNotifySink::OnChanged(DISPID dispid) {
   SITE(PropertyNotifySink);
+  if (pThis->m_pBindings != NULL && !pThis->m_bIgnoreNotify && _afxOccBindHooks != NULL)
+    _afxOccBindHooks->pfnChanged(pThis, dispid);
   AFX_EVENT event(AFX_EVENT::propChanged, dispid);
   pThis->FireEvent(&event);
   return S_OK;
