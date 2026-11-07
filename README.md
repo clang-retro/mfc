@@ -91,6 +91,10 @@ when there is no display:
   current record, edits written back when moving, nulls shown as empty
   fields and indeterminate check boxes, and the record commands enabled
   at each end.
+* `dragtest`: `afxole.h` in a scroll view: data put on the clipboard
+  and read back (cached, rendered when asked for, and as a file),
+  a COleDropTarget fed enter, over, leave and drop by hand, scrolling
+  near the edges, and a real DoDragDrop from the view onto itself.
 
 The GUI tests drive themselves with timers, check what they see, and
 save screenshots (PNG when ImageMagick is installed) next to their logs
@@ -120,6 +124,9 @@ request with the stock MinGW-w64 toolchain.
   date, currency and safe array classes) and servers: dispatch maps on
   any CCmdTarget, interface maps, aggregation, COleObjectFactory with
   registration and licensing, AfxOleLockApp and the /Automation start.
+* `afxole.h`: data transfer: COleDataSource (cached and delayed data,
+  the clipboard, DoDragDrop), COleDataObject, COleDropSource and
+  COleDropTarget, with the CView drag and drop handlers.
 * `afxdlgs.h`: the common dialogs (file, color, font, print, page setup,
   find/replace) and CPropertySheet/CPropertyPage, wizards included.
 * `afxcmn.h`, `afxcview.h`: the common controls, CImageList, CListView,
@@ -145,7 +152,8 @@ request with the stock MinGW-w64 toolchain.
   made from the function's own type, not through assembly that pushes
   the arguments, so the function's parameter types must be the ones its
   VTS_ string describes (as they must in MFC) and it must not be
-  overloaded. Type libraries (EnableTypeLib), connection points and
+  overloaded. Drag scrolling starts as soon as the pointer is in the
+  inset, without waiting nScrollDelay. Type libraries (EnableTypeLib), connection points and
   events, the OLE document classes and ActiveX control containment are
   not implemented yet.
 * Sockets are IPv4, as in MFC 6. `CAsyncSocket::FromHandle` returns

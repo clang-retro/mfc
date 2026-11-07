@@ -16,10 +16,10 @@ const TCHAR _afxWndControlBar[] = AFX_WNDCONTROLBAR;
 const TCHAR _afxWndMDIFrame[] = AFX_WNDMDIFRAME;
 const TCHAR _afxWndFrameOrView[] = AFX_WNDFRAMEORVIEW;
 
-CWnd::CWnd() : m_hWnd(NULL), m_pfnSuper(NULL), m_hWndOwner(NULL), m_nFlags(0), m_nModalResult(0) {}
+CWnd::CWnd() : m_hWnd(NULL), m_pDropTarget(NULL), m_pfnSuper(NULL), m_hWndOwner(NULL), m_nFlags(0), m_nModalResult(0) {}
 
 CWnd::CWnd(HWND hWnd)
-    : m_hWnd(hWnd), m_pfnSuper(NULL), m_hWndOwner(NULL), m_nFlags(0), m_nModalResult(0) {}
+    : m_hWnd(hWnd), m_pDropTarget(NULL), m_pfnSuper(NULL), m_hWndOwner(NULL), m_nFlags(0), m_nModalResult(0) {}
 
 CWnd::~CWnd() {
   if (m_hWnd != NULL && this != &wndTop && this != &wndBottom && this != &wndTopMost &&
@@ -622,7 +622,13 @@ LRESULT CWnd::OnDisplayChange(WPARAM, LPARAM) {
 
 LRESULT CWnd::OnDragList(WPARAM, LPARAM) { return Default(); }
 
+void (AFXAPI* _afxPfnRevokeDropTarget)(COleDropTarget*) = NULL;  // set by COleDropTarget
+
 void CWnd::OnNcDestroy() {
+  if (m_pDropTarget != NULL && _afxPfnRevokeDropTarget != NULL)
+    _afxPfnRevokeDropTarget(m_pDropTarget);
+  m_pDropTarget = NULL;
+
   // The main window going away ends the thread's message loop.
   CWinThread* pThread = AfxGetThread();
   if (pThread != NULL) {

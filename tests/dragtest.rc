@@ -1,0 +1,17 @@
+// dragtest.rc - resources for dragtest.
+#include <windows.h>
+#include <afxres.h>
+#include "dragtest.h"
+
+IDR_MAINFRAME MENU
+BEGIN
+  POPUP "&Edit"
+  BEGIN
+    MENUITEM "&Paste", ID_EDIT_PASTE
+  END
+END
+
+STRINGTABLE
+BEGIN
+  IDR_MAINFRAME "DragTest\n\nDragTest\n\n\nDragTest.Document\nDragTest Document"
+END
