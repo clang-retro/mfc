@@ -114,7 +114,11 @@ when there is no display:
   CMultiPageDHtmlDialog: each page's embedded map from the URL map, by
   resource id or name, with the dialog's own map on every page, and an
   ActiveX control's events (DHTML_EVENT_AXCONTROL) with by-value and
-  by-reference arguments.
+  by-reference arguments. For HTML editing: CHtmlEditView's start page
+  in design mode, the CHtmlEditCtrlBase commands with their arguments
+  and values, the page's text both ways, the editing command map
+  (enabling, checks, handlers), CHtmlEditDoc saving, a new document and
+  opening a URL, and CHtmlEditCtrl.
 * `dlgtest`: a dialog with data exchange and validation, common
   controls, and a property sheet.
 * `sditest`: a single-document program with a toolbar, a status bar and
@@ -310,7 +314,10 @@ request with the stock MinGW-w64 toolchain.
   page: DHTML event maps, the element functions, the DDX_DHtml
   functions, ActiveX controls in the page and their events,
   window.external) and CMultiPageDHtmlDialog (a page's own event map,
-  from BEGIN_EMBED_DHTML_EVENT_MAP and the URL map).
+  from BEGIN_EMBED_DHTML_EVENT_MAP and the URL map). HTML editing in
+  MSHTML's design mode: CHtmlEditCtrlBase's commands, CHtmlEditCtrl,
+  CHtmlEditView with its editing command map
+  (BEGIN_DHTMLEDITING_CMDMAP) and CHtmlEditDoc.
   `atlcomcli.h` has the CComPtr, CComQIPtr, CComBSTR and CComVariant
   their members use.
 
@@ -366,7 +373,10 @@ request with the stock MinGW-w64 toolchain.
   DHTML_EVENT_AXCONTROL handler's parameters are read as their C++
   types (as a dispatch map's are), so it must not be overloaded. A URL
   map entry matches the page's whole URL or its last part.
-  CHtmlEditView and CHtmlEditCtrl are not there.
+  CHtmlEditView's editing command map is searched before its message
+  map, and after the class's own entries CHtmlEditView's (the Edit
+  menu's commands) apply. CHtmlEditDoc saves through the page's
+  IPersistFile, or else writes its text in UTF-8.
 * Wine's OleCreatePropertyFrame (as of Wine 9) never calls
   IPropertyPage::Apply, so under Wine the OK and Apply buttons of a
   control's property frame do not change the control; Windows applies

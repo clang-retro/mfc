@@ -711,4 +711,393 @@ protected:
   const DHtmlEventMapEntry* FindPageMap(LPCTSTR szUrl);
 };
 
+// ---------------------------------------------------------------------
+// HTML editing: CHtmlEditCtrlBase, the editing commands of MSHTML's
+// design mode, for CHtmlEditCtrl (a control) and CHtmlEditView (a view),
+// and CHtmlEditDoc, the document of a CHtmlEditView.
+
+#include <mshtmcid.h>
+
+// The helpers CHtmlEditCtrlBase's functions call.
+HRESULT AFXAPI _AfxHtmlEditExec(IHTMLDocument2* pDoc, const GUID* pGuid, long cmdID,
+                                long cmdExecOpt, VARIANT* pInVar, VARIANT* pOutVar);
+long AFXAPI _AfxHtmlEditQueryStatus(IHTMLDocument2* pDoc, long cmdID);
+HRESULT AFXAPI _AfxHtmlEditExecText(IHTMLDocument2* pDoc, long cmdID, LPCTSTR lpsz);
+HRESULT AFXAPI _AfxHtmlEditExecBool(IHTMLDocument2* pDoc, long cmdID, bool b);
+HRESULT AFXAPI _AfxHtmlEditExecInt(IHTMLDocument2* pDoc, long cmdID, long n);
+HRESULT AFXAPI _AfxHtmlEditGetText(IHTMLDocument2* pDoc, long cmdID, CString& str);
+HRESULT AFXAPI _AfxHtmlEditGetInt(IHTMLDocument2* pDoc, long cmdID, long& n);
+HRESULT AFXAPI _AfxHtmlEditGetBlockFormatNames(IHTMLDocument2* pDoc, CStringArray& sa);
+BOOL AFXAPI _AfxHtmlEditSetDesignMode(IHTMLDocument2* pDoc, BOOL bMode);
+HRESULT AFXAPI _AfxHtmlEditGetHTML(IUnknown* pDoc, CString& str);
+HRESULT AFXAPI _AfxHtmlEditSetHTML(IUnknown* pDoc, LPCTSTR lpszHTML);
+HRESULT AFXAPI _AfxHtmlEditNewDocument(IHTMLDocument2* pDoc);
+HRESULT AFXAPI _AfxHtmlEditIsDirty(IHTMLDocument2* pDoc);
+HRESULT AFXAPI _AfxHtmlEditGetEvent(IHTMLDocument2* pDoc, IHTMLEventObj** ppEventObj);
+HRESULT AFXAPI _AfxHtmlEditGetSelectionType(IHTMLDocument2* pDoc, CString& str);
+
+template <class T>
+class CHtmlEditCtrlBase {
+public:
+  // T's document, through its GetDHtmlDocument.
+  CComPtr<IHTMLDocument2> _GetDoc() const {
+    CComPtr<IHTMLDocument2> sp;
+    static_cast<const T*>(this)->GetDHtmlDocument(&sp);
+    return sp;
+  }
+
+  BOOL SetDesignMode(BOOL bMode) const { return _AfxHtmlEditSetDesignMode(_GetDoc(), bMode); }
+  HRESULT ExecCommand(long cmdID, long cmdExecOpt, VARIANT* pInVar = NULL,
+                      VARIANT* pOutVar = NULL) const {
+    return _AfxHtmlEditExec(_GetDoc(), NULL, cmdID, cmdExecOpt, pInVar, pOutVar);
+  }
+  HRESULT ExecCommand(const GUID* pGuid, long cmdID, long cmdExecOpt, VARIANT* pInVar = NULL,
+                      VARIANT* pOutVar = NULL) const {
+    return _AfxHtmlEditExec(_GetDoc(), pGuid, cmdID, cmdExecOpt, pInVar, pOutVar);
+  }
+  // The command's OLECMDF flags; 0 when there is no document.
+  long QueryStatus(long cmdID) const { return _AfxHtmlEditQueryStatus(_GetDoc(), cmdID); }
+  HRESULT ExecHelperNN(UINT nID, long nExecOpt = OLECMDEXECOPT_DODEFAULT) const {
+    return ExecCommand((long)nID, nExecOpt);
+  }
+  HRESULT ExecHelperSetVal(UINT nCmdID, LPCTSTR szID = NULL,
+                           long nExecOpt = OLECMDEXECOPT_DODEFAULT) const {
+    (void)nExecOpt;
+    return _AfxHtmlEditExecText(_GetDoc(), (long)nCmdID, szID);
+  }
+
+  // The document.
+  HRESULT GetDocumentHTML(CString& szHTML) const { return _AfxHtmlEditGetHTML(_GetDoc(), szHTML); }
+  HRESULT SetDocumentHTML(LPCTSTR pszHTMLContent) const {
+    return _AfxHtmlEditSetHTML(_GetDoc(), pszHTMLContent);
+  }
+  HRESULT GetDocumentTitle(CString& szTitle) const {
+    szTitle.Empty();
+    CComPtr<IHTMLDocument2> sp = _GetDoc();
+    if (sp == NULL) return E_NOINTERFACE;
+    BSTR bstr = NULL;
+    HRESULT hr = sp->get_title(&bstr);
+    if (SUCCEEDED(hr) && bstr != NULL) szTitle = bstr;
+    ::SysFreeString(bstr);
+    return hr;
+  }
+  HRESULT NewDocument() const { return _AfxHtmlEditNewDocument(_GetDoc()); }
+  HRESULT RefreshDocument() const { return ExecHelperNN(IDM_REFRESH); }
+  // S_OK when the document was changed, S_FALSE when not.
+  HRESULT IsDirty() const { return _AfxHtmlEditIsDirty(_GetDoc()); }
+  HRESULT SaveAs(LPCTSTR szPath = NULL) const { return ExecHelperSetVal(IDM_SAVEAS, szPath); }
+  HRESULT Print(bool bDisplayPrintDlg = false) const {
+    return ExecHelperNN(IDM_PRINT, bDisplayPrintDlg ? OLECMDEXECOPT_PROMPTUSER
+                                                    : OLECMDEXECOPT_DONTPROMPTUSER);
+  }
+  HRESULT PrintPreview() const { return ExecHelperNN(IDM_PRINTPREVIEW); }
+  HRESULT GetEvent(IHTMLEventObj** ppEventObj) const {
+    return _AfxHtmlEditGetEvent(_GetDoc(), ppEventObj);
+  }
+  HRESULT GetEventSrcElement(IHTMLElement** ppSrcElement) const {
+    if (ppSrcElement == NULL) return E_POINTER;
+    *ppSrcElement = NULL;
+    CComPtr<IHTMLEventObj> spEvent;
+    HRESULT hr = GetEvent(&spEvent);
+    if (FAILED(hr) || spEvent == NULL) return FAILED(hr) ? hr : E_FAIL;
+    return spEvent->get_srcElement(ppSrcElement);
+  }
+  // "None", "Text" or "Control".
+  HRESULT GetSelectionType(CString& szType) const {
+    return _AfxHtmlEditGetSelectionType(_GetDoc(), szType);
+  }
+
+  // Editing.
+  HRESULT Copy() const { return ExecHelperNN(IDM_COPY); }
+  HRESULT Cut() const { return ExecHelperNN(IDM_CUT); }
+  HRESULT Paste() const { return ExecHelperNN(IDM_PASTE); }
+  HRESULT Delete() const { return ExecHelperNN(IDM_DELETE); }
+  HRESULT Undo() const { return ExecHelperNN(IDM_UNDO); }
+  HRESULT Redo() const { return ExecHelperNN(IDM_REDO); }
+  HRESULT SelectAll() const { return ExecHelperNN(IDM_SELECTALL); }
+  HRESULT ClearSelection() const { return ExecHelperNN(IDM_CLEARSELECTION); }
+  HRESULT RemoveFormat() const { return ExecHelperNN(IDM_REMOVEFORMAT); }
+
+  // Character and paragraph formats.
+  HRESULT Bold() const { return ExecHelperNN(IDM_BOLD); }
+  HRESULT Italic() const { return ExecHelperNN(IDM_ITALIC); }
+  HRESULT Underline() const { return ExecHelperNN(IDM_UNDERLINE); }
+  HRESULT StrikeThrough() const { return ExecHelperNN(IDM_STRIKETHROUGH); }
+  HRESULT Superscript() const { return ExecHelperNN(IDM_SUPERSCRIPT); }
+  HRESULT Subscript() const { return ExecHelperNN(IDM_SUBSCRIPT); }
+  HRESULT Font() const { return ExecHelperNN(IDM_FONT); }
+  HRESULT GetFontFace(CString& szFace) const {
+    return _AfxHtmlEditGetText(_GetDoc(), IDM_FONTNAME, szFace);
+  }
+  HRESULT SetFontFace(LPCTSTR szFace) const {
+    return _AfxHtmlEditExecText(_GetDoc(), IDM_FONTNAME, szFace);
+  }
+  HRESULT GetFontSize(short& nSize) const {
+    long n = 0;
+    HRESULT hr = _AfxHtmlEditGetInt(_GetDoc(), IDM_FONTSIZE, n);
+    nSize = (short)n;
+    return hr;
+  }
+  HRESULT SetFontSize(unsigned short size) const {
+    return _AfxHtmlEditExecInt(_GetDoc(), IDM_FONTSIZE, (long)size);
+  }
+  HRESULT GetForeColor(int& nColor) const {
+    long n = 0;
+    HRESULT hr = _AfxHtmlEditGetInt(_GetDoc(), IDM_FORECOLOR, n);
+    nColor = (int)n;
+    return hr;
+  }
+  HRESULT SetForeColor(LPCTSTR szColor) const {
+    return _AfxHtmlEditExecText(_GetDoc(), IDM_FORECOLOR, szColor);
+  }
+  HRESULT SetForeColor(int nColor) const {
+    return _AfxHtmlEditExecInt(_GetDoc(), IDM_FORECOLOR, (long)nColor);
+  }
+  HRESULT GetBackColor(int& nColor) const {
+    long n = 0;
+    HRESULT hr = _AfxHtmlEditGetInt(_GetDoc(), IDM_BACKCOLOR, n);
+    nColor = (int)n;
+    return hr;
+  }
+  HRESULT SetBackColor(LPCTSTR szColor) const {
+    return _AfxHtmlEditExecText(_GetDoc(), IDM_BACKCOLOR, szColor);
+  }
+  HRESULT SetBackColor(int nColor) const {
+    return _AfxHtmlEditExecInt(_GetDoc(), IDM_BACKCOLOR, (long)nColor);
+  }
+  HRESULT GetBlockFormat(CString& szFormat) const {
+    return _AfxHtmlEditGetText(_GetDoc(), IDM_BLOCKFMT, szFormat);
+  }
+  HRESULT SetBlockFormat(LPCTSTR szFormat) const {
+    return _AfxHtmlEditExecText(_GetDoc(), IDM_BLOCKFMT, szFormat);
+  }
+  HRESULT GetBlockFormatNames(CStringArray& sa) const {
+    return _AfxHtmlEditGetBlockFormatNames(_GetDoc(), sa);
+  }
+  HRESULT JustifyLeft() const { return ExecHelperNN(IDM_JUSTIFYLEFT); }
+  HRESULT JustifyCenter() const { return ExecHelperNN(IDM_JUSTIFYCENTER); }
+  HRESULT JustifyRight() const { return ExecHelperNN(IDM_JUSTIFYRIGHT); }
+  HRESULT Indent() const { return ExecHelperNN(IDM_INDENT); }
+  HRESULT Outdent() const { return ExecHelperNN(IDM_OUTDENT); }
+  HRESULT OrderList(LPCTSTR szId = NULL) const { return ExecHelperSetVal(IDM_ORDERLIST, szId); }
+  HRESULT UnorderList(LPCTSTR szId = NULL) const {
+    return ExecHelperSetVal(IDM_UNORDERLIST, szId);
+  }
+  HRESULT Paragraph(LPCTSTR szId = NULL) const { return ExecHelperSetVal(IDM_PARAGRAPH, szId); }
+  HRESULT PreFormatted(LPCTSTR szId = NULL) const {
+    return ExecHelperSetVal(IDM_PREFORMATTED, szId);
+  }
+
+  // Links and bookmarks.
+  HRESULT SetHyperLink(LPCTSTR szUrl = NULL) const {
+    return ExecHelperSetVal(IDM_HYPERLINK, szUrl);
+  }
+  HRESULT Unlink() const { return ExecHelperNN(IDM_UNLINK); }
+  HRESULT Bookmark(LPCTSTR szName = NULL) const { return ExecHelperSetVal(IDM_BOOKMARK, szName); }
+  HRESULT Unbookmark() const { return ExecHelperNN(IDM_UNBOOKMARK); }
+
+  // Elements to insert; the string is the new element's id (or URL).
+  HRESULT HorizontalLine(LPCTSTR szId = NULL) const {
+    return ExecHelperSetVal(IDM_HORIZONTALLINE, szId);
+  }
+  HRESULT Image(LPCTSTR szUrl = NULL) const { return ExecHelperSetVal(IDM_IMAGE, szUrl); }
+  HRESULT IFrame(LPCTSTR szUrl = NULL) const { return ExecHelperSetVal(IDM_IFRAME, szUrl); }
+  HRESULT Marquee(LPCTSTR szId = NULL) const { return ExecHelperSetVal(IDM_MARQUEE, szId); }
+  HRESULT Button(LPCTSTR szId = NULL) const { return ExecHelperSetVal(IDM_BUTTON, szId); }
+  HRESULT CheckBox(LPCTSTR szId = NULL) const { return ExecHelperSetVal(IDM_CHECKBOX, szId); }
+  HRESULT RadioButton(LPCTSTR szId = NULL) const {
+    return ExecHelperSetVal(IDM_RADIOBUTTON, szId);
+  }
+  HRESULT DropDownBox(LPCTSTR szId = NULL) const {
+    return ExecHelperSetVal(IDM_DROPDOWNBOX, szId);
+  }
+  HRESULT ListBox(LPCTSTR szId = NULL) const { return ExecHelperSetVal(IDM_LISTBOX, szId); }
+  HRESULT TextBox(LPCTSTR szId = NULL) const { return ExecHelperSetVal(IDM_TEXTBOX, szId); }
+  HRESULT TextArea(LPCTSTR szId = NULL) const { return ExecHelperSetVal(IDM_TEXTAREA, szId); }
+  HRESULT InsertFieldSet(LPCTSTR szId = NULL) const {
+    return ExecHelperSetVal(IDM_INSFIELDSET, szId);
+  }
+  HRESULT InsertInputButton(LPCTSTR szId = NULL) const {
+    return ExecHelperSetVal(IDM_INSINPUTBUTTON, szId);
+  }
+  HRESULT InsertInputHidden(LPCTSTR szId = NULL) const {
+    return ExecHelperSetVal(IDM_INSINPUTHIDDEN, szId);
+  }
+  HRESULT InsertInputImage(LPCTSTR szId = NULL) const {
+    return ExecHelperSetVal(IDM_INSINPUTIMAGE, szId);
+  }
+  HRESULT InsertInputPassword(LPCTSTR szId = NULL) const {
+    return ExecHelperSetVal(IDM_INSINPUTPASSWORD, szId);
+  }
+  HRESULT InsertInputReset(LPCTSTR szId = NULL) const {
+    return ExecHelperSetVal(IDM_INSINPUTRESET, szId);
+  }
+  HRESULT InsertInputSubmit(LPCTSTR szId = NULL) const {
+    return ExecHelperSetVal(IDM_INSINPUTSUBMIT, szId);
+  }
+  HRESULT InsertInputUpload(LPCTSTR szId = NULL) const {
+    return ExecHelperSetVal(IDM_INSINPUTUPLOAD, szId);
+  }
+
+  // How the editor behaves.
+  HRESULT SetAbsolutePosition(bool bNewValue) const {
+    return _AfxHtmlEditExecBool(_GetDoc(), IDM_ABSOLUTE_POSITION, bNewValue);
+  }
+  HRESULT Set2DPosition(bool bNewValue) const {
+    return _AfxHtmlEditExecBool(_GetDoc(), IDM_2D_POSITION, bNewValue);
+  }
+  HRESULT SetAtomicSelection(bool bNewValue) const {
+    return _AfxHtmlEditExecBool(_GetDoc(), IDM_ATOMICSELECTION, bNewValue);
+  }
+  HRESULT SetMultipleSelection(bool bNewValue) const {
+    return _AfxHtmlEditExecBool(_GetDoc(), IDM_MULTIPLESELECTION, bNewValue);
+  }
+  HRESULT SetLiveResize(bool bNewValue) const {
+    return _AfxHtmlEditExecBool(_GetDoc(), IDM_LIVERESIZE, bNewValue);
+  }
+  HRESULT SetOverwriteMode(bool bNewValue) const {
+    return _AfxHtmlEditExecBool(_GetDoc(), IDM_OVERWRITE, bNewValue);
+  }
+  HRESULT SetSnapToGrid(bool bNewValue) const {
+    return _AfxHtmlEditExecBool(_GetDoc(), IDM_SNAPTOGRID, bNewValue);
+  }
+  HRESULT ShowDetails(bool bNewValue) const {
+    return _AfxHtmlEditExecBool(_GetDoc(), IDM_SHOWALLTAGS, bNewValue);
+  }
+  HRESULT ShowBorders(bool bNewValue) const {
+    return _AfxHtmlEditExecBool(_GetDoc(), IDM_SHOWZEROBORDERATDESIGNTIME, bNewValue);
+  }
+  HRESULT SetCSSEditingLevel(short nLevel) const {
+    return _AfxHtmlEditExecInt(_GetDoc(), IDM_CSSEDITING_LEVEL, (long)nLevel);
+  }
+};
+
+// ---------------------------------------------------------------------
+// CHtmlEditCtrl: the WebBrowser control in design mode, as a child
+// window.
+
+class CHtmlEditCtrl : public CWnd, public CHtmlEditCtrlBase<CHtmlEditCtrl> {
+public:
+  CHtmlEditCtrl();
+  virtual ~CHtmlEditCtrl();
+
+  virtual BOOL Create(LPCTSTR lpszWindowName, DWORD dwStyle, const RECT& rect, CWnd* pParentWnd,
+                      int nID, CCreateContext* pContext = NULL);
+  BOOL GetDHtmlDocument(IHTMLDocument2** ppDocument) const;
+  // The page it starts with.
+  virtual LPCTSTR GetStartDocument();
+
+  // Called when the browser has the start page, to put it in design mode.
+  virtual void OnDocumentReady();
+
+  virtual BOOL DestroyWindow();
+
+protected:
+  IDispatch* m_pBrowserSink;       // the browser's events, for design mode
+  IConnectionPoint* m_pSinkPoint;  // where it is connected
+  DWORD m_dwSinkCookie;
+  void DisconnectBrowser();
+  DECLARE_MESSAGE_MAP()
+};
+
+// ---------------------------------------------------------------------
+// The editing command map of a CHtmlEditView: menu and toolbar commands
+// that are MSHTML editing commands, enabled from their QueryStatus.
+
+#define AFX_UI_ELEMTYPE_NORMAL 0
+#define AFX_UI_ELEMTYPE_CHECBOX 1  // checked when the command is latched
+#define AFX_UI_ELEMTYPE_CHECKBOX AFX_UI_ELEMTYPE_CHECBOX
+#define AFX_UI_ELEMTYPE_RADIO 2
+
+typedef void (*AFX_DHTMLEDITCMDFUNC)(CCmdTarget* pTarget, UINT nID);
+
+struct DHtmlEditingCmdMapEntry {
+  UINT nCmdID;            // the command (ID_EDIT_COPY...)
+  long nDHtmlCmdID;       // MSHTML's (IDM_COPY...)
+  UINT nElementType;      // AFX_UI_ELEMTYPE_*
+  AFX_DHTMLEDITCMDFUNC pfnCmd;  // a handler to call instead of the command
+};
+
+// A handler takes the command's id, or nothing.
+template <auto pfn, class M = decltype(pfn)>
+struct _AfxDHtmlEditCmd;
+template <auto pfn, class C, class R>
+struct _AfxDHtmlEditCmd<pfn, R (C::*)()> {
+  static void Call(CCmdTarget* p, UINT) { (static_cast<C*>(p)->*pfn)(); }
+};
+template <auto pfn, class C, class R>
+struct _AfxDHtmlEditCmd<pfn, R (C::*)(UINT)> {
+  static void Call(CCmdTarget* p, UINT nID) { (static_cast<C*>(p)->*pfn)(nID); }
+};
+
+#define DECLARE_DHTMLEDITING_CMDMAP(className) \
+public:                                         \
+  virtual const DHtmlEditingCmdMapEntry* GetDHtmlEditingCmdMap() const;
+#define BEGIN_DHTMLEDITING_CMDMAP(className)                                 \
+  const DHtmlEditingCmdMapEntry* className::GetDHtmlEditingCmdMap() const { \
+    typedef className theClass;                                              \
+    (void)sizeof(theClass*);                                                 \
+    static const DHtmlEditingCmdMapEntry _dhtmlEditingEntries[] = {
+#define DHTMLEDITING_CMD_ENTRY(cmdID, dhtmlcmdID) \
+  {(UINT)(cmdID), (long)(dhtmlcmdID), AFX_UI_ELEMTYPE_NORMAL, (AFX_DHTMLEDITCMDFUNC)NULL},
+#define DHTMLEDITING_CMD_ENTRY_TYPE(cmdID, dhtmlcmdID, elemType) \
+  {(UINT)(cmdID), (long)(dhtmlcmdID), (UINT)(elemType), (AFX_DHTMLEDITCMDFUNC)NULL},
+#define DHTMLEDITING_CMD_ENTRY_FUNC(cmdID, dhtmlcmdID, member_func) \
+  {(UINT)(cmdID), (long)(dhtmlcmdID), AFX_UI_ELEMTYPE_NORMAL,         \
+   &_AfxDHtmlEditCmd<&theClass::member_func>::Call},
+#define DHTMLEDITING_CMD_ENTRY_FUNC_TYPE(cmdID, dhtmlcmdID, member_func, elemType) \
+  {(UINT)(cmdID), (long)(dhtmlcmdID), (UINT)(elemType),                            \
+   &_AfxDHtmlEditCmd<&theClass::member_func>::Call},
+#define END_DHTMLEDITING_CMDMAP()                         \
+  {0, 0, 0, (AFX_DHTMLEDITCMDFUNC)NULL}};                 \
+  return _dhtmlEditingEntries;                            \
+  }
+
+// ---------------------------------------------------------------------
+// CHtmlEditView: a CHtmlView whose page is edited.
+
+class CHtmlEditDoc;
+
+class CHtmlEditView : public CHtmlView, public CHtmlEditCtrlBase<CHtmlEditView> {
+  DECLARE_DYNCREATE(CHtmlEditView)
+public:
+  CHtmlEditView();
+  virtual ~CHtmlEditView();
+
+  virtual BOOL Create(LPCTSTR lpszClassName, LPCTSTR lpszWindowName, DWORD dwStyle,
+                      const RECT& rect, CWnd* pParentWnd, UINT nID,
+                      CCreateContext* pContext = NULL);
+  BOOL GetDHtmlDocument(IHTMLDocument2** ppDocument) const;
+  virtual LPCTSTR GetStartDocument();
+  CHtmlEditDoc* GetDocument() const;
+
+  virtual void OnNavigateComplete2(LPCTSTR strURL);
+  virtual BOOL OnCmdMsg(UINT nID, int nCode, void* pExtra, AFX_CMDHANDLERINFO* pHandlerInfo);
+
+  DECLARE_DHTMLEDITING_CMDMAP(CHtmlEditView)
+
+protected:
+  // The entry for a command, in the class's map or CHtmlEditView's.
+  const DHtmlEditingCmdMapEntry* FindEditingCmd(UINT nID) const;
+};
+
+// ---------------------------------------------------------------------
+// CHtmlEditDoc: the document of a CHtmlEditView; the page is the data.
+
+class CHtmlEditDoc : public CDocument {
+  DECLARE_DYNCREATE(CHtmlEditDoc)
+public:
+  CHtmlEditDoc();
+  virtual ~CHtmlEditDoc();
+
+  virtual CHtmlEditView* GetView() const;
+  virtual BOOL IsModified();
+  virtual BOOL OpenURL(LPCTSTR lpszURL);
+  virtual BOOL NewDocument();
+  virtual BOOL OnNewDocument();
+  virtual BOOL OnOpenDocument(LPCTSTR lpszPathName);
+  virtual BOOL OnSaveDocument(LPCTSTR lpszPathName);
+  virtual void DeleteContents();
+};
+
 #endif  // __AFXHTML_H__
