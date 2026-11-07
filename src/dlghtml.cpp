@@ -100,15 +100,18 @@ public:
   BOOL m_bDocument;
   IConnectionPoint* m_pPoint;
   DWORD m_dwCookie;
+  CString m_strControl;  // for an ActiveX control's events: its <object>'s id
 
-  CDHtmlSinkHandler(CDHtmlEventSink* pOwner, IDispatch* pElement, REFIID iid, BOOL bDocument)
+  CDHtmlSinkHandler(CDHtmlEventSink* pOwner, IDispatch* pElement, REFIID iid, BOOL bDocument,
+                    LPCTSTR lpszControl = NULL)
       : m_nRef(1),
         m_pOwner(pOwner),
         m_pElement(pElement),
         m_iid(iid),
         m_bDocument(bDocument),
         m_pPoint(NULL),
-        m_dwCookie(0) {
+        m_dwCookie(0),
+        m_strControl(lpszControl) {
     m_pElement->AddRef();
   }
   virtual ~CDHtmlSinkHandler() {
@@ -179,7 +182,23 @@ public:
 // ---------------------------------------------------------------------
 // CDHtmlEventSink
 
-CDHtmlEventSink::CDHtmlEventSink() : m_pCurrentEvent(NULL) {}
+CDHtmlEventSink::CDHtmlEventSink() : m_pCurrentEvent(NULL), m_pPageMap(NULL) {}
+
+int CDHtmlEventSink::GetMaps(const DHtmlEventMapEntry* apMaps[2]) {
+  int n = 0;
+  const DHtmlEventMapEntry* pMap = GetDHtmlEventMap();
+  if (pMap != NULL) apMaps[n++] = pMap;
+  if (m_pPageMap != NULL && m_pPageMap != pMap) apMaps[n++] = m_pPageMap;
+  return n;
+}
+
+// A DHTML_EVENT_AXCONTROL argument: its value, and the VARIANT itself
+// for a VARIANT* parameter.
+void AFXAPI _AfxDHtmlAxArg(AFX_DISPARG& a, VARIANT* pSrc) {
+  a.pVar = pSrc->vt == (VT_BYREF | VT_VARIANT) ? pSrc->pvarVal : pSrc;
+  ::VariantCopyInd(&a.v, pSrc);
+  if (a.v.vt == VT_BOOL) a.bVal = a.v.boolVal != VARIANT_FALSE;
+}
 
 CDHtmlEventSink::~CDHtmlEventSink() {
   DisconnectDHtmlEvents();
@@ -242,7 +261,20 @@ static BOOL CallHandlers(CDHtmlEventSink* pSink, const DHtmlEventMapEntry* pMap,
 
 void CDHtmlEventSink::FireFor(CDHtmlSinkHandler* pHandler, DISPID dispid,
                               DISPPARAMS* pDispParams, VARIANT* pVarResult, HRESULT* phr) {
-  (void)pVarResult;
+  // An ActiveX control's event: its own arguments, to the entries for
+  // the control.
+  if (!pHandler->m_strControl.IsEmpty()) {
+    const DHtmlEventMapEntry* apMaps[2];
+    int nMaps = GetMaps(apMaps);
+    for (int i = 0; i < nMaps; i++)
+      for (const DHtmlEventMapEntry* p = apMaps[i]; p->nType != DHTMLEVENTMAPENTRY_END; p++)
+        if (p->nType == DHTMLEVENTMAPENTRY_CONTROL && p->dispId == dispid &&
+            p->pfnAxInvoke != NULL && p->szName != NULL && pHandler->m_strControl == p->szName) {
+          HRESULT hr = p->pfnAxInvoke(this, pDispParams, pVarResult);
+          if (phr != NULL) *phr = hr;
+        }
+    return;
+  }
   // The event object comes as the one argument.
   IHTMLEventObj* pEvent = NULL;
   if (pDispParams != NULL && pDispParams->cArgs >= 1) {
@@ -264,7 +296,10 @@ void CDHtmlEventSink::FireFor(CDHtmlSinkHandler* pHandler, DISPID dispid,
   IHTMLElement* pMatch = NULL;
   pHandler->m_pElement->QueryInterface(IID_IHTMLElement, (void**)&pMatch);
 
-  CallHandlers(this, GetDHtmlEventMap(), dispid, pElement, pMatch, pHandler->m_bDocument, phr);
+  const DHtmlEventMapEntry* apMaps[2];
+  int nMaps = GetMaps(apMaps);
+  for (int i = 0; i < nMaps; i++)
+    CallHandlers(this, apMaps[i], dispid, pElement, pMatch, pHandler->m_bDocument, phr);
 
   if (pMatch != NULL) pMatch->Release();
   if (pElement != NULL) pElement->Release();
@@ -286,10 +321,13 @@ BOOL CDHtmlEventSink::DHtmlEventHook(HRESULT* phr, DISPID dispIdMember, DISPPARA
   if (pEvent != NULL) pEvent->get_srcElement(&pElement);
   IHTMLEventObj* pOldEvent = m_pCurrentEvent;
   m_pCurrentEvent = pEvent;
-  BOOL bHandled = CallHandlers(this, GetDHtmlEventMap(), dispIdMember, pElement, pElement, FALSE,
-                               phr);
-  if (!bHandled)
-    bHandled = CallHandlers(this, GetDHtmlEventMap(), dispIdMember, pElement, NULL, TRUE, phr);
+  const DHtmlEventMapEntry* apMaps[2];
+  int nMaps = GetMaps(apMaps);
+  BOOL bHandled = FALSE;
+  for (int i = 0; i < nMaps; i++)
+    bHandled |= CallHandlers(this, apMaps[i], dispIdMember, pElement, pElement, FALSE, phr);
+  for (int i = 0; i < nMaps && !bHandled; i++)
+    bHandled |= CallHandlers(this, apMaps[i], dispIdMember, pElement, NULL, TRUE, phr);
   m_pCurrentEvent = pOldEvent;
   if (pElement != NULL) pElement->Release();
   if (pEvent != NULL) pEvent->Release();
@@ -330,9 +368,11 @@ HRESULT CDHtmlEventSink::ConnectDHtmlEvents(IUnknown* punkDoc) {
   if (punkDoc == NULL) return E_POINTER;
   // Only when the map has entries for the document.
   BOOL bAny = FALSE;
-  for (const DHtmlEventMapEntry* p = GetDHtmlEventMap();
-       p != NULL && p->nType != DHTMLEVENTMAPENTRY_END; p++)
-    if (p->szName == NULL) bAny = TRUE;
+  const DHtmlEventMapEntry* apMaps[2];
+  int nMaps = GetMaps(apMaps);
+  for (int i = 0; i < nMaps; i++)
+    for (const DHtmlEventMapEntry* p = apMaps[i]; p->nType != DHTMLEVENTMAPENTRY_END; p++)
+      if (p->szName == NULL) bAny = TRUE;
   if (!bAny) return S_OK;
   IDispatch* pDisp = NULL;
   HRESULT hr = punkDoc->QueryInterface(IID_IDispatch, (void**)&pDisp);
@@ -391,10 +431,15 @@ HRESULT CDHtmlEventSink::ConnectDHtmlElementEvents(DWORD_PTR) {
   pDoc->Release();
   if (FAILED(hr) || pAll == NULL) return FAILED(hr) ? hr : E_FAIL;
 
-  for (const DHtmlEventMapEntry* p = GetDHtmlEventMap();
-       p != NULL && p->nType != DHTMLEVENTMAPENTRY_END; p++) {
+  const DHtmlEventMapEntry* apMaps[2];
+  int nMaps = GetMaps(apMaps);
+  for (int iMap = 0; iMap < nMaps; iMap++)
+  for (const DHtmlEventMapEntry* p = apMaps[iMap]; p->nType != DHTMLEVENTMAPENTRY_END; p++) {
     if (p->szName == NULL) continue;  // the document's
     switch (p->nType) {
+      case DHTMLEVENTMAPENTRY_CONTROL:
+        ConnectControl(pAll, p->szName);
+        break;
       case DHTMLEVENTMAPENTRY_NAME:
       case DHTMLEVENTMAPENTRY_ELEMENT: {
         VARIANT vName = StringVariant(p->szName), vEmpty;
@@ -443,6 +488,97 @@ HRESULT CDHtmlEventSink::ConnectDHtmlElementEvents(DWORD_PTR) {
   }
   pAll->Release();
   return S_OK;
+}
+
+// The events' interface of a control: its default source.
+static BOOL GetSourceIID(IDispatch* pCtl, IID* piid) {
+  IProvideClassInfo2* pPCI2 = NULL;
+  if (SUCCEEDED(pCtl->QueryInterface(IID_IProvideClassInfo2, (void**)&pPCI2))) {
+    HRESULT hr = pPCI2->GetGUID(GUIDKIND_DEFAULT_SOURCE_DISP_IID, piid);
+    pPCI2->Release();
+    if (SUCCEEDED(hr)) return TRUE;
+  }
+  // The class's type information: its default source interface.
+  BOOL bFound = FALSE;
+  IProvideClassInfo* pPCI = NULL;
+  if (SUCCEEDED(pCtl->QueryInterface(IID_IProvideClassInfo, (void**)&pPCI))) {
+    ITypeInfo* pClass = NULL;
+    if (SUCCEEDED(pPCI->GetClassInfo(&pClass)) && pClass != NULL) {
+      TYPEATTR* pAttr = NULL;
+      if (SUCCEEDED(pClass->GetTypeAttr(&pAttr))) {
+        for (UINT i = 0; i < pAttr->cImplTypes && !bFound; i++) {
+          INT nFlags = 0;
+          if (FAILED(pClass->GetImplTypeFlags(i, &nFlags))) continue;
+          if ((nFlags & (IMPLTYPEFLAG_FDEFAULT | IMPLTYPEFLAG_FSOURCE)) !=
+              (IMPLTYPEFLAG_FDEFAULT | IMPLTYPEFLAG_FSOURCE))
+            continue;
+          HREFTYPE hRef = 0;
+          ITypeInfo* pSource = NULL;
+          if (SUCCEEDED(pClass->GetRefTypeOfImplType(i, &hRef)) &&
+              SUCCEEDED(pClass->GetRefTypeInfo(hRef, &pSource))) {
+            TYPEATTR* pSrcAttr = NULL;
+            if (SUCCEEDED(pSource->GetTypeAttr(&pSrcAttr))) {
+              *piid = pSrcAttr->guid;
+              bFound = TRUE;
+              pSource->ReleaseTypeAttr(pSrcAttr);
+            }
+            pSource->Release();
+          }
+        }
+        pClass->ReleaseTypeAttr(pAttr);
+      }
+      pClass->Release();
+    }
+    pPCI->Release();
+  }
+  if (bFound) return TRUE;
+  // Otherwise its first connection point.
+  IConnectionPointContainer* pCPC = NULL;
+  if (FAILED(pCtl->QueryInterface(IID_IConnectionPointContainer, (void**)&pCPC))) return FALSE;
+  IEnumConnectionPoints* pEnum = NULL;
+  if (SUCCEEDED(pCPC->EnumConnectionPoints(&pEnum)) && pEnum != NULL) {
+    IConnectionPoint* pCP = NULL;
+    if (pEnum->Next(1, &pCP, NULL) == S_OK && pCP != NULL) {
+      bFound = SUCCEEDED(pCP->GetConnectionInterface(piid));
+      pCP->Release();
+    }
+    pEnum->Release();
+  }
+  pCPC->Release();
+  return bFound;
+}
+
+// The events of the ActiveX control of the <object> element szName.
+HRESULT CDHtmlEventSink::ConnectControl(IHTMLElementCollection* pAll, LPCTSTR szName) {
+  VARIANT vName = StringVariant(szName), vEmpty;
+  ::VariantInit(&vEmpty);
+  IDispatch* pElem = NULL;
+  HRESULT hr = pAll->item(vName, vEmpty, &pElem);
+  ::VariantClear(&vName);
+  if (FAILED(hr) || pElem == NULL) return FAILED(hr) ? hr : E_FAIL;
+  VARIANT var;
+  hr = GetDispProperty(pElem, DISPID_IHTMLOBJECTELEMENT_OBJECT, &var);
+  pElem->Release();
+  if (FAILED(hr)) return hr;
+  if (var.vt != VT_DISPATCH || var.pdispVal == NULL) {
+    ::VariantClear(&var);
+    return E_NOINTERFACE;
+  }
+  IDispatch* pCtl = var.pdispVal;
+  IID iid;
+  hr = E_NOINTERFACE;
+  if (!IsSinkedElement(pCtl) && GetSourceIID(pCtl, &iid)) {
+    CDHtmlSinkHandler* pHandler = new CDHtmlSinkHandler(this, pCtl, iid, FALSE, szName);
+    hr = pHandler->Connect();
+    if (FAILED(hr)) {
+      pHandler->m_pOwner = NULL;
+      pHandler->Release();
+    } else {
+      m_aSinks.Add(pHandler);
+    }
+  }
+  pCtl->Release();
+  return hr;
 }
 
 // ---------------------------------------------------------------------
@@ -553,6 +689,9 @@ STDMETHODIMP CDHtmlControlSite::XDocHostUIHandler::FilterDataObject(LPDATAOBJECT
 // CDHtmlDialog
 
 IMPLEMENT_DYNAMIC(CDHtmlDialog, CDialog)
+
+BEGIN_DHTML_EVENT_MAP(CDHtmlDialog)
+END_DHTML_EVENT_MAP()
 
 BEGIN_MESSAGE_MAP(CDHtmlDialog, CDialog)
   ON_WM_DESTROY()
@@ -1279,4 +1418,65 @@ STDMETHODIMP CDHtmlDialog::TranslateUrl(DWORD, OLECHAR*, OLECHAR** ppchURLOut) {
 STDMETHODIMP CDHtmlDialog::FilterDataObject(IDataObject*, IDataObject** ppDORet) {
   if (ppDORet != NULL) *ppDORet = NULL;
   return S_FALSE;
+}
+
+// ---------------------------------------------------------------------
+// CMultiPageDHtmlDialog
+
+IMPLEMENT_DYNAMIC(CMultiPageDHtmlDialog, CDHtmlDialog)
+
+CMultiPageDHtmlDialog::CMultiPageDHtmlDialog() {}
+
+CMultiPageDHtmlDialog::CMultiPageDHtmlDialog(LPCTSTR lpszTemplateName, LPCTSTR szHtmlResID,
+                                             CWnd* pParentWnd)
+    : CDHtmlDialog(lpszTemplateName, szHtmlResID, pParentWnd) {}
+
+CMultiPageDHtmlDialog::CMultiPageDHtmlDialog(UINT nIDTemplate, UINT nHtmlResID,
+                                             CWnd* pParentWnd)
+    : CDHtmlDialog(nIDTemplate, nHtmlResID, pParentWnd) {}
+
+CMultiPageDHtmlDialog::~CMultiPageDHtmlDialog() {}
+
+const DHtmlUrlEventMapEntry* CMultiPageDHtmlDialog::GetDHtmlUrlEventMap() {
+  static const DHtmlUrlEventMapEntry kNone[] = {{(LPCTSTR)NULL, NULL}};
+  return kNone;
+}
+
+// A page's URL against an entry's: the whole URL, or its last part (what
+// LoadFromResource put after the module), without a #fragment or ?query.
+static BOOL UrlMatches(const CString& strUrl, LPCTSTR szEntry) {
+  CString strEntry;
+  if (IS_INTRESOURCE(szEntry))
+    strEntry.Format(_T("%u"), (UINT)(UINT_PTR)szEntry);
+  else
+    strEntry = szEntry;
+  if (strUrl.CompareNoCase(strEntry) == 0) return TRUE;
+  CString strLast = strUrl;
+  int n = strLast.FindOneOf(_T("#?"));
+  if (n >= 0) strLast = strLast.Left(n);
+  n = strLast.ReverseFind(_T('/'));
+  if (n >= 0) strLast = strLast.Mid(n + 1);
+  if (strLast.CompareNoCase(strEntry) == 0) return TRUE;
+  // A name given with its path ("pages/one.htm") matches the URL's end.
+  return strEntry.GetLength() < strUrl.GetLength() &&
+         strUrl.Right(strEntry.GetLength() + 1).CompareNoCase(_T("/") + strEntry) == 0;
+}
+
+const DHtmlEventMapEntry* CMultiPageDHtmlDialog::FindPageMap(LPCTSTR szUrl) {
+  CString strUrl(szUrl);
+  for (const DHtmlUrlEventMapEntry* p = GetDHtmlUrlEventMap(); p != NULL && p->szUrl != NULL;
+       p++)
+    if (p->pfnGetMap != NULL && UrlMatches(strUrl, p->szUrl)) return p->pfnGetMap();
+  return NULL;
+}
+
+void CMultiPageDHtmlDialog::OnBeforeNavigate(LPDISPATCH pDisp, LPCTSTR szUrl) {
+  CDHtmlDialog::OnBeforeNavigate(pDisp, szUrl);
+  if (IsTopLevel(m_pBrowserApp, pDisp)) m_pPageMap = NULL;
+}
+
+void CMultiPageDHtmlDialog::OnDocumentComplete(LPDISPATCH pDisp, LPCTSTR szUrl) {
+  // The new page's map, before CDHtmlDialog connects the page's elements.
+  if (m_pBrowserApp != NULL && IsTopLevel(m_pBrowserApp, pDisp)) m_pPageMap = FindPageMap(szUrl);
+  CDHtmlDialog::OnDocumentComplete(pDisp, szUrl);
 }

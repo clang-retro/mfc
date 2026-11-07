@@ -1737,8 +1737,266 @@ static void RunDHtmlDialog(CWnd* pParent) {
   pDoc->Release();
 }
 
+// =====================================================================
+// CMultiPageDHtmlDialog and DHTML_EVENT_AXCONTROL
+
+static const IID kDIID_AxEvents = {
+    0x6d1f3e20, 0x4b7a, 0x11d0, {0x9a, 0x51, 0x00, 0x60, 0x97, 0x1a, 0x2c, 0x33}};
+
+// An ActiveX control in the page that fires its own events.
+class CFakeAxControl final : public IDispatch,
+                             public IProvideClassInfo2,
+                             public IConnectionPointContainer {
+public:
+  FAKE_REFCOUNT
+  CFakeEvents m_events;
+  CFakeAxControl() : m_nRef(1), m_events(static_cast<IDispatch*>(this), kDIID_AxEvents) {
+    g_nDomAlive++;
+  }
+  ~CFakeAxControl() { g_nDomAlive--; }
+
+  HRESULT Fire(DISPID dispid, VARIANT* pArgs, UINT nArgs) {
+    if (m_events.m_pSink == NULL) return E_FAIL;
+    DISPPARAMS dp = {pArgs, NULL, nArgs, 0};
+    return m_events.m_pSink->Invoke(dispid, IID_NULL, 0, DISPATCH_METHOD, &dp, NULL, NULL, NULL);
+  }
+
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (iid == IID_IUnknown || iid == IID_IDispatch)
+      *ppv = static_cast<IDispatch*>(this);
+    else if (iid == IID_IProvideClassInfo || iid == IID_IProvideClassInfo2)
+      *ppv = static_cast<IProvideClassInfo2*>(this);
+    else if (iid == IID_IConnectionPointContainer)
+      *ppv = static_cast<IConnectionPointContainer*>(this);
+    else {
+      *ppv = NULL;
+      return E_NOINTERFACE;
+    }
+    AddRef();
+    return S_OK;
+  }
+  FAKE_DISPATCH_INFO
+  STDMETHOD(Invoke)(DISPID, REFIID, LCID, WORD, DISPPARAMS*, VARIANT*, EXCEPINFO*, UINT*) {
+    return DISP_E_MEMBERNOTFOUND;
+  }
+  STDMETHOD(GetClassInfo)(ITypeInfo** pp) {
+    *pp = NULL;
+    return E_NOTIMPL;
+  }
+  STDMETHOD(GetGUID)(DWORD dwKind, GUID* pGUID) {
+    if (dwKind != GUIDKIND_DEFAULT_SOURCE_DISP_IID) return E_INVALIDARG;
+    *pGUID = kDIID_AxEvents;
+    return S_OK;
+  }
+  STDMETHOD(EnumConnectionPoints)(IEnumConnectionPoints** pp) {
+    *pp = NULL;
+    return E_NOTIMPL;
+  }
+  STDMETHOD(FindConnectionPoint)(REFIID iid, IConnectionPoint** pp) {
+    *pp = NULL;
+    if (iid != kDIID_AxEvents) return CONNECT_E_NOCONNECTION;
+    *pp = &m_events;
+    AddRef();
+    return S_OK;
+  }
+};
+
+#define IDC_AX_CHANGE 5
+#define IDC_AX_ASK 6
+
+class CTestMultiDlg : public CMultiPageDHtmlDialog {
+public:
+  int m_nNext, m_nBack, m_nDocClicks;
+  long m_nAxValue;
+  CString m_strAxText;
+  int m_nAsks;
+
+  CTestMultiDlg()
+      : CMultiPageDHtmlDialog(IDD_HTMLDLG, IDR_DLGPAGE),
+        m_nNext(0),
+        m_nBack(0),
+        m_nDocClicks(0),
+        m_nAxValue(0),
+        m_nAsks(0) {}
+
+  HRESULT OnNext(IHTMLElement*) {
+    m_nNext++;
+    return S_OK;
+  }
+  HRESULT OnBack(IHTMLElement*) {
+    m_nBack++;
+    return S_OK;
+  }
+  HRESULT OnDocClick(IHTMLElement*) {
+    m_nDocClicks++;
+    return S_OK;
+  }
+  // The control's events: one __stdcall, as in Visual C++'s examples.
+  void __stdcall OnAxChange(long nValue, BSTR bstrText) {
+    m_nAxValue = nValue;
+    m_strAxText = bstrText;
+  }
+  void OnAxAsk(VARIANT_BOOL* pbCancel, VARIANT* pvAnswer) {
+    m_nAsks++;
+    *pbCancel = VARIANT_TRUE;
+    ::VariantClear(pvAnswer);
+    pvAnswer->vt = VT_BSTR;
+    pvAnswer->bstrVal = ::SysAllocString(L"answer");
+  }
+
+  // The events of every page.
+  DECLARE_DHTML_EVENT_MAP()
+
+  BEGIN_EMBED_DHTML_EVENT_MAP(CTestMultiDlg, page1)
+    DHTML_EVENT_ONCLICK(_T("btnGo"), OnNext)
+    DHTML_EVENT_AXCONTROL(IDC_AX_CHANGE, _T("ax"), OnAxChange)
+    DHTML_EVENT_AXCONTROL(IDC_AX_ASK, _T("ax"), OnAxAsk)
+  END_EMBED_DHTML_EVENT_MAP()
+
+  BEGIN_EMBED_DHTML_EVENT_MAP(CTestMultiDlg, page2)
+    DHTML_EVENT_ONCLICK(_T("btnBack"), OnBack)
+  END_EMBED_DHTML_EVENT_MAP()
+
+  DECLARE_DHTML_URL_EVENT_MAP()
+};
+
+BEGIN_DHTML_EVENT_MAP(CTestMultiDlg)
+  DHTML_EVENT_ONCLICK(NULL, OnDocClick)
+END_DHTML_EVENT_MAP()
+
+BEGIN_DHTML_URL_EVENT_MAP(CTestMultiDlg)
+  BEGIN_URL_ENTRIES(CTestMultiDlg)
+    URL_EVENT_ENTRY(CTestMultiDlg, IDR_DLGPAGE, page1)
+    URL_EVENT_ENTRY(CTestMultiDlg, _T("page2.htm"), page2)
+  END_URL_ENTRIES()
+END_DHTML_URL_EVENT_MAP(CTestMultiDlg)
+
+// The browser shows another document.
+static void ShowDoc(CFakeBrowser* pBrowser, IDispatch* pDoc) {
+  if (pBrowser->m_pDocOverride != NULL) pBrowser->m_pDocOverride->Release();
+  pBrowser->m_pDocOverride = pDoc;
+  pDoc->AddRef();
+}
+
+static void RunMultiPageDialog(CWnd* pParent) {
+  TestLog("multi-page dhtml dialog");
+  CPageControl ctl;
+  CFakeHtmlDoc* pDoc1 = MakePage(&ctl);
+  CFakeAxControl* pAx = new CFakeAxControl;
+  VARIANT v;
+  v.vt = VT_DISPATCH;
+  v.pdispVal = static_cast<IDispatch*>(pAx);
+  pDoc1->Add(_T("OBJECT"), _T("ax"))->SetProp(DISPID_IHTMLOBJECTELEMENT_OBJECT, v);
+  CFakeHtmlDoc* pDoc2 = new CFakeHtmlDoc;
+  pDoc2->Add(_T("BUTTON"), _T("btnBack"));
+  pDoc2->Add(_T("BUTTON"), _T("btnGo"));
+  CFakeHtmlDoc* pDoc3 = new CFakeHtmlDoc;
+  pDoc3->Add(_T("BUTTON"), _T("btnGo"));
+  pDoc3->Add(_T("BUTTON"), _T("btnBack"));
+
+  g_pNextDoc = static_cast<IHTMLDocument2*>(pDoc1);
+  CTestMultiDlg* pDlg = new CTestMultiDlg;
+  BOOL bMade = pDlg->Create(IDD_HTMLDLG, pParent);
+  g_pNextDoc = NULL;
+  CHECK(bMade);
+  if (bMade) {
+    CFakeBrowser* pBrowser = CFakeBrowser::s_pLast;
+
+    // The first page (the resource): its embedded map and the dialog's.
+    CHECK(pDoc1->Find(_T("btnGo"))->Connected());
+    CHECK(pDoc1->m_events.m_pSink != NULL);
+    CHECK(pAx->m_events.m_pSink != NULL);
+    pDoc1->Find(_T("btnGo"))->Fire(DISPID_HTMLELEMENTEVENTS2_ONCLICK);
+    CHECK(pDlg->m_nNext == 1);
+    pDoc1->Fire(DISPID_HTMLELEMENTEVENTS2_ONCLICK, pDoc1->Find(_T("note")));
+    CHECK(pDlg->m_nDocClicks == 1);
+
+    // The control's events, with their arguments (last first).
+    VARIANT aChange[2];
+    aChange[0].vt = VT_BSTR;
+    aChange[0].bstrVal = ::SysAllocString(L"hi there");
+    aChange[1].vt = VT_I4;
+    aChange[1].lVal = 42;
+    CHECK(SUCCEEDED(pAx->Fire(IDC_AX_CHANGE, aChange, 2)));
+    ::VariantClear(&aChange[0]);
+    CHECK(pDlg->m_nAxValue == 42 && pDlg->m_strAxText == _T("hi there"));
+    // By reference: what the handler writes comes back.
+    VARIANT_BOOL bCancel = VARIANT_FALSE;
+    VARIANT vAnswer;
+    ::VariantInit(&vAnswer);
+    VARIANT aAsk[2];
+    aAsk[0].vt = VT_BYREF | VT_VARIANT;
+    aAsk[0].pvarVal = &vAnswer;
+    aAsk[1].vt = VT_BYREF | VT_BOOL;
+    aAsk[1].pboolVal = &bCancel;
+    CHECK(SUCCEEDED(pAx->Fire(IDC_AX_ASK, aAsk, 2)));
+    CHECK(pDlg->m_nAsks == 1 && bCancel == VARIANT_TRUE);
+    CHECK(vAnswer.vt == VT_BSTR && wcscmp(vAnswer.bstrVal, L"answer") == 0);
+    ::VariantClear(&vAnswer);
+    // An event the map does not name.
+    CHECK(SUCCEEDED(pAx->Fire(99, NULL, 0)));
+
+    // The second page: its own map, not the first's.
+    ShowDoc(pBrowser, static_cast<IHTMLDocument2*>(pDoc2));
+    pDlg->Navigate(_T("res://test.exe/page2.htm"));
+    CString strUrl;
+    pDlg->GetCurrentUrl(strUrl);
+    CHECK(strUrl == _T("res://test.exe/page2.htm"));
+    CHECK(!pDoc1->Find(_T("btnGo"))->Connected() && pDoc1->m_events.m_pSink == NULL);
+    CHECK(pAx->m_events.m_pSink == NULL);
+    CHECK(pDoc2->Find(_T("btnBack"))->Connected() && !pDoc2->Find(_T("btnGo"))->Connected());
+    CHECK(pDoc2->m_events.m_pSink != NULL);
+    pDoc2->Find(_T("btnBack"))->Fire(DISPID_HTMLELEMENTEVENTS2_ONCLICK);
+    CHECK(pDlg->m_nBack == 1 && pDlg->m_nNext == 1);
+    pDoc2->Fire(DISPID_HTMLELEMENTEVENTS2_ONCLICK, pDoc2->Find(_T("btnBack")));
+    CHECK(pDlg->m_nDocClicks == 2);
+
+    // A page the URL map does not name: only the dialog's own map.
+    ShowDoc(pBrowser, static_cast<IHTMLDocument2*>(pDoc3));
+    pDlg->Navigate(_T("http://example.test/other.htm#top"));
+    CHECK(!pDoc2->Find(_T("btnBack"))->Connected());
+    CHECK(!pDoc3->Find(_T("btnGo"))->Connected() && !pDoc3->Find(_T("btnBack"))->Connected());
+    CHECK(pDoc3->m_events.m_pSink != NULL);
+
+    // Back to the first page by its resource URL.
+    ShowDoc(pBrowser, static_cast<IHTMLDocument2*>(pDoc1));
+    pDlg->LoadFromResource(IDR_DLGPAGE);
+    CHECK(pDoc1->Find(_T("btnGo"))->Connected() && pAx->m_events.m_pSink != NULL);
+    CHECK(pDoc3->m_events.m_pSink == NULL);
+
+    pDlg->DestroyWindow();
+    CHECK(pAx->m_events.m_pSink == NULL && !pDoc1->Find(_T("btnGo"))->Connected());
+  }
+  delete pDlg;
+  pDoc1->Release();
+  pDoc2->Release();
+  pDoc3->Release();
+  pAx->Release();
+}
+
+// A CDHtmlDialog with no map of its own.
+static void RunPlainDHtmlDialog(CWnd* pParent) {
+  TestLog("plain dhtml dialog");
+  CPageControl ctl;
+  CFakeHtmlDoc* pDoc = MakePage(&ctl);
+  g_pNextDoc = static_cast<IHTMLDocument2*>(pDoc);
+  CDHtmlDialog* pDlg = new CDHtmlDialog(IDD_HTMLDLG, IDR_DLGPAGE);
+  BOOL bMade = pDlg->Create(IDD_HTMLDLG, pParent);
+  g_pNextDoc = NULL;
+  CHECK(bMade);
+  if (bMade) {
+    CHECK(pDlg->m_spHtmlDoc == static_cast<IHTMLDocument2*>(pDoc));
+    CHECK(!pDoc->Find(_T("btnGo"))->Connected() && pDoc->m_events.m_pSink == NULL);
+    pDlg->DestroyWindow();
+  }
+  delete pDlg;
+  pDoc->Release();
+}
+
 void TestDHtmlDialog(CWnd* pParent) {
   RunDHtmlDialog(pParent);
+  RunMultiPageDialog(pParent);
+  RunPlainDHtmlDialog(pParent);
   // Nothing kept the page's objects.
   CHECK(g_nDomAlive == 0);
 }
