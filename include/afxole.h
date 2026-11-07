@@ -11,6 +11,12 @@
 #include "afxwin.h"
 #include "afxext.h"
 #include "afxdisp.h"
+// docobj.h names these two print flags too, with the same values.
+#ifdef PRINTFLAG_MAYBOTHERUSER
+#undef PRINTFLAG_MAYBOTHERUSER
+#undef PRINTFLAG_PROMPTUSER
+#endif
+#include <docobj.h>
 
 #ifndef _AFX_NOFORCE_LIBS
 __asm__(".section .drectve,\"yn\"\n"
@@ -30,6 +36,7 @@ class COleLinkingDoc;
 class COleServerDoc;
 class COleServerItem;
 class COleTemplateServer;
+class CDocObjectServer;
 class COleFrameHook;
 class COleIPFrameWnd;
 class COleCntrFrameWnd;
@@ -711,6 +718,14 @@ public:
   virtual void OnSetHostNames(LPCTSTR lpszHost, LPCTSTR lpszHostObj);
   virtual void OnClose(OLECLOSE dwCloseOption);
 
+  // Active Documents (afxdocob.h): a document that makes a
+  // CDocObjectServer here is one when its container is a document site.
+  virtual CDocObjectServer* GetDocObjectServer(LPOLEDOCUMENTSITE pDocSite);
+  BOOL IsDocObject() const { return m_pDocObjectServer != NULL; }
+  void ActivateDocObject();
+  CDocObjectServer* m_pDocObjectServer;
+  virtual LPUNKNOWN GetInterfaceHook(const void* piid);
+
   virtual void OnCloseDocument();
   virtual BOOL SaveModified();
   virtual HMENU GetDefaultMenu();
@@ -829,6 +844,7 @@ public:
   DECLARE_INTERFACE_MAP()
   DECLARE_MESSAGE_MAP()
   friend class COleServerItem;
+  friend class CDocObjectServer;
   friend class COleIPFrameWnd;
   friend class COleResizeBar;
 };

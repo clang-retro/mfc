@@ -5,6 +5,7 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 #include "afximpl.h"
 #include <afxole.h>
+#include <afxdocob.h>
 
 IMPLEMENT_DYNAMIC(COleLinkingDoc, COleDocument)
 IMPLEMENT_DYNAMIC(COleServerDoc, COleLinkingDoc)
@@ -419,7 +420,8 @@ BEGIN_MESSAGE_MAP(COleServerDoc, COleLinkingDoc)
 END_MESSAGE_MAP()
 
 COleServerDoc::COleServerDoc()
-    : m_lpClientSite(NULL),
+    : m_pDocObjectServer(NULL),
+      m_lpClientSite(NULL),
       m_lpOleAdviseHolder(NULL),
       m_lpDataAdviseHolder(NULL),
       m_pEmbeddedItem(NULL),
@@ -437,6 +439,7 @@ COleServerDoc::COleServerDoc()
 }
 
 COleServerDoc::~COleServerDoc() {
+  delete m_pDocObjectServer;
   if (m_lpInPlaceSite != NULL) m_lpInPlaceSite->Release();
   if (m_lpClientSite != NULL) m_lpClientSite->Release();
   if (m_lpOleAdviseHolder != NULL) m_lpOleAdviseHolder->Release();
@@ -444,6 +447,27 @@ COleServerDoc::~COleServerDoc() {
   // The items go before the lock, with the rest of the document.
   while (!m_docItemList.IsEmpty()) delete (CDocItem*)m_docItemList.GetHead();
   AfxOleUnlockApp();
+}
+
+CDocObjectServer* COleServerDoc::GetDocObjectServer(LPOLEDOCUMENTSITE) { return NULL; }
+
+static BOOL IsDocObjectIID(REFIID iid) {
+  return ::IsEqualIID(iid, IID_IOleDocument) || ::IsEqualIID(iid, IID_IOleDocumentView) ||
+         ::IsEqualIID(iid, IID_IOleCommandTarget) || ::IsEqualIID(iid, IID_IPrint);
+}
+
+// A DocObject's document answers for its CDocObjectServer's interfaces,
+// made when a container first asks for one.
+LPUNKNOWN COleServerDoc::GetInterfaceHook(const void* piid) {
+  if (!IsDocObjectIID(*(const IID*)piid)) return COleLinkingDoc::GetInterfaceHook(piid);
+  if (m_pDocObjectServer == NULL && !m_bClosing) {
+    try {
+      m_pDocObjectServer = GetDocObjectServer(NULL);
+    } catch (CException* e) {
+      e->Delete();
+    }
+  }
+  return m_pDocObjectServer != NULL ? m_pDocObjectServer->GetInterface(piid) : NULL;
 }
 
 COleServerItem* COleServerDoc::GetEmbeddedItem() {
@@ -736,6 +760,13 @@ void COleServerDoc::OnCloseDocument() {
     ReleaseItems(items);
   }
   ::CoDisconnectObject((LPUNKNOWN)&m_xOleObject, 0);
+  if (m_pDocObjectServer != NULL) {
+    m_pDocObjectServer->SetDocSite(NULL);
+    if (m_pDocObjectServer->m_pViewSite != NULL) {
+      m_pDocObjectServer->m_pViewSite->Release();
+      m_pDocObjectServer->m_pViewSite = NULL;
+    }
+  }
   if (m_lpClientSite != NULL) {
     m_lpClientSite->Release();
     m_lpClientSite = NULL;
@@ -943,6 +974,22 @@ STDMETHODIMP COleServerDoc::XOleObject::SetClientSite(LPOLECLIENTSITE pClientSit
   if (pClientSite != NULL) pClientSite->AddRef();
   if (pThis->m_lpClientSite != NULL) pThis->m_lpClientSite->Release();
   pThis->m_lpClientSite = pClientSite;
+  // A document site makes the document a DocObject, if it can be one.
+  LPOLEDOCUMENTSITE lpDocSite = NULL;
+  if (pClientSite != NULL &&
+      SUCCEEDED(pClientSite->QueryInterface(IID_IOleDocumentSite, (void**)&lpDocSite))) {
+    HRESULT hr = S_OK;
+    OLE_TRY
+      if (pThis->m_pDocObjectServer == NULL)
+        pThis->m_pDocObjectServer = pThis->GetDocObjectServer(lpDocSite);
+      else
+        pThis->m_pDocObjectServer->SetDocSite(lpDocSite);
+    OLE_CATCH(hr)
+    lpDocSite->Release();
+    (void)hr;
+  } else if (pThis->m_pDocObjectServer != NULL) {
+    pThis->m_pDocObjectServer->SetDocSite(NULL);
+  }
   return S_OK;
 }
 
@@ -1982,6 +2029,8 @@ void COleTemplateServer::UpdateRegistry(OLE_APPTYPE nAppType, LPCTSTR*, LPCTSTR*
   SetClassKey(strKey + _T("\\MiscStatus"), _T("32"));  // OLEMISC_RECOMPOSEONRESIZE
   SetClassKey(strKey + _T("\\verb\\0"), _T("&Edit,0,2"));
   if (nAppType != OAT_SERVER) SetClassKey(strKey + _T("\\verb\\1"), _T("&Open,0,2"));
+  // A DocObject server's class says so, for containers that show it whole.
+  if (nAppType == OAT_DOC_OBJECT_SERVER) SetClassKey(strKey + _T("\\DocObject"), _T("0"));
 }
 
 BOOL COleTemplateServer::UpdateRegistry(BOOL bRegister) {
