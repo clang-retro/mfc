@@ -182,7 +182,9 @@ when there is no display:
   document a DocObject, which shows over the whole of the container's
   view; the test checks the view's rectangle, commands through
   IOleCommandTarget (standard ones and an OLE command map's own), the
-  view state, closing the view, and the DocObject registration.
+  view state, printing through IPrint (the page count, page sets, a
+  target printer and the continue callback), closing the view, and the
+  DocObject registration.
 * `occtest`: ActiveX control containment, with a control of the test's
   own: CWnd::CreateControl in a frame window (properties, methods,
   events and property notifications through event sink maps, ambient
@@ -201,8 +203,10 @@ when there is no display:
   its server and its container: stock and custom properties, a method,
   stock and custom events, verbs from its message map (ON_OLEVERB,
   ON_STDOLEVERB), the font object, ambient properties, frozen
-  events, activation and focus, drawing in its window and through
-  IViewObject, its state through IPersistStreamInit,
+  events, activation and focus, the container's extended control
+  (its extender properties, moving and hiding the control through it,
+  and the control's own properties and methods), drawing in its window
+  and through IViewObject, its state through IPersistStreamInit,
   IPersistPropertyBag and IPersistStorage into new instances, the
   registry keys of AfxOleRegisterControlClass, and the control's
   COlePropertyPage, through IPropertyPage (its size and title, DDP_ and
@@ -300,12 +304,15 @@ request with the stock MinGW-w64 toolchain.
   controls (DataSource): CWnd::BindDefaultProperty binds a control's
   property to a field of the current row, both ways, BindProperty gives
   a property the data source, and GetDSCCursor gives its rowset.
+  Extended controls (IOleControlSite::GetExtendedControl): the
+  extender properties, and the control's own through the same
+  IDispatch.
 * `afxctl.h`: writing ActiveX controls: COleControl (the OLE control
   interfaces, in-place activation, stock properties, methods and events,
   ambient properties, IViewObject drawing and persistence through
   streams, storages and property bags), COleControlModule, event maps,
   verb maps (ON_OLEVERB, ON_STDOLEVERB), IPerPropertyBrowsing,
-  IQuickActivate, windowless activation (the windowlessActivate flag of
+  IQuickActivate, GetExtendedControl, windowless activation (the windowlessActivate flag of
   GetControlFlags, IOleInPlaceObjectWindowless and COleControl's
   windowless SetCapture, SetFocus, GetDC and InvalidateControl),
   DECLARE_OLECREATE_EX, DECLARE_OLECTLTYPE,
@@ -369,8 +376,11 @@ request with the stock MinGW-w64 toolchain.
   overloaded. Drag scrolling starts as soon as the pointer is in the
   inset, without waiting nScrollDelay. A connection point's cookie is
   the sink's interface pointer.
-* Containment does not implement extended controls
-  (IOleControlSite::GetExtendedControl) or property pages. Data binding
+* Containment does not implement property pages for the container.
+  The extended control's own properties are Name, Object, Parent and
+  Left, Top, Width, Height, Visible and ID (in the container window's
+  pixels, with DISPIDs of this library's, AFX_DISPID_EXT_*); Parent is
+  the container window's IDispatch when it has automation. Data binding
   works with OLE DB data sources only (DataSource and its default data
   member, with IRowPosition or else the rowset's first row), not with
   the older ICursor data source controls, and there is no ON_DSCNOTIFY
@@ -429,9 +439,13 @@ request with the stock MinGW-w64 toolchain.
   with the container and server in one process. There Wine gives the
   container the server's own object rather than OLE's handler, and
   COleClientItem::Draw then draws from the object's metafile.
-* A DocObject prints through its Print command (OLECMDID_PRINT):
-  IPrint::Print and GetPageInfo are not implemented, so
-  COleDocObjectItem::GetPageCount says it does not know the pages.
+* A DocObject's IPrint prints its document's first view, as File Print
+  does, to the container's printer. GetPageInfo knows the pages only
+  when the view's OnPreparePrinting sets the last page. Printing to a
+  file takes the file's name from a TYMED_FILE pstgmOptions.
+  COleDocObjectItem::DoDefaultPrinting prints the whole object through
+  IPrint to the container's printer, or else through its Print command
+  (OLECMDID_PRINT).
 * The running object table holds a stand-in for a document or a linked
   item, which hands out the object's interfaces, so that the table does
   not keep open a document a link opened; asking it for IUnknown gives

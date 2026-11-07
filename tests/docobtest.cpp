@@ -5,11 +5,14 @@
 // activation through IOleDocumentSite::ActivateMe, the view's rectangle,
 // the commands the container sends through IOleCommandTarget (the
 // standard ones and the program's own OLE command map), the view state
-// the container keeps, closing the view, and the DocObject registration.
+// the container keeps, printing through IPrint (the page count, page sets,
+// the container's printer, the continue callback), closing the view, and
+// the DocObject registration.
 #include <afxwin.h>
 #include <afxext.h>
 #include <afxole.h>
 #include <afxdocob.h>
+#include <stddef.h>
 #include "docobtest.h"
 #include "testutil.h"
 
@@ -24,6 +27,10 @@ static const GUID CGID_DocObTest = {
 
 static int g_nCopies = 0, g_nRecolors = 0, g_nViewsActivated = 0;
 static DWORD g_dwSavedState = 0, g_dwAppliedState = 0;
+// The pages the server's view printed, as digits.
+static CString g_strPrinted;
+static int g_nBeginPrinting = 0, g_nEndPrinting = 0;
+static BOOL g_bLastWasDocObject = FALSE;
 
 class CDocObDoc;
 static CDocObDoc* g_pSrvDoc = NULL;
@@ -85,8 +92,70 @@ public:
     GetClientRect(&rect);
     pDC->FillSolidRect(rect, RGB(0, 0, 255));
   }
+  // Three pages.
+  virtual BOOL OnPreparePrinting(CPrintInfo* pInfo) {
+    pInfo->SetMaxPage(3);
+    g_bLastWasDocObject = pInfo->m_bDocObject;
+    return DoPreparePrinting(pInfo);
+  }
+  virtual void OnBeginPrinting(CDC*, CPrintInfo*) { g_nBeginPrinting++; }
+  virtual void OnEndPrinting(CDC*, CPrintInfo*) { g_nEndPrinting++; }
+  virtual void OnPrint(CDC* pDC, CPrintInfo* pInfo) {
+    g_strPrinted += (TCHAR)(_T('0') + pInfo->m_nCurPage);
+    CString str;
+    str.Format(_T("page %u"), pInfo->m_nCurPage);
+    pDC->TextOut(100, 100, str);
+  }
 };
 IMPLEMENT_DYNCREATE(CDocObView, CView)
+
+// A continue callback that stops after some pages.
+class CContinue : public IContinueCallback {
+public:
+  LONG m_nStopAfter, m_nCalls, m_nLastPage;
+  explicit CContinue(LONG nStopAfter) : m_nStopAfter(nStopAfter), m_nCalls(0), m_nLastPage(0) {}
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (::IsEqualIID(iid, IID_IUnknown) || ::IsEqualIID(iid, IID_IContinueCallback)) {
+      *ppv = this;
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return 2; }
+  STDMETHOD_(ULONG, Release)() { return 1; }
+  STDMETHOD(FContinue)() { return S_OK; }
+  STDMETHOD(FContinuePrinting)(LONG nCntPrinted, LONG nCurPage, WCHAR*) {
+    m_nCalls++;
+    m_nLastPage = nCurPage;
+    return nCntPrinted >= m_nStopAfter ? S_FALSE : S_OK;
+  }
+};
+
+// The default printer as a target device.
+static DVTARGETDEVICE* DefaultPrinter() {
+  PRINTDLG pd;
+  memset(&pd, 0, sizeof(pd));
+  pd.lStructSize = sizeof(pd);
+  if (!AfxGetApp()->GetPrinterDeviceDefaults(&pd) || pd.hDevNames == NULL) return NULL;
+  DEVNAMES* pdn = (DEVNAMES*)::GlobalLock(pd.hDevNames);
+  CStringW strDriver((LPCTSTR)pdn + pdn->wDriverOffset);
+  CStringW strDevice((LPCTSTR)pdn + pdn->wDeviceOffset);
+  ::GlobalUnlock(pd.hDevNames);
+  UINT cbHeader = offsetof(DVTARGETDEVICE, tdData);
+  UINT cbDriver = (strDriver.GetLength() + 1) * sizeof(WCHAR);
+  UINT cbDevice = (strDevice.GetLength() + 1) * sizeof(WCHAR);
+  UINT cbTotal = cbHeader + cbDriver + cbDevice + sizeof(WCHAR);
+  DVTARGETDEVICE* ptd = (DVTARGETDEVICE*)::CoTaskMemAlloc(cbTotal);
+  memset(ptd, 0, cbTotal);
+  ptd->tdSize = cbTotal;
+  ptd->tdDriverNameOffset = (WORD)cbHeader;
+  ptd->tdDeviceNameOffset = (WORD)(cbHeader + cbDriver);
+  ptd->tdPortNameOffset = (WORD)(cbHeader + cbDriver + cbDevice);
+  memcpy((BYTE*)ptd + ptd->tdDriverNameOffset, (LPCWSTR)strDriver, cbDriver);
+  memcpy((BYTE*)ptd + ptd->tdDeviceNameOffset, (LPCWSTR)strDevice, cbDevice);
+  return ptd;
+}
 
 class CDocObFrame : public CFrameWnd {
   DECLARE_DYNCREATE(CDocObFrame)
@@ -237,8 +306,89 @@ public:
       CHECK(g_dwAppliedState == 0x1234);
       lpStream->Release();
     }
+  }
+
+  void Print() {
+    if (m_pItem == NULL || m_pItem->GetActiveView() == NULL) return;
+    // The page count, from the server view's OnPreparePrinting.
     LONG nFirst = 0, nPages = 0;
-    CHECK(!m_pItem->GetPageCount(&nFirst, &nPages));  // not known before printing
+    CHECK(m_pItem->GetPageCount(&nFirst, &nPages));
+    TestLog("pages %ld from %ld", nPages, nFirst);
+    CHECK(nFirst == 1 && nPages == 3 && g_bLastWasDocObject);
+    CPrintInfo info;
+    CHECK(COleDocObjectItem::OnPreparePrinting(View(), &info));
+    CHECK(info.GetMinPage() == 1 && info.GetMaxPage() == 3);
+
+    LPPRINT lpPrint = NULL;
+    m_pItem->m_lpObject->QueryInterface(IID_IPrint, (void**)&lpPrint);
+    CHECK(lpPrint != NULL);
+    if (lpPrint == NULL) return;
+    CHECK(lpPrint->SetInitialPageNum(5) == S_OK);
+    CHECK(lpPrint->GetPageInfo(&nFirst, &nPages) == S_OK && nFirst == 5 && nPages == 3);
+
+    // Counting only.
+    LONG nPrinted = -1, nLast = -1;
+    CHECK(lpPrint->Print(PRINTFLAG_DONTACTUALLYPRINT, NULL, NULL, NULL, NULL, 5, &nPrinted,
+                         &nLast) == S_OK);
+    CHECK(nPrinted == 3 && nLast == 7 && g_strPrinted.IsEmpty());
+    // A page set: the second page on, and the odd pages of all.
+    struct {
+      PAGESET set;
+      PAGERANGE more[1];
+    } ps;
+    memset(&ps, 0, sizeof(ps));
+    ps.set.cbStruct = sizeof(PAGESET);
+    ps.set.fOddPages = ps.set.fEvenPages = TRUE;
+    ps.set.cPageRange = 1;
+    ps.set.rgPages[0].nFromPage = 2;
+    ps.set.rgPages[0].nToPage = PAGESET_TOLASTPAGE;
+    PAGESET* pSet = &ps.set;
+    CHECK(lpPrint->Print(PRINTFLAG_DONTACTUALLYPRINT, NULL, &pSet, NULL, NULL, 1, &nPrinted,
+                         &nLast) == S_OK);
+    CHECK(nPrinted == 2 && nLast == 3);
+    ps.set.fEvenPages = FALSE;
+    ps.set.rgPages[0].nFromPage = 1;
+    CHECK(lpPrint->Print(PRINTFLAG_DONTACTUALLYPRINT, NULL, &pSet, NULL, NULL, 1, &nPrinted,
+                         &nLast) == S_OK);
+    CHECK(nPrinted == 2 && nLast == 3);
+    ps.set.fEvenPages = TRUE;
+    ps.set.rgPages[0].nFromPage = 4;  // past the end
+    CHECK(FAILED(lpPrint->Print(PRINTFLAG_DONTACTUALLYPRINT, NULL, &pSet, NULL, NULL, 1,
+                                &nPrinted, &nLast)));
+
+    // Printing to the container's printer, into a file.
+    DVTARGETDEVICE* ptd = DefaultPrinter();
+    if (ptd == NULL) {
+      TestLog("note: no printer; IPrint::Print not run");
+    } else {
+      TCHAR szPath[MAX_PATH], szDir[MAX_PATH];
+      ::GetTempPath(MAX_PATH, szDir);
+      ::GetTempFileName(szDir, _T("dob"), 0, szPath);
+      CStringW strPath(szPath);
+      STGMEDIUM stgm;
+      memset(&stgm, 0, sizeof(stgm));
+      stgm.tymed = TYMED_FILE;
+      stgm.lpszFileName = (LPOLESTR)(LPCWSTR)strPath;
+      ps.set.rgPages[0].nFromPage = 2;
+      CContinue cont(99);
+      int nBegin = g_nBeginPrinting;
+      HRESULT hr = lpPrint->Print(PRINTFLAG_PRINTTOFILE, &ptd, &pSet, &stgm, &cont, 10,
+                                  &nPrinted, &nLast);
+      TestLog("Print: %08lx, %ld pages to %ld, printed %s", (unsigned long)hr, nPrinted, nLast,
+              (LPCSTR)CStringA(g_strPrinted));
+      CHECK(hr == S_OK && nPrinted == 2 && nLast == 12 && g_strPrinted == _T("23"));
+      CHECK(cont.m_nCalls == 2 && cont.m_nLastPage == 12);
+      CHECK(g_nBeginPrinting == nBegin + 1 && g_nEndPrinting == g_nBeginPrinting);
+      // The callback stops it after the first page.
+      g_strPrinted.Empty();
+      CContinue stop(1);
+      pSet = NULL;
+      hr = lpPrint->Print(PRINTFLAG_PRINTTOFILE, &ptd, &pSet, &stgm, &stop, 1, &nPrinted, &nLast);
+      CHECK(FAILED(hr) && nPrinted == 1 && g_strPrinted == _T("1"));
+      ::DeleteFile(szPath);
+      ::CoTaskMemFree(ptd);
+    }
+    lpPrint->Release();
   }
 
   void Close() {
@@ -258,8 +408,9 @@ public:
     switch (m_nStep++) {
       case 0: Activate(); break;
       case 1: Commands(); break;
-      case 2: Close(); break;
-      case 3:
+      case 2: Print(); break;
+      case 3: Close(); break;
+      case 4:
         // Nothing to save: no prompt on the way out.
         GetActiveDocument()->SetModifiedFlag(FALSE);
         KillTimer(1);

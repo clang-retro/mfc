@@ -911,6 +911,69 @@ void CMainFrame::TestHosted() {
     dc.SelectObject(pOld);
   }
 
+  // The container's extended control: extender properties, and the
+  // control's own passed on.
+  LPDISPATCH pExt = pCtl->GetExtendedControl();
+  CHECK(pExt != NULL);
+  if (pExt != NULL) {
+    COleDispatchDriver ext(pExt, FALSE);
+    LPOLESTR names[] = {(LPOLESTR)L"left", (LPOLESTR)L"Label", (LPOLESTR)L"Nothing"};
+    DISPID dispid = 0;
+    CHECK(pExt->GetIDsOfNames(IID_NULL, &names[0], 1, 0, &dispid) == S_OK &&
+          dispid == AFX_DISPID_EXT_LEFT);
+    CHECK(pExt->GetIDsOfNames(IID_NULL, &names[1], 1, 0, &dispid) == S_OK &&
+          dispid == DISPID_LABEL);
+    CHECK(pExt->GetIDsOfNames(IID_NULL, &names[2], 1, 0, &dispid) == DISP_E_UNKNOWNNAME);
+    CString strName;
+    ext.GetProperty(DISPID_NAME, VT_BSTR, &strName);
+    CHECK(strName.IsEmpty());
+    ext.SetProperty(DISPID_NAME, VT_BSTR, _T("Ctl1"));
+    ext.GetProperty(DISPID_NAME, VT_BSTR, &strName);
+    CHECK(strName == _T("Ctl1") && m_ctl.m_pCtrlSite->m_strName == _T("Ctl1"));
+    long nLeft = 0, nTop = 0, nWidth = 0, nHeight = 0, nID = 0;
+    ext.GetProperty(AFX_DISPID_EXT_LEFT, VT_I4, &nLeft);
+    ext.GetProperty(AFX_DISPID_EXT_TOP, VT_I4, &nTop);
+    ext.GetProperty(AFX_DISPID_EXT_WIDTH, VT_I4, &nWidth);
+    ext.GetProperty(AFX_DISPID_EXT_HEIGHT, VT_I4, &nHeight);
+    ext.GetProperty(AFX_DISPID_EXT_ID, VT_I4, &nID);
+    CRect rcNow;
+    m_ctl.GetWindowRect(&rcNow);
+    ScreenToClient(&rcNow);
+    CHECK(nLeft == rcNow.left && nTop == rcNow.top && nWidth == rcNow.Width() &&
+          nHeight == rcNow.Height() && nID == IDC_CTL);
+    // Moving it through the extender moves the control.
+    ext.SetProperty(AFX_DISPID_EXT_WIDTH, VT_I4, 150L);
+    ext.SetProperty(AFX_DISPID_EXT_LEFT, VT_I4, 20L);
+    m_ctl.GetWindowRect(&rcNow);
+    ScreenToClient(&rcNow);
+    CHECK(rcNow.left == 20 && rcNow.Width() == 150 && rcNow.top == nTop);
+    BOOL bVisible = FALSE;
+    ext.GetProperty(AFX_DISPID_EXT_VISIBLE, VT_BOOL, &bVisible);
+    CHECK(bVisible);
+    ext.SetProperty(AFX_DISPID_EXT_VISIBLE, VT_BOOL, FALSE);
+    CHECK(!::IsWindowVisible(pCtl->m_hWnd));
+    ext.SetProperty(AFX_DISPID_EXT_VISIBLE, VT_BOOL, TRUE);
+    CHECK(::IsWindowVisible(pCtl->m_hWnd));
+    // The control itself, and its own properties through the extender.
+    LPDISPATCH pObj = NULL;
+    ext.GetProperty(DISPID_OBJECT, VT_DISPATCH, &pObj);
+    CHECK(pObj != NULL && pObj == m_ctl.m_pCtrlSite->m_dispDriver.m_lpDispatch);
+    if (pObj != NULL) pObj->Release();
+    ext.SetProperty(DISPID_LABEL, VT_BSTR, _T("through"));
+    CHECK(pCtl->m_strLabel == _T("through"));
+    long nTwice = 0;
+    static const BYTE parms[] = VTS_I4;
+    ext.InvokeHelper(DISPID_TWICE, DISPATCH_METHOD, VT_I4, &nTwice, parms, 21L);
+    CHECK(nTwice == 42);
+    // The same object each time.
+    LPDISPATCH pExt2 = pCtl->GetExtendedControl();
+    CHECK(pExt2 == pExt);
+    if (pExt2 != NULL) pExt2->Release();
+    ext.SetProperty(AFX_DISPID_EXT_LEFT, VT_I4, (long)rect.left);
+    ext.SetProperty(AFX_DISPID_EXT_WIDTH, VT_I4, (long)rect.Width());
+    ext.DetachDispatch();
+  }
+
   PumpMessages();
   TestSaveWindowBitmap(m_hWnd, _T("ctltest-frame.bmp"));
 
@@ -918,6 +981,17 @@ void CMainFrame::TestHosted() {
   m_ctl.DestroyWindow();
   CHECK(m_ctl.m_hWnd == NULL && m_ctl.m_pCtrlSite == NULL);
   CHECK(CTestCtrl::s_nAlive == 0);
+  // An extended control kept after its control went says so.
+  if (pExt != NULL) {
+    VARIANT var;
+    ::VariantInit(&var);
+    DISPPARAMS noArgs = {NULL, NULL, 0, 0};
+    CHECK(pExt->Invoke(AFX_DISPID_EXT_LEFT, IID_NULL, 0, DISPATCH_PROPERTYGET, &noArgs, &var,
+                       NULL, NULL) == E_UNEXPECTED);
+    CHECK(pExt->Invoke(DISPID_LABEL, IID_NULL, 0, DISPATCH_PROPERTYGET, &noArgs, &var, NULL,
+                       NULL) == DISP_E_MEMBERNOTFOUND);
+    pExt->Release();
+  }
 }
 
 // Makes a control with CoCreateInstance; the caller owns the IUnknown.

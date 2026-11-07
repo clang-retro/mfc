@@ -778,6 +778,7 @@ public:
 protected:
   BOOL m_bPrinting;
   friend class CView;
+  friend class CDocObjectServer;
   friend class CPreviewDC;
   friend class CPreviewView;
 };
@@ -2560,6 +2561,7 @@ public:
   friend class CDocument;
   friend class CFrameWnd;
   friend class CPreviewView;
+  friend class CDocObjectServer;
   DECLARE_MESSAGE_MAP()
 };
 
