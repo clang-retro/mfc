@@ -3,6 +3,7 @@
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 #include "afximpl.h"
+#include <afxext.h>
 
 // ---------------------------------------------------------------------
 // Styles and ownership
@@ -352,6 +353,13 @@ void CWnd::RepositionBars(UINT nIDFirst, UINT nIDLast, UINT nIDLeftOver, UINT nF
        hWndChild = ::GetWindow(hWndChild, GW_HWNDNEXT)) {
     UINT nIDC = (UINT)::GetDlgCtrlID(hWndChild);
     CWnd* pWnd = CWnd::FromHandlePermanent(hWndChild);
+    // A bar that an object active in place docked on this window belongs
+    // to the other frame object that stands for it (COleCntrFrameWnd),
+    // and the other way round: each lays out its own.
+    if (pWnd != NULL && pWnd->IsKindOf(RUNTIME_CLASS(CControlBar))) {
+      CFrameWnd* pSite = ((CControlBar*)pWnd)->m_pDockSite;
+      if (pSite != NULL && pSite != this && pSite->m_hWnd == m_hWnd) continue;
+    }
     if (nIDC == nIDLeftOver)
       hWndLeftOver = hWndChild;
     else if (nIDC >= nIDFirst && nIDC <= nIDLast && pWnd != NULL)

@@ -568,6 +568,70 @@ public:
 };
 
 // ---------------------------------------------------------------------
+// CRectTracker: a rectangle drawn with a border and resize handles that
+// the user can move and resize with the mouse.
+
+class CRectTracker {
+public:
+  enum StyleFlags {
+    solidLine = 1,
+    dottedLine = 2,
+    hatchedBorder = 4,
+    resizeInside = 8,
+    resizeOutside = 16,
+    hatchInside = 32,
+  };
+  enum TrackerHit {
+    hitNothing = -1,
+    hitTopLeft = 0,
+    hitTopRight = 1,
+    hitBottomRight = 2,
+    hitBottomLeft = 3,
+    hitTop = 4,
+    hitRight = 5,
+    hitBottom = 6,
+    hitLeft = 7,
+    hitMiddle = 8,
+  };
+
+  CRectTracker();
+  CRectTracker(LPCRECT lpSrcRect, UINT nStyle);
+  virtual ~CRectTracker();
+
+  UINT m_nStyle;
+  CRect m_rect;
+  CSize m_sizeMin;
+  int m_nHandleSize;
+
+  void Draw(CDC* pDC) const;
+  void GetTrueRect(LPRECT lpTrueRect) const;
+  BOOL SetCursor(CWnd* pWnd, UINT nHitTest) const;
+  BOOL Track(CWnd* pWnd, CPoint point, BOOL bAllowInvert = FALSE, CWnd* pWndClipTo = NULL);
+  BOOL TrackRubberBand(CWnd* pWnd, CPoint point, BOOL bAllowInvert = TRUE);
+  int HitTest(CPoint point) const;
+  int NormalizeHit(int nHandle) const;
+
+  virtual void DrawTrackerRect(LPCRECT lpRect, CWnd* pWndClipTo, CDC* pDC, CWnd* pWnd);
+  virtual void AdjustRect(int nHandle, LPRECT lpRect);
+  virtual void OnChangedRect(const CRect& rectOld);
+  virtual UINT GetHandleMask() const;
+
+protected:
+  BOOL m_bAllowInvert;
+  CRect m_rectLast;
+  CSize m_sizeLast;
+  BOOL m_bErase;
+  BOOL m_bFinalErase;
+
+  void Construct();
+  virtual int GetHandleSize(LPCRECT lpRect = NULL) const;
+  BOOL TrackHandle(int nHandle, CWnd* pWnd, CPoint point, CWnd* pWndClipTo);
+  void GetHandleRect(int nHandle, CRect* pHandleRect) const;
+  void GetModifyPointers(int nHandle, int** ppx, int** ppy, int* px, int* py);
+  int HitTestHandles(CPoint point) const;
+};
+
+// ---------------------------------------------------------------------
 // CBitmapButton
 
 class CBitmapButton : public CButton {

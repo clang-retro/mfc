@@ -30,6 +30,10 @@ class COleLinkingDoc;
 class COleServerDoc;
 class COleServerItem;
 class COleTemplateServer;
+class COleFrameHook;
+class COleIPFrameWnd;
+class COleCntrFrameWnd;
+class COleResizeBar;
 
 // Defaults for drag scrolling and starting a drag, in pixels and
 // milliseconds; the [windows] section of win.ini can change them.
@@ -300,6 +304,7 @@ public:
   virtual BOOL OnSaveDocument(LPCTSTR lpszPathName);
   virtual void OnCloseDocument();
   virtual BOOL SaveModified();
+  virtual void PreCloseFrame(CFrameWnd* pFrame);
   virtual BOOL OnCmdMsg(UINT nID, int nCode, void* pExtra, AFX_CMDHANDLERINFO* pHandlerInfo);
 
   virtual void LoadFromStorage();
@@ -446,6 +451,16 @@ public:
   virtual void OnActivateUI();
   virtual void OnDeactivate();
   virtual void OnDeactivateUI(BOOL bUndoable);
+  virtual BOOL OnScrollBy(CSize sizeExtent);
+  virtual void OnDiscardUndoState();
+  virtual void OnDeactivateAndUndo();
+  // The frames that hold the view (pDocFrame is NULL unless it is an MDI
+  // child), and the in-place menu's accelerators.
+  virtual BOOL OnGetWindowContext(CFrameWnd** ppMainFrame, CFrameWnd** ppDocFrame,
+                                  LPOLEINPLACEFRAMEINFO lpFrameInfo);
+  // Hides the container's bars while the object shows its own, and
+  // shows them again after.
+  virtual BOOL OnShowControlBars(CFrameWnd* pFrameWnd, BOOL bShow);
   virtual COleDataSource* OnGetClipboardData(BOOL bIncludeLink, LPPOINT lpOffset, LPSIZE lpSize);
   virtual void Serialize(CArchive& ar);
 
@@ -462,6 +477,10 @@ public:
   UINT m_nItemState;
   SCODE m_scLast;
   CView* m_pView;
+  // While the object is active in place.
+  LPOLEINPLACEOBJECT m_lpInPlaceObject;
+  COleFrameHook* m_pInPlaceFrame;
+  COleFrameHook* m_pInPlaceDoc;
 
 protected:
   void GetItemStorage();
@@ -474,6 +493,8 @@ protected:
   void WriteItemFlat(CArchive& ar);
   void ReadItemFlat(CArchive& ar);
   void SetState(UINT nNewState);
+  LPOLEINPLACEOBJECT GetInPlaceObject();
+  void ReleaseInPlace();
 
 public:
   BEGIN_INTERFACE_PART(OleClientSite, IOleClientSite)
@@ -493,6 +514,73 @@ public:
     STDMETHOD_(void, OnClose)();
   END_INTERFACE_PART(AdviseSink)
 
+  BEGIN_INTERFACE_PART(OleIPSite, IOleInPlaceSite)
+    STDMETHOD(GetWindow)(HWND* phwnd);
+    STDMETHOD(ContextSensitiveHelp)(BOOL fEnterMode);
+    STDMETHOD(CanInPlaceActivate)();
+    STDMETHOD(OnInPlaceActivate)();
+    STDMETHOD(OnUIActivate)();
+    STDMETHOD(GetWindowContext)(LPOLEINPLACEFRAME* ppFrame, LPOLEINPLACEUIWINDOW* ppDoc,
+                                LPRECT lprcPosRect, LPRECT lprcClipRect,
+                                LPOLEINPLACEFRAMEINFO lpFrameInfo);
+    STDMETHOD(Scroll)(SIZE scrollExtent);
+    STDMETHOD(OnUIDeactivate)(BOOL fUndoable);
+    STDMETHOD(OnInPlaceDeactivate)();
+    STDMETHOD(DiscardUndoState)();
+    STDMETHOD(DeactivateAndUndo)();
+    STDMETHOD(OnPosRectChange)(LPCRECT lprcPosRect);
+  END_INTERFACE_PART(OleIPSite)
+
+  DECLARE_INTERFACE_MAP()
+  friend class COleFrameHook;
+};
+
+// COleFrameHook: a container frame as an object active in place sees it
+// (IOleInPlaceFrame for the main frame, IOleInPlaceUIWindow for an MDI
+// child). The frame calls it for its accelerators, activation and
+// layout while an object is active in it.
+class COleFrameHook : public CCmdTarget {
+public:
+  COleFrameHook(CFrameWnd* pFrameWnd, COleClientItem* pItem);
+  virtual ~COleFrameHook();
+
+  CFrameWnd* m_pFrameWnd;
+  HWND m_hWnd;
+  COleClientItem* m_pActiveItem;  // the item that last asked for the frame
+  LPOLEINPLACEACTIVEOBJECT m_lpActiveObject;
+  HMENU m_hSharedMenu;  // the object's menu while it is on the frame
+  HOLEMENU m_hOleMenu;
+  CString m_strObjName;
+  BOOL m_bInModalState;
+  BOOL m_bInBorderChange;
+  CPtrList m_listHiddenBars;  // the frame's bars hidden for the object's
+
+  // From the frame.
+  virtual BOOL OnPreTranslateMessage(MSG* pMsg);
+  virtual void OnActivate(BOOL bActive);
+  virtual void OnDocActivate(BOOL bActive);
+  virtual void OnRecalcLayout();
+  virtual BOOL OnUpdateFrameMenu();
+  virtual void OnFrameDestroy();
+
+  HACCEL GetInPlaceAccel() const;
+  HMENU GetInPlaceMenu() const;
+
+  BEGIN_INTERFACE_PART(OleInPlaceFrame, IOleInPlaceFrame)
+    STDMETHOD(GetWindow)(HWND* phwnd);
+    STDMETHOD(ContextSensitiveHelp)(BOOL fEnterMode);
+    STDMETHOD(GetBorder)(LPRECT lprectBorder);
+    STDMETHOD(RequestBorderSpace)(LPCBORDERWIDTHS pborderwidths);
+    STDMETHOD(SetBorderSpace)(LPCBORDERWIDTHS pborderwidths);
+    STDMETHOD(SetActiveObject)(LPOLEINPLACEACTIVEOBJECT pActiveObject, LPCOLESTR pszObjName);
+    STDMETHOD(InsertMenus)(HMENU hmenuShared, LPOLEMENUGROUPWIDTHS lpMenuWidths);
+    STDMETHOD(SetMenu)(HMENU hmenuShared, HOLEMENU holemenu, HWND hwndActiveObject);
+    STDMETHOD(RemoveMenus)(HMENU hmenuShared);
+    STDMETHOD(SetStatusText)(LPCOLESTR pszStatusText);
+    STDMETHOD(EnableModeless)(BOOL fEnable);
+    STDMETHOD(TranslateAccelerator)(LPMSG lpmsg, WORD wID);
+  END_INTERFACE_PART(OleInPlaceFrame)
+
   DECLARE_INTERFACE_MAP()
 };
 
@@ -502,7 +590,7 @@ public:
 // What COleTemplateServer::UpdateRegistry registers the program as.
 enum OLE_APPTYPE {
   OAT_UNKNOWN = -1,
-  OAT_INPLACE_SERVER = 0,  // a full server (in-place activation is not there yet)
+  OAT_INPLACE_SERVER = 0,  // a full server, active in place
   OAT_SERVER = 1,          // a server that opens its objects in its own window
   OAT_CONTAINER = 2,       // a container that links to its embeddings
   OAT_DISPATCH_OBJECT = 3, // an automation object
@@ -575,6 +663,22 @@ public:
 
   virtual BOOL OnUpdateDocument();
   virtual void OnShowDocument(BOOL bShow);
+
+  // In-place activation. ActivateInPlace makes the in-place frame in the
+  // container's window and puts the menus and bars up; FALSE when the
+  // container cannot have the object active in place.
+  BOOL IsInPlaceActive() const { return m_pInPlaceFrame != NULL; }
+  virtual BOOL ActivateInPlace();
+  void RequestPositionChange(LPCRECT lpPosRect);
+  BOOL ScrollContainerBy(CSize sizeScroll);
+  BOOL DeactivateAndUndo();
+  BOOL DiscardUndoState();
+  void GetItemPosition(LPRECT lpPosRect) const;
+  void GetItemClipRect(LPRECT lpClipRect) const;
+  // The ratio of the item's size in the container to its natural size;
+  // FALSE when it is 1.
+  BOOL GetZoomFactor(LPSIZE lpSizeNum = NULL, LPSIZE lpSizeDenom = NULL,
+                     LPCRECT lpPosRect = NULL) const;
   virtual void OnSetHostNames(LPCTSTR lpszHost, LPCTSTR lpszHostObj);
   virtual void OnClose(OLECLOSE dwCloseOption);
 
@@ -594,10 +698,27 @@ public:
   BOOL m_bClosing;
   BOOL m_bOwnRef;  // the reference the document starts with is its own
   BOOL m_bShownBefore;
+  COleIPFrameWnd* m_pInPlaceFrame;
+  CWnd* m_pOrigParent;  // where the view was before the in-place frame
+  DWORD m_dwOrigStyle;
+  DWORD m_dwOrigStyleEx;
+  LPOLEINPLACESITE m_lpInPlaceSite;
 
 protected:
   // Make the item that stands for the whole document.
   virtual COleServerItem* OnGetEmbeddedItem() = 0;
+  virtual COleIPFrameWnd* CreateInPlaceFrame(CWnd* pParentWnd);
+  virtual void DestroyInPlaceFrame(COleIPFrameWnd* pFrameWnd);
+  virtual void OnDeactivate();
+  virtual void OnDeactivateUI(BOOL bUndoable);
+  virtual void OnSetItemRects(LPCRECT lpPosRect, LPCRECT lpClipRect);
+  virtual BOOL OnReactivateAndUndo();
+  virtual void OnFrameWindowActivate(BOOL bActivate);
+  virtual void OnDocWindowActivate(BOOL bActivate);
+  virtual void OnShowControlBars(CFrameWnd* pFrameWnd, BOOL bShow);
+  virtual void OnResizeBorder(LPCRECT lpRectBorder, LPOLEINPLACEUIWINDOW lpUIWindow,
+                              BOOL bFrame);
+  BOOL UIActivate();
   virtual void OnNewEmbedding(LPSTORAGE lpStorage);
   virtual void OnOpenEmbedding(LPSTORAGE lpStorage);
   virtual void OnSaveEmbedding(LPSTORAGE lpStorage);
@@ -657,9 +778,120 @@ public:
     STDMETHOD(EnumDAdvise)(LPENUMSTATDATA* ppenumAdvise);
   END_INTERFACE_PART(DataObject)
 
+  BEGIN_INTERFACE_PART(OleInPlaceObject, IOleInPlaceObject)
+    STDMETHOD(GetWindow)(HWND* phwnd);
+    STDMETHOD(ContextSensitiveHelp)(BOOL fEnterMode);
+    STDMETHOD(InPlaceDeactivate)();
+    STDMETHOD(UIDeactivate)();
+    STDMETHOD(SetObjectRects)(LPCRECT lprcPosRect, LPCRECT lprcClipRect);
+    STDMETHOD(ReactivateAndUndo)();
+  END_INTERFACE_PART(OleInPlaceObject)
+
+  BEGIN_INTERFACE_PART(OleInPlaceActiveObject, IOleInPlaceActiveObject)
+    STDMETHOD(GetWindow)(HWND* phwnd);
+    STDMETHOD(ContextSensitiveHelp)(BOOL fEnterMode);
+    STDMETHOD(TranslateAccelerator)(LPMSG lpmsg);
+    STDMETHOD(OnFrameWindowActivate)(BOOL fActivate);
+    STDMETHOD(OnDocWindowActivate)(BOOL fActivate);
+    STDMETHOD(ResizeBorder)(LPCRECT prcBorder, LPOLEINPLACEUIWINDOW pUIWindow, BOOL fFrameWindow);
+    STDMETHOD(EnableModeless)(BOOL fEnable);
+  END_INTERFACE_PART(OleInPlaceActiveObject)
+
   DECLARE_INTERFACE_MAP()
   DECLARE_MESSAGE_MAP()
   friend class COleServerItem;
+  friend class COleIPFrameWnd;
+  friend class COleResizeBar;
+};
+
+// COleCntrFrameWnd: a container's frame as the server sees it while its
+// object is active in place there. Its window is the container's; the
+// server's toolbars dock on it, and its layout asks the container for
+// the border space they take.
+class COleCntrFrameWnd : public CFrameWnd {
+  DECLARE_DYNAMIC(COleCntrFrameWnd)
+public:
+  COleCntrFrameWnd(COleIPFrameWnd* pInPlaceFrame, HWND hWnd, LPOLEINPLACEUIWINDOW lpWindow);
+  virtual ~COleCntrFrameWnd();
+
+  virtual void RecalcLayout(BOOL bNotify = TRUE);
+  virtual CFrameWnd* GetActiveFrame();
+  virtual void PostNcDestroy() {}
+
+  COleIPFrameWnd* m_pInPlaceFrame;
+  LPOLEINPLACEUIWINDOW m_lpWindow;
+  CPtrList m_listHiddenBars;  // bars hidden while the object is not UI active
+};
+
+// COleIPFrameWnd: the frame a server's view sits in while the object is
+// active in place: a child of the container's window. Programs derive
+// their in-place frame from it and make their toolbars in
+// OnCreateControlBars, on the container's frames.
+class COleIPFrameWnd : public CFrameWnd {
+  DECLARE_DYNCREATE(COleIPFrameWnd)
+public:
+  COleIPFrameWnd();
+  virtual ~COleIPFrameWnd();
+
+  virtual BOOL OnCreateControlBars(CFrameWnd* pWndFrame, CFrameWnd* pWndDoc);
+  // Places the frame over the item's rectangle in the container's window,
+  // cut to the visible part.
+  virtual void RepositionFrame(LPCRECT lpPosRect, LPCRECT lpClipRect);
+
+  virtual BOOL LoadFrame(UINT nIDResource, DWORD dwDefaultStyle, CWnd* pParentWnd,
+                         CCreateContext* pContext = NULL);
+  virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
+  virtual BOOL PreTranslateMessage(MSG* pMsg);
+  virtual void RecalcLayout(BOOL bNotify = TRUE);
+  virtual void OnIdleUpdateCmdUI();
+  virtual void OnUpdateFrameMenu(HMENU) {}
+
+  BOOL m_bUIActive;
+  BOOL m_bInsideRecalc;
+  BOOL m_bBarsCreated;
+  HMENU m_hSharedMenu;
+  HOLEMENU m_hOleMenu;
+  CRect m_rectPos;
+  CRect m_rectClip;
+  LPOLEINPLACEFRAME m_lpFrame;
+  LPOLEINPLACEUIWINDOW m_lpDocFrame;
+  OLEINPLACEFRAMEINFO m_frameInfo;
+  COleCntrFrameWnd* m_pMainFrame;
+  COleCntrFrameWnd* m_pDocFrame;
+
+  // The shared menu: the container's groups and the in-place menu's.
+  BOOL BuildSharedMenu();
+  void DestroySharedMenu();
+
+protected:
+  afx_msg void OnSize(UINT nType, int cx, int cy);
+  afx_msg void OnDestroy();
+  // Status text goes to the container's status bar.
+  afx_msg LRESULT OnSetMessageString(WPARAM wParam, LPARAM lParam);
+  DECLARE_MESSAGE_MAP()
+  friend class COleServerDoc;
+};
+
+// COleResizeBar: the hatched border with handles around an object active
+// in place; dragging a handle asks the container for a new size.
+class COleResizeBar : public CControlBar {
+  DECLARE_DYNAMIC(COleResizeBar)
+public:
+  COleResizeBar();
+  virtual ~COleResizeBar();
+  BOOL Create(CWnd* pParentWnd, DWORD dwStyle = WS_CHILD | WS_VISIBLE,
+              UINT nID = AFX_IDW_RESIZE_BAR);
+  virtual void OnUpdateCmdUI(CFrameWnd*, BOOL) {}
+  int GetBorderWidth() const { return m_tracker.m_nHandleSize; }
+
+protected:
+  CRectTracker m_tracker;
+  afx_msg LRESULT OnSizeParent(WPARAM wParam, LPARAM lParam);
+  afx_msg void OnPaint();
+  afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+  afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
+  afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+  DECLARE_MESSAGE_MAP()
 };
 
 // COleServerItem: what a server shows a container: the whole document

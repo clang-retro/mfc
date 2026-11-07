@@ -2,6 +2,7 @@
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 #include "afximpl.h"
+#include <afxole.h>
 
 // ---------------------------------------------------------------------
 // CMDIFrameWnd
@@ -131,6 +132,7 @@ static void _AfxSetMDIMenu(CMDIFrameWnd* pFrame, HMENU hMenu) {
 }
 
 void CMDIFrameWnd::OnUpdateFrameMenu(HMENU hMenuAlt) {
+  if (m_pNotifyHook != NULL && m_pNotifyHook->OnUpdateFrameMenu()) return;
   CMDIChildWnd* pActiveWnd = MDIGetActive();
   if (pActiveWnd != NULL) {
     pActiveWnd->OnUpdateFrameMenu(TRUE, pActiveWnd, hMenuAlt);
@@ -483,6 +485,8 @@ void CMDIChildWnd::OnMDIActivate(BOOL bActivate, CWnd* pActivateWnd, CWnd* pDeac
     pActiveView->OnActivateView(FALSE, pActiveView, pActiveView);
 
   OnUpdateFrameMenu(bActivate, bActivate ? this : pActivateWnd, NULL);
+  // An object active in place in this child puts its menu up or down.
+  if (m_pNotifyHook != NULL) m_pNotifyHook->OnDocActivate(bActivate);
 
   if (bActivate && pActiveView != NULL)
     pActiveView->OnActivateView(TRUE, pActiveView, pActiveView);
