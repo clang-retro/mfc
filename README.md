@@ -110,7 +110,11 @@ when there is no display:
   fake elements: the page from the resources and its title, the
   DDX_DHtml functions both ways, the element and control functions, the
   DHTML event map by id, class and tag and the document's events,
-  window.external only for a local page, and a new page.
+  window.external only for a local page, and a new page. For
+  CMultiPageDHtmlDialog: each page's embedded map from the URL map, by
+  resource id or name, with the dialog's own map on every page, and an
+  ActiveX control's events (DHTML_EVENT_AXCONTROL) with by-value and
+  by-reference arguments.
 * `dlgtest`: a dialog with data exchange and validation, common
   controls, and a property sheet.
 * `sditest`: a single-document program with a toolbar, a status bar and
@@ -304,7 +308,9 @@ request with the stock MinGW-w64 toolchain.
   the browser's properties and events, IDocHostUIHandler through the
   view's On functions) and CDHtmlDialog (a dialog whose face is an HTML
   page: DHTML event maps, the element functions, the DDX_DHtml
-  functions, ActiveX controls in the page, window.external).
+  functions, ActiveX controls in the page and their events,
+  window.external) and CMultiPageDHtmlDialog (a page's own event map,
+  from BEGIN_EMBED_DHTML_EVENT_MAP and the URL map).
   `atlcomcli.h` has the CComPtr, CComQIPtr, CComBSTR and CComVariant
   their members use.
 
@@ -353,12 +359,14 @@ request with the stock MinGW-w64 toolchain.
   CInternetSession's status callback finds its session through the
   handle's parent (INTERNET_OPTION_PARENT_HANDLE), or is the only
   session with the callback on.
-* CDHtmlDialog's event maps do not chain to the base class's map, and
-  there are no embedded maps (BEGIN_EMBED_DHTML_EVENT_MAP,
-  CMultiPageDHtmlDialog) or DHTML_EVENT_AXCONTROL entries yet. A handler
-  gets the element whose event it handles (for the document's events,
-  the element where the event happened). CHtmlEditView and
-  CHtmlEditCtrl are not there.
+* A DHTML event map holds its own class's entries only; a
+  CMultiPageDHtmlDialog uses the class's map and the page's embedded
+  map together. A handler gets the element whose event it handles (for
+  the document's events, the element where the event happened). A
+  DHTML_EVENT_AXCONTROL handler's parameters are read as their C++
+  types (as a dispatch map's are), so it must not be overloaded. A URL
+  map entry matches the page's whole URL or its last part.
+  CHtmlEditView and CHtmlEditCtrl are not there.
 * Wine's OleCreatePropertyFrame (as of Wine 9) never calls
   IPropertyPage::Apply, so under Wine the OK and Apply buttons of a
   control's property frame do not change the control; Windows applies

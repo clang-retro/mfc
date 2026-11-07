@@ -236,15 +236,34 @@ enum DHtmlEventMapEntryType {
   DHTMLEVENTMAPENTRY_CLASS,    // the elements of this class
   DHTMLEVENTMAPENTRY_TAG,      // the elements with this tag
   DHTMLEVENTMAPENTRY_ELEMENT,  // the element with this id, also inside a frame
+  DHTMLEVENTMAPENTRY_CONTROL,  // the ActiveX control of the <object> with this id
   DHTMLEVENTMAPENTRY_END
 };
+
+// Calls a DHTML_EVENT_AXCONTROL handler with the event's arguments.
+typedef HRESULT (*AFX_DHTMLAXINVOKE)(CDHtmlEventSink* pSink, DISPPARAMS* pDispParams,
+                                     VARIANT* pVarResult);
 
 struct DHtmlEventMapEntry {
   DHtmlEventMapEntryType nType;
   DISPID dispId;
   LPCTSTR szName;
   DHEVTFUNC pfnEventFunc;
+  AFX_DHTMLAXINVOKE pfnAxInvoke;  // DHTMLEVENTMAPENTRY_CONTROL's handler
 };
+
+// A page of a CMultiPageDHtmlDialog and the embedded map of its events.
+struct DHtmlUrlEventMapEntry {
+  LPCTSTR szUrl;  // a resource id (MAKEINTRESOURCE) or a name; NULL ends the map
+  const DHtmlEventMapEntry* (*pfnGetMap)();
+};
+
+// A URL_EVENT_ENTRY's page, given as a resource id or a name.
+inline LPCTSTR _AfxDHtmlUrl(LPCTSTR lpsz) { return lpsz; }
+inline LPCTSTR _AfxDHtmlUrl(int nID) { return MAKEINTRESOURCE(nID); }
+inline LPCTSTR _AfxDHtmlUrl(UINT nID) { return MAKEINTRESOURCE(nID); }
+inline LPCTSTR _AfxDHtmlUrl(long nID) { return MAKEINTRESOURCE(nID); }
+inline LPCTSTR _AfxDHtmlUrl(unsigned long nID) { return MAKEINTRESOURCE(nID); }
 
 #define DECLARE_DHTML_EVENT_MAP() \
 public:                           \
@@ -253,16 +272,51 @@ public:                           \
 #define BEGIN_DHTML_EVENT_MAP(className)                         \
   const DHtmlEventMapEntry* className::GetDHtmlEventMap() {      \
     typedef className theClass;                                  \
+    (void)sizeof(theClass*);                                     \
     static const DHtmlEventMapEntry _dhtmlEventEntries[] = {
 #define BEGIN_DHTML_EVENT_MAP_INLINE(className)                  \
   virtual const DHtmlEventMapEntry* GetDHtmlEventMap() {         \
     typedef className theClass;                                  \
+    (void)sizeof(theClass*);                                     \
     static const DHtmlEventMapEntry _dhtmlEventEntries[] = {
 #define END_DHTML_EVENT_MAP()                                    \
       {DHTMLEVENTMAPENTRY_END, 0, NULL, (DHEVTFUNC)NULL}};       \
     return _dhtmlEventEntries;                                   \
   }
 #define END_DHTML_EVENT_MAP_INLINE() END_DHTML_EVENT_MAP()
+
+// Embedded maps, one for each page of a CMultiPageDHtmlDialog: in the
+// class definition, with the page's entries between them.
+#define BEGIN_EMBED_DHTML_EVENT_MAP(className, mapName)          \
+  static const DHtmlEventMapEntry* _GetDHtmlEventMap_##mapName() { \
+    typedef className theClass;                                  \
+    (void)sizeof(theClass*);                                     \
+    static const DHtmlEventMapEntry _dhtmlEventEntries[] = {
+#define END_EMBED_DHTML_EVENT_MAP() END_DHTML_EVENT_MAP()
+
+// The URL map of a CMultiPageDHtmlDialog: which embedded map each page
+// uses. In the implementation file:
+//   BEGIN_DHTML_URL_EVENT_MAP(CMyDlg)
+//     BEGIN_URL_ENTRIES(CMyDlg)
+//       URL_EVENT_ENTRY(CMyDlg, IDR_PAGE1, page1)
+//       URL_EVENT_ENTRY(CMyDlg, _T("page2.htm"), page2)
+//     END_URL_ENTRIES()
+//   END_DHTML_URL_EVENT_MAP(CMyDlg)
+#define DECLARE_DHTML_URL_EVENT_MAP() \
+public:                               \
+  virtual const DHtmlUrlEventMapEntry* GetDHtmlUrlEventMap();
+#define BEGIN_DHTML_URL_EVENT_MAP(className)                      \
+  const DHtmlUrlEventMapEntry* className::GetDHtmlUrlEventMap() { \
+    typedef className theClass;                                   \
+    (void)sizeof(theClass*);
+#define BEGIN_URL_ENTRIES(className) static const DHtmlUrlEventMapEntry _dhtmlUrlEntries[] = {
+#define URL_EVENT_ENTRY(className, url, mapName) \
+  {_AfxDHtmlUrl(url), &className::_GetDHtmlEventMap_##mapName},
+#define END_URL_ENTRIES() \
+  {(LPCTSTR)NULL, NULL}};
+#define END_DHTML_URL_EVENT_MAP(className) \
+  return _dhtmlUrlEntries;                 \
+  }
 
 #define _AFX_DHTML_HANDLER(memberFxn) \
   static_cast<DHEVTFUNC>(static_cast<HRESULT (theClass::*)(IHTMLElement*)>(&theClass::memberFxn))
@@ -274,6 +328,12 @@ public:                           \
   {DHTMLEVENTMAPENTRY_TAG, (DISPID)(dispid), elemName, _AFX_DHTML_HANDLER(memberFxn)},
 #define DHTML_EVENT_ELEMENT(dispid, elemName, memberFxn) \
   {DHTMLEVENTMAPENTRY_ELEMENT, (DISPID)(dispid), elemName, _AFX_DHTML_HANDLER(memberFxn)},
+// An event of an ActiveX control in the page. The handler takes the
+// event's parameters, as their types (long, BSTR, VARIANT*, a
+// VARIANT_BOOL* to write back...), and may be __stdcall.
+#define DHTML_EVENT_AXCONTROL(dispid, controlName, memberFxn)                  \
+  {DHTMLEVENTMAPENTRY_CONTROL, (DISPID)(dispid), controlName, (DHEVTFUNC)NULL, \
+   &_AfxDHtmlAx<&theClass::memberFxn>::Invoke},
 
 // The events by name; an element of NULL is the document.
 #define DHTML_EVENT_ONHELP(elemName, memberFxn) DHTML_EVENT(DISPID_HTMLELEMENTEVENTS2_ONHELP, elemName, memberFxn)
@@ -374,10 +434,79 @@ protected:
   BOOL IsSinkedElement(IDispatch* pdispElem);
   void FireFor(CDHtmlSinkHandler* pHandler, DISPID dispid, DISPPARAMS* pDispParams,
                VARIANT* pVarResult, HRESULT* phr);
+  // The maps in use: GetDHtmlEventMap's, then the page's embedded map.
+  int GetMaps(const DHtmlEventMapEntry* apMaps[2]);
+  HRESULT ConnectControl(IHTMLElementCollection* pAll, LPCTSTR szName);
   CPtrArray m_aSinks;  // CDHtmlSinkHandler*, one for each connected element
   IHTMLEventObj* m_pCurrentEvent;
+  const DHtmlEventMapEntry* m_pPageMap;  // a CMultiPageDHtmlDialog's page's map
   friend class CDHtmlSinkHandler;
 };
+
+// DHTML_EVENT_AXCONTROL's call: the event's arguments (last first in the
+// DISPPARAMS) as the handler's parameter types.
+void AFXAPI _AfxDHtmlAxArg(AFX_DISPARG& a, VARIANT* pSrc);
+template <class T>
+inline auto _AfxDHtmlAxGet(AFX_DISPARG& a, VARIANT*, T* pTag) -> decltype(_AfxDispGet(a, pTag)) {
+  return _AfxDispGet(a, pTag);
+}
+// A pointer to a by-reference argument is the caller's own, so what the
+// handler writes goes back.
+template <class T>
+inline T* _AfxDHtmlAxGet(AFX_DISPARG& a, VARIANT* pSrc, T** pTag) {
+  if (!std::is_base_of<IUnknown, T>::value && !std::is_same<T, VARIANT>::value &&
+      (pSrc->vt & VT_BYREF) != 0 && pSrc->vt != (VT_BYREF | VT_VARIANT))
+    return (T*)pSrc->byref;
+  return _AfxDispGet(a, pTag);
+}
+
+template <class C, class M, class R, class... A, size_t... I>
+inline void _AfxDHtmlAxCall(C* p, M pfn, AFX_DISPARG* args, VARIANT** src, VARIANT* r,
+                            std::index_sequence<I...>) {
+  (void)args;
+  (void)src;
+  _AfxDispRet<R>::Call(r, [&]() -> R {
+    return (p->*pfn)(_AfxDHtmlAxGet(args[I], src[I], (typename std::decay<A>::type*)0)...);
+  });
+}
+
+template <class C, class M, class R, class... A>
+inline HRESULT _AfxDHtmlAxInvoke(CDHtmlEventSink* pSink, M pfn, DISPPARAMS* pdp, VARIANT* pResult) {
+  UINT n = pdp != NULL ? pdp->cArgs : 0;
+  if (n < sizeof...(A)) return DISP_E_BADPARAMCOUNT;
+  AFX_DISPARG args[sizeof...(A) + 1];
+  VARIANT* src[sizeof...(A) + 1];
+  for (UINT i = 0; i < sizeof...(A); i++) {
+    src[i] = &pdp->rgvarg[n - 1 - i];
+    _AfxDHtmlAxArg(args[i], src[i]);
+  }
+  VARIANT vr;
+  ::VariantInit(&vr);
+  _AfxDHtmlAxCall<C, M, R, A...>(static_cast<C*>(pSink), pfn, args, src, &vr,
+                                 std::index_sequence_for<A...>());
+  if (pResult != NULL)
+    *pResult = vr;
+  else
+    ::VariantClear(&vr);
+  return S_OK;
+}
+
+template <auto pfn, class M = decltype(pfn)>
+struct _AfxDHtmlAx;
+template <auto pfn, class C, class R, class... A>
+struct _AfxDHtmlAx<pfn, R (C::*)(A...)> {
+  static HRESULT Invoke(CDHtmlEventSink* pSink, DISPPARAMS* pdp, VARIANT* pResult) {
+    return _AfxDHtmlAxInvoke<C, R (C::*)(A...), R, A...>(pSink, pfn, pdp, pResult);
+  }
+};
+#if defined(__i386__) || defined(_M_IX86)
+template <auto pfn, class C, class R, class... A>
+struct _AfxDHtmlAx<pfn, R (__stdcall C::*)(A...)> {
+  static HRESULT Invoke(CDHtmlEventSink* pSink, DISPPARAMS* pdp, VARIANT* pResult) {
+    return _AfxDHtmlAxInvoke<C, R (__stdcall C::*)(A...), R, A...>(pSink, pfn, pdp, pResult);
+  }
+};
+#endif
 
 // ---------------------------------------------------------------------
 // CDHtmlControlSite: the WebBrowser control's site in a CDHtmlDialog.
@@ -554,8 +683,32 @@ protected:
   CComPtr<IDispatch> m_spExternalDisp;
 
   afx_msg void OnDestroy();
+  DECLARE_DHTML_EVENT_MAP()
   DECLARE_EVENTSINK_MAP()
   DECLARE_MESSAGE_MAP()
+};
+
+// ---------------------------------------------------------------------
+// CMultiPageDHtmlDialog: a CDHtmlDialog whose pages each have their own
+// event map, an embedded map its URL map names.
+
+class CMultiPageDHtmlDialog : public CDHtmlDialog {
+  DECLARE_DYNAMIC(CMultiPageDHtmlDialog)
+public:
+  CMultiPageDHtmlDialog();
+  CMultiPageDHtmlDialog(LPCTSTR lpszTemplateName, LPCTSTR szHtmlResID = NULL,
+                        CWnd* pParentWnd = NULL);
+  CMultiPageDHtmlDialog(UINT nIDTemplate, UINT nHtmlResID = 0, CWnd* pParentWnd = NULL);
+  virtual ~CMultiPageDHtmlDialog();
+
+  virtual void OnBeforeNavigate(LPDISPATCH pDisp, LPCTSTR szUrl);
+  virtual void OnDocumentComplete(LPDISPATCH pDisp, LPCTSTR szUrl);
+
+  DECLARE_DHTML_URL_EVENT_MAP()
+
+protected:
+  // The embedded map of the page at this URL; NULL when none.
+  const DHtmlEventMapEntry* FindPageMap(LPCTSTR szUrl);
 };
 
 #endif  // __AFXHTML_H__
