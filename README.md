@@ -324,16 +324,13 @@ that lists declared functions the library does not define yet.
 
 ## License
 
+Copyright (C) clang-retro contributors.
+
 clang-retro MFC is free software under the GNU Affero General Public
 License, version 3 only (`AGPL-3.0-only`); the full text is in
 [LICENSE](LICENSE). If you distribute a program built with it, or let
 people use a modified version over a network, you must offer the
 program's complete source under the same license.
 
-A commercial license, for programs that cannot meet those terms, is
-available from the clang-retro project; ask through
-[the clang-retro organization on GitHub](https://github.com/clang-retro).
-
-Contributions are accepted under the Contributor License Agreement in
-[CONTRIBUTING.md](CONTRIBUTING.md), which lets the project offer the
-code under both licenses.
+Each contributor keeps the copyright in their own work and contributes
+it under the same license; see [CONTRIBUTING.md](CONTRIBUTING.md).
