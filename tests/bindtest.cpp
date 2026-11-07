@@ -10,7 +10,9 @@
 //     and changes to the properties go to the table and to the other
 //     controls bound to the same field; BindProperty gives DataSource
 //     the data source; GetDSCCursor gives the rowset; unbinding and
-//     destroying either side leaves nothing behind.
+//     destroying either side leaves nothing behind;
+//   - a dialog template's DLGINIT record binds a control to the data
+//     source control next to it, as the dialog editor writes it.
 #include <afxwin.h>
 #include <afxdisp.h>
 #include <afxctl.h>
@@ -20,6 +22,7 @@
 #include <oledb.h>
 #include <oledberr.h>
 #include <msdatsrc.h>
+#include "bindtest.h"
 #include "testutil.h"
 
 #define IDC_DSC 2001
@@ -446,6 +449,8 @@ public:
   virtual void OnDraw(CDC* pDC, const CRect& rcBounds, const CRect&) {
     pDC->FillSolidRect(rcBounds, RGB(255, 255, 255));
   }
+  // No saved properties, so an empty saved state loads.
+  virtual void DoPropExchange(CPropExchange*) {}
 
   long GetAge() { return m_nAge; }
   void SetAge(long nAge) {
@@ -514,6 +519,7 @@ public:
   void TestUnbind();
   void TestDestroyOrder();
   void TestRowsetOnly();
+  void TestDialog();
 
   afx_msg int OnCreate(LPCREATESTRUCT lpcs) {
     if (CFrameWnd::OnCreate(lpcs) == -1) return -1;
@@ -723,12 +729,38 @@ void CMainFrame::TestRowsetOnly() {
   CHECK(CFakeTable::s_nAlive == 0 && CDscCtrl::s_nAlive == 0 && CBoundCtrl::s_nAlive == 0);
 }
 
+void CMainFrame::TestDialog() {
+  TestLog("bindings from a dialog template");
+  CDialog dlg;
+  CBoundCtrl::s_pLast = NULL;
+  CHECK(dlg.Create(IDD_BINDDLG, this));
+  CBoundCtrl* pCtl = CBoundCtrl::s_pLast;
+  CDscCtrl* pDsc = CDscCtrl::s_pLast;
+  CHECK(pCtl != NULL && pDsc != NULL);
+  if (pCtl != NULL && pDsc != NULL) {
+    // Age follows the field, and DataSource holds the data source.
+    CHECK(pCtl->m_nAge == 31);
+    IUnknown* pDataSource = NULL;
+    pDsc->GetControllingUnknown()->QueryInterface(kIID_DataSource, (void**)&pDataSource);
+    CHECK(pDataSource != NULL && pCtl->m_pDataSource == pDataSource);
+    if (pDataSource != NULL) pDataSource->Release();
+    pDsc->m_pTable->MoveTo(2);
+    CHECK(pCtl->m_nAge == 42);
+    pCtl->SetAge(43);
+    CHECK(pDsc->m_pTable->Age(1) == 43);
+    pCtl->SetDataSource(NULL);  // so that the controls can go
+  }
+  dlg.DestroyWindow();
+  CHECK(CFakeTable::s_nAlive == 0 && CDscCtrl::s_nAlive == 0 && CBoundCtrl::s_nAlive == 0);
+}
+
 void CMainFrame::RunTests() {
   TestSimple();
   TestComplex();
   TestUnbind();
   TestDestroyOrder();
   TestRowsetOnly();
+  TestDialog();
 }
 
 // =====================================================================
