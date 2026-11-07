@@ -1,6 +1,10 @@
-# Builds the libraries and runs the tests under Wine. clang-retro's own
-# toolchain has no published package yet, so CI uses Ubuntu's clang with
-# the MinGW-w64 headers and libraries (libstdc++ in place of libc++).
+# Builds the libraries and runs the tests under Wine, twice:
+#
+# - clang-dos: with clang-retro's own toolchain (the nightly package from
+#   clang-retro/dos-sdk, which is rebuilt every night from the default
+#   branches) and its Windows 2000/XP sysroot with libc++.
+# - mingw-wine: with Ubuntu's clang and MinGW-w64 (libstdc++ in place of
+#   libc++).
 name: CI
 
 on:
@@ -13,6 +17,41 @@ permissions:
   contents: read
 
 jobs:
+  clang-dos:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # Unpacks the nightly, puts its bin on PATH and sets $CLANG_DOS.
+      - uses: clang-retro/dos-sdk/.github/actions/setup-toolchain@main
+      - name: Install Wine and Xvfb
+        timeout-minutes: 15
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends wine wine32:i386 xvfb xauth imagemagick python3
+      - name: Find the Wine version
+        id: wine
+        run: echo "version=$(wine --version)" >> "$GITHUB_OUTPUT"
+      - name: Restore the Wine prefix
+        uses: actions/cache@v4
+        with:
+          path: ~/wineprefix
+          key: wineprefix-v1-${{ runner.os }}-${{ steps.wine.outputs.version }}
+      - name: Build
+        run: make -j"$(nproc)" BIN="$CLANG_DOS/bin" SYSROOT="$CLANG_DOS/sysroots/win2k-xp"
+      - name: Test
+        run: |
+          export MFC_TEST_WINEPREFIX="$HOME/wineprefix"
+          make check BIN="$CLANG_DOS/bin" SYSROOT="$CLANG_DOS/sysroots/win2k-xp"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-output-clang-dos
+          path: |
+            build/i586-pc-windows5.1-gnu/tests/a
+            build/i586-pc-windows5.1-gnu/tests/u
+
   mingw-wine:
     runs-on: ubuntu-24.04
     # A hung package install or test should fail, not run for hours.
