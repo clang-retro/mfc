@@ -61,6 +61,39 @@ nothing to do and the program and the DLL need not use the same
 library build. `AfxDllGetClassObject`, `AfxDllCanUnloadNow` and
 `COleObjectFactory::UpdateRegistryAll` implement the usual exports.
 
+### Linux and macOS
+
+A portable layer in `port/` implements the part of the Win32 API that MFC
+uses over POSIX, so the libraries also build for Linux and macOS with
+the system's own clang:
+
+```sh
+make TARGET=x86_64-linux-gnu STDLIB=          # Linux (glibc, libstdc++)
+make TARGET=arm64-apple-macos11 STDLIB= AR=ar # macOS
+```
+
+This adds `libwinport.a`, which programs link after the MFC library:
+
+```sh
+clang++ -std=c++17 -Ipath/to/mfc/port/include -Ipath/to/mfc/include app.cpp \
+  -Lpath/to/build/x86_64-linux-gnu -lmfc -lwinport -ldl -lpthread -o app
+```
+
+It is a work in progress. So far the non-window classes, automation, the
+registry (kept in `~/.config/winport/registry.reg`), sockets and COM
+within one process work; windows, drawing and resources compiled from
+`.rc` files come next, with X11, Wayland and Cocoa backends (the Cocoa
+one for Mac OS X 10.4 and later, PowerPC and Intel). The functions not
+written yet are listed in `port/src/stubs.txt` and fail with
+`ERROR_CALL_NOT_IMPLEMENTED`; `WINPORT_DEBUG=1` names each one the first
+time a program calls it.
+
+The ANSI code page there is UTF-8, `WCHAR` is the system's 32-bit
+`wchar_t`, and `long` is 64 bits on 64-bit systems while `LONG` and
+`DWORD` stay 32 bits. Code that passes a `long*` where the API takes a
+`LONG*` needs `LONG`; in dispatch maps `long` remains the type of
+`VT_I4`, as MFC documents.
+
 ## Testing
 
 `make check` (with the same variables as the build) builds the programs
@@ -370,13 +403,15 @@ request with the stock MinGW-w64 toolchain.
 
 ## Plans
 
-Win16 (with win16-sdk), and later a portable layer that implements the
-part of the Win32 API MFC uses, with controls drawn in the classic
-style, so that MFC programs build and look the same on macOS and Linux.
+Win16 (with win16-sdk), and finishing the portable layer (see Linux and
+macOS above), with controls drawn in the classic style, so that MFC
+programs build and look the same on macOS and Linux.
 
 ## Layout
 
-`include/` has the public headers, `src/` the library, `tests/` the
+`include/` has the public headers, `src/` the library, `port/` the
+portable Win32 layer (its headers, sources and the generator for its
+placeholders), `tests/` the
 test programs and `tools/` the generator for the `ON_WM_*` macros and
 CWnd's default handlers (`tools/gen-msgmap.py`) and a development helper
 that lists declared functions the library does not define yet.
