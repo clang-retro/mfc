@@ -182,9 +182,12 @@ int CWinApp::Run() {
 }
 
 void (AFXAPI* _afxPfnOleTerm)(BOOL) = NULL;  // set by AfxOleInit
+void (AFXAPI* _afxPfnDaoTerm)() = NULL;      // set by AfxDaoInit
 
 int CWinApp::ExitInstance() {
   SaveStdProfileSettings();
+  // The DAO engine goes before OLE does.
+  if (_afxPfnDaoTerm != NULL) _afxPfnDaoTerm();
   if (_afxPfnOleTerm != NULL) _afxPfnOleTerm(FALSE);
   return (int)m_msgCur.wParam;
 }

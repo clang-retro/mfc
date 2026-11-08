@@ -1,18 +1,10 @@
 // dbrfx.cpp - record field exchange: the RFX functions, which describe a
 // recordset's fields, and moving field values between member variables,
-// ODBC and the fetched rows. Also CLongBinary and CDBVariant.
+// ODBC and the fetched rows. Also CDBVariant.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "dbimpl.h"
-
-IMPLEMENT_DYNAMIC(CLongBinary, CObject)
-
-CLongBinary::CLongBinary() : m_hData(NULL), m_dwDataLength(0) {}
-
-CLongBinary::~CLongBinary() {
-  if (m_hData != NULL) ::GlobalFree(m_hData);
-}
 
 CDBVariant::CDBVariant() : m_dwType(DBVT_NULL) { m_pstring = NULL; }
 

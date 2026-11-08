@@ -103,14 +103,7 @@ void AFXAPI AfxThrowDBException(RETCODE nRetCode, CDatabase* pdb, HSTMT hstmt);
 // ---------------------------------------------------------------------
 // CLongBinary and CDBVariant
 
-class CLongBinary : public CObject {
-  DECLARE_DYNAMIC(CLongBinary)
-public:
-  CLongBinary();
-  virtual ~CLongBinary();
-  HGLOBAL m_hData;
-  DWORD_PTR m_dwDataLength;
-};
+#include "afxdb_.h"  // CLongBinary, shared with afxdao.h
 
 #define DBVT_NULL 0
 #define DBVT_BOOL 1
