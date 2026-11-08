@@ -268,7 +268,7 @@ CTXT_OUT(BYTE)
 long AFXAPI _AfxParseLong(LPCTSTR psz) { return psz != NULL ? _tcstol(psz, NULL, 0) : 0; }
 
 LONGLONG AFXAPI _AfxParseLongLong(LPCTSTR psz) {
-  return psz != NULL ? _tcstoi64(psz, NULL, 0) : 0;
+  return psz != NULL ? strtoll(CStringA(psz), NULL, 0) : 0;
 }
 
 double AFXAPI _AfxParseDouble(LPCTSTR psz) { return psz != NULL ? _tcstod(psz, NULL) : 0; }
