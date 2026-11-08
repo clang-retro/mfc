@@ -74,6 +74,11 @@ public:
   afx_msg void OnEditCopy() { g_nCopies++; }
   afx_msg void OnUpdateEditCut(CCmdUI* pCmdUI) { pCmdUI->Enable(FALSE); }
   afx_msg void OnRecolor() { g_nRecolors++; }
+  // Text and a check, through IOleCommandTarget::QueryStatus.
+  afx_msg void OnUpdateRecolor(CCmdUI* pCmdUI) {
+    pCmdUI->SetText(_T("Recolor all"));
+    pCmdUI->SetCheck(1);
+  }
   DECLARE_MESSAGE_MAP()
 };
 IMPLEMENT_DYNCREATE(CDocObDoc, COleServerDoc)
@@ -82,6 +87,7 @@ BEGIN_MESSAGE_MAP(CDocObDoc, COleServerDoc)
   ON_COMMAND(ID_EDIT_CUT, OnEditCopy)
   ON_UPDATE_COMMAND_UI(ID_EDIT_CUT, OnUpdateEditCut)
   ON_COMMAND(ID_EDIT_RECOLOR, OnRecolor)
+  ON_UPDATE_COMMAND_UI(ID_EDIT_RECOLOR, OnUpdateRecolor)
 END_MESSAGE_MAP()
 
 class CDocObView : public CView {
@@ -162,10 +168,12 @@ class CDocObFrame : public CFrameWnd {
 };
 IMPLEMENT_DYNCREATE(CDocObFrame, CFrameWnd)
 
-class CDocObIPFrame : public COleIPFrameWnd {
+// A DocObject's in-place frame: its Help popup goes into the container's
+// Help menu.
+class CDocObIPFrame : public COleDocIPFrameWnd {
   DECLARE_DYNCREATE(CDocObIPFrame)
 };
-IMPLEMENT_DYNCREATE(CDocObIPFrame, COleIPFrameWnd)
+IMPLEMENT_DYNCREATE(CDocObIPFrame, COleDocIPFrameWnd)
 
 // ---------------------------------------------------------------------
 // The container
@@ -202,7 +210,7 @@ public:
   int m_nStep;
   BOOL m_bBusy;
   COleDocObjectItem* m_pItem;
-  CMainFrame() : m_nStep(0), m_bBusy(FALSE), m_pItem(NULL) {}
+  CMainFrame() : m_nStep(0), m_bBusy(FALSE), m_pItem(NULL), m_hHelp(NULL) {}
 
   afx_msg int OnCreate(LPCREATESTRUCT lpcs) {
     if (CFrameWnd::OnCreate(lpcs) == -1) return -1;
@@ -260,6 +268,37 @@ public:
       m_pItem->GetActiveView()->GetRect(&rect);
       CHECK(rect == rectClient);
     }
+    CheckMenu();
+  }
+
+  // The shared menu: the container's File and Help, the object's Edit, and
+  // the object's Help popup at the top of the container's Help.
+  HMENU m_hHelp;
+  void CheckMenu() {
+    m_hHelp = NULL;
+    COleIPFrameWnd* pFrame = g_pSrvDoc != NULL ? g_pSrvDoc->InPlaceFrame() : NULL;
+    CHECK(pFrame != NULL && pFrame->IsKindOf(RUNTIME_CLASS(COleDocIPFrameWnd)));
+    if (pFrame == NULL) return;
+    HMENU hMenu = pFrame->m_hSharedMenu;
+    CHECK(hMenu != NULL && ::GetMenuItemCount(hMenu) == 3);
+    TCHAR sz[64];
+    for (int i = 0; hMenu != NULL && i < ::GetMenuItemCount(hMenu); i++) {
+      ::GetMenuString(hMenu, i, sz, 64, MF_BYPOSITION);
+      TestLog("shared menu %d: %s", i, sz);
+    }
+    if (hMenu == NULL || ::GetMenuItemCount(hMenu) != 3) return;
+    ::GetMenuString(hMenu, 1, sz, 64, MF_BYPOSITION);
+    CHECK(lstrcmp(sz, _T("&Edit")) == 0);
+    ::GetMenuString(hMenu, 2, sz, 64, MF_BYPOSITION);
+    CHECK(lstrcmp(sz, _T("&Help")) == 0);
+    m_hHelp = ::GetSubMenu(hMenu, 2);
+    CHECK(m_hHelp != NULL && ::GetMenuItemCount(m_hHelp) == 2);
+    if (m_hHelp == NULL) return;
+    ::GetMenuString(m_hHelp, 0, sz, 64, MF_BYPOSITION);
+    CHECK(lstrcmp(sz, _T("DocOb &Help")) == 0);
+    HMENU hObjHelp = ::GetSubMenu(m_hHelp, 0);
+    CHECK(hObjHelp != NULL && ::GetMenuItemID(hObjHelp, 0) == ID_HELP_INDEX);
+    CHECK(::GetMenuItemID(m_hHelp, 1) == ID_APP_ABOUT);
   }
 
   void Commands() {
@@ -286,8 +325,17 @@ public:
     CHECK(m_pItem->ExecCommand(OLECMDID_ZOOM) == OLECMDERR_E_NOTSUPPORTED);
     CHECK(g_nCopies == 1);
     // The program's own group.
-    CHECK(m_pItem->QueryCommand(1, &dw, NULL, &CGID_DocObTest) == S_OK);
-    CHECK(dw == (OLECMDF_SUPPORTED | OLECMDF_ENABLED));
+    struct {
+      OLECMDTEXT text;
+      WCHAR sz[63];
+    } text;
+    memset(&text, 0, sizeof(text));
+    text.text.cmdtextf = OLECMDTEXTF_NAME;
+    text.text.cwBuf = 64;
+    CHECK(m_pItem->QueryCommand(1, &dw, &text.text, &CGID_DocObTest) == S_OK);
+    TestLog("recolor %08lx, text %ls (%lu)", dw, text.text.rgwz, text.text.cwActual);
+    CHECK(dw == (OLECMDF_SUPPORTED | OLECMDF_ENABLED | OLECMDF_LATCHED));
+    CHECK(lstrcmpW(text.text.rgwz, L"Recolor all") == 0 && text.text.cwActual == 12);
     CHECK(m_pItem->ExecCommand(1, OLECMDEXECOPT_DONTPROMPTUSER, &CGID_DocObTest) == S_OK);
     CHECK(g_nRecolors == 1);
     static const GUID guidOther = {1, 2, 3, {4, 5, 6, 7, 8, 9, 10, 11}};
@@ -397,6 +445,8 @@ public:
     m_pItem->CloseView();
     CHECK(m_pItem->GetActiveView() == NULL);
     CHECK(g_pSrvDoc == NULL || !g_pSrvDoc->IsInPlaceActive());
+    // The object's Help popup is out of the container's Help menu again.
+    if (m_hHelp != NULL) CHECK(::GetMenuItemCount(m_hHelp) == 1);
     m_pItem->Close(OLECLOSE_NOSAVE);
     m_pItem->Delete();
     m_pItem = NULL;

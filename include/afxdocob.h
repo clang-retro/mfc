@@ -198,4 +198,44 @@ public:
   DECLARE_INTERFACE_MAP()
 };
 
+// ---------------------------------------------------------------------
+// COleCmdUI: what a command's update handler says of an OLE command
+// (IOleCommandTarget::QueryStatus): enabled, latched, its text.
+class COleCmdUI : public CCmdUI {
+public:
+  COleCmdUI(OLECMD* rgCmds, ULONG cCmds, const GUID* pGroup);
+  virtual void Enable(BOOL bOn);
+  virtual void SetCheck(int nCheck);
+  virtual void SetText(LPCTSTR lpszText);
+  // The update handlers of pTarget for command m_nIndex, as m_nID; with
+  // no handler, the command is enabled if pTarget has one for it, else
+  // left disabled when bDisableIfNoHandler.
+  virtual BOOL DoUpdate(CCmdTarget* pTarget, BOOL bDisableIfNoHandler);
+
+  DWORD m_nCmdTextFlag;  // OLECMDTEXTF_NAME or _STATUS, what SetText's text is
+  CString m_strText;
+
+protected:
+  OLECMD* m_rgCmds;
+  const GUID* m_pGuidCmdGroup;
+};
+
+// ---------------------------------------------------------------------
+// COleDocIPFrameWnd: the in-place frame of a DocObject. A DocObject
+// container keeps its Help menu in the shared menu (group 5); the
+// object's Help popup goes into it, at its top.
+class COleDocIPFrameWnd : public COleIPFrameWnd {
+  DECLARE_DYNCREATE(COleDocIPFrameWnd)
+public:
+  COleDocIPFrameWnd();
+  virtual ~COleDocIPFrameWnd();
+
+  virtual BOOL BuildSharedMenu();
+  virtual void DestroySharedMenu();
+
+protected:
+  HMENU m_hMenuHelpPopup;  // the container's Help popup, while the object's is in it
+  HMENU m_hHelpPopup;      // the object's Help popup
+};
+
 #endif  // __AFXDOCOB_H__

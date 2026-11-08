@@ -170,8 +170,9 @@ when there is no display:
   object table, and to a closed file whose class the shell registration
   gives, which COM opens hidden and closes when the link lets go. It
   checks the item's moniker, data and notifications, the item container,
-  the Link Source data Paste Link uses, and links to an object embedded
-  in a container's file.
+  the Link Source data Paste Link uses, links to an object embedded
+  in a container's file, the object information the Object Properties
+  and Change Source dialogs show, and COleMessageFilter's answers.
 * `iptest`: in-place activation, with the container and the server in
   one program: the object activated in the container's view, the
   shared menu, both sides' accelerators, the server's toolbar in the
@@ -180,8 +181,10 @@ when there is no display:
 * `docobtest`: Active Documents, with the container and the server in
   one program: a COleDocObjectItem's document site makes the server's
   document a DocObject, which shows over the whole of the container's
-  view; the test checks the view's rectangle, commands through
-  IOleCommandTarget (standard ones and an OLE command map's own), the
+  view; the test checks the view's rectangle, the shared menu with
+  both Help popups, commands through IOleCommandTarget (standard ones
+  and an OLE command map's own, with an update handler's text and
+  check), the
   view state, printing through IPrint (the page count, page sets, a
   target printer and the continue callback), closing the view, and the
   DocObject registration.
@@ -291,9 +294,11 @@ request with the stock MinGW-w64 toolchain.
 * `afxdocob.h`: Active Documents: CDocObjectServer (IOleDocument,
   IOleDocumentView, IOleCommandTarget, IPrint) made by
   COleServerDoc::GetDocObjectServer, CDocObjectServerItem, OLE command
-  maps (BEGIN_OLECMD_MAP, ON_OLECMD and the ON_OLECMD_* entries), and the
-  container's COleDocObjectItem; COleTemplateServer registers
-  OAT_DOC_OBJECT_SERVER classes as DocObjects.
+  maps (BEGIN_OLECMD_MAP, ON_OLECMD and the ON_OLECMD_* entries) with
+  COleCmdUI, which gives update handlers' state and text to QueryStatus,
+  COleDocIPFrameWnd, whose Help popup goes into the container's Help
+  menu, and the container's COleDocObjectItem; COleTemplateServer
+  registers OAT_DOC_OBJECT_SERVER classes as DocObjects.
 * `afxocc.h`: ActiveX control containment after AfxEnableControlContainer:
   COleControlContainer, COleControlSite and COccManager;
   CWnd::CreateControl, InvokeHelper, GetProperty and SetProperty on a
@@ -332,8 +337,13 @@ request with the stock MinGW-w64 toolchain.
   template) and the DDP_ functions.
 * `afxodlgs.h`: the OLE dialogs over oledlg: COleInsertDialog,
   COlePasteSpecialDialog, COleLinksDialog, COleUpdateDialog,
-  COleChangeIconDialog, COleConvertDialog and COleBusyDialog, and the
-  COleDocument Links, Convert and Change Icon commands.
+  COleChangeIconDialog, COleConvertDialog, COleBusyDialog,
+  COleChangeSourceDialog and COlePropertiesDialog (IOleUIObjInfo), and
+  the COleDocument Links, Convert and Change Icon commands.
+  COleMessageFilter, which AfxOleInit registers for the thread
+  (AfxOleGetMessageFilter): BeginBusyState refuses new calls, and a
+  refused call of the program's own is retried, then the Server Busy or
+  Not Responding dialog lets the user decide.
 * `afxdlgs.h`: the common dialogs (file, color, font, print, page setup,
   find/replace) and CPropertySheet/CPropertyPage, wizards included.
 * `afxcmn.h`, `afxcview.h`: the common controls, CImageList, CListView,
@@ -449,6 +459,15 @@ request with the stock MinGW-w64 toolchain.
   with the container and server in one process. There Wine gives the
   container the server's own object rather than OLE's handler, and
   COleClientItem::Draw then draws from the object's metafile.
+* A DocObject container keeps its in-place menu's fourth group (after
+  the third separator, usually Help) in the shared menu, and
+  COleDocIPFrameWnd puts the object's Help popup, the first popup of its
+  in-place menu's third group, at the top of it. The whole Help menu
+  then counts as the object's group 5, so its commands, the
+  container's included, go to the object's window. Wine's oledlg has no
+  Change Source, Object Properties or Server Busy dialogs, so tests call
+  the interfaces those dialogs use rather than the dialogs, and Wine
+  has no OleCreateLinkToFile.
 * A DocObject's IPrint prints its document's first view, as File Print
   does, to the container's printer. GetPageInfo knows the pages only
   when the view's OnPreparePrinting sets the last page. Printing to a
