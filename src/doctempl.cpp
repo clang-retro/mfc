@@ -41,7 +41,7 @@ CDocTemplate::~CDocTemplate() {
 
 void CDocTemplate::SetContainerInfo(UINT nIDOleInPlaceContainer) {
   m_nIDContainerResource = nIDOleInPlaceContainer;
-  HINSTANCE hInst = AfxGetResourceHandle();
+  HINSTANCE hInst = AfxFindResourceHandle(MAKEINTRESOURCE(nIDOleInPlaceContainer), RT_MENU);
   if (m_hMenuInPlace == NULL)
     m_hMenuInPlace = ::LoadMenu(hInst, MAKEINTRESOURCE(nIDOleInPlaceContainer));
   if (m_hAccelInPlace == NULL)
@@ -54,7 +54,8 @@ void CDocTemplate::SetServerInfo(UINT nIDOleEmbedding, UINT nIDOleInPlaceServer,
   m_nIDServerResource = nIDOleInPlaceServer;
   m_pOleFrameClass = pOleFrameClass;
   m_pOleViewClass = pOleViewClass;
-  HINSTANCE hInst = AfxGetResourceHandle();
+  HINSTANCE hInst =
+      AfxFindResourceHandle(MAKEINTRESOURCE(nIDOleEmbedding ? nIDOleEmbedding : nIDOleInPlaceServer), RT_MENU);
   if (m_hMenuEmbedding == NULL && nIDOleEmbedding != 0) {
     m_hMenuEmbedding = ::LoadMenu(hInst, MAKEINTRESOURCE(nIDOleEmbedding));
     m_hAccelEmbedding = ::LoadAccelerators(hInst, MAKEINTRESOURCE(nIDOleEmbedding));

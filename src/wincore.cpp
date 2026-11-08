@@ -740,7 +740,7 @@ LPCTSTR AFXAPI AfxRegisterWndClass(UINT nClassStyle, HCURSOR hCursor, HBRUSH hbr
 
 static BOOL _AfxRegisterWithIcon(WNDCLASS* pWndCls, LPCTSTR lpszClassName, UINT nIDIcon) {
   pWndCls->lpszClassName = lpszClassName;
-  pWndCls->hIcon = ::LoadIcon(AfxGetResourceHandle(), MAKEINTRESOURCE(nIDIcon));
+  pWndCls->hIcon = ::LoadIcon(AfxFindResourceHandle(MAKEINTRESOURCE(nIDIcon), RT_GROUP_ICON), MAKEINTRESOURCE(nIDIcon));
   if (pWndCls->hIcon == NULL) pWndCls->hIcon = ::LoadIcon(NULL, IDI_APPLICATION);
   return AfxRegisterClass(pWndCls);
 }

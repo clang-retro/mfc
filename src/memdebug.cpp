@@ -9,6 +9,13 @@
 // other pointer goes to free(), as the C++ runtime's own delete does.
 // While nothing is tracked, delete costs one comparison more.
 //
+// In mfc.dll that replacement covers the DLL's own code only. Each module
+// that uses the DLL gets another from libmfcs.a (dllstub.cpp), which sends
+// its deletes here (_AfxDllDelete), and says when its runtime's delete won
+// (_AfxNoteForeignDelete). All three C runtimes the library is built with
+// (msvcrt.dll, and picolibc on the process heap) let one module free
+// what another allocated, so untracked blocks need nothing more.
+//
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #define _AFX_MEMDEBUG_IMPL
@@ -389,6 +396,8 @@ _AFX_DELETE_LINKAGE void operator delete[](void* p, const std::nothrow_t&) noexc
   GlobalDelete(p);
 }
 
+static volatile LONG g_bForeignDelete;  // a module's runtime delete won over the library's
+
 // Whether the global delete is this file's: one freed through it says.
 static BOOL OwnDelete() {
   static volatile LONG nOwn = -1;
@@ -399,8 +408,17 @@ static BOOL OwnDelete() {
     nOwn = g_pProbe == NULL;
     g_pProbe = NULL;
   }
-  return nOwn;
+  return nOwn && !g_bForeignDelete;
 }
+
+#ifdef _AFX_BUILDING_DLL
+extern "C" void AFXAPI _AfxDllDelete(void* p) {
+  if (p == NULL || FreeIfTracked(p)) return;
+  ::free(p);
+}
+
+extern "C" void AFXAPI _AfxNoteForeignDelete() { g_bForeignDelete = TRUE; }
+#endif
 
 BOOL AFXAPI _AfxTracksAllBlocks() { return OwnDelete(); }
 

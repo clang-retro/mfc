@@ -3,6 +3,7 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "stdafx.h"
+#include "afximpl.h"
 
 // ---------------------------------------------------------------------
 // CObject
@@ -44,6 +45,15 @@ CObject* AFXAPI AfxStaticDownCast(CRuntimeClass* pClass, CObject* pObject) {
 
 namespace {
 CRuntimeClass* g_pFirstClass = NULL;
+}
+
+void AFXAPI _AfxRemoveClasses(const BYTE* pStart, const BYTE* pEnd) {
+  for (CRuntimeClass** pp = &g_pFirstClass; *pp != NULL;) {
+    if ((const BYTE*)*pp >= pStart && (const BYTE*)*pp < pEnd)
+      *pp = (*pp)->m_pNextClass;
+    else
+      pp = &(*pp)->m_pNextClass;
+  }
 }
 
 AFX_CLASSINIT::AFX_CLASSINIT(CRuntimeClass* pNewClass) {

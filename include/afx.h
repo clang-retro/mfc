@@ -70,26 +70,53 @@ inline typename std::common_type<_AfxT1, _AfxT2>::type max(_AfxT1 a, _AfxT2 b) {
 // does, unless _AFX_NOFORCE_LIBS is defined. (clang ignores
 // #pragma comment(lib) for MinGW targets, so the linker directives are
 // written directly.)
+//
+// With _AFXDLL the program uses the shared library, mfc.dll (mfcu.dll for
+// Unicode): its import library is libmfcdll.a, and libmfcs.a holds the
+// few pieces each module keeps for itself (WinMain, and the operator
+// delete that sends memory-tracked blocks back to the DLL).
 #ifndef _AFX_NOFORCE_LIBS
 #ifdef _UNICODE
-#define _AFX_LIB_NAME "mfcu"
+#define _AFX_LIB_SUFFIX "u"
 #else
-#define _AFX_LIB_NAME "mfc"
+#define _AFX_LIB_SUFFIX ""
+#endif
+#if defined(_AFX_BUILDING_DLL)
+#define _AFX_LIB_DIRECTIVES ""
+#elif defined(_AFXDLL)
+#ifdef __i386__
+#define _AFX_C_NAME(name) "_" #name  // 32-bit x86 C names start with an underscore
+#else
+#define _AFX_C_NAME(name) #name
+#endif
+#if defined(__PICOLIBC__)
+// picolibc's startup does not fix the references a module makes to data
+// in a DLL ("pseudo relocations"); libmfcs.a does it.
+#define _AFX_RELOC_DIRECTIVE " -include:" _AFX_C_NAME(_pei386_runtime_relocator)
+#else
+#define _AFX_RELOC_DIRECTIVE ""
+#endif
+#define _AFX_LIB_DIRECTIVES                                              \
+  " -defaultlib:mfc" _AFX_LIB_SUFFIX "dll -defaultlib:mfc" _AFX_LIB_SUFFIX "s" \
+  " -include:" _AFX_C_NAME(_afxDllStub) _AFX_RELOC_DIRECTIVE
+#else
+#define _AFX_LIB_DIRECTIVES " -defaultlib:mfc" _AFX_LIB_SUFFIX
 #endif
 __asm__(".section .drectve,\"yn\"\n"
-        ".ascii \" -defaultlib:" _AFX_LIB_NAME " -defaultlib:user32 -defaultlib:gdi32"
+        ".ascii \"" _AFX_LIB_DIRECTIVES " -defaultlib:user32 -defaultlib:gdi32"
         " -defaultlib:comdlg32 -defaultlib:comctl32 -defaultlib:shell32 -defaultlib:advapi32"
         " -defaultlib:winspool -defaultlib:ole32 -defaultlib:oleaut32 -defaultlib:uuid\"\n"
         ".text");
 #endif
-// A DLL built with the library (an MFC regular DLL, such as an .ocx)
-// takes its DllMain from the library: dllmodul.cpp starts and ends the
-// DLL's CWinApp. The C runtime has an empty DllMain of its own, which
+// A DLL built with the static library (an MFC regular DLL, such as an
+// .ocx) takes its DllMain from the library: dllmodul.cpp starts and ends
+// the DLL's CWinApp. The C runtime has an empty DllMain of its own, which
 // the linker would find first, so every module made with the library
 // carries this one, which only calls the library's. Like Visual C++ MFC,
 // that means such a DLL does not write a DllMain; _AFX_NO_DLLMAIN turns
-// it off for one that must.
-#ifndef _AFX_NO_DLLMAIN
+// it off for one that must. An extension DLL (_AFXDLL) writes its own,
+// which calls AfxInitExtensionModule.
+#if !defined(_AFX_NO_DLLMAIN) && !defined(_AFXDLL)
 extern "C" BOOL WINAPI _AfxDllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved);
 extern "C" __attribute__((used)) inline BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason,
                                                             LPVOID lpReserved) {
@@ -124,9 +151,22 @@ inline bool _AfxIsNullPtr(const void* p) {
 #define AFX_STATIC_DATA static
 #define AFX_INLINE inline
 #define AFX_API
+// An extension DLL (built with _AFXEXT) exports what it marks with
+// AFX_EXT_CLASS, AFX_EXT_API and AFX_EXT_DATA; the modules that use it
+// import them.
+#if defined(_AFXDLL) && defined(_AFXEXT)
+#define AFX_EXT_CLASS __declspec(dllexport)
+#define AFX_EXT_API __declspec(dllexport)
+#define AFX_EXT_DATA __declspec(dllexport)
+#elif defined(_AFXDLL)
+#define AFX_EXT_CLASS __declspec(dllimport)
+#define AFX_EXT_API __declspec(dllimport)
+#define AFX_EXT_DATA __declspec(dllimport)
+#else
 #define AFX_EXT_CLASS
 #define AFX_EXT_API
 #define AFX_EXT_DATA
+#endif
 #define AFX_CORE_DATA
 #define AFX_DATA
 #define AFX_DATADEF

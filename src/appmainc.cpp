@@ -9,6 +9,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 
+#ifndef _AFX_BUILDING_DLL  // not in mfc.dll: each program has its own main, from libmfcs.a
+
 int main() {
   LPTSTR p = ::GetCommandLine();
   if (*p == _T('"')) {
@@ -25,3 +27,5 @@ int main() {
   int nCmdShow = (si.dwFlags & STARTF_USESHOWWINDOW) ? si.wShowWindow : SW_SHOWDEFAULT;
   return AfxWinMain(::GetModuleHandle(NULL), NULL, p, nCmdShow);
 }
+
+#endif  // _AFX_BUILDING_DLL

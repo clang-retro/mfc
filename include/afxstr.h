@@ -13,6 +13,9 @@
 #include <stdarg.h>
 
 HINSTANCE AFXAPI AfxGetResourceHandle();
+// The module whose string table holds string nID: the program, or an
+// extension DLL.
+HINSTANCE AFXAPI AfxFindStringResourceHandle(UINT nID);
 void AFXAPI AfxThrowMemoryException();
 void AFXAPI AfxThrowInvalidArgException();
 
@@ -560,7 +563,7 @@ public:
     LocalFree(p);
   }
 
-  BOOL LoadString(UINT nID) { return LoadString(AfxGetResourceHandle(), nID); }
+  BOOL LoadString(UINT nID) { return LoadString(AfxFindStringResourceHandle(nID), nID); }
   BOOL LoadString(HINSTANCE hInstance, UINT nID) {
     XCHAR buf[256];
     int n = Tr::LoadStr(hInstance, nID, buf, 256);
