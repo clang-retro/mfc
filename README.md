@@ -99,6 +99,13 @@ when there is no display:
   CInternetException, and FTP directories, files, listings
   (CFtpFileFind), PutFile, GetFile, Rename and Remove, in passive and
   active mode.
+* `isapitest`: `afxisapi.h`, with an extension and a filter called
+  through the functions an ISAPI DLL exports by a pretend server:
+  CHtmlStream (growing, attached buffers), a parse map's commands
+  (the default command, a base class's map, arguments by position and
+  by name with defaults, numbers of each ITS_ type, posted form data
+  read in parts, ITS_RAW data, parse errors), the reply's status and
+  headers, server variables, and CHttpFilter notifications.
 * `htmltest`: `afxhtml.h` with a WebBrowser control of the test's own
   (Wine's needs Gecko to show a page), registered for CLSID_WebBrowser
   in the process. For CHtmlView: the browser filling the view,
@@ -365,6 +372,9 @@ request with the stock MinGW-w64 toolchain.
   CGopherFile, CGopherLocator and CGopherFileFind, CInternetFile with
   read and write buffers, CInternetException, AfxParseURL and
   AfxParseURLEx.
+* `afxisapi.h`: Internet Server API extensions and filters: CHttpServer
+  with parse maps, CHttpServerContext, CHttpFilter,
+  CHttpFilterContext, CHtmlStream, and the DLL's exported functions.
 * `afxhtml.h`: CHtmlView (the WebBrowser control in a view: navigation,
   the browser's properties and events, IDocHostUIHandler through the
   view's On functions) and CDHtmlDialog (a dialog whose face is an HTML
@@ -385,6 +395,8 @@ request with the stock MinGW-w64 toolchain.
   (`ON_COMMAND(ID_X, &CMyView::OnX)`). Standard C++ has no expression
   that accepts both, so the second form needs
   `_AFX_MSGMAP_MEMBER_POINTERS` defined before `afxwin.h`.
+* An ISAPI parse map's ITS_ string gives the number of a command's
+  arguments; each argument is read as its parameter's own C++ type.
 * `min` and `max` are function templates rather than macros (MinGW-w64
   defines the macros for C only). `NOMINMAX` turns them off.
 * Floating bars are tool windows, so the system draws their captions,
