@@ -522,10 +522,14 @@ void AFXAPI HookPaintWindowless(CWnd* pWnd, HRGN hRgnUpdate) {
   ::ReleaseDC(pWnd->m_hWnd, hDC);
 }
 
+LPDROPTARGET AFXAPI HookWindowlessDropTarget(CWnd* pWnd, CPoint point) {
+  return pWnd->m_pCtrlCont != NULL ? pWnd->m_pCtrlCont->GetWindowlessDropTarget(point) : NULL;
+}
+
 const _AFX_OCC_HOOKS s_hooks = {HookPreCreateDialog,   HookPostCreateDialog, HookInitDialog,
                                 HookDestroy,           HookNcDestroy,        HookDestroyControl,
                                 HookDDXControl,        HookHasWindowless,    HookWindowlessMessage,
-                                HookPaintWindowless};
+                                HookPaintWindowless,   HookWindowlessDropTarget};
 
 }  // namespace
 

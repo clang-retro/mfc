@@ -7,11 +7,16 @@
 //     its keys while the control has the focus go to it (in the control's
 //     coordinates), and capture, focus, InvalidateControl, GetDC, moving,
 //     hiding and the stock Click event work through the container;
+//   - drag and drop over it goes to the drop target the control gives
+//     (GetWindowlessDropTarget), through the drop target the container
+//     made for the frame: entering, leaving it for the frame, coming back,
+//     the drop and its data;
 //   - without windowlessActivate the same control has a window as before.
 #include <afxwin.h>
 #include <afxdisp.h>
 #include <afxctl.h>
 #include <afxocc.h>
+#include <afxole.h>
 #include <olectl.h>
 #include "testutil.h"
 
@@ -36,6 +41,56 @@ static BOOL g_bAskWindowless = TRUE;
 // =====================================================================
 // The control
 
+// The control's drop target: it takes copies, and keeps what it saw.
+class CTestDropTarget : public IDropTarget {
+public:
+  int m_nEnter, m_nOver, m_nLeave, m_nDrop;
+  POINTL m_ptLast;
+  CString m_strDropped;
+  CTestDropTarget() : m_nEnter(0), m_nOver(0), m_nLeave(0), m_nDrop(0) { m_ptLast.x = m_ptLast.y = 0; }
+
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (iid == IID_IUnknown || iid == IID_IDropTarget) {
+      *ppv = this;
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return 2; }  // part of the control
+  STDMETHOD_(ULONG, Release)() { return 1; }
+  STDMETHOD(DragEnter)(IDataObject*, DWORD, POINTL pt, DWORD* pdwEffect) {
+    m_nEnter++;
+    m_ptLast = pt;
+    *pdwEffect &= DROPEFFECT_COPY;
+    return S_OK;
+  }
+  STDMETHOD(DragOver)(DWORD, POINTL pt, DWORD* pdwEffect) {
+    m_nOver++;
+    m_ptLast = pt;
+    *pdwEffect &= DROPEFFECT_COPY;
+    return S_OK;
+  }
+  STDMETHOD(DragLeave)() {
+    m_nLeave++;
+    return S_OK;
+  }
+  STDMETHOD(Drop)(IDataObject* pData, DWORD, POINTL pt, DWORD* pdwEffect) {
+    m_nDrop++;
+    m_ptLast = pt;
+    COleDataObject dataObject;
+    dataObject.Attach(pData, FALSE);
+    HGLOBAL hText = dataObject.GetGlobalData(CF_TEXT);
+    if (hText != NULL) {
+      m_strDropped = (LPCSTR)::GlobalLock(hText);
+      ::GlobalUnlock(hText);
+      ::GlobalFree(hText);
+    }
+    *pdwEffect &= DROPEFFECT_COPY;
+    return S_OK;
+  }
+};
+
 class CWlCtrl : public COleControl {
   DECLARE_DYNCREATE(CWlCtrl)
 public:
@@ -48,6 +103,7 @@ public:
   int m_nDowns, m_nUps, m_nMoves, m_nChars, m_nSetFocus, m_nKillFocus;
   CPoint m_ptDown, m_ptMove;
   UINT m_nLastKey;
+  CTestDropTarget m_dropTarget;
 
   CWlCtrl()
       : m_bAskWindowless(g_bAskWindowless),
@@ -72,6 +128,10 @@ public:
     DWORD dwFlags = COleControl::GetControlFlags();
     if (m_bAskWindowless) dwFlags |= windowlessActivate;
     return dwFlags;
+  }
+  virtual IDropTarget* GetWindowlessDropTarget() {
+    m_dropTarget.AddRef();
+    return &m_dropTarget;
   }
   virtual void OnDraw(CDC* pDC, const CRect& rcBounds, const CRect&) {
     m_nDraws++;
@@ -160,6 +220,7 @@ public:
   void OnClick() { m_nClicks++; }
   void RunTests();
   void TestWindowless();
+  void TestDragDrop(CWlCtrl* pCtl, const CRect& rect);
   void TestWindowed();
 
   afx_msg int OnCreate(LPCREATESTRUCT lpcs) {
@@ -218,6 +279,8 @@ void CMainFrame::TestWindowless() {
   CHECK(PixelAt(this, rect.left + 5, rect.top + 5) == kFill);
   CHECK(PixelAt(this, rect.left - 5, rect.top + 5) != kFill);
   TestSaveWindowBitmap(m_hWnd, _T("wltest.bmp"));
+
+  TestDragDrop(pCtl, rect);
 
   // InvalidateControl: the control's part of the frame, or a piece of it.
   ValidateRect(NULL);
@@ -297,6 +360,65 @@ void CMainFrame::TestWindowless() {
   CHECK(CWlCtrl::s_nAlive == 0);
   CHECK(m_pCtrlCont->m_nWindowlessControls == 0 && m_pCtrlCont->m_pSiteFocus == NULL);
   CHECK(m_ctl.m_pCtrlSite == NULL);
+}
+
+void CMainFrame::TestDragDrop(CWlCtrl* pCtl, const CRect& rect) {
+  // The frame took no drops of its own, so the container made it a drop
+  // target for the control.
+  CHECK(m_pDropTarget != NULL && m_pDropTarget == m_pCtrlCont->m_pWindowlessDropTarget);
+  if (m_pDropTarget == NULL) return;
+  LPDROPTARGET pTarget = (LPDROPTARGET)m_pDropTarget->GetInterface(&IID_IDropTarget);
+  COleDataSource* pSource = new COleDataSource;
+  HGLOBAL hText = ::GlobalAlloc(GMEM_MOVEABLE, 5);
+  memcpy(::GlobalLock(hText), "drop", 5);
+  ::GlobalUnlock(hText);
+  pSource->CacheGlobalData(CF_TEXT, hText);
+  LPDATAOBJECT pData = (LPDATAOBJECT)pSource->GetInterface(&IID_IDataObject);
+
+  CTestDropTarget& dt = pCtl->m_dropTarget;
+  CPoint ptIn(rect.left + 10, rect.top + 10), ptOut(5, 5);
+  ClientToScreen(&ptIn);
+  ClientToScreen(&ptOut);
+  POINTL plIn = {ptIn.x, ptIn.y}, plOut = {ptOut.x, ptOut.y};
+  const DWORD dwBoth = DROPEFFECT_COPY | DROPEFFECT_MOVE;
+
+  // Entering over the control: the control's, in screen coordinates.
+  DWORD dwEffect = dwBoth;
+  CHECK(pTarget->DragEnter(pData, MK_LBUTTON, plIn, &dwEffect) == S_OK);
+  CHECK(dt.m_nEnter == 1 && dwEffect == DROPEFFECT_COPY);
+  CHECK(dt.m_ptLast.x == ptIn.x && dt.m_ptLast.y == ptIn.y);
+  dwEffect = dwBoth;
+  pTarget->DragOver(MK_LBUTTON, plIn, &dwEffect);
+  CHECK(dt.m_nOver == 1 && dwEffect == DROPEFFECT_COPY);
+  // Off it: the control is left, and the frame takes nothing.
+  dwEffect = dwBoth;
+  pTarget->DragOver(MK_LBUTTON, plOut, &dwEffect);
+  CHECK(dt.m_nLeave == 1 && dwEffect == DROPEFFECT_NONE);
+  dwEffect = dwBoth;
+  pTarget->DragOver(MK_LBUTTON, plOut, &dwEffect);
+  CHECK(dt.m_nOver == 1 && dwEffect == DROPEFFECT_NONE);
+  // Back over it, and the drop.
+  dwEffect = dwBoth;
+  pTarget->DragOver(MK_LBUTTON, plIn, &dwEffect);
+  CHECK(dt.m_nEnter == 2 && dwEffect == DROPEFFECT_COPY);
+  dwEffect = dwBoth;
+  CHECK(pTarget->Drop(pData, 0, plIn, &dwEffect) == S_OK);
+  CHECK(dt.m_nDrop == 1 && dwEffect == DROPEFFECT_COPY && dt.m_strDropped == _T("drop"));
+  CHECK(dt.m_nLeave == 1 && m_pDropTarget->m_pWindowlessTarget == NULL);
+
+  // A drag that ends over it without a drop.
+  dwEffect = dwBoth;
+  pTarget->DragEnter(pData, MK_LBUTTON, plIn, &dwEffect);
+  pTarget->DragLeave();
+  CHECK(dt.m_nEnter == 3 && dt.m_nLeave == 2 && m_pDropTarget->m_lpDataObject == NULL);
+  // Dropped outside it: the frame's, which takes nothing.
+  dwEffect = dwBoth;
+  pTarget->DragEnter(pData, MK_LBUTTON, plOut, &dwEffect);
+  CHECK(dt.m_nEnter == 3 && dwEffect == DROPEFFECT_NONE);
+  dwEffect = dwBoth;
+  pTarget->Drop(pData, 0, plOut, &dwEffect);
+  CHECK(dt.m_nDrop == 1 && dwEffect == DROPEFFECT_NONE);
+  pSource->InternalRelease();
 }
 
 void CMainFrame::TestWindowed() {

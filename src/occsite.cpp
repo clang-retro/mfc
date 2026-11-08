@@ -7,6 +7,7 @@
 #include "afximpl.h"
 #include <afxocc.h>
 #include <olectl.h>
+#include <afxole.h>
 
 const _AFX_OCC_BIND_HOOKS* _afxOccBindHooks = NULL;
 
@@ -1101,6 +1102,7 @@ void COleControlSite::OnActivated(DWORD dwFlags) {
       m_pWindowlessObject = pWindowless;
       m_bIsWindowless = TRUE;
       m_pCtrlCont->m_nWindowlessControls++;
+      m_pCtrlCont->RegisterWindowlessDropTarget(this);
       InvalidateWindowless(NULL, TRUE);
     }
   }
@@ -1424,12 +1426,39 @@ COleControlContainer::COleControlContainer(CWnd* pWnd)
       m_crBack(0x80000000 | COLOR_BTNFACE),
       m_crFore(0x80000000 | COLOR_WINDOWTEXT),
       m_nWindowlessControls(0),
-      m_pActiveObject(NULL) {}
+      m_pActiveObject(NULL),
+      m_pWindowlessDropTarget(NULL) {}
 
 COleControlContainer::~COleControlContainer() {
   DestroyAll();
+  delete m_pWindowlessDropTarget;
   if (m_pOleFont != NULL) m_pOleFont->Release();
   if (m_pActiveObject != NULL) m_pActiveObject->Release();
+}
+
+LPDROPTARGET COleControlContainer::GetWindowlessDropTarget(CPoint point) const {
+  COleControlSite* pSite = FindWindowlessSite(point);
+  if (pSite == NULL || pSite->m_pWindowlessObject == NULL) return NULL;
+  LPDROPTARGET pTarget = NULL;
+  if (((IOleInPlaceObjectWindowless*)pSite->m_pWindowlessObject)->GetDropTarget(&pTarget) != S_OK)
+    return NULL;
+  return pTarget;
+}
+
+void COleControlContainer::RegisterWindowlessDropTarget(COleControlSite* pSite) {
+  if (m_pWindowlessDropTarget != NULL || m_pWnd->GetSafeHwnd() == NULL ||
+      m_pWnd->m_pDropTarget != NULL || pSite->m_pWindowlessObject == NULL)
+    return;
+  LPDROPTARGET pTarget = NULL;
+  if (((IOleInPlaceObjectWindowless*)pSite->m_pWindowlessObject)->GetDropTarget(&pTarget) != S_OK ||
+      pTarget == NULL)
+    return;
+  pTarget->Release();
+  m_pWindowlessDropTarget = new COleDropTarget;
+  if (!m_pWindowlessDropTarget->Register(m_pWnd)) {
+    delete m_pWindowlessDropTarget;
+    m_pWindowlessDropTarget = NULL;
+  }
 }
 
 COleControlSite* COleControlContainer::FindWindowlessSite(CPoint point) const {

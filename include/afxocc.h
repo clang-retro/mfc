@@ -11,6 +11,7 @@
 #include "ocdb.h"
 
 class COleControlContainer;
+class COleDropTarget;
 class COleControlSite;
 class CDataSourceControl;
 struct CDataBoundProperty;
@@ -312,6 +313,12 @@ public:
                                        LRESULT* plResult);
   // The visible windowless control at a point of the window, the topmost.
   COleControlSite* FindWindowlessSite(CPoint point) const;
+  // The drop target of the windowless control at a point (AddRef'd), or
+  // NULL. When a windowless control that takes drops is activated and
+  // the window is no drop target, the container makes it one
+  // (m_pWindowlessDropTarget), so that drags reach the control.
+  LPDROPTARGET GetWindowlessDropTarget(CPoint point) const;
+  void RegisterWindowlessDropTarget(COleControlSite* pSite);
 
   // Dialog item functions that also reach controls.
   virtual CWnd* GetDlgItem(int nID) const;
@@ -332,6 +339,7 @@ public:
   OLE_COLOR m_crFore;
   int m_nWindowlessControls;
   LPOLEINPLACEACTIVEOBJECT m_pActiveObject;
+  COleDropTarget* m_pWindowlessDropTarget;
 
 protected:
   // The frame and document window the controls see.

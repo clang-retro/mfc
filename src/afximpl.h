@@ -40,6 +40,9 @@ struct _AFX_OCC_HOOKS {
   BOOL(AFXAPI* pfnWindowlessMessage)(CWnd* pWnd, UINT message, WPARAM wParam, LPARAM lParam,
                                      LRESULT* plResult);
   void(AFXAPI* pfnPaintWindowless)(CWnd* pWnd, HRGN hRgnUpdate);
+  // The drop target of the windowless control at a point (AddRef'd), or
+  // NULL.
+  LPDROPTARGET(AFXAPI* pfnWindowlessDropTarget)(CWnd* pWnd, CPoint point);
 };
 extern const _AFX_OCC_HOOKS* _afxOccHooks;
 // What a control site calls once a control is data bound (occdb.cpp):
