@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "dbimpl.h"
 #include <afxdisp.h>
+#include "ddxfield.h"
 
 void AFXAPI _AfxRfxDate(CFieldExchange* pFX, LPCTSTR szName, void* pv, int nSize,
                         const void* pPseudoNull, _AFX_FROM_TIMESTAMP pfnFrom,
@@ -34,30 +35,10 @@ void AFXAPI RFX_Date(CFieldExchange* pFX, LPCTSTR szName, COleDateTime& value) {
               OleDateToTimestamp);
 }
 
-template <class T>
-static void FieldText(CDataExchange* pDX, int nIDC, T& value, CRecordset* pSet) {
-  BOOL bHasField = pSet != NULL && pSet->IsOpen();
-  HWND hWnd = pDX->PrepareEditCtrl(nIDC);
-  if (!pDX->m_bSaveAndValidate) {
-    if (bHasField && pSet->IsFieldNull(&value)) {
-      ::SetWindowText(hWnd, _T(""));
-      return;
-    }
-    DDX_Text(pDX, nIDC, value);
-    return;
-  }
-  if (bHasField && ::GetWindowTextLength(hWnd) == 0 && pSet->IsFieldNullable(&value)) {
-    if (!pSet->IsFieldNull(&value)) pSet->SetFieldNull(&value);
-    return;
-  }
-  DDX_Text(pDX, nIDC, value);
-  if (bHasField && pSet->IsFieldNull(&value)) pSet->SetFieldNull(&value, FALSE);
-}
-
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, COleDateTime& value, CRecordset* pSet) {
-  FieldText(pDX, nIDC, value, pSet);
+  _AfxDdxFieldText(pDX, nIDC, value, pSet);
 }
 
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, COleCurrency& value, CRecordset* pSet) {
-  FieldText(pDX, nIDC, value, pSet);
+  _AfxDdxFieldText(pDX, nIDC, value, pSet);
 }

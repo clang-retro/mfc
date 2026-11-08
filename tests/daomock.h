@@ -151,6 +151,7 @@ struct State {
   int idles = 0;
   int engines = 0;
   int licensed = 0;  // engines made through the licence key
+  int fieldWrites = 0;  // values put into a record being edited
   Db* Find(const CString& name) {
     for (auto& d : files)
       if (d.name.CompareNoCase(name) == 0) return &d;
@@ -1489,6 +1490,7 @@ inline HRESULT Field::get_Value(VARIANT* p) {
 inline HRESULT Field::put_Value(VARIANT val) {
   if (rs == NULL) return Fail(3219, _T("Invalid operation."));
   if (rs->editMode == dbEditNone) return Fail(3020, _T("Update or CancelUpdate without AddNew or Edit."));
+  G().fieldWrites++;
   const Column& col = rs->table->cols[rs->cols[rsCol]];
   if (col.attrs & dbAutoIncrField) return Fail(3164, _T("Field cannot be updated."));
   return Coerce(col, val, rs->buf[rsCol]);

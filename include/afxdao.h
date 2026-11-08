@@ -12,6 +12,7 @@
 #define __AFXDAO_H__
 
 #include "afxdisp.h"
+#include "afxext.h"
 #include "afxdb_.h"
 #include <dbdaoint.h>
 #include <dbdaoerr.h>
@@ -717,5 +718,78 @@ public:
 #define AFX_DAO_PREV (-1)
 #define AFX_DAO_FIRST LONG_MIN
 #define AFX_DAO_LAST LONG_MAX
+
+// ---------------------------------------------------------------------
+// A form view on a DAO recordset: the record commands move through it,
+// and the form's values are written back before each move.
+
+class CDaoRecordView : public CFormView {
+  DECLARE_DYNAMIC(CDaoRecordView)
+protected:
+  CDaoRecordView(LPCTSTR lpszTemplateName);
+  CDaoRecordView(UINT nIDTemplate);
+
+public:
+  virtual ~CDaoRecordView();
+  virtual CDaoRecordset* OnGetRecordset() = 0;
+
+  BOOL IsOnLastRecord();
+  BOOL IsOnFirstRecord();
+
+  virtual BOOL OnMove(UINT nIDMoveCommand);
+  virtual void OnInitialUpdate();
+
+  afx_msg void OnUpdateRecordFirst(CCmdUI* pCmdUI);
+  afx_msg void OnUpdateRecordPrev(CCmdUI* pCmdUI);
+  afx_msg void OnUpdateRecordNext(CCmdUI* pCmdUI);
+  afx_msg void OnUpdateRecordLast(CCmdUI* pCmdUI);
+  afx_msg BOOL OnMoveCommand(UINT nID) { return OnMove(nID); }
+
+protected:
+  // The first and last records' bookmarks, found when the view opens.
+  COleVariant m_varBookmarkCurrent;
+  COleVariant m_varBookmarkFirst;
+  COleVariant m_varBookmarkLast;
+  UINT m_nStatus;
+  void FindBounds();
+  BOOL IsOnBookmark(const COleVariant& var);
+  DECLARE_MESSAGE_MAP()
+};
+
+// ---------------------------------------------------------------------
+// Dialog data exchange with DAO recordset fields: like DDX_Text and the
+// others, but a null field shows as empty and an empty entry stores null.
+
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, BYTE& value, CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, int& value, CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, UINT& value, CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, long& value, CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, DWORD& value, CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, CString& value,
+                          CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, LPTSTR pstrValue, int nMaxLen,
+                          CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, float& value, CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, double& value,
+                          CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, short& value, CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, COleDateTime& value,
+                          CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, COleCurrency& value,
+                          CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldCheck(CDataExchange* pDX, int nIDC, int& value, CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldRadio(CDataExchange* pDX, int nIDC, int& value, CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldLBString(CDataExchange* pDX, int nIDC, CString& value,
+                              CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldCBString(CDataExchange* pDX, int nIDC, CString& value,
+                              CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldLBStringExact(CDataExchange* pDX, int nIDC, CString& value,
+                                   CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldCBStringExact(CDataExchange* pDX, int nIDC, CString& value,
+                                   CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldLBIndex(CDataExchange* pDX, int nIDC, int& index, CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldCBIndex(CDataExchange* pDX, int nIDC, int& index, CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldScroll(CDataExchange* pDX, int nIDC, int& value, CDaoRecordset* pRecordset);
+void AFXAPI DDX_FieldSlider(CDataExchange* pDX, int nIDC, int& value, CDaoRecordset* pRecordset);
 
 #endif  // __AFXDAO_H__
