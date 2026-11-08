@@ -1,0 +1,9 @@
+# The API reference of the documentation site (api/), run by .docs/hooks.py
+# from the repository's root after `mkdocs build`.
+@INCLUDE               = .docs/Doxyfile.base
+PROJECT_NAME           = "clang-retro MFC"
+PROJECT_BRIEF          = "The MFC classes"
+INPUT                  = include \
+                         src
+FILE_PATTERNS          = *.h *.cpp *.inl
+OPTIMIZE_OUTPUT_FOR_C  = NO
