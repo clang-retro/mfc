@@ -1,0 +1,30 @@
+# The documentation site: https://clang-retro.github.io/mfc/
+# Build it with `pip install -r .docs/requirements.txt` and `mkdocs serve`.
+INHERIT: .docs/base.yml
+site_name: clang-retro MFC
+site_description: An independent implementation of the Microsoft Foundation Classes for clang and MinGW-w64
+site_url: https://clang-retro.github.io/mfc/
+repo_url: https://github.com/clang-retro/mfc
+repo_name: clang-retro/mfc
+edit_uri: ""
+hooks:
+  - .docs/hooks.py
+
+extra:
+  retro:
+    github: clang-retro/mfc
+    branch: main
+    pages:
+      README.md: index.md
+      CONTRIBUTING.md: contributing.md
+
+nav:
+  - "Home": index.md
+  - "Building": building.md
+  - "Testing": testing.md
+  - "What is there": contents.md
+  - "Differences from Visual C++": differences.md
+  - "Plans and layout": plans.md
+  - "Contributing": contributing.md
+  - "License": license.md
+  - "All clang-retro projects": https://clang-retro.github.io/dos-sdk/projects/
