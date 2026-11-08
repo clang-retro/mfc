@@ -445,6 +445,9 @@ protected:
   void FreeFields();
   void FreeParamBuffers();
   void BindParams(HSTMT hstmt);
+  // The output parameters' values, into their members: once the
+  // statement has no more result sets.
+  void GetOutputParams();
   void SetCurrentToNull();
   _AFX_DB_ROW* SaveMembers() const;
   void RestoreMembers(const _AFX_DB_ROW* pRow);

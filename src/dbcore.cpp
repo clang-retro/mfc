@@ -482,6 +482,15 @@ void CRecordset::BindParams(HSTMT hstmt) {
   }
 }
 
+void CRecordset::GetOutputParams() {
+  for (INT_PTR i = 0; i < m_rgParams.GetSize() && i < m_rgParamBuffers.GetSize(); i++) {
+    const _AFX_RFX_FIELD& field = *(_AFX_RFX_FIELD*)m_rgParams[i];
+    if (field.nParamType != SQL_PARAM_OUTPUT && field.nParamType != SQL_PARAM_INPUT_OUTPUT)
+      continue;
+    m_rgParamNull[i] = (BYTE)_AfxGetParamOutput(field, *(CByteArray*)m_rgParamBuffers[i]);
+  }
+}
+
 // The C type a result column is read as when no field covers it.
 static SQLSMALLINT DefaultCType(SQLSMALLINT nSqlType) {
   switch (nSqlType) {
@@ -524,6 +533,8 @@ void CRecordset::ExecuteQuery() {
   rc = ::SQLNumResultCols(m_hstmt, &nCols);
   if (!Check(rc)) ThrowDBException(rc, m_hstmt);
   m_nResultCols = nCols;
+  // A procedure without a result set has its output parameters now.
+  if (m_nResultCols == 0) GetOutputParams();
   if ((INT_PTR)m_nResultCols < m_rgFields.GetSize())
     ThrowDBException(AFX_SQL_ERROR_FIELD_SCHEMA_MISMATCH);
   m_rgColCType.SetSize(m_nResultCols);
@@ -571,6 +582,10 @@ void CRecordset::RestoreMembers(const _AFX_DB_ROW* pRow) {
 }
 
 BOOL CRecordset::FetchRow() {
+  if (m_nResultCols == 0) {  // a statement without a result set, such as a procedure's
+    m_bAllFetched = TRUE;
+    return FALSE;
+  }
   RETCODE rc = ::SQLFetch(m_hstmt);
   if (rc == SQL_NO_DATA) {
     m_bAllFetched = TRUE;
@@ -710,7 +725,11 @@ BOOL CRecordset::Requery() {
 BOOL CRecordset::FlushResultSet() {
   if (!IsOpen()) return FALSE;
   RETCODE rc = ::SQLMoreResults(m_hstmt);
-  if (rc == SQL_NO_DATA) return FALSE;
+  if (rc == SQL_NO_DATA) {
+    // After the last result set, the output parameters are there.
+    GetOutputParams();
+    return FALSE;
+  }
   if (!Check(rc)) ThrowDBException(rc, m_hstmt);
   SQLSMALLINT nCols = 0;
   ::SQLNumResultCols(m_hstmt, &nCols);

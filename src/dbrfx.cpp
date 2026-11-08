@@ -213,23 +213,28 @@ void AFXAPI _AfxBindFieldBytes(CRecordset* pSet, HSTMT hstmt, SQLUSMALLINT nPara
   INT_PTR nData = bytes.GetSize();
   CByteArray* pBuffer = new CByteArray;
   rgBuffers.Add(pBuffer);
+  // An output parameter's buffer takes the longest value the field does.
+  SQLSMALLINT nIOType = (SQLSMALLINT)field.nParamType;
+  if (nIOType != SQL_PARAM_OUTPUT && nIOType != SQL_PARAM_INPUT_OUTPUT) nIOType = SQL_PARAM_INPUT;
+  BOOL bOutput = nIOType != SQL_PARAM_INPUT;
   switch (field.nKind) {
   case _AFX_RFX_STRING:
   case _AFX_RFX_TEXTBUF:
     nCType = SQL_C_TCHAR;
-    pBuffer->SetSize(nHeader + nData + sizeof(TCHAR));
-    memset(pBuffer->GetData(), 0, pBuffer->GetSize());
-    if (nData) memcpy(pBuffer->GetData() + nHeader, bytes.GetData(), nData);
     if (nColumnSize < (SQLULEN)(nData / sizeof(TCHAR))) nColumnSize = nData / sizeof(TCHAR);
     if (nColumnSize == 0) nColumnSize = 1;
+    pBuffer->SetSize(nHeader + (bOutput ? (INT_PTR)(nColumnSize * sizeof(TCHAR)) : nData) +
+                     sizeof(TCHAR));
+    memset(pBuffer->GetData(), 0, pBuffer->GetSize());
+    if (nData) memcpy(pBuffer->GetData() + nHeader, bytes.GetData(), nData);
     break;
   case _AFX_RFX_BINARY:
   case _AFX_RFX_LONGBINARY:
     nCType = SQL_C_BINARY;
-    pBuffer->SetSize(nHeader + nData + 1);
-    if (nData) memcpy(pBuffer->GetData() + nHeader, bytes.GetData(), nData);
     if (nColumnSize < (SQLULEN)nData) nColumnSize = nData;
     if (nColumnSize == 0) nColumnSize = 1;
+    pBuffer->SetSize(nHeader + (bOutput ? (INT_PTR)nColumnSize : nData) + 1);
+    if (nData) memcpy(pBuffer->GetData() + nHeader, bytes.GetData(), nData);
     break;
   case _AFX_RFX_DATE: {
     nCType = SQL_C_TIMESTAMP;
@@ -257,10 +262,50 @@ void AFXAPI _AfxBindFieldBytes(CRecordset* pSet, HSTMT hstmt, SQLUSMALLINT nPara
   SQLLEN* pnInd = (SQLLEN*)pBuffer->GetData();
   *pnInd = bNull ? SQL_NULL_DATA : (SQLLEN)nData;
   BYTE* pData = pBuffer->GetData() + nHeader;
-  RETCODE rc = ::SQLBindParameter(hstmt, nParam, SQL_PARAM_INPUT, nCType, field.nSqlType,
+  RETCODE rc = ::SQLBindParameter(hstmt, nParam, nIOType, nCType, field.nSqlType,
                                   nColumnSize, nScale, pData,
                                   (SQLLEN)(pBuffer->GetSize() - nHeader), pnInd);
   if (!pSet->Check(rc)) pSet->ThrowDBException(rc, hstmt);
+}
+
+// Moves an output parameter's value from the buffer _AfxBindFieldBytes
+// made into the field. Returns whether it is NULL.
+BOOL AFXAPI _AfxGetParamOutput(const _AFX_RFX_FIELD& field, const CByteArray& buffer) {
+  const INT_PTR nHeader = 8;
+  SQLLEN nInd = *(const SQLLEN*)buffer.GetData();
+  const BYTE* pData = buffer.GetData() + nHeader;
+  INT_PTR nMax = buffer.GetSize() - nHeader;
+  if (nInd == SQL_NULL_DATA) {
+    _AfxSetFieldPseudoNull(field);
+    return TRUE;
+  }
+  switch (field.nKind) {
+  case _AFX_RFX_STRING:
+  case _AFX_RFX_TEXTBUF: {
+    nMax -= sizeof(TCHAR);  // the terminator
+    INT_PTR nBytes = nInd;
+    if (nInd == SQL_NTS || nInd < 0 || nInd > nMax) {
+      const TCHAR* psz = (const TCHAR*)pData;
+      INT_PTR nChars = 0;
+      while (nChars < nMax / (INT_PTR)sizeof(TCHAR) && psz[nChars] != 0) nChars++;
+      nBytes = nChars * sizeof(TCHAR);
+    }
+    _AfxSetFieldBytes(field, pData, nBytes);
+    break;
+  }
+  case _AFX_RFX_BINARY:
+  case _AFX_RFX_LONGBINARY:
+    nMax -= 1;
+    _AfxSetFieldBytes(field, pData, nInd < 0 || nInd > nMax ? nMax : nInd);
+    break;
+  case _AFX_RFX_DATE:
+    field.pfnFromTimestamp(field.pv, *(const TIMESTAMP_STRUCT*)pData);
+    break;
+  default:
+    memcpy(field.pv, pData, field.nSize);
+    break;
+  }
+  return FALSE;
 }
 
 // ---------------------------------------------------------------------

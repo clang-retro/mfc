@@ -56,6 +56,7 @@ struct _AFX_DB_ROW {
 void AFXAPI _AfxGetFieldBytes(const _AFX_RFX_FIELD& field, CByteArray& bytes);
 void AFXAPI _AfxSetFieldBytes(const _AFX_RFX_FIELD& field, const BYTE* p, INT_PTR nBytes);
 void AFXAPI _AfxSetFieldPseudoNull(const _AFX_RFX_FIELD& field);
+BOOL AFXAPI _AfxGetParamOutput(const _AFX_RFX_FIELD& field, const CByteArray& buffer);
 
 // Reads column nCol of the current row into the field's member.
 void AFXAPI _AfxGetFieldData(CRecordset* pSet, HSTMT hstmt, SQLUSMALLINT nCol,
