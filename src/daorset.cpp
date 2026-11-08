@@ -194,7 +194,7 @@ static void BinaryFromVar(void* pv, COleVariant& var) {
   CByteArray& arr = *(CByteArray*)pv;
   arr.RemoveAll();
   if (var.vt != (VT_ARRAY | VT_UI1) || var.parray == NULL) return;
-  long lo = 0, hi = -1;
+  LONG lo = 0, hi = -1;
   ::SafeArrayGetLBound(var.parray, 1, &lo);
   ::SafeArrayGetUBound(var.parray, 1, &hi);
   arr.SetSize(hi - lo + 1);
@@ -334,7 +334,7 @@ static void LongBinaryFromVar(void* pv, COleVariant& var) {
   lb.m_hData = NULL;
   lb.m_dwDataLength = 0;
   if (var.vt != (VT_ARRAY | VT_UI1) || var.parray == NULL) return;
-  long lo = 0, hi = -1;
+  LONG lo = 0, hi = -1;
   ::SafeArrayGetLBound(var.parray, 1, &lo);
   ::SafeArrayGetUBound(var.parray, 1, &hi);
   DWORD cb = (DWORD)(hi - lo + 1);
@@ -691,7 +691,7 @@ short CDaoRecordset::GetEditMode() {
 
 long CDaoRecordset::GetRecordCount() {
   ThrowIfNotOpen();
-  long l = 0;
+  LONG l = 0;
   DAO_CHECK(m_pDAORecordset->get_RecordCount(&l));
   return l;
 }
@@ -781,7 +781,7 @@ void CDaoRecordset::Move(long lRows) {
 
 long CDaoRecordset::GetAbsolutePosition() {
   ThrowIfNotOpen();
-  long l = -1;
+  LONG l = -1;
   DAO_CHECK(m_pDAORecordset->get_AbsolutePosition(&l));
   return l;
 }

@@ -175,7 +175,7 @@ void CDaoException::GetErrorInfo(int nIndex) {
 
 void CDaoException::FillErrorInfo() {
   if (m_pErrorInfo == NULL) m_pErrorInfo = new CDaoErrorInfo;
-  long l = 0;
+  LONG l = 0;
   m_pDAOError->get_Number(&l);
   m_pErrorInfo->m_lErrorCode = l;
   BSTR bstr = NULL;
@@ -299,7 +299,7 @@ void AFXAPI _AfxDaoFillTableDefInfo(DAOTableDef* p, CDaoTableDefInfo& info, DWOR
   if (dwOptions & AFX_DAO_PRIMARY_INFO) {
     DAO_GET_STRING(p, Name, info.m_strName);
     DAO_GET_BOOL(p, Updatable, info.m_bUpdatable);
-    long l = 0;
+    LONG l = 0;
     DAO_CHECK(p->get_Attributes(&l));
     info.m_lAttributes = l;
   }
@@ -316,7 +316,7 @@ void AFXAPI _AfxDaoFillTableDefInfo(DAOTableDef* p, CDaoTableDefInfo& info, DWOR
     DAO_GET_STRING(p, ValidationText, info.m_strValidationText);
   }
   if ((dwOptions & AFX_DAO_ALL_INFO) == AFX_DAO_ALL_INFO) {
-    long l = 0;
+    LONG l = 0;
     DAO_CHECK(p->get_RecordCount(&l));
     info.m_lRecordCount = l;
   }
@@ -328,7 +328,7 @@ void AFXAPI _AfxDaoFillFieldInfo(DAOField* p, CDaoFieldInfo& info, DWORD dwOptio
     short s = 0;
     DAO_CHECK(p->get_Type(&s));
     info.m_nType = s;
-    long l = 0;
+    LONG l = 0;
     DAO_CHECK(p->get_Size(&l));
     info.m_lSize = l;
     l = 0;
@@ -341,7 +341,7 @@ void AFXAPI _AfxDaoFillFieldInfo(DAOField* p, CDaoFieldInfo& info, DWORD dwOptio
     info.m_nOrdinalPosition = s;
     DAO_GET_BOOL(p, Required, info.m_bRequired);
     DAO_GET_BOOL(p, AllowZeroLength, info.m_bAllowZeroLength);
-    long l = 0;
+    LONG l = 0;
     DAO_CHECK(p->get_CollatingOrder(&l));
     info.m_lCollatingOrder = l;
     DAO_GET_STRING(p, ForeignName, info.m_strForeignName);
@@ -391,7 +391,7 @@ void AFXAPI _AfxDaoFillIndexInfo(DAOIndex* p, CDaoIndexInfo& info, DWORD dwOptio
         BSTR b = NULL;
         pField->get_Name(&b);
         fi.m_strName = _AfxDaoString(b);
-        long l = 0;
+        LONG l = 0;
         pField->get_Attributes(&l);
         fi.m_bDescending = (l & dbDescending) != 0;
         pField->Release();
@@ -408,7 +408,7 @@ void AFXAPI _AfxDaoFillIndexInfo(DAOIndex* p, CDaoIndexInfo& info, DWORD dwOptio
     DAO_GET_BOOL(p, Foreign, info.m_bForeign);
   }
   if ((dwOptions & AFX_DAO_ALL_INFO) == AFX_DAO_ALL_INFO) {
-    long l = 0;
+    LONG l = 0;
     DAO_CHECK(p->get_DistinctCount(&l));
     info.m_lDistinctCount = l;
   }
@@ -447,7 +447,7 @@ void AFXAPI _AfxDaoFillRelationInfo(DAORelation* p, CDaoRelationInfo& info, DWOR
     DAO_GET_STRING(p, ForeignTable, info.m_strForeignTable);
   }
   if (dwOptions & AFX_DAO_SECONDARY_INFO) {
-    long l = 0;
+    LONG l = 0;
     DAO_CHECK(p->get_Attributes(&l));
     info.m_lAttributes = l;
     if (info.m_bCleanupFieldInfo) delete[] info.m_pFieldInfos;
@@ -875,7 +875,7 @@ void CDaoDatabase::SetQueryTimeout(short nSeconds) {
 
 long CDaoDatabase::GetRecordsAffected() {
   if (!m_bOpen) ThrowNotOpen();
-  long l = 0;
+  LONG l = 0;
   DAO_CHECK(m_pDAODatabase->get_RecordsAffected(&l));
   return l;
 }
@@ -1105,7 +1105,7 @@ BOOL CDaoTableDef::CanUpdate() {
 
 long CDaoTableDef::GetAttributes() {
   if (!m_bOpen) ThrowNotOpen();
-  long l = 0;
+  LONG l = 0;
   DAO_CHECK(m_pDAOTableDef->get_Attributes(&l));
   return l;
 }
@@ -1131,7 +1131,7 @@ COleDateTime CDaoTableDef::GetDateLastUpdated() {
 
 long CDaoTableDef::GetRecordCount() {
   if (!m_bOpen) ThrowNotOpen();
-  long l = 0;
+  LONG l = 0;
   DAO_CHECK(m_pDAOTableDef->get_RecordCount(&l));
   return l;
 }
@@ -1415,7 +1415,7 @@ void CDaoQueryDef::SetReturnsRecords(BOOL bReturnsRecords) {
 
 long CDaoQueryDef::GetRecordsAffected() {
   if (!m_bOpen) ThrowNotOpen();
-  long l = 0;
+  LONG l = 0;
   DAO_CHECK(m_pDAOQueryDef->get_RecordsAffected(&l));
   return l;
 }

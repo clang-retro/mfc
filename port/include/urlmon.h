@@ -139,6 +139,42 @@ WINPORT_UUIDOF(IBinding)
 WINPORT_UUIDOF(IBindStatusCallback)
 WINPORT_UUIDOF(IBindHost)
 
+// Security zones
+typedef enum tagURLZONE {
+  URLZONE_INVALID = -1,
+  URLZONE_PREDEFINED_MIN = 0,
+  URLZONE_LOCAL_MACHINE = 0,
+  URLZONE_INTRANET = 1,
+  URLZONE_TRUSTED = 2,
+  URLZONE_INTERNET = 3,
+  URLZONE_UNTRUSTED = 4,
+  URLZONE_PREDEFINED_MAX = 999,
+  URLZONE_USER_MIN = 1000,
+  URLZONE_USER_MAX = 10000
+} URLZONE;
+
+extern "C" const IID IID_IInternetSecurityMgrSite, IID_IInternetSecurityManager;
+
+interface IInternetSecurityMgrSite : public IUnknown {
+  STDMETHOD(GetWindow)(HWND* phwnd) = 0;
+  STDMETHOD(EnableModeless)(BOOL fEnable) = 0;
+};
+
+interface IInternetSecurityManager : public IUnknown {
+  STDMETHOD(SetSecuritySite)(IInternetSecurityMgrSite* pSite) = 0;
+  STDMETHOD(GetSecuritySite)(IInternetSecurityMgrSite** ppSite) = 0;
+  STDMETHOD(MapUrlToZone)(LPCWSTR pwszUrl, DWORD* pdwZone, DWORD dwFlags) = 0;
+  STDMETHOD(GetSecurityId)(LPCWSTR pwszUrl, BYTE* pbSecurityId, DWORD* pcbSecurityId, DWORD_PTR dwReserved) = 0;
+  STDMETHOD(ProcessUrlAction)(LPCWSTR pwszUrl, DWORD dwAction, BYTE* pPolicy, DWORD cbPolicy, BYTE* pContext,
+                              DWORD cbContext, DWORD dwFlags, DWORD dwReserved) = 0;
+  STDMETHOD(QueryCustomPolicy)(LPCWSTR pwszUrl, REFGUID guidKey, BYTE** ppPolicy, DWORD* pcbPolicy, BYTE* pContext,
+                               DWORD cbContext, DWORD dwReserved) = 0;
+  STDMETHOD(SetZoneMapping)(DWORD dwZone, LPCWSTR lpszPattern, DWORD dwFlags) = 0;
+  STDMETHOD(GetZoneMappings)(DWORD dwZone, IEnumString** ppenumString, DWORD dwFlags) = 0;
+};
+
+WINPORT_UUIDOF(IInternetSecurityManager)
+
 extern "C" {
 HRESULT WINAPI CreateURLMoniker(LPMONIKER pMkCtx, LPCWSTR szURL, LPMONIKER* ppmk);
 HRESULT WINAPI CreateAsyncBindCtx(DWORD reserved, IBindStatusCallback* pBSCb, IEnumFORMATETC* pEFetc,
@@ -147,6 +183,8 @@ HRESULT WINAPI RegisterBindStatusCallback(LPBC pBC, IBindStatusCallback* pBSCb,
                                           IBindStatusCallback** ppBSCBPrev, DWORD dwReserved);
 HRESULT WINAPI RevokeBindStatusCallback(LPBC pBC, IBindStatusCallback* pBSCb);
 HRESULT WINAPI IsAsyncMoniker(IMoniker* pmk);
+HRESULT WINAPI CoInternetCreateSecurityManager(IServiceProvider* pSP, IInternetSecurityManager** ppSM,
+                                               DWORD dwReserved);
 HRESULT WINAPI URLDownloadToFileA(LPUNKNOWN pCaller, LPCSTR szURL, LPCSTR szFileName, DWORD dwReserved,
                                   LPBINDSTATUSCALLBACK lpfnCB);
 HRESULT WINAPI URLDownloadToFileW(LPUNKNOWN pCaller, LPCWSTR szURL, LPCWSTR szFileName, DWORD dwReserved,

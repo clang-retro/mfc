@@ -477,4 +477,223 @@ BOOL WINAPI OleUIAddVerbMenuW(LPOLEOBJECT lpOleObj, LPCWSTR lpszShortType, HMENU
 #define OleUIBusy OleUIBusyA
 #endif
 
+// Change Source and Object Properties
+#define CSF_SHOWHELP 0x00000001L
+#define CSF_VALIDSOURCE 0x00000002L
+#define CSF_ONLYGETSOURCE 0x00000004L
+#define CSF_EXPLORER 0x00000008L
+#define OPF_OBJECTISLINK 0x00000001L
+#define OPF_NOFILLDEFAULT 0x00000002L
+#define OPF_SHOWHELP 0x00000004L
+#define OPF_DISABLECONVERT 0x00000008L
+#define VPF_SELECTRELATIVE 0x00000001L
+#define VPF_DISABLERELATIVE 0x00000002L
+#define VPF_DISABLESCALE 0x00000004L
+
+interface IOleUILinkInfoA : public IOleUILinkContainerA {
+  STDMETHOD(GetLastUpdate)(DWORD dwLink, FILETIME* lpLastUpdate) = 0;
+};
+typedef IOleUILinkInfoA* LPOLEUILINKINFOA;
+interface IOleUIObjInfoA : public IUnknown {
+  STDMETHOD(GetObjectInfo)(DWORD dwObject, DWORD* lpdwObjSize, LPSTR* lplpszLabel, LPSTR* lplpszType,
+                           LPSTR* lplpszShortType, LPSTR* lplpszLocation) = 0;
+  STDMETHOD(GetConvertInfo)(DWORD dwObject, CLSID* lpClassID, WORD* lpwFormat, CLSID* lpConvertDefaultClassID,
+                            LPCLSID* lplpClsidExclude, UINT* lpcClsidExclude) = 0;
+  STDMETHOD(ConvertObject)(DWORD dwObject, REFCLSID clsidNew) = 0;
+  STDMETHOD(GetViewInfo)(DWORD dwObject, HGLOBAL* phMetaPict, DWORD* pdvAspect, int* pnCurrentScale) = 0;
+  STDMETHOD(SetViewInfo)(DWORD dwObject, HGLOBAL hMetaPict, DWORD dvAspect, int nCurrentScale,
+                         BOOL bRelativeToOrig) = 0;
+};
+typedef IOleUIObjInfoA* LPOLEUIOBJINFOA;
+typedef struct tagOLEUICHANGESOURCEA {
+  DWORD cbStruct;
+  DWORD dwFlags;
+  HWND hWndOwner;
+  LPCSTR lpszCaption;
+  LPFNOLEUIHOOK lpfnHook;
+  LPARAM lCustData;
+  HINSTANCE hInstance;
+  LPCSTR lpszTemplate;
+  HRSRC hResource;
+  OPENFILENAMEA* lpOFN;
+  DWORD dwReserved1[4];
+  LPOLEUILINKCONTAINERA lpOleUILinkContainer;
+  DWORD dwLink;
+  LPSTR lpszDisplayName;
+  ULONG nFileLength;
+  LPSTR lpszFrom;
+  LPSTR lpszTo;
+} OLEUICHANGESOURCEA, *POLEUICHANGESOURCEA, *LPOLEUICHANGESOURCEA;
+struct tagOLEUIOBJECTPROPSA;
+typedef struct tagOLEUIGNRLPROPSA {
+  DWORD cbStruct;
+  DWORD dwFlags;
+  DWORD dwReserved1[2];
+  LPFNOLEUIHOOK lpfnHook;
+  LPARAM lCustData;
+  DWORD dwReserved2[3];
+  struct tagOLEUIOBJECTPROPSA* lpOP;
+} OLEUIGNRLPROPSA, *POLEUIGNRLPROPSA, *LPOLEUIGNRLPROPSA;
+typedef struct tagOLEUIVIEWPROPSA {
+  DWORD cbStruct;
+  DWORD dwFlags;
+  DWORD dwReserved1[2];
+  LPFNOLEUIHOOK lpfnHook;
+  LPARAM lCustData;
+  DWORD dwReserved2[3];
+  struct tagOLEUIOBJECTPROPSA* lpOP;
+  int nScaleMin;
+  int nScaleMax;
+} OLEUIVIEWPROPSA, *POLEUIVIEWPROPSA, *LPOLEUIVIEWPROPSA;
+typedef struct tagOLEUILINKPROPSA {
+  DWORD cbStruct;
+  DWORD dwFlags;
+  DWORD dwReserved1[2];
+  LPFNOLEUIHOOK lpfnHook;
+  LPARAM lCustData;
+  DWORD dwReserved2[3];
+  struct tagOLEUIOBJECTPROPSA* lpOP;
+} OLEUILINKPROPSA, *POLEUILINKPROPSA, *LPOLEUILINKPROPSA;
+typedef struct tagOLEUIOBJECTPROPSA {
+  DWORD cbStruct;
+  DWORD dwFlags;
+  LPPROPSHEETHEADERA lpPS;
+  DWORD dwObject;
+  LPOLEUIOBJINFOA lpObjInfo;
+  DWORD dwLink;
+  LPOLEUILINKINFOA lpLinkInfo;
+  LPOLEUIGNRLPROPSA lpGP;
+  LPOLEUIVIEWPROPSA lpVP;
+  LPOLEUILINKPROPSA lpLP;
+} OLEUIOBJECTPROPSA, *POLEUIOBJECTPROPSA, *LPOLEUIOBJECTPROPSA;
+interface IOleUILinkInfoW : public IOleUILinkContainerW {
+  STDMETHOD(GetLastUpdate)(DWORD dwLink, FILETIME* lpLastUpdate) = 0;
+};
+typedef IOleUILinkInfoW* LPOLEUILINKINFOW;
+interface IOleUIObjInfoW : public IUnknown {
+  STDMETHOD(GetObjectInfo)(DWORD dwObject, DWORD* lpdwObjSize, LPWSTR* lplpszLabel, LPWSTR* lplpszType,
+                           LPWSTR* lplpszShortType, LPWSTR* lplpszLocation) = 0;
+  STDMETHOD(GetConvertInfo)(DWORD dwObject, CLSID* lpClassID, WORD* lpwFormat, CLSID* lpConvertDefaultClassID,
+                            LPCLSID* lplpClsidExclude, UINT* lpcClsidExclude) = 0;
+  STDMETHOD(ConvertObject)(DWORD dwObject, REFCLSID clsidNew) = 0;
+  STDMETHOD(GetViewInfo)(DWORD dwObject, HGLOBAL* phMetaPict, DWORD* pdvAspect, int* pnCurrentScale) = 0;
+  STDMETHOD(SetViewInfo)(DWORD dwObject, HGLOBAL hMetaPict, DWORD dvAspect, int nCurrentScale,
+                         BOOL bRelativeToOrig) = 0;
+};
+typedef IOleUIObjInfoW* LPOLEUIOBJINFOW;
+typedef struct tagOLEUICHANGESOURCEW {
+  DWORD cbStruct;
+  DWORD dwFlags;
+  HWND hWndOwner;
+  LPCWSTR lpszCaption;
+  LPFNOLEUIHOOK lpfnHook;
+  LPARAM lCustData;
+  HINSTANCE hInstance;
+  LPCWSTR lpszTemplate;
+  HRSRC hResource;
+  OPENFILENAMEW* lpOFN;
+  DWORD dwReserved1[4];
+  LPOLEUILINKCONTAINERW lpOleUILinkContainer;
+  DWORD dwLink;
+  LPWSTR lpszDisplayName;
+  ULONG nFileLength;
+  LPWSTR lpszFrom;
+  LPWSTR lpszTo;
+} OLEUICHANGESOURCEW, *POLEUICHANGESOURCEW, *LPOLEUICHANGESOURCEW;
+struct tagOLEUIOBJECTPROPSW;
+typedef struct tagOLEUIGNRLPROPSW {
+  DWORD cbStruct;
+  DWORD dwFlags;
+  DWORD dwReserved1[2];
+  LPFNOLEUIHOOK lpfnHook;
+  LPARAM lCustData;
+  DWORD dwReserved2[3];
+  struct tagOLEUIOBJECTPROPSW* lpOP;
+} OLEUIGNRLPROPSW, *POLEUIGNRLPROPSW, *LPOLEUIGNRLPROPSW;
+typedef struct tagOLEUIVIEWPROPSW {
+  DWORD cbStruct;
+  DWORD dwFlags;
+  DWORD dwReserved1[2];
+  LPFNOLEUIHOOK lpfnHook;
+  LPARAM lCustData;
+  DWORD dwReserved2[3];
+  struct tagOLEUIOBJECTPROPSW* lpOP;
+  int nScaleMin;
+  int nScaleMax;
+} OLEUIVIEWPROPSW, *POLEUIVIEWPROPSW, *LPOLEUIVIEWPROPSW;
+typedef struct tagOLEUILINKPROPSW {
+  DWORD cbStruct;
+  DWORD dwFlags;
+  DWORD dwReserved1[2];
+  LPFNOLEUIHOOK lpfnHook;
+  LPARAM lCustData;
+  DWORD dwReserved2[3];
+  struct tagOLEUIOBJECTPROPSW* lpOP;
+} OLEUILINKPROPSW, *POLEUILINKPROPSW, *LPOLEUILINKPROPSW;
+typedef struct tagOLEUIOBJECTPROPSW {
+  DWORD cbStruct;
+  DWORD dwFlags;
+  LPPROPSHEETHEADERW lpPS;
+  DWORD dwObject;
+  LPOLEUIOBJINFOW lpObjInfo;
+  DWORD dwLink;
+  LPOLEUILINKINFOW lpLinkInfo;
+  LPOLEUIGNRLPROPSW lpGP;
+  LPOLEUIVIEWPROPSW lpVP;
+  LPOLEUILINKPROPSW lpLP;
+} OLEUIOBJECTPROPSW, *POLEUIOBJECTPROPSW, *LPOLEUIOBJECTPROPSW;
+
+extern "C" {
+UINT WINAPI OleUIChangeSourceA(LPOLEUICHANGESOURCEA lp);
+UINT WINAPI OleUIChangeSourceW(LPOLEUICHANGESOURCEW lp);
+UINT WINAPI OleUIObjectPropertiesA(LPOLEUIOBJECTPROPSA lp);
+UINT WINAPI OleUIObjectPropertiesW(LPOLEUIOBJECTPROPSW lp);
+}
+
+#ifdef UNICODE
+#define IOleUILinkInfo IOleUILinkInfoW
+#define LPOLEUILINKINFO LPOLEUILINKINFOW
+#define IOleUIObjInfo IOleUIObjInfoW
+#define LPOLEUIOBJINFO LPOLEUIOBJINFOW
+#define OleUIChangeSource OleUIChangeSourceW
+#define OleUIObjectProperties OleUIObjectPropertiesW
+#define OLEUICHANGESOURCE OLEUICHANGESOURCEW
+#define POLEUICHANGESOURCE POLEUICHANGESOURCEW
+#define LPOLEUICHANGESOURCE LPOLEUICHANGESOURCEW
+#define OLEUIGNRLPROPS OLEUIGNRLPROPSW
+#define POLEUIGNRLPROPS POLEUIGNRLPROPSW
+#define LPOLEUIGNRLPROPS LPOLEUIGNRLPROPSW
+#define OLEUIVIEWPROPS OLEUIVIEWPROPSW
+#define POLEUIVIEWPROPS POLEUIVIEWPROPSW
+#define LPOLEUIVIEWPROPS LPOLEUIVIEWPROPSW
+#define OLEUILINKPROPS OLEUILINKPROPSW
+#define POLEUILINKPROPS POLEUILINKPROPSW
+#define LPOLEUILINKPROPS LPOLEUILINKPROPSW
+#define OLEUIOBJECTPROPS OLEUIOBJECTPROPSW
+#define POLEUIOBJECTPROPS POLEUIOBJECTPROPSW
+#define LPOLEUIOBJECTPROPS LPOLEUIOBJECTPROPSW
+#else
+#define IOleUILinkInfo IOleUILinkInfoA
+#define LPOLEUILINKINFO LPOLEUILINKINFOA
+#define IOleUIObjInfo IOleUIObjInfoA
+#define LPOLEUIOBJINFO LPOLEUIOBJINFOA
+#define OleUIChangeSource OleUIChangeSourceA
+#define OleUIObjectProperties OleUIObjectPropertiesA
+#define OLEUICHANGESOURCE OLEUICHANGESOURCEA
+#define POLEUICHANGESOURCE POLEUICHANGESOURCEA
+#define LPOLEUICHANGESOURCE LPOLEUICHANGESOURCEA
+#define OLEUIGNRLPROPS OLEUIGNRLPROPSA
+#define POLEUIGNRLPROPS POLEUIGNRLPROPSA
+#define LPOLEUIGNRLPROPS LPOLEUIGNRLPROPSA
+#define OLEUIVIEWPROPS OLEUIVIEWPROPSA
+#define POLEUIVIEWPROPS POLEUIVIEWPROPSA
+#define LPOLEUIVIEWPROPS LPOLEUIVIEWPROPSA
+#define OLEUILINKPROPS OLEUILINKPROPSA
+#define POLEUILINKPROPS POLEUILINKPROPSA
+#define LPOLEUILINKPROPS LPOLEUILINKPROPSA
+#define OLEUIOBJECTPROPS OLEUIOBJECTPROPSA
+#define POLEUIOBJECTPROPS POLEUIOBJECTPROPSA
+#define LPOLEUIOBJECTPROPS LPOLEUIOBJECTPROPSA
+#endif
+
 #endif

@@ -18,7 +18,7 @@ struct __winport_uuidof;
 #define WINPORT_UUIDOF(I)                              \
   template <>                                          \
   struct __winport_uuidof<I> {                         \
-    static const IID& iid() { return IID_##I; }        \
+    static constexpr const IID& iid() { return IID_##I; } \
   };
 
 interface IUnknown {

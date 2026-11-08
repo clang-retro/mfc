@@ -52,6 +52,14 @@ void _AfxDdxFieldOther(CDataExchange* pDX, int nIDC, T& value, SET* pSet, T null
   if (bWasNull) pSet->SetFieldNull(&value, FALSE);
 }
 
+// DWORD is UINT in the portable build, so the overload beside UINT takes
+// unsigned long there.
+#ifndef _WINPORT
+#define _AFX_DDX_ULONG DWORD
+#else
+#define _AFX_DDX_ULONG unsigned long
+#endif
+
 // The DDX_Field functions for a recordset class: DDX_FIELD_FUNCTIONS(CRecordset).
 #define _AFX_DDX_FIELD_TEXT(SET, T)                                                   \
   void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, T& value, SET* pSet) {    \
@@ -62,7 +70,7 @@ void _AfxDdxFieldOther(CDataExchange* pDX, int nIDC, T& value, SET* pSet, T null
   _AFX_DDX_FIELD_TEXT(SET, int)                                                       \
   _AFX_DDX_FIELD_TEXT(SET, UINT)                                                      \
   _AFX_DDX_FIELD_TEXT(SET, long)                                                      \
-  _AFX_DDX_FIELD_TEXT(SET, DWORD)                                                     \
+  _AFX_DDX_FIELD_TEXT(SET, _AFX_DDX_ULONG)                                                   \
   _AFX_DDX_FIELD_TEXT(SET, CString)                                                   \
   _AFX_DDX_FIELD_TEXT(SET, float)                                                     \
   _AFX_DDX_FIELD_TEXT(SET, double)                                                    \

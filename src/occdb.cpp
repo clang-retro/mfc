@@ -545,9 +545,9 @@ void CDataSourceControl::Add(CDataBoundProperty* pProp) { m_bound.AddTail(pProp)
 void CDataSourceControl::Remove(CDataBoundProperty* pProp) {
   POSITION pos = m_bound.Find(pProp);
   if (pos != NULL) m_bound.RemoveAt(pos);
-  if (pProp->m_hAccessor != NULL && m_pAccessor != NULL) {
+  if (pProp->m_hAccessor != DB_NULL_HACCESSOR && m_pAccessor != NULL) {
     m_pAccessor->ReleaseAccessor(pProp->m_hAccessor, NULL);
-    pProp->m_hAccessor = NULL;
+    pProp->m_hAccessor = DB_NULL_HACCESSOR;
   }
 }
 
@@ -679,7 +679,7 @@ static CDataBoundProperty* NewBinding(COleControlSite* pSite, CDataSourceControl
   pProp->m_vt = vt;
   pProp->m_bComplex = bComplex;
   pProp->m_nColumn = 0;
-  pProp->m_hAccessor = NULL;
+  pProp->m_hAccessor = DB_NULL_HACCESSOR;
   pProp->m_pNext = pSite->m_pBindings;
   pSite->m_pBindings = pProp;
   pDSC->Add(pProp);
@@ -692,7 +692,7 @@ void COleControlSite::BindDefaultProperty(DISPID dwDispID, VARTYPE vtProp, LPCTS
   CDataSourceControl* pDSC = GetDSC(pDSCWnd);
   if (pDSC == NULL || m_pObject == NULL) return;
   DBORDINAL nColumn = pDSC->FindColumn(szFieldName);
-  HACCESSOR hAccessor = NULL;
+  HACCESSOR hAccessor = DB_NULL_HACCESSOR;
   if (nColumn == 0) return;
   if (pDSC->m_pAccessor != NULL && !MakeAccessor(pDSC->m_pAccessor, nColumn, &hAccessor)) return;
   CDataBoundProperty* pProp = NewBinding(this, pDSC, dwDispID, vtProp, FALSE);

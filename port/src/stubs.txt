@@ -510,3 +510,26 @@ InternetSetOptionW
 InternetSetStatusCallbackA
 InternetSetStatusCallbackW
 InternetWriteFile
+
+# from main: HTML views, DAO, OLE dialogs, controls
+CheckDlgButton
+CoInternetCreateSecurityManager
+CoRegisterMessageFilter
+CopyIcon
+DestroyIcon
+DrawEdge
+DrawFrameControl
+EnumFontFamiliesExA
+EnumFontFamiliesExW
+GetUpdateRgn
+InvalidateRgn
+LBItemFromPt
+MakeDragList
+OffsetRgn
+OleCreatePictureIndirect
+OleLoadPicture
+OleUIChangeSourceA
+OleUIChangeSourceW
+OleUIObjectPropertiesA
+OleUIObjectPropertiesW
+SelectClipRgn

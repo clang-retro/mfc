@@ -111,6 +111,7 @@ typedef int INT32;
 typedef int LONG;
 typedef int LONG32;
 typedef int BOOL;
+typedef int WINBOOL;
 typedef int HFILE;
 typedef unsigned int UINT;
 typedef unsigned int UINT32;
