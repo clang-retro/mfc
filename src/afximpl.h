@@ -12,8 +12,11 @@ void AFXAPI _AfxRegisterInPlaceDockSite(CFrameWnd* pFrame, BOOL bAdd);
 // Shared in-place menus (oleipcli.cpp): copies the groups of hMenuSource,
 // split by separators, into hMenuShared (nFirstGroup 0 for a container's
 // groups 0, 2 and 4; 1 for an object's 1, 3 and 5), and takes them out.
-void AFXAPI _AfxMergeMenus(HMENU hMenuShared, HMENU hMenuSource, LONG* lpMenuWidths,
-                           int nFirstGroup);
+// nLastGroup (nFirstGroup + 4 when -1) is the last group filled: past it,
+// with bStop the merge stops, and otherwise the rest goes into it. The
+// result is the position in hMenuSource where the merge stopped.
+int AFXAPI _AfxMergeMenus(HMENU hMenuShared, HMENU hMenuSource, LONG* lpMenuWidths,
+                          int nFirstGroup, int nLastGroup = -1, BOOL bStop = FALSE);
 void AFXAPI _AfxUnmergeMenus(HMENU hMenuShared, HMENU hMenuSource);
 
 // Idle updates for in-place frames, which are not under the main window
@@ -31,8 +34,29 @@ struct _AFX_OCC_HOOKS {
   void(AFXAPI* pfnNcDestroy)(CWnd* pWnd);  // the container goes
   BOOL(AFXAPI* pfnDestroyControl)(CWnd* pWnd);  // DestroyWindow on a control's window
   BOOL(AFXAPI* pfnDDXControl)(CWnd* pDlgWnd, int nIDC, CWnd& rControl);
+  // Windowless controls in the window: whether there are any, a message
+  // for one of them, and drawing them over what the window painted.
+  BOOL(AFXAPI* pfnHasWindowless)(CWnd* pWnd);
+  BOOL(AFXAPI* pfnWindowlessMessage)(CWnd* pWnd, UINT message, WPARAM wParam, LPARAM lParam,
+                                     LRESULT* plResult);
+  void(AFXAPI* pfnPaintWindowless)(CWnd* pWnd, HRGN hRgnUpdate);
 };
 extern const _AFX_OCC_HOOKS* _afxOccHooks;
+// What a control site calls once a control is data bound (occdb.cpp):
+// a control's bound property changed, a site goes, and a data source
+// control's cursor changed.
+class COleControlSite;
+struct _AFX_OCC_BIND_HOOKS {
+  void(AFXAPI* pfnChanged)(COleControlSite* pSite, DISPID dispid);
+  void(AFXAPI* pfnRelease)(COleControlSite* pSite);
+  // A data source control's site was told of a change to its cursor.
+  HRESULT(AFXAPI* pfnDBEvent)(COleControlSite* pSite, int nState, DWORD dwEventWhat,
+                              ULONG cReasons, struct tagDBNOTIFYREASON* rgReasons);
+};
+// Fires a data source control's notification (ON_DSCNOTIFY) on its
+// container: S_FALSE when a handler refuses it.
+HRESULT AFXAPI _AfxFireDSCNotify(COleControlSite* pSite, DSCSTATE nState, DSCREASON nReason);
+extern const _AFX_OCC_BIND_HOOKS* _afxOccBindHooks;
 
 // Empties the type library caches (oleconn.cpp), before OLE goes.
 void AFXAPI _AfxReleaseTypeLibCaches();

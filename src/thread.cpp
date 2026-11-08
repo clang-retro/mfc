@@ -18,6 +18,7 @@ void CWinThread::CommonConstruct() {
   memset(&m_msgCur, 0, sizeof(m_msgCur));
   m_ptCursorLast = CPoint(-1, -1);
   m_nMsgLast = 0;
+  m_pMessageFilter = NULL;
 }
 
 CWinThread::CWinThread() : m_pThreadParams(NULL), m_pfnThreadProc(NULL) { CommonConstruct(); }

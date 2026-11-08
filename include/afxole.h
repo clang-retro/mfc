@@ -997,8 +997,8 @@ public:
   COleCntrFrameWnd* m_pDocFrame;
 
   // The shared menu: the container's groups and the in-place menu's.
-  BOOL BuildSharedMenu();
-  void DestroySharedMenu();
+  virtual BOOL BuildSharedMenu();
+  virtual void DestroySharedMenu();
 
 protected:
   afx_msg void OnSize(UINT nType, int cx, int cy);
@@ -1178,6 +1178,71 @@ public:
 protected:
   virtual CCmdTarget* OnCreateObject();
 };
+
+// ---------------------------------------------------------------------
+// COleMessageFilter: the thread's IMessageFilter. While busy
+// (BeginBusyState), calls from other applications are refused with the
+// busy reply; calls to a busy application are retried, and after the
+// timeout the Server Busy dialog asks the user, as does Not Responding
+// while a call waits and the user tries to work. AfxOleInit registers
+// one for the thread (AfxOleGetMessageFilter).
+class COleMessageFilter : public CCmdTarget {
+  DECLARE_DYNAMIC(COleMessageFilter)
+public:
+  COleMessageFilter();
+  virtual ~COleMessageFilter();
+
+  BOOL Register();
+  void Revoke();
+
+  virtual void BeginBusyState();
+  virtual void EndBusyState();
+  void SetBusyReply(SERVERCALL nBusyReply) { m_nBusyReply = nBusyReply; }
+  // Milliseconds to wait before retrying a refused call; (DWORD)-1
+  // cancels it.
+  void SetRetryReply(DWORD nRetryReply = 0) { m_nRetryReply = nRetryReply; }
+  // How long a call waits before the dialogs show.
+  void SetMessagePendingDelay(DWORD nTimeout = 5000) { m_nTimeout = nTimeout; }
+  void EnableBusyDialog(BOOL bEnableBusy = TRUE) { m_bEnableBusy = bEnableBusy; }
+  void EnableNotRespondingDialog(BOOL bEnableNotResponding = TRUE) {
+    m_bEnableNotResponding = bEnableNotResponding;
+  }
+
+  // A message that arrives while a call waits; TRUE when handled. It
+  // dispatches WM_PAINT, so that windows repaint.
+  virtual BOOL OnMessagePending(const MSG* pMsg);
+
+protected:
+  // The dialogs: -1 cancels the call, anything else retries it.
+  virtual int OnBusyDialog(HTASK htaskBusy);
+  virtual int OnNotRespondingDialog(HTASK htaskBusy);
+  // Whether a message is one the user is waiting on (input), which
+  // brings up Not Responding.
+  virtual BOOL IsSignificantMessage(MSG* pMsg);
+
+  int m_nBusyCount;
+  BOOL m_bEnableBusy;
+  BOOL m_bEnableNotResponding;
+  BOOL m_bUnblocking;   // a dialog is up
+  DWORD m_nRetryReply;
+  DWORD m_nBusyReply;
+  DWORD m_nTimeout;
+  BOOL m_bRegistered;
+
+public:
+  BEGIN_INTERFACE_PART(MessageFilter, IMessageFilter)
+    STDMETHOD_(DWORD, HandleInComingCall)(DWORD dwCallType, HTASK htaskCaller,
+                                          DWORD dwTickCount, LPINTERFACEINFO lpInterfaceInfo);
+    STDMETHOD_(DWORD, RetryRejectedCall)(HTASK htaskCallee, DWORD dwTickCount,
+                                         DWORD dwRejectType);
+    STDMETHOD_(DWORD, MessagePending)(HTASK htaskCallee, DWORD dwTickCount,
+                                      DWORD dwPendingType);
+  END_INTERFACE_PART(MessageFilter)
+
+  DECLARE_INTERFACE_MAP()
+};
+
+COleMessageFilter* AFXAPI AfxOleGetMessageFilter();
 
 // Fills the object verb item of an Edit menu ("&Object" at nPosition) with
 // the item's verbs, from nIDVerbMin on; NULL disables it.

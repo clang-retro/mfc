@@ -10,6 +10,7 @@
 #include <afxwin.h>
 #include <afxext.h>
 #include <afxole.h>
+#include <afxodlgs.h>
 #include "linktest.h"
 #include "testutil.h"
 
@@ -255,6 +256,33 @@ public:
   void TestOpenDocument();
   void TestClosedDocument();
   void TestEmbeddedObject();
+  void TestDialogs(CCntrDoc* pCntr, COleClientItem* pClient);
+  void TestMessageFilter();
+};
+
+// The Object Properties dialog's View page asks the program to scale.
+class CPropsDialog : public COlePropertiesDialog {
+public:
+  int m_nScale;
+  explicit CPropsDialog(COleClientItem* pItem) : COlePropertiesDialog(pItem), m_nScale(0) {}
+  virtual BOOL OnApplyScale(COleClientItem*, int nCurrentScale, BOOL) {
+    m_nScale = nCurrentScale;
+    return TRUE;
+  }
+};
+
+// A message filter whose Server Busy dialog answers by itself.
+class CTestFilter : public COleMessageFilter {
+public:
+  int m_nBusyDialogs, m_nAnswer;
+  CTestFilter() : m_nBusyDialogs(0), m_nAnswer(0) {}
+  LPMESSAGEFILTER Filter() { return (LPMESSAGEFILTER)GetInterface(&IID_IMessageFilter); }
+
+protected:
+  virtual int OnBusyDialog(HTASK) {
+    m_nBusyDialogs++;
+    return m_nAnswer;
+  }
 };
 
 CLinkApp theApp;
@@ -560,11 +588,151 @@ void CLinkApp::TestEmbeddedObject() {
     CHECK(SUCCEEDED(hr) && SameObject(lpUnk, pClient->m_lpObject));
     if (lpUnk != NULL) lpUnk->Release();
     lpExpected->Release();
+    TestDialogs(pCntr, pClient);
     pClient->Close(OLECLOSE_NOSAVE);
   }
   pCntr->OnCloseDocument();  // deletes it and its items
   TestLog("documents at the end %d", g_nDocs);
   CHECK(g_nDocs == 0);
+}
+
+// The Object Properties dialog's object information and the Change Source
+// dialog's names, without the dialogs: through the interfaces they use.
+void CLinkApp::TestDialogs(CCntrDoc* pCntr, COleClientItem* pClient) {
+  CPropsDialog props(pClient);
+  CHECK(props.m_op.lpObjInfo != NULL && props.m_op.lpLP == NULL &&
+        !(props.m_op.dwFlags & OPF_OBJECTISLINK));
+  LPOLEUIOBJINFO lpInfo = props.m_op.lpObjInfo;
+  DWORD dwSize = 0;
+  LPTSTR lpszLabel = NULL, lpszType = NULL, lpszShort = NULL, lpszLocation = NULL;
+  CHECK(lpInfo->GetObjectInfo(1, &dwSize, &lpszLabel, &lpszType, &lpszShort, &lpszLocation) ==
+        S_OK);
+  TestLog("object info: size %ld, label %s, type %s, short %s, location %s", (long)dwSize,
+          (const char*)CStringA(lpszLabel), (const char*)CStringA(lpszType),
+          (const char*)CStringA(lpszShort), (const char*)CStringA(lpszLocation));
+  CHECK(lpszType != NULL && lstrlen(lpszType) > 0 && lpszShort != NULL);
+  CHECK(lpszLocation != NULL && m_strCntrPath.CompareNoCase(lpszLocation) == 0);
+  ::CoTaskMemFree(lpszLabel);
+  ::CoTaskMemFree(lpszType);
+  ::CoTaskMemFree(lpszShort);
+  ::CoTaskMemFree(lpszLocation);
+  CHECK(lpInfo->GetObjectInfo(2, &dwSize, NULL, NULL, NULL, NULL) == E_INVALIDARG);
+  CLSID clsid = CLSID_NULL;
+  WORD wFormat = 0;
+  CHECK(lpInfo->GetConvertInfo(1, &clsid, &wFormat, NULL, NULL, NULL) == S_OK);
+  CHECK(clsid == CLSID_LinkDoc);
+  HGLOBAL hMetaPict = NULL;
+  DWORD dwAspect = 0;
+  int nScale = 0;
+  CHECK(lpInfo->GetViewInfo(1, &hMetaPict, &dwAspect, &nScale) == S_OK);
+  TestLog("view info: icon %p, aspect %lu, scale %d", hMetaPict, dwAspect, nScale);
+  CHECK(dwAspect == DVASPECT_CONTENT && nScale == 100);
+  if (hMetaPict != NULL) {
+    METAFILEPICT* pmfp = (METAFILEPICT*)::GlobalLock(hMetaPict);
+    if (pmfp != NULL) ::DeleteMetaFile(pmfp->hMF);
+    ::GlobalUnlock(hMetaPict);
+    ::GlobalFree(hMetaPict);
+  }
+  pCntr->SetModifiedFlag(FALSE);
+  CHECK(lpInfo->SetViewInfo(1, NULL, DVASPECT_CONTENT, 150, FALSE) == S_OK);
+  CHECK(props.m_nScale == 150 && pCntr->IsModified());
+  pCntr->SetModifiedFlag(FALSE);
+
+  // An embedded item has no source to change.
+  {
+    COleChangeSourceDialog cs(pClient);
+    CHECK(cs.m_cs.dwLink == 0 && cs.GetDisplayName().IsEmpty() && !cs.IsValidSource());
+  }
+
+  // A link to the square's file: its source, and when that last changed.
+  COleClientItem* pLink = new COleClientItem(pCntr);
+  BOOL bLinked = pLink->CreateLinkFromFile(m_strPath);
+  TestLog("CreateLinkFromFile: %d (%08lx)", bLinked, (unsigned long)pLink->GetLastStatus());
+  // Wine's OleCreateLinkToFile is not there (E_NOTIMPL).
+  if (!bLinked && pLink->GetLastStatus() == E_NOTIMPL)
+    TestLog("note: no OleCreateLinkToFile; link source not checked");
+  else
+    CHECK(bLinked && pLink->GetType() == OT_LINK);
+  if (bLinked) {
+    COleChangeSourceDialog cs(pLink);
+    TestLog("change source: link %lu, name %s, file %s, item %s", cs.m_cs.dwLink,
+            (const char*)CStringA(cs.GetDisplayName()), (const char*)CStringA(cs.GetFileName()),
+            (const char*)CStringA(cs.GetItemName()));
+    CHECK(cs.m_cs.dwLink != 0 && cs.m_cs.lpOleUILinkContainer != NULL);
+    CHECK(m_strPath.CompareNoCase(cs.GetFileName()) == 0 && cs.GetItemName().IsEmpty());
+    FILETIME ft = {0, 0};
+    // The links' container is an IOleUILinkInfo, as the Link page needs.
+    LPOLEUILINKINFO lpLinkInfo = (LPOLEUILINKINFO)cs.m_cs.lpOleUILinkContainer;
+    HRESULT hr = lpLinkInfo->GetLastUpdate(cs.m_cs.dwLink, &ft);
+    TestLog("last update %08lx: %08lx%08lx", (unsigned long)hr, ft.dwHighDateTime,
+            ft.dwLowDateTime);
+    CHECK(SUCCEEDED(hr) && (ft.dwHighDateTime != 0 || ft.dwLowDateTime != 0));
+    CPropsDialog linkProps(pLink);
+    CHECK((linkProps.m_op.dwFlags & OPF_OBJECTISLINK) && linkProps.m_op.lpLP != NULL &&
+          linkProps.m_op.lpLinkInfo != NULL && linkProps.m_op.dwLink == cs.m_cs.dwLink);
+    lpszLocation = NULL;
+    CHECK(linkProps.m_op.lpObjInfo->GetObjectInfo(1, NULL, NULL, NULL, NULL, &lpszLocation) ==
+          S_OK);
+    CHECK(lpszLocation != NULL && m_strPath.CompareNoCase(lpszLocation) == 0);
+    ::CoTaskMemFree(lpszLocation);
+    pLink->Close(OLECLOSE_NOSAVE);
+  }
+  pLink->Delete();
+}
+
+// The thread's message filter, made by AfxOleInit: busy, it refuses new
+// calls; a refused call of its own is retried, then the user decides.
+void CLinkApp::TestMessageFilter() {
+  COleMessageFilter* pThreadFilter = AfxOleGetMessageFilter();
+  CHECK(pThreadFilter != NULL && pThreadFilter->IsKindOf(RUNTIME_CLASS(COleMessageFilter)));
+  CTestFilter filter;
+  LPMESSAGEFILTER lpFilter = filter.Filter();
+  CHECK(lpFilter != NULL);
+  if (lpFilter == NULL) return;
+  CHECK(lpFilter->HandleInComingCall(CALLTYPE_TOPLEVEL, NULL, 0, NULL) == SERVERCALL_ISHANDLED);
+  filter.BeginBusyState();
+  CHECK(lpFilter->HandleInComingCall(CALLTYPE_TOPLEVEL, NULL, 0, NULL) == SERVERCALL_RETRYLATER);
+  CHECK(lpFilter->HandleInComingCall(CALLTYPE_NESTED, NULL, 0, NULL) == SERVERCALL_ISHANDLED);
+  filter.SetBusyReply(SERVERCALL_REJECTED);
+  CHECK(lpFilter->HandleInComingCall(CALLTYPE_TOPLEVEL_CALLPENDING, NULL, 0, NULL) ==
+        SERVERCALL_REJECTED);
+  filter.EndBusyState();
+  CHECK(lpFilter->HandleInComingCall(CALLTYPE_TOPLEVEL, NULL, 0, NULL) == SERVERCALL_ISHANDLED);
+
+  // Rejected for good: cancelled. For now: retried, until the delay.
+  CHECK(lpFilter->RetryRejectedCall(NULL, 0, SERVERCALL_REJECTED) == (DWORD)-1);
+  filter.SetRetryReply(25);
+  filter.SetMessagePendingDelay(1000);
+  CHECK(lpFilter->RetryRejectedCall(NULL, 500, SERVERCALL_RETRYLATER) == 25);
+  CHECK(filter.m_nBusyDialogs == 0);
+  // Then the Server Busy dialog: Retry retries now, Cancel cancels.
+  CHECK(lpFilter->RetryRejectedCall(NULL, 1500, SERVERCALL_RETRYLATER) == 0);
+  filter.m_nAnswer = -1;
+  CHECK(lpFilter->RetryRejectedCall(NULL, 1500, SERVERCALL_RETRYLATER) == (DWORD)-1);
+  CHECK(filter.m_nBusyDialogs == 2);
+  filter.EnableBusyDialog(FALSE);
+  CHECK(lpFilter->RetryRejectedCall(NULL, 1500, SERVERCALL_RETRYLATER) == 25);
+  CHECK(filter.m_nBusyDialogs == 2);
+  // With nothing waiting, a pending message goes on waiting.
+  MSG msg;
+  while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) ::DispatchMessage(&msg);
+  CHECK(lpFilter->MessagePending(NULL, 1500, PENDINGTYPE_TOPLEVEL) == PENDINGMSG_WAITDEFPROCESS);
+
+  // Registered, it is the thread's COM message filter.
+  CHECK(filter.Register());
+  LPMESSAGEFILTER lpOld = NULL;
+  CHECK(SUCCEEDED(::CoRegisterMessageFilter(NULL, &lpOld)) && lpOld == lpFilter);
+  if (lpOld != NULL) lpOld->Release();
+  ::CoRegisterMessageFilter(lpFilter, &lpOld);  // back, for Revoke
+  if (lpOld != NULL) lpOld->Release();
+  filter.Revoke();
+  // The thread's filter back in its place.
+  if (pThreadFilter != NULL) {
+    lpOld = NULL;
+    ::CoRegisterMessageFilter((LPMESSAGEFILTER)pThreadFilter->GetInterface(&IID_IMessageFilter),
+                              &lpOld);
+    if (lpOld != NULL) lpOld->Release();
+  }
 }
 
 BOOL CLinkApp::InitInstance() {
@@ -593,6 +761,7 @@ BOOL CLinkApp::InitInstance() {
   TestRegistry();
   TestClosedDocument();
   TestEmbeddedObject();
+  TestMessageFilter();
 
   pFrame->DestroyWindow();
   m_pMainWnd = NULL;

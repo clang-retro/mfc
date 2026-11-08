@@ -292,6 +292,22 @@ LRESULT CWnd::WindowProc(UINT message, WPARAM wParam, LPARAM lParam) {
   if (message == WM_INITDIALOG && m_pOccDialogInfo != NULL && _afxOccHooks != NULL)
     _afxOccHooks->pfnInitDialog(this);
   LRESULT lResult = 0;
+  // Windowless controls get their messages before the window, and draw
+  // over what it paints.
+  if (m_pCtrlCont != NULL && _afxOccHooks != NULL && _afxOccHooks->pfnHasWindowless(this)) {
+    if (message == WM_PAINT) {
+      HRGN hRgn = ::CreateRectRgn(0, 0, 0, 0);
+      int nRgn = ::GetUpdateRgn(m_hWnd, hRgn, FALSE);
+      if (!OnWndMsg(message, wParam, lParam, &lResult))
+        lResult = DefWindowProc(message, wParam, lParam);
+      if (nRgn != NULLREGION && nRgn != ERROR && m_hWnd != NULL)
+        _afxOccHooks->pfnPaintWindowless(this, hRgn);
+      ::DeleteObject(hRgn);
+      return lResult;
+    }
+    if (_afxOccHooks->pfnWindowlessMessage(this, message, wParam, lParam, &lResult))
+      return lResult;
+  }
   if (!OnWndMsg(message, wParam, lParam, &lResult))
     lResult = DefWindowProc(message, wParam, lParam);
   // The hosted controls close after the window's own OnDestroy.
@@ -342,6 +358,14 @@ BOOL CWnd::OnWndMsg(UINT message, WPARAM wParam, LPARAM lParam, LRESULT* pResult
     if (pNMHDR == NULL || pNMHDR->hwndFrom == NULL || !OnNotify(wParam, lParam, &lResult))
       return FALSE;
     goto LReturnTrue;
+  }
+
+  // A drag list box's notification goes back to the list box first.
+  if (message >= 0xC000) {
+    static const UINT s_nDragListMsg = ::RegisterWindowMessage(_T("commctrl_DragListMsg"));
+    if (message == s_nDragListMsg && lParam != 0 &&
+        ReflectLastMsg(((DRAGLISTINFO*)lParam)->hWnd, &lResult))
+      goto LReturnTrue;
   }
 
   {
@@ -795,6 +819,8 @@ BOOL AFXAPI AfxDeferRegisterClass(LONG fToRegister) {
       {AFX_WNDCOMMCTL_COOL_REG, ICC_COOL_CLASSES},
       {AFX_WNDCOMMCTL_USEREX_REG, ICC_USEREX_CLASSES},
       {AFX_WNDCOMMCTL_DATE_REG, ICC_DATE_CLASSES},
+      {AFX_WNDCOMMCTL_PAGER_REG, ICC_PAGESCROLLER_CLASS},
+      {AFX_WNDCOMMCTL_LINK_REG, ICC_LINK_CLASS},
   };
   for (size_t i = 0; i < sizeof(commctls) / sizeof(commctls[0]); i++) {
     if ((fToRegister & commctls[i].fReg) && _AfxInitCommonControls(commctls[i].dwICC))

@@ -8,6 +8,177 @@
 #include <afxocc.h>
 #include <olectl.h>
 
+const _AFX_OCC_BIND_HOOKS* _afxOccBindHooks = NULL;
+
+// ---------------------------------------------------------------------
+// The extended control: the extender properties, and the control's own
+// names and DISPIDs passed on to it.
+
+namespace {
+
+struct ExtProp {
+  const WCHAR* pszName;
+  DISPID dispid;
+};
+const ExtProp kExtProps[] = {
+    {L"Name", DISPID_NAME},          {L"Object", DISPID_OBJECT},
+    {L"Parent", DISPID_PARENT},      {L"Left", AFX_DISPID_EXT_LEFT},
+    {L"Top", AFX_DISPID_EXT_TOP},    {L"Width", AFX_DISPID_EXT_WIDTH},
+    {L"Height", AFX_DISPID_EXT_HEIGHT}, {L"Visible", AFX_DISPID_EXT_VISIBLE},
+    {L"ID", AFX_DISPID_EXT_ID},
+};
+
+class CExtendedControl final : public IDispatch {
+public:
+  explicit CExtendedControl(COleControlSite* pSite) : m_cRef(1), m_pSite(pSite) {}
+
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (::IsEqualIID(iid, IID_IUnknown) || ::IsEqualIID(iid, IID_IDispatch)) {
+      *ppv = static_cast<IDispatch*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return (ULONG)InterlockedIncrement(&m_cRef); }
+  STDMETHOD_(ULONG, Release)() {
+    LONG c = InterlockedDecrement(&m_cRef);
+    if (c == 0) delete this;
+    return (ULONG)c;
+  }
+  STDMETHOD(GetTypeInfoCount)(UINT* pctinfo) {
+    *pctinfo = 0;
+    return S_OK;
+  }
+  STDMETHOD(GetTypeInfo)(UINT, LCID, ITypeInfo** ppTI) {
+    *ppTI = NULL;
+    return E_NOTIMPL;
+  }
+  STDMETHOD(GetIDsOfNames)(REFIID riid, LPOLESTR* rgszNames, UINT cNames, LCID lcid,
+                           DISPID* rgDispId) {
+    if (cNames == 1) {
+      for (const ExtProp& prop : kExtProps)
+        if (::lstrcmpiW(rgszNames[0], prop.pszName) == 0) {
+          rgDispId[0] = prop.dispid;
+          return S_OK;
+        }
+    }
+    IDispatch* pDisp = Control();
+    if (pDisp == NULL) return DISP_E_UNKNOWNNAME;
+    return pDisp->GetIDsOfNames(riid, rgszNames, cNames, lcid, rgDispId);
+  }
+  STDMETHOD(Invoke)(DISPID dispid, REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS* pParams,
+                    VARIANT* pResult, EXCEPINFO* pExcepInfo, UINT* puArgErr) {
+    if (!IsExtender(dispid)) {
+      IDispatch* pDisp = Control();
+      if (pDisp == NULL) return DISP_E_MEMBERNOTFOUND;
+      return pDisp->Invoke(dispid, riid, lcid, wFlags, pParams, pResult, pExcepInfo, puArgErr);
+    }
+    if (m_pSite == NULL) return E_UNEXPECTED;
+    if (wFlags & DISPATCH_PROPERTYGET) return GetExtender(dispid, pResult);
+    if (wFlags & (DISPATCH_PROPERTYPUT | DISPATCH_PROPERTYPUTREF)) {
+      if (pParams == NULL || pParams->cArgs != 1) return DISP_E_BADPARAMCOUNT;
+      return PutExtender(dispid, &pParams->rgvarg[0], puArgErr);
+    }
+    return DISP_E_MEMBERNOTFOUND;
+  }
+
+  LONG m_cRef;
+  COleControlSite* m_pSite;  // NULL once the site goes
+
+private:
+  IDispatch* Control() const {
+    return m_pSite != NULL ? m_pSite->m_dispDriver.m_lpDispatch : NULL;
+  }
+  static BOOL IsExtender(DISPID dispid) {
+    for (const ExtProp& prop : kExtProps)
+      if (prop.dispid == dispid) return TRUE;
+    return FALSE;
+  }
+  HRESULT GetExtender(DISPID dispid, VARIANT* pResult) {
+    if (pResult == NULL) return S_OK;
+    ::VariantInit(pResult);
+    const CRect& rect = m_pSite->m_rect;
+    switch (dispid) {
+      case DISPID_NAME:
+        pResult->vt = VT_BSTR;
+        pResult->bstrVal = m_pSite->m_strName.AllocSysString();
+        return S_OK;
+      case DISPID_OBJECT:
+        pResult->vt = VT_DISPATCH;
+        pResult->pdispVal = Control();
+        if (pResult->pdispVal != NULL) pResult->pdispVal->AddRef();
+        return S_OK;
+      case DISPID_PARENT: {
+        // The container window's automation object, when it has one.
+        CWnd* pWnd = m_pSite->m_pCtrlCont->m_pWnd;
+        pResult->vt = VT_DISPATCH;
+        pResult->pdispVal = pWnd != NULL ? pWnd->GetIDispatch(TRUE) : NULL;
+        return S_OK;
+      }
+      case AFX_DISPID_EXT_LEFT: pResult->vt = VT_I4; pResult->lVal = rect.left; return S_OK;
+      case AFX_DISPID_EXT_TOP: pResult->vt = VT_I4; pResult->lVal = rect.top; return S_OK;
+      case AFX_DISPID_EXT_WIDTH: pResult->vt = VT_I4; pResult->lVal = rect.Width(); return S_OK;
+      case AFX_DISPID_EXT_HEIGHT: pResult->vt = VT_I4; pResult->lVal = rect.Height(); return S_OK;
+      case AFX_DISPID_EXT_VISIBLE:
+        pResult->vt = VT_BOOL;
+        pResult->boolVal = (m_pSite->m_dwStyle & WS_VISIBLE) ? VARIANT_TRUE : VARIANT_FALSE;
+        return S_OK;
+      case AFX_DISPID_EXT_ID:
+        pResult->vt = VT_I4;
+        pResult->lVal = (LONG)m_pSite->GetDlgCtrlID();
+        return S_OK;
+    }
+    return DISP_E_MEMBERNOTFOUND;
+  }
+  HRESULT PutExtender(DISPID dispid, VARIANT* pArg, UINT* puArgErr) {
+    VARIANT var;
+    ::VariantInit(&var);
+    VARTYPE vt = dispid == DISPID_NAME              ? VT_BSTR
+                 : dispid == AFX_DISPID_EXT_VISIBLE ? VT_BOOL
+                                                    : VT_I4;
+    if (dispid == DISPID_OBJECT || dispid == DISPID_PARENT) return DISP_E_MEMBERNOTFOUND;
+    if (FAILED(::VariantChangeType(&var, pArg, 0, vt))) {
+      if (puArgErr != NULL) *puArgErr = 0;
+      return DISP_E_TYPEMISMATCH;
+    }
+    CRect rect = m_pSite->m_rect;
+    switch (dispid) {
+      case DISPID_NAME: m_pSite->m_strName = var.bstrVal; break;
+      case AFX_DISPID_EXT_LEFT: rect.OffsetRect(var.lVal - rect.left, 0); break;
+      case AFX_DISPID_EXT_TOP: rect.OffsetRect(0, var.lVal - rect.top); break;
+      case AFX_DISPID_EXT_WIDTH: rect.right = rect.left + var.lVal; break;
+      case AFX_DISPID_EXT_HEIGHT: rect.bottom = rect.top + var.lVal; break;
+      case AFX_DISPID_EXT_VISIBLE:
+        m_pSite->ShowWindow(var.boolVal != VARIANT_FALSE ? SW_SHOWNA : SW_HIDE);
+        break;
+      case AFX_DISPID_EXT_ID: m_pSite->SetDlgCtrlID((int)var.lVal); break;
+    }
+    ::VariantClear(&var);
+    if (rect != m_pSite->m_rect)
+      m_pSite->MoveWindow(rect.left, rect.top, rect.Width(), rect.Height());
+    return S_OK;
+  }
+};
+
+}  // namespace
+
+LPDISPATCH COleControlSite::GetExtendedControl() {
+  if (m_pObject == NULL) return NULL;
+  if (m_pExtendedControl == NULL) m_pExtendedControl = new CExtendedControl(this);
+  m_pExtendedControl->AddRef();
+  return m_pExtendedControl;
+}
+
+static void _AfxReleaseExtendedControl(COleControlSite* pSite) {
+  if (pSite->m_pExtendedControl == NULL) return;
+  // The control may still hold it; it no longer reaches the site.
+  static_cast<CExtendedControl*>(pSite->m_pExtendedControl)->m_pSite = NULL;
+  pSite->m_pExtendedControl->Release();
+  pSite->m_pExtendedControl = NULL;
+}
+
 // HIMETRIC and pixels, at the screen's resolution.
 static void PixelsToHimetric(const SIZE& sizePix, SIZEL* pSizeHm) {
   HDC hDC = ::GetDC(NULL);
@@ -32,9 +203,12 @@ BEGIN_INTERFACE_MAP(COleControlSite, CCmdTarget)
   INTERFACE_PART(COleControlSite, IID_IOleClientSite, OleClientSite)
   INTERFACE_PART(COleControlSite, IID_IOleWindow, OleIPSite)
   INTERFACE_PART(COleControlSite, IID_IOleInPlaceSite, OleIPSite)
+  INTERFACE_PART(COleControlSite, IID_IOleInPlaceSiteEx, OleIPSite)
+  INTERFACE_PART(COleControlSite, IID_IOleInPlaceSiteWindowless, OleIPSite)
   INTERFACE_PART(COleControlSite, IID_IOleControlSite, OleControlSite)
   INTERFACE_PART(COleControlSite, IID_IDispatch, AmbientProps)
   INTERFACE_PART(COleControlSite, IID_IPropertyNotifySink, PropertyNotifySink)
+  INTERFACE_PART(COleControlSite, IID_INotifyDBEvents, NotifyDBEvents)
 END_INTERFACE_MAP()
 
 COleControlSite::COleControlSite(COleControlContainer* pCtrlCont)
@@ -49,6 +223,7 @@ COleControlSite::COleControlSite(COleControlContainer* pCtrlCont)
       m_pActiveObject(NULL),
       m_dwEventSink(0),
       m_dwPropNotifySink(0),
+      m_dwNotifyDBEvents(0),
       m_dwMiscStatus(0),
       m_dwStyleMask(WS_GROUP | WS_TABSTOP),
       m_dwStyle(0),
@@ -59,7 +234,11 @@ COleControlSite::COleControlSite(COleControlContainer* pCtrlCont)
       m_pWndOwned(NULL),
       m_clsid(GUID_NULL),
       m_pWindowlessObject(NULL),
-      m_nFreezeEvents(0) {
+      m_nFreezeEvents(0),
+      m_pDataSourceControl(NULL),
+      m_pBindings(NULL),
+      m_bIgnoreNotify(FALSE),
+      m_pExtendedControl(NULL) {
   memset(&m_ctlInfo, 0, sizeof(m_ctlInfo));
   m_ctlInfo.cb = sizeof(m_ctlInfo);
 }
@@ -115,6 +294,7 @@ HRESULT COleControlSite::CreateControl(CWnd* pWndCtrl, REFCLSID clsid, LPCTSTR l
   if (!::IsEqualIID(m_iidEvents, GUID_NULL))
     ConnectSink(m_iidEvents, &m_xEventSink, &m_dwEventSink);
   ConnectSink(IID_IPropertyNotifySink, &m_xPropertyNotifySink, &m_dwPropNotifySink);
+  ConnectSink(IID_INotifyDBEvents, &m_xNotifyDBEvents, &m_dwNotifyDBEvents);
   GetControlInfo();
 
   // Active in place, with a window, unless it is invisible at run time.
@@ -122,9 +302,10 @@ HRESULT COleControlSite::CreateControl(CWnd* pWndCtrl, REFCLSID clsid, LPCTSTR l
   hr = m_pObject->DoVerb(OLEIVERB_INPLACEACTIVATE, NULL, &m_xOleClientSite, 0, hWndParent,
                          &m_rect);
   if (FAILED(hr) && !(m_dwMiscStatus & OLEMISC_INVISIBLEATRUNTIME)) {
+    DisconnectSink(IID_INotifyDBEvents, m_dwNotifyDBEvents);
     DisconnectSink(IID_IPropertyNotifySink, m_dwPropNotifySink);
     DisconnectSink(m_iidEvents, m_dwEventSink);
-    m_dwEventSink = m_dwPropNotifySink = 0;
+    m_dwEventSink = m_dwPropNotifySink = m_dwNotifyDBEvents = 0;
     m_dispDriver.ReleaseDispatch();
     m_pObject->Close(OLECLOSE_NOSAVE);
     m_pObject->SetClientSite(NULL);
@@ -358,14 +539,21 @@ void COleControlSite::DetachWindow() {
 }
 
 BOOL COleControlSite::DestroyControl() {
+  _AfxReleaseExtendedControl(this);
+  if (_afxOccBindHooks != NULL) _afxOccBindHooks->pfnRelease(this);
   DetachWindow();
   if (m_hWnd != NULL) m_pCtrlCont->m_siteMap.RemoveKey(m_hWnd);
   if (m_pCtrlCont->m_pSiteUIActive == this) m_pCtrlCont->m_pSiteUIActive = NULL;
   if (m_pCtrlCont->m_pSiteFocus == this) m_pCtrlCont->m_pSiteFocus = NULL;
+  if (m_pCtrlCont->m_pSiteCapture == this) {
+    m_pCtrlCont->m_pSiteCapture = NULL;
+    if (::GetCapture() == m_pCtrlCont->m_pWnd->GetSafeHwnd()) ::ReleaseCapture();
+  }
   if (m_pObject != NULL) {
+    DisconnectSink(IID_INotifyDBEvents, m_dwNotifyDBEvents);
     DisconnectSink(IID_IPropertyNotifySink, m_dwPropNotifySink);
     DisconnectSink(m_iidEvents, m_dwEventSink);
-    m_dwEventSink = m_dwPropNotifySink = 0;
+    m_dwEventSink = m_dwPropNotifySink = m_dwNotifyDBEvents = 0;
     m_dispDriver.ReleaseDispatch();
     // Closing deactivates it, which destroys its window.
     m_pObject->Close(OLECLOSE_NOSAVE);
@@ -508,7 +696,9 @@ int COleControlSite::SetDlgCtrlID(int nID) {
 }
 
 void COleControlSite::MoveWindow(int x, int y, int nWidth, int nHeight, BOOL bRepaint) {
+  if (m_bIsWindowless && bRepaint) InvalidateWindowless(NULL, TRUE);  // where it was
   m_rect.SetRect(x, y, x + nWidth, y + nHeight);
+  if (m_bIsWindowless && bRepaint) InvalidateWindowless(NULL, TRUE);
   SetExtent();
   if (m_pInPlaceObject != NULL)
     m_pInPlaceObject->SetObjectRects(&m_rect, &m_rect);
@@ -532,10 +722,15 @@ BOOL COleControlSite::SetWindowPos(const CWnd* pWndInsertAfter, int x, int y, in
 BOOL COleControlSite::ShowWindow(int nCmdShow) {
   if (nCmdShow == SW_HIDE && m_bUIActive && m_pInPlaceObject != NULL)
     m_pInPlaceObject->UIDeactivate();
+  BOOL bWasVisible = (m_dwStyle & WS_VISIBLE) != 0;
   if (nCmdShow == SW_HIDE)
     m_dwStyle &= ~WS_VISIBLE;
   else
     m_dwStyle |= WS_VISIBLE;
+  if (m_bIsWindowless) {
+    if (bWasVisible != ((m_dwStyle & WS_VISIBLE) != 0)) InvalidateWindowless(NULL, TRUE);
+    return bWasVisible;
+  }
   return m_hWnd != NULL ? ::ShowWindow(m_hWnd, nCmdShow) : FALSE;
 }
 
@@ -699,9 +894,7 @@ STDMETHODIMP COleControlSite::XOleIPSite::ContextSensitiveHelp(BOOL) { return E_
 STDMETHODIMP COleControlSite::XOleIPSite::CanInPlaceActivate() { return S_OK; }
 STDMETHODIMP COleControlSite::XOleIPSite::OnInPlaceActivate() {
   SITE(OleIPSite);
-  pThis->m_bInPlaceActive = TRUE;
-  if (pThis->m_pInPlaceObject == NULL)
-    pThis->m_pObject->QueryInterface(IID_IOleInPlaceObject, (void**)&pThis->m_pInPlaceObject);
+  pThis->OnActivated(0);
   return S_OK;
 }
 STDMETHODIMP COleControlSite::XOleIPSite::OnUIActivate() {
@@ -741,11 +934,7 @@ STDMETHODIMP COleControlSite::XOleIPSite::OnUIDeactivate(BOOL) {
 }
 STDMETHODIMP COleControlSite::XOleIPSite::OnInPlaceDeactivate() {
   SITE(OleIPSite);
-  pThis->m_bInPlaceActive = FALSE;
-  if (pThis->m_pInPlaceObject != NULL) {
-    pThis->m_pInPlaceObject->Release();
-    pThis->m_pInPlaceObject = NULL;
-  }
+  pThis->OnDeactivated();
   return S_OK;
 }
 STDMETHODIMP COleControlSite::XOleIPSite::DiscardUndoState() { return S_OK; }
@@ -756,10 +945,206 @@ STDMETHODIMP COleControlSite::XOleIPSite::DeactivateAndUndo() {
 }
 STDMETHODIMP COleControlSite::XOleIPSite::OnPosRectChange(LPCRECT lprcPosRect) {
   SITE(OleIPSite);
+  if (pThis->m_bIsWindowless) pThis->InvalidateWindowless(NULL, TRUE);
   pThis->m_rect = *lprcPosRect;
   if (pThis->m_pInPlaceObject != NULL)
     pThis->m_pInPlaceObject->SetObjectRects(&pThis->m_rect, &pThis->m_rect);
+  if (pThis->m_bIsWindowless) pThis->InvalidateWindowless(NULL, TRUE);
   return S_OK;
+}
+
+// ----- IOleInPlaceSiteEx
+
+STDMETHODIMP COleControlSite::XOleIPSite::OnInPlaceActivateEx(BOOL* pfNoRedraw, DWORD dwFlags) {
+  SITE(OleIPSite);
+  if (pfNoRedraw != NULL) *pfNoRedraw = FALSE;
+  pThis->OnActivated(dwFlags);
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::OnInPlaceDeactivateEx(BOOL) {
+  SITE(OleIPSite);
+  pThis->OnDeactivated();
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::RequestUIActivate() { return S_OK; }
+
+// ----- IOleInPlaceSiteWindowless: what a windowless control asks of the
+// window it lives in.
+
+STDMETHODIMP COleControlSite::XOleIPSite::CanWindowlessActivate() {
+  SITE(OleIPSite);
+  return pThis->m_pCtrlCont->m_pWnd->GetSafeHwnd() != NULL ? S_OK : S_FALSE;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::GetCapture() {
+  SITE(OleIPSite);
+  return pThis->m_pCtrlCont->m_pSiteCapture == pThis ? S_OK : S_FALSE;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::SetCapture(BOOL fCapture) {
+  SITE(OleIPSite);
+  COleControlContainer* pCont = pThis->m_pCtrlCont;
+  HWND hWnd = pCont->m_pWnd->GetSafeHwnd();
+  if (fCapture) {
+    pCont->m_pSiteCapture = pThis;
+    if (::GetCapture() != hWnd) ::SetCapture(hWnd);
+  } else if (pCont->m_pSiteCapture == pThis) {
+    pCont->m_pSiteCapture = NULL;
+    if (::GetCapture() == hWnd) ::ReleaseCapture();
+  }
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::GetFocus() {
+  SITE(OleIPSite);
+  return pThis->m_pCtrlCont->m_pSiteFocus == pThis ? S_OK : S_FALSE;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::SetFocus(BOOL fFocus) {
+  SITE(OleIPSite);
+  COleControlContainer* pCont = pThis->m_pCtrlCont;
+  HWND hWnd = pCont->m_pWnd->GetSafeHwnd();
+  if (!fFocus) {
+    if (pCont->m_pSiteFocus == pThis) pCont->m_pSiteFocus = NULL;
+    return S_OK;
+  }
+  if (pCont->m_pSiteFocus == pThis && ::GetFocus() == hWnd) return S_OK;
+  // The old windowless control loses the focus.
+  COleControlSite* pOld = pCont->m_pSiteFocus;
+  pCont->m_pSiteFocus = pThis;
+  LRESULT lResult = 0;
+  if (pOld != NULL && pOld != pThis && pOld->m_bIsWindowless)
+    pOld->SendWindowlessMessage(WM_KILLFOCUS, (WPARAM)hWnd, 0, &lResult);
+  // The window takes the keyboard (the control hears WM_SETFOCUS from
+  // it); when it has it already, the control hears it now.
+  if (::GetFocus() != hWnd)
+    ::SetFocus(hWnd);
+  else
+    pThis->SendWindowlessMessage(WM_SETFOCUS, (WPARAM)hWnd, 0, &lResult);
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::GetDC(LPCRECT pRect, DWORD grfFlags, HDC* phDC) {
+  SITE(OleIPSite);
+  if (phDC == NULL) return E_POINTER;
+  *phDC = NULL;
+  HWND hWnd = pThis->m_pCtrlCont->m_pWnd->GetSafeHwnd();
+  if (hWnd == NULL) return E_FAIL;
+  HDC hDC = ::GetDC(hWnd);
+  if (hDC == NULL) return E_FAIL;
+  ::SaveDC(hDC);
+  // Only the control's part of the window.
+  CRect rect(pThis->m_rect);
+  if (pRect != NULL) rect.IntersectRect(&rect, pRect);
+  ::IntersectClipRect(hDC, rect.left, rect.top, rect.right, rect.bottom);
+  if (grfFlags & OLEDC_PAINTBKGND) ::SendMessage(hWnd, WM_ERASEBKGND, (WPARAM)hDC, 0);
+  *phDC = hDC;
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::ReleaseDC(HDC hDC) {
+  SITE(OleIPSite);
+  if (hDC == NULL) return E_INVALIDARG;
+  ::RestoreDC(hDC, -1);
+  ::ReleaseDC(pThis->m_pCtrlCont->m_pWnd->GetSafeHwnd(), hDC);
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::InvalidateRect(LPCRECT pRect, BOOL fErase) {
+  SITE(OleIPSite);
+  pThis->InvalidateWindowless(pRect, fErase);
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::InvalidateRgn(HRGN hRgn, BOOL fErase) {
+  SITE(OleIPSite);
+  HWND hWnd = pThis->m_pCtrlCont->m_pWnd->GetSafeHwnd();
+  if (hWnd == NULL) return E_FAIL;
+  if (hRgn == NULL) {
+    pThis->InvalidateWindowless(NULL, fErase);
+    return S_OK;
+  }
+  // Within the control's part.
+  HRGN hRgnPart = ::CreateRectRgnIndirect(&pThis->m_rect);
+  ::CombineRgn(hRgnPart, hRgnPart, hRgn, RGN_AND);
+  ::InvalidateRgn(hWnd, hRgnPart, fErase);
+  ::DeleteObject(hRgnPart);
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::ScrollRect(INT, INT, LPCRECT pRectScroll,
+                                                     LPCRECT pRectClip) {
+  // The scrolled part is drawn again.
+  SITE(OleIPSite);
+  CRect rect(pRectScroll != NULL ? *pRectScroll : pThis->m_rect);
+  if (pRectClip != NULL) rect.IntersectRect(&rect, pRectClip);
+  pThis->InvalidateWindowless(&rect, FALSE);
+  return S_OK;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::AdjustRect(LPRECT prc) {
+  return prc != NULL ? S_OK : E_INVALIDARG;
+}
+STDMETHODIMP COleControlSite::XOleIPSite::OnDefWindowMessage(UINT msg, WPARAM wParam,
+                                                             LPARAM lParam, LRESULT* plResult) {
+  SITE(OleIPSite);
+  CWnd* pWnd = pThis->m_pCtrlCont->m_pWnd;
+  if (plResult == NULL) return E_POINTER;
+  *plResult = 0;
+  if (pWnd->GetSafeHwnd() == NULL) return S_FALSE;
+  // The window's default handling, not its message map: the control has
+  // had the message.
+  *plResult = pWnd->DefWindowProc(msg, wParam, lParam);
+  return S_OK;
+}
+
+// ----- Windowless controls
+
+void COleControlSite::OnActivated(DWORD dwFlags) {
+  m_bInPlaceActive = TRUE;
+  if (m_pInPlaceObject == NULL)
+    m_pObject->QueryInterface(IID_IOleInPlaceObject, (void**)&m_pInPlaceObject);
+  if ((dwFlags & ACTIVATE_WINDOWLESS) && !m_bIsWindowless) {
+    IOleInPlaceObjectWindowless* pWindowless = NULL;
+    if (SUCCEEDED(m_pObject->QueryInterface(IID_IOleInPlaceObjectWindowless,
+                                            (void**)&pWindowless))) {
+      m_pWindowlessObject = pWindowless;
+      m_bIsWindowless = TRUE;
+      m_pCtrlCont->m_nWindowlessControls++;
+      InvalidateWindowless(NULL, TRUE);
+    }
+  }
+}
+
+void COleControlSite::OnDeactivated() {
+  m_bInPlaceActive = FALSE;
+  if (m_bIsWindowless) {
+    InvalidateWindowless(NULL, TRUE);
+    m_bIsWindowless = FALSE;
+    m_pCtrlCont->m_nWindowlessControls--;
+    if (m_pCtrlCont->m_pSiteCapture == this) {
+      m_pCtrlCont->m_pSiteCapture = NULL;
+      if (::GetCapture() == m_pCtrlCont->m_pWnd->GetSafeHwnd()) ::ReleaseCapture();
+    }
+    if (m_pCtrlCont->m_pSiteFocus == this) m_pCtrlCont->m_pSiteFocus = NULL;
+    ((IOleInPlaceObjectWindowless*)m_pWindowlessObject)->Release();
+    m_pWindowlessObject = NULL;
+  }
+  if (m_pInPlaceObject != NULL) {
+    m_pInPlaceObject->Release();
+    m_pInPlaceObject = NULL;
+  }
+}
+
+void COleControlSite::InvalidateWindowless(LPCRECT lpRect, BOOL bErase) {
+  HWND hWnd = m_pCtrlCont->m_pWnd->GetSafeHwnd();
+  if (hWnd == NULL) return;
+  CRect rect(m_rect);
+  if (lpRect != NULL) rect.IntersectRect(&rect, lpRect);
+  if (!rect.IsRectEmpty()) ::InvalidateRect(hWnd, &rect, bErase);
+}
+
+HRESULT COleControlSite::SendWindowlessMessage(UINT msg, WPARAM wParam, LPARAM lParam,
+                                               LRESULT* plResult) {
+  *plResult = 0;
+  if (!m_bIsWindowless || m_pWindowlessObject == NULL) return S_FALSE;
+  InternalAddRef();  // the control may go away
+  IOleInPlaceObjectWindowless* pWindowless = (IOleInPlaceObjectWindowless*)m_pWindowlessObject;
+  pWindowless->AddRef();
+  HRESULT hr = pWindowless->OnWindowMessage(msg, wParam, lParam, plResult);
+  pWindowless->Release();
+  InternalRelease();
+  return hr;
 }
 
 // ---------------------------------------------------------------------
@@ -784,8 +1169,10 @@ STDMETHODIMP COleControlSite::XOleControlSite::OnControlInfoChanged() {
 }
 STDMETHODIMP COleControlSite::XOleControlSite::LockInPlaceActive(BOOL) { return S_OK; }
 STDMETHODIMP COleControlSite::XOleControlSite::GetExtendedControl(LPDISPATCH* ppDisp) {
-  *ppDisp = NULL;
-  return E_NOTIMPL;
+  SITE(OleControlSite);
+  if (ppDisp == NULL) return E_POINTER;
+  *ppDisp = pThis->GetExtendedControl();
+  return *ppDisp != NULL ? S_OK : E_NOTIMPL;
 }
 STDMETHODIMP COleControlSite::XOleControlSite::TransformCoords(POINTL* pptlHimetric,
                                                                POINTF* pptfContainer,
@@ -882,6 +1269,8 @@ STDMETHODIMP COleControlSite::XPropertyNotifySink::QueryInterface(REFIID iid, LP
 }
 STDMETHODIMP COleControlSite::XPropertyNotifySink::OnChanged(DISPID dispid) {
   SITE(PropertyNotifySink);
+  if (pThis->m_pBindings != NULL && !pThis->m_bIgnoreNotify && _afxOccBindHooks != NULL)
+    _afxOccBindHooks->pfnChanged(pThis, dispid);
   AFX_EVENT event(AFX_EVENT::propChanged, dispid);
   pThis->FireEvent(&event);
   return S_OK;
@@ -891,6 +1280,86 @@ STDMETHODIMP COleControlSite::XPropertyNotifySink::OnRequestEdit(DISPID dispid) 
   AFX_EVENT event(AFX_EVENT::propRequest, dispid);
   return pThis->FireEvent(&event) == S_FALSE ? S_FALSE : S_OK;
 }
+
+// INotifyDBEvents: each step of a change to a data source control's
+// cursor is an ON_DSCNOTIFY notification, for the changes to the current
+// row; the binding (occdb.cpp) then sets the bound controls.
+HRESULT AFXAPI _AfxFireDSCNotify(COleControlSite* pSite, DSCSTATE nState, DSCREASON nReason) {
+  AFX_EVENT event(AFX_EVENT::propDSCNotify);
+  event.m_nDSCState = nState;
+  event.m_nDSCReason = nReason;
+  return pSite->FireEvent(&event);
+}
+
+static DSCREASON DSCReason(DWORD dwReason) {
+  switch (dwReason) {
+    case DBREASON_CLOSE: return dscClose;
+    case DBREASON_FIND:
+    case DBREASON_MOVE:
+    case DBREASON_MOVEPERCENT:
+    case DBREASON_NEWINDEX:
+    case DBREASON_NEWPARAMETERS:
+    case DBREASON_QUERYSPECCHANGED:
+    case DBREASON_REFRESH:
+    case DBREASON_SEEK:
+    case DBREASON_SETRANGECHANGED: return dscMove;
+    case DBREASON_ADDNEW:
+    case DBREASON_INSERTED: return dscInsert;
+    case DBREASON_EDIT: return dscEdit;
+    case DBREASON_MODIFIED:
+    case DBREASON_RECALC:
+    case DBREASON_ROLLBACK:
+    case DBREASON_ROWFIXUP: return dscModify;
+    case DBREASON_DELETED: return dscDelete;
+    case DBREASON_COMMIT: return dscCommit;
+    default: return dscNoReason;
+  }
+}
+
+HRESULT COleControlSite::XNotifyDBEvents::Notify(DSCSTATE nState, DWORD dwEventWhat,
+                                                 ULONG cReasons, DBNOTIFYREASON rgReasons[]) {
+  SITE(NotifyDBEvents);
+  HRESULT hr = S_OK;
+  if (dwEventWhat & (DBEVENT_CURRENT_ROW_CHANGED | DBEVENT_CURRENT_ROW_DATA_CHANGED)) {
+    // The first reason that is one of ON_DSCNOTIFY's.
+    for (ULONG i = 0; i < cReasons; i++) {
+      DSCREASON nReason = DSCReason(rgReasons[i].dwReason);
+      if (nReason == dscNoReason) continue;
+      hr = _AfxFireDSCNotify(pThis, nState, nReason);
+      break;
+    }
+  }
+  if (hr != S_OK) return hr;
+  if (pThis->m_pDataSourceControl != NULL && _afxOccBindHooks != NULL)
+    hr = _afxOccBindHooks->pfnDBEvent(pThis, nState, dwEventWhat, cReasons, rgReasons);
+  return hr;
+}
+
+STDMETHODIMP_(ULONG) COleControlSite::XNotifyDBEvents::AddRef() {
+  SITE(NotifyDBEvents);
+  return pThis->ExternalAddRef();
+}
+STDMETHODIMP_(ULONG) COleControlSite::XNotifyDBEvents::Release() {
+  SITE(NotifyDBEvents);
+  return pThis->ExternalRelease();
+}
+STDMETHODIMP COleControlSite::XNotifyDBEvents::QueryInterface(REFIID iid, LPVOID* ppvObj) {
+  SITE(NotifyDBEvents);
+  return (HRESULT)pThis->ExternalQueryInterface(&iid, ppvObj);
+}
+#define _AFX_DBEVENT(name, state)                                                      \
+  STDMETHODIMP COleControlSite::XNotifyDBEvents::name(DWORD dwEventWhat, ULONG cReasons, \
+                                                      DBNOTIFYREASON rgReasons[]) {      \
+    return Notify(state, dwEventWhat, cReasons, rgReasons);                              \
+  }
+_AFX_DBEVENT(OKToDo, dscOKToDo)
+_AFX_DBEVENT(Cancelled, dscCancelled)
+_AFX_DBEVENT(SyncBefore, dscSyncBefore)
+_AFX_DBEVENT(AboutToDo, dscAboutToDo)
+_AFX_DBEVENT(FailedToDo, dscFailedToDo)
+_AFX_DBEVENT(SyncAfter, dscSyncAfter)
+_AFX_DBEVENT(DidEvent, dscDidEvent)
+#undef _AFX_DBEVENT
 
 STDMETHODIMP_(ULONG) COleControlSite::XEventSink::AddRef() {
   SITE(EventSink);
@@ -963,6 +1432,74 @@ COleControlContainer::~COleControlContainer() {
   if (m_pActiveObject != NULL) m_pActiveObject->Release();
 }
 
+COleControlSite* COleControlContainer::FindWindowlessSite(CPoint point) const {
+  // The last made is on top.
+  POSITION pos = m_listSitesOrWnds.GetTailPosition();
+  while (pos != NULL) {
+    COleControlSite* pSite = (COleControlSite*)m_listSitesOrWnds.GetPrev(pos);
+    if (pSite->m_bIsWindowless && (pSite->m_dwStyle & WS_VISIBLE) && pSite->m_rect.PtInRect(point))
+      return pSite;
+  }
+  return NULL;
+}
+
+BOOL COleControlContainer::OnPaint(CDC* pDC) {
+  BOOL bDrew = FALSE;
+  POSITION pos = m_listSitesOrWnds.GetHeadPosition();
+  while (pos != NULL) {
+    COleControlSite* pSite = (COleControlSite*)m_listSitesOrWnds.GetNext(pos);
+    if (!pSite->m_bIsWindowless || !(pSite->m_dwStyle & WS_VISIBLE) || pSite->m_pObject == NULL)
+      continue;
+    if (!pDC->RectVisible(&pSite->m_rect)) continue;
+    IViewObject* pView = NULL;
+    if (FAILED(pSite->m_pObject->QueryInterface(IID_IViewObject, (void**)&pView))) continue;
+    RECTL rcl = {pSite->m_rect.left, pSite->m_rect.top, pSite->m_rect.right,
+                 pSite->m_rect.bottom};
+    if (SUCCEEDED(pView->Draw(DVASPECT_CONTENT, -1, NULL, NULL, NULL, pDC->m_hDC, &rcl, NULL,
+                              NULL, 0)))
+      bDrew = TRUE;
+    pView->Release();
+  }
+  return bDrew;
+}
+
+BOOL COleControlContainer::HandleWindowlessMessage(UINT message, WPARAM wParam, LPARAM lParam,
+                                                   LRESULT* plResult) {
+  if (m_nWindowlessControls <= 0 || m_pWnd->GetSafeHwnd() == NULL) return FALSE;
+  COleControlSite* pSite = NULL;
+  if (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST) {
+    if (message == WM_MOUSEWHEEL) {
+      pSite = m_pSiteFocus;  // the wheel goes with the keyboard
+    } else {
+      pSite = m_pSiteCapture;
+      if (pSite == NULL)
+        pSite = FindWindowlessSite(CPoint((short)LOWORD(lParam), (short)HIWORD(lParam)));
+    }
+  } else if (message == WM_SETCURSOR) {
+    if ((HWND)wParam != m_pWnd->m_hWnd || LOWORD(lParam) != HTCLIENT) return FALSE;
+    pSite = m_pSiteCapture;
+    if (pSite == NULL) {
+      CPoint point;
+      ::GetCursorPos(&point);
+      ::ScreenToClient(m_pWnd->m_hWnd, &point);
+      pSite = FindWindowlessSite(point);
+    }
+  } else if ((message >= WM_KEYFIRST && message <= WM_KEYLAST) ||
+             (message >= WM_IME_SETCONTEXT && message <= WM_IME_KEYUP) ||
+             message == WM_HELP || message == WM_SETFOCUS || message == WM_KILLFOCUS) {
+    pSite = m_pSiteFocus;
+  } else if (message == WM_CANCELMODE || message == WM_CAPTURECHANGED) {
+    pSite = m_pSiteCapture;
+    // The window lost the mouse, so the control did.
+    if (message == WM_CAPTURECHANGED && (HWND)lParam != m_pWnd->m_hWnd) m_pSiteCapture = NULL;
+  }
+  if (pSite == NULL || !pSite->m_bIsWindowless) return FALSE;
+  LRESULT lResult = 0;
+  if (pSite->SendWindowlessMessage(message, wParam, lParam, &lResult) != S_OK) return FALSE;
+  *plResult = lResult;
+  return TRUE;
+}
+
 void COleControlContainer::DestroyAll() {
   while (!m_listSitesOrWnds.IsEmpty()) {
     COleControlSite* pSite = (COleControlSite*)m_listSitesOrWnds.GetHead();
@@ -986,7 +1523,9 @@ BOOL COleControlContainer::CreateControl(CWnd* pWndCtrl, REFCLSID clsid, LPCTSTR
                                          UINT nID, CFile* pPersist, BOOL bStorage,
                                          BSTR bstrLicKey, COleControlSite** ppNewSite) {
   if (ppNewSite != NULL) *ppNewSite = NULL;
-  COleControlSite* pSite = _AfxGetOccManager()->CreateSite(this);
+  COleControlSite* pSite = NULL;
+  if (m_pWnd != NULL) m_pWnd->CreateControlSite(this, &pSite, nID, clsid);
+  if (pSite == NULL) pSite = _AfxGetOccManager()->CreateSite(this);
   if (pSite == NULL) return FALSE;
   m_listSitesOrWnds.AddTail(pSite);
   HRESULT hr = pSite->CreateControl(pWndCtrl, clsid, lpszWindowName, dwStyle, ppt, psize, nID,

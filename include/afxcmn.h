@@ -1024,6 +1024,195 @@ public:
   BOOL DeleteBand(UINT uBand) { return (BOOL)::SendMessage(m_hWnd, RB_DELETEBAND, uBand, 0); }
   UINT GetBarHeight() const { return (UINT)::SendMessage(m_hWnd, RB_GETBARHEIGHT, 0, 0); }
   UINT GetRowCount() const { return (UINT)::SendMessage(m_hWnd, RB_GETROWCOUNT, 0, 0); }
+  UINT GetRowHeight(UINT uRow) const {
+    return (UINT)::SendMessage(m_hWnd, RB_GETROWHEIGHT, uRow, 0);
+  }
+  BOOL GetBarInfo(REBARINFO* prbi) const {
+    return (BOOL)::SendMessage(m_hWnd, RB_GETBARINFO, 0, (LPARAM)prbi);
+  }
+  BOOL SetBarInfo(REBARINFO* prbi) {
+    return (BOOL)::SendMessage(m_hWnd, RB_SETBARINFO, 0, (LPARAM)prbi);
+  }
+  COLORREF GetBkColor() const { return (COLORREF)::SendMessage(m_hWnd, RB_GETBKCOLOR, 0, 0); }
+  COLORREF SetBkColor(COLORREF clr) {
+    return (COLORREF)::SendMessage(m_hWnd, RB_SETBKCOLOR, 0, (LPARAM)clr);
+  }
+  COLORREF GetTextColor() const {
+    return (COLORREF)::SendMessage(m_hWnd, RB_GETTEXTCOLOR, 0, 0);
+  }
+  COLORREF SetTextColor(COLORREF clr) {
+    return (COLORREF)::SendMessage(m_hWnd, RB_SETTEXTCOLOR, 0, (LPARAM)clr);
+  }
+  // The window that gets the notifications; the previous one.
+  CWnd* SetOwner(CWnd* pWnd) {
+    return CWnd::FromHandle(
+        (HWND)::SendMessage(m_hWnd, RB_SETPARENT, (WPARAM)pWnd->GetSafeHwnd(), 0));
+  }
+  CToolTipCtrl* GetToolTips() const {
+    return (CToolTipCtrl*)CWnd::FromHandle((HWND)::SendMessage(m_hWnd, RB_GETTOOLTIPS, 0, 0));
+  }
+  void SetToolTips(CToolTipCtrl* pTip) {
+    ::SendMessage(m_hWnd, RB_SETTOOLTIPS, (WPARAM)((CWnd*)pTip)->GetSafeHwnd(), 0);
+  }
+  int IDToIndex(UINT uBandID) const {
+    return (int)::SendMessage(m_hWnd, RB_IDTOINDEX, uBandID, 0);
+  }
+  BOOL GetRect(UINT uBand, LPRECT prc) const {
+    return (BOOL)::SendMessage(m_hWnd, RB_GETRECT, uBand, (LPARAM)prc);
+  }
+  int HitTest(RBHITTESTINFO* prbht) {
+    return (int)::SendMessage(m_hWnd, RB_HITTEST, 0, (LPARAM)prbht);
+  }
+  void GetBandBorders(UINT uBand, LPRECT prc) const {
+    ::SendMessage(m_hWnd, RB_GETBANDBORDERS, uBand, (LPARAM)prc);
+  }
+  CImageList* GetImageList() const;
+  BOOL SetImageList(CImageList* pImageList);
+  BOOL GetColorScheme(COLORSCHEME* lpcs) {
+    lpcs->dwSize = sizeof(COLORSCHEME);
+    return (BOOL)::SendMessage(m_hWnd, RB_GETCOLORSCHEME, 0, (LPARAM)lpcs);
+  }
+  void SetColorScheme(const COLORSCHEME* lpcs) {
+    ::SendMessage(m_hWnd, RB_SETCOLORSCHEME, 0, (LPARAM)lpcs);
+  }
+  CPalette* GetPalette() const {
+    return CPalette::FromHandle((HPALETTE)::SendMessage(m_hWnd, RB_GETPALETTE, 0, 0));
+  }
+  CPalette* SetPalette(HPALETTE hPal) {
+    return CPalette::FromHandle((HPALETTE)::SendMessage(m_hWnd, RB_SETPALETTE, 0, (LPARAM)hPal));
+  }
+  void BeginDrag(UINT uBand, DWORD dwPos = (DWORD)-1) {
+    ::SendMessage(m_hWnd, RB_BEGINDRAG, uBand, (LPARAM)dwPos);
+  }
+  void EndDrag() { ::SendMessage(m_hWnd, RB_ENDDRAG, 0, 0); }
+  void DragMove(DWORD dwPos = (DWORD)-1) { ::SendMessage(m_hWnd, RB_DRAGMOVE, 0, (LPARAM)dwPos); }
+  void MaximizeBand(UINT uBand) { ::SendMessage(m_hWnd, RB_MAXIMIZEBAND, uBand, 0); }
+  // Back to the band's ideal width.
+  void RestoreBand(UINT uBand) { ::SendMessage(m_hWnd, RB_MAXIMIZEBAND, uBand, TRUE); }
+  void MinimizeBand(UINT uBand) { ::SendMessage(m_hWnd, RB_MINIMIZEBAND, uBand, 0); }
+  BOOL ShowBand(UINT uBand, BOOL fShow = TRUE) {
+    return (BOOL)::SendMessage(m_hWnd, RB_SHOWBAND, uBand, fShow);
+  }
+  BOOL MoveBand(UINT uFrom, UINT uTo) {
+    return (BOOL)::SendMessage(m_hWnd, RB_MOVEBAND, uFrom, uTo);
+  }
+  BOOL SizeToRect(CRect& rect) {
+    return (BOOL)::SendMessage(m_hWnd, RB_SIZETORECT, 0, (LPARAM)(LPRECT)rect);
+  }
+  void PushChevron(UINT uBand, LPARAM lAppValue) {
+    ::SendMessage(m_hWnd, RB_PUSHCHEVRON, uBand, lAppValue);
+  }
+  IDropTarget* GetDropTarget() const;
+  DWORD GetExtendedStyle() const {
+    return (DWORD)::SendMessage(m_hWnd, WM_USER + 42 /* RB_GETEXTENDEDSTYLE */, 0, 0);
+  }
+  DWORD SetExtendedStyle(DWORD dwMask, DWORD dwStyleEx) {
+    return (DWORD)::SendMessage(m_hWnd, WM_USER + 41 /* RB_SETEXTENDEDSTYLE */, dwMask, dwStyleEx);
+  }
+};
+
+// ---------------------------------------------------------------------
+// CLinkCtrl: the SysLink control (comctl32 6, so a program needs a
+// manifest that asks for it): text with <a> links.
+
+class CLinkCtrl : public CWnd {
+  DECLARE_DYNAMIC(CLinkCtrl)
+public:
+  CLinkCtrl() {}
+  virtual BOOL Create(LPCTSTR lpszLinkMarkup, DWORD dwStyle, const RECT& rect, CWnd* pParentWnd,
+                      UINT nID);
+  virtual BOOL Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID);
+  virtual BOOL CreateEx(DWORD dwExStyle, LPCTSTR lpszLinkMarkup, DWORD dwStyle, const RECT& rect,
+                        CWnd* pParentWnd, UINT nID);
+  virtual BOOL CreateEx(DWORD dwExStyle, DWORD dwStyle, const RECT& rect, CWnd* pParentWnd,
+                        UINT nID);
+
+  // The height the text needs at the control's width.
+  int GetIdealHeight() const { return (int)::SendMessage(m_hWnd, LM_GETIDEALHEIGHT, 0, 0); }
+  BOOL SetItem(PLITEM pItem) { return (BOOL)::SendMessage(m_hWnd, LM_SETITEM, 0, (LPARAM)pItem); }
+  BOOL GetItem(PLITEM pItem) const {
+    return (BOOL)::SendMessage(m_hWnd, LM_GETITEM, 0, (LPARAM)pItem);
+  }
+  BOOL SetItemID(int iLink, LPCWSTR szID);
+  BOOL SetItemUrl(int iLink, LPCWSTR szUrl);
+  BOOL SetItemState(int iLink, UINT state, UINT stateMask = 0xFFFFFFFF);
+  BOOL GetItemID(int iLink, CString& strID) const;
+  BOOL GetItemID(int iLink, LPWSTR szID, UINT cchID) const;
+  BOOL GetItemUrl(int iLink, CString& strUrl) const;
+  BOOL GetItemUrl(int iLink, LPWSTR szUrl, UINT cchUrl) const;
+  BOOL GetItemState(int iLink, UINT* pnState, UINT stateMask = 0xFFFFFFFF) const;
+  BOOL LinkHitTest(PLHITTESTINFO phti) const {
+    return (BOOL)::SendMessage(m_hWnd, LM_HITTEST, 0, (LPARAM)phti);
+  }
+};
+
+// ---------------------------------------------------------------------
+// CPagerCtrl: the pager (SysPager), which scrolls a child window too big
+// for it.
+
+class CPagerCtrl : public CWnd {
+  DECLARE_DYNAMIC(CPagerCtrl)
+public:
+  CPagerCtrl() {}
+  virtual BOOL Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID);
+  virtual BOOL CreateEx(DWORD dwExStyle, DWORD dwStyle, const RECT& rect, CWnd* pParentWnd,
+                        UINT nID);
+
+  void SetChild(HWND hwndChild) { ::SendMessage(m_hWnd, PGM_SETCHILD, 0, (LPARAM)hwndChild); }
+  // Asks the parent for the child's size again (PGN_CALCSIZE).
+  void RecalcSize() { ::SendMessage(m_hWnd, PGM_RECALCSIZE, 0, 0); }
+  void ForwardMouse(BOOL bForward) { ::SendMessage(m_hWnd, PGM_FORWARDMOUSE, bForward, 0); }
+  COLORREF GetBkColor() const { return (COLORREF)::SendMessage(m_hWnd, PGM_GETBKCOLOR, 0, 0); }
+  COLORREF SetBkColor(COLORREF clr) {
+    return (COLORREF)::SendMessage(m_hWnd, PGM_SETBKCOLOR, 0, (LPARAM)clr);
+  }
+  int GetBorder() const { return (int)::SendMessage(m_hWnd, PGM_GETBORDER, 0, 0); }
+  int SetBorder(int iBorder) { return (int)::SendMessage(m_hWnd, PGM_SETBORDER, 0, iBorder); }
+  int GetButtonSize() const { return (int)::SendMessage(m_hWnd, PGM_GETBUTTONSIZE, 0, 0); }
+  int SetButtonSize(int iButtonSize) {
+    return (int)::SendMessage(m_hWnd, PGM_SETBUTTONSIZE, 0, iButtonSize);
+  }
+  int GetScrollPos() const { return (int)::SendMessage(m_hWnd, PGM_GETPOS, 0, 0); }
+  int SetScrollPos(int iPos) { return (int)::SendMessage(m_hWnd, PGM_SETPOS, 0, iPos); }
+  // PGB_TOPORLEFT or PGB_BOTTOMORRIGHT: PGF_INVISIBLE, PGF_NORMAL, ...
+  DWORD GetButtonState(int iButton) {
+    return (DWORD)::SendMessage(m_hWnd, PGM_GETBUTTONSTATE, 0, iButton);
+  }
+  BOOL IsButtonInvisible(int iButton) { return GetButtonState(iButton) == PGF_INVISIBLE; }
+  BOOL IsButtonNormal(int iButton) { return (GetButtonState(iButton) & PGF_NORMAL) != 0; }
+  BOOL IsButtonGrayed(int iButton) { return (GetButtonState(iButton) & PGF_GRAYED) != 0; }
+  BOOL IsButtonDepressed(int iButton) { return (GetButtonState(iButton) & PGF_DEPRESSED) != 0; }
+  BOOL IsButtonHot(int iButton) { return (GetButtonState(iButton) & PGF_HOT) != 0; }
+  void GetDropTarget(IDropTarget** ppDropTarget) {
+    ::SendMessage(m_hWnd, PGM_GETDROPTARGET, 0, (LPARAM)ppDropTarget);
+  }
+};
+
+// ---------------------------------------------------------------------
+// CDragListBox: a list box whose items the user drags into a new order
+// (MakeDragList). The virtual functions get the cursor in screen
+// coordinates.
+
+class CDragListBox : public CListBox {
+  DECLARE_DYNAMIC(CDragListBox)
+public:
+  CDragListBox();
+  virtual ~CDragListBox();
+
+  int ItemFromPt(CPoint pt, BOOL bAutoScroll = TRUE) const;
+  virtual BOOL BeginDrag(CPoint pt);
+  virtual void CancelDrag(CPoint pt);
+  // DL_STOPCURSOR, DL_COPYCURSOR or DL_MOVECURSOR.
+  virtual UINT Dragging(CPoint pt);
+  virtual void Dropped(int nSrcIndex, CPoint pt);
+  // The insertion mark before nItem (-1 for none).
+  virtual void DrawInsert(int nItem);
+  void DrawSingle(int nIndex);
+
+  // ----- Implementation
+  virtual void PreSubclassWindow();
+  virtual BOOL OnChildNotify(UINT, WPARAM, LPARAM, LRESULT*);
+  int m_nLast;
 };
 
 #endif  // __AFXCMN_H__

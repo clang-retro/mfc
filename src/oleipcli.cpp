@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 #include <afxole.h>
+#include <afxdocob.h>
 
 // ---------------------------------------------------------------------
 // Shared menus. A container's in-place menu and a server's in-place menu
@@ -13,9 +14,10 @@
 // 0, 2 and 4 (File, Container, Window) and the object's 1, 3 and 5 (Edit,
 // Object, Help). The popups go into the shared menu as they are.
 
-void AFXAPI _AfxMergeMenus(HMENU hMenuShared, HMENU hMenuSource, LONG* lpMenuWidths,
-                           int nFirstGroup) {
-  if (hMenuShared == NULL || hMenuSource == NULL) return;
+int AFXAPI _AfxMergeMenus(HMENU hMenuShared, HMENU hMenuSource, LONG* lpMenuWidths,
+                          int nFirstGroup, int nLastGroup, BOOL bStop) {
+  if (hMenuShared == NULL || hMenuSource == NULL) return 0;
+  if (nLastGroup < 0) nLastGroup = nFirstGroup + 4;
   int nGroup = nFirstGroup;
   int nCount = ::GetMenuItemCount(hMenuSource);
   for (int i = 0; i < nCount; i++) {
@@ -29,7 +31,11 @@ void AFXAPI _AfxMergeMenus(HMENU hMenuShared, HMENU hMenuSource, LONG* lpMenuWid
     if (!::GetMenuItemInfo(hMenuSource, i, TRUE, &mii)) continue;
     if (mii.fType & MFT_SEPARATOR) {
       // The next group; extra separators leave the rest in the last one.
-      if (nGroup + 2 <= nFirstGroup + 4) nGroup += 2;
+      if (nGroup == nLastGroup) {
+        if (bStop) return i + 1;
+      } else {
+        nGroup = nGroup + 2 <= nLastGroup ? nGroup + 2 : nLastGroup;
+      }
       continue;
     }
     int nPos = 0;
@@ -37,6 +43,7 @@ void AFXAPI _AfxMergeMenus(HMENU hMenuShared, HMENU hMenuSource, LONG* lpMenuWid
     mii.cch = lstrlen(szText);
     if (::InsertMenuItem(hMenuShared, nPos, TRUE, &mii)) lpMenuWidths[nGroup]++;
   }
+  return nCount;
 }
 
 static BOOL MenuHasItem(HMENU hMenu, HMENU hSubMenu, UINT nID) {
@@ -238,7 +245,12 @@ STDMETHODIMP COleFrameHook::XOleInPlaceFrame::InsertMenus(HMENU hmenuShared,
   METHOD_PROLOGUE_EX(COleFrameHook, OleInPlaceFrame)
   if (lpMenuWidths == NULL) return E_POINTER;
   lpMenuWidths->width[0] = lpMenuWidths->width[2] = lpMenuWidths->width[4] = 0;
-  _AfxMergeMenus(hmenuShared, pThis->GetInPlaceMenu(), lpMenuWidths->width, 0);
+  // A DocObject shares the container's Help menu: what follows the third
+  // separator goes into group 5, where the object puts its Help popup.
+  BOOL bDocObject =
+      pThis->m_pActiveItem != NULL && pThis->m_pActiveItem->IsKindOf(RUNTIME_CLASS(COleDocObjectItem));
+  if (bDocObject) lpMenuWidths->width[5] = 0;
+  _AfxMergeMenus(hmenuShared, pThis->GetInPlaceMenu(), lpMenuWidths->width, 0, bDocObject ? 5 : 4);
   return S_OK;
 }
 

@@ -49,6 +49,7 @@ class CMenu;
 class CCmdTarget;
 class CCmdUI;
 class COleDropTarget;
+class COleMessageFilter;
 class COleControlContainer;
 class COleControlSite;
 struct _AFX_OCC_DIALOG_INFO;
@@ -778,6 +779,7 @@ public:
 protected:
   BOOL m_bPrinting;
   friend class CView;
+  friend class CDocObjectServer;
   friend class CPreviewDC;
   friend class CPreviewView;
 };
@@ -1078,6 +1080,29 @@ class CConnectionPoint;
 
 // An event, a property change or a request to change a property, from an
 // ActiveX control to its container's event sink map (CN_EVENT).
+// A data source control's notification (ON_DSCNOTIFY): the step of
+// the change, and what the change is.
+enum DSCSTATE {
+  dscNoState = 0,
+  dscOKToDo,
+  dscCancelled,
+  dscSyncBefore,
+  dscAboutToDo,
+  dscFailedToDo,
+  dscSyncAfter,
+  dscDidEvent
+};
+enum DSCREASON {
+  dscNoReason = 0,
+  dscClose,
+  dscCommit,
+  dscDelete,
+  dscEdit,
+  dscInsert,
+  dscModify,
+  dscMove
+};
+
 struct AFX_EVENT {
   enum { event, propRequest, propChanged, propDSCNotify };
   AFX_EVENT(int eventKind)
@@ -1087,7 +1112,9 @@ struct AFX_EVENT {
         m_pExcepInfo(NULL),
         m_puArgError(NULL),
         m_bPropChanged(FALSE),
-        m_hResult(S_OK) {}
+        m_hResult(S_OK),
+        m_nDSCState(dscNoState),
+        m_nDSCReason(dscNoReason) {}
   AFX_EVENT(int eventKind, DISPID dispid, DISPPARAMS* pDispParams = NULL,
             EXCEPINFO* pExcepInfo = NULL, UINT* puArgError = NULL)
       : m_eventKind(eventKind),
@@ -1096,7 +1123,9 @@ struct AFX_EVENT {
         m_pExcepInfo(pExcepInfo),
         m_puArgError(puArgError),
         m_bPropChanged(FALSE),
-        m_hResult(S_OK) {}
+        m_hResult(S_OK),
+        m_nDSCState(dscNoState),
+        m_nDSCReason(dscNoReason) {}
   int m_eventKind;
   DISPID m_dispid;
   DISPPARAMS* m_pDispParams;
@@ -1104,6 +1133,8 @@ struct AFX_EVENT {
   UINT* m_puArgError;
   BOOL m_bPropChanged;
   HRESULT m_hResult;
+  DSCSTATE m_nDSCState;
+  DSCREASON m_nDSCReason;
 };
 
 // Event sink maps, filled by the ON_EVENT macros of afxdisp.h.
@@ -1324,10 +1355,22 @@ public:
                               const BYTE* pbParamInfo, ...);
   void AFX_CDECL SetProperty(DISPID dwDispID, VARTYPE vtProp, ...);
   void GetProperty(DISPID dwDispID, VARTYPE vtProp, void* pvProp) const;
+  // Data binding (afxocc.h): this control's property dwDispID follows the
+  // field szFieldName of the data source control pDSCWnd's current row,
+  // and the field follows the property; BindProperty gives the property
+  // the data source itself. A NULL data source control unbinds.
+  void BindDefaultProperty(DISPID dwDispID, VARTYPE vtProp, LPCTSTR szFieldName, CWnd* pDSCWnd);
+  void BindProperty(DISPID dwDispId, CWnd* pWndDSC);
+  // A data source control's rowset, which the window keeps.
+  IUnknown* GetDSCCursor();
   // Ambient properties for the controls this window hosts; FALSE for the
   // container's defaults.
   virtual BOOL OnAmbientProperty(COleControlSite* pSite, DISPID dispid, VARIANT* pvar);
   BOOL InitControlContainer();
+  // Makes the site of a control this window is about to host; *ppSite
+  // left NULL means the usual COleControlSite.
+  virtual BOOL CreateControlSite(COleControlContainer* pContainer, COleControlSite** ppSite,
+                                 UINT nID, REFCLSID clsid);
 
   COleControlContainer* m_pCtrlCont;  // the controls this window hosts
   COleControlSite* m_pCtrlSite;       // the site, when this is a control's window
@@ -1879,6 +1922,53 @@ public:
   virtual int VKeyToItem(UINT nKey, UINT nIndex);
   virtual int CharToItem(UINT nKey, UINT nIndex);
   virtual BOOL OnChildNotify(UINT, WPARAM, LPARAM, LRESULT*);
+};
+
+// CCheckListBox: an owner-drawn list box (LBS_OWNERDRAWFIXED or
+// _VARIABLE, with LBS_HASSTRINGS) with a check box by each item. A change
+// of a check sends the parent CLBN_CHKCHANGE through WM_COMMAND.
+#define CLBN_CHKCHANGE 40
+
+class CCheckListBox : public CListBox {
+  DECLARE_DYNAMIC(CCheckListBox)
+public:
+  CCheckListBox();
+  virtual ~CCheckListBox();
+  virtual BOOL Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID);
+
+  // BS_CHECKBOX, BS_AUTOCHECKBOX, BS_3STATE or BS_AUTO3STATE.
+  void SetCheckStyle(UINT nStyle);
+  UINT GetCheckStyle() { return m_nStyle; }
+  void SetCheck(int nIndex, int nCheck);  // 0, 1, or 2 (indeterminate)
+  int GetCheck(int nIndex);
+  void Enable(int nIndex, BOOL bEnabled = TRUE);
+  BOOL IsEnabled(int nIndex);
+
+  // Where the check box goes in the item; the default is its left end,
+  // centered vertically.
+  virtual CRect OnGetCheckPosition(CRect rectItem, CRect rectCheckBox);
+  virtual void DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct);
+  virtual void MeasureItem(LPMEASUREITEMSTRUCT lpMeasureItemStruct);
+
+  // ----- Implementation
+  virtual BOOL OnChildNotify(UINT, WPARAM, LPARAM, LRESULT*);
+  virtual void PreSubclassWindow();
+  virtual LRESULT WindowProc(UINT message, WPARAM wParam, LPARAM lParam);
+  void PreDrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct);
+  void PreMeasureItem(LPMEASUREITEMSTRUCT lpMeasureItemStruct);
+  int CalcMinimumItemHeight();
+  CSize CheckSize() const;
+  void InvalidateCheck(int nIndex);
+  // Toggles the check as a click or the space bar does.
+  void ToggleCheck(int nIndex);
+
+  UINT m_nStyle;
+  int m_cyText;
+
+  afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+  afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
+  afx_msg void OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
+  DECLARE_MESSAGE_MAP()
 };
 
 class CComboBox : public CWnd {
@@ -2552,6 +2642,7 @@ public:
   friend class CDocument;
   friend class CFrameWnd;
   friend class CPreviewView;
+  friend class CDocObjectServer;
   DECLARE_MESSAGE_MAP()
 };
 
@@ -2833,6 +2924,7 @@ public:
   AFX_THREADPROC m_pfnThreadProc;
   CPoint m_ptCursorLast;
   UINT m_nMsgLast;
+  COleMessageFilter* m_pMessageFilter;  // AfxOleInit's, for this thread
 
   void CommonConstruct();
   BOOL DispatchThreadMessageEx(MSG* msg);
@@ -3153,6 +3245,8 @@ void AFXAPI AfxDeleteObject(HGDIOBJ* pObject);
 #define AFX_WNDCOMMCTL_COOL_REG 0x08000
 #define AFX_WNDCOMMCTL_USEREX_REG 0x10000
 #define AFX_WNDCOMMCTL_DATE_REG 0x20000
+#define AFX_WNDCOMMCTL_PAGER_REG 0x40000
+#define AFX_WNDCOMMCTL_LINK_REG 0x80000
 
 #define AFX_WND _T("AfxWnd")
 #define AFX_WNDCONTROLBAR _T("AfxControlBar")

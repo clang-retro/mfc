@@ -309,33 +309,51 @@ static UINT CommandID(const OLECMDMAP* pMap, const GUID* pguid, ULONG cmdID, BOO
   return 0;
 }
 
-// What the frame's update handlers say of a command.
-class CDocObjectCmdUI : public CCmdUI {
-public:
-  BOOL m_bEnabled;
-  int m_nCheck;
-  CDocObjectCmdUI() : m_bEnabled(FALSE), m_nCheck(0) {}
-  virtual void Enable(BOOL bOn) {
-    m_bEnabled = bOn;
-    m_bEnableChanged = TRUE;
-  }
-  virtual void SetCheck(int nCheck) { m_nCheck = nCheck; }
-  virtual void SetText(LPCTSTR) {}
-  virtual void SetRadio(BOOL bOn) { m_nCheck = bOn ? 1 : 0; }
-};
+// ---------------------------------------------------------------------
+// COleCmdUI
 
-static DWORD CommandState(CWnd* pWnd, UINT nID) {
-  if (pWnd == NULL) return OLECMDF_SUPPORTED;
-  CDocObjectCmdUI ui;
-  ui.m_nID = nID;
-  ui.m_nIndexMax = 1;
-  BOOL bUpdated = pWnd->OnCmdMsg(nID, CN_UPDATE_COMMAND_UI, &ui, NULL) && ui.m_bEnableChanged;
-  AFX_CMDHANDLERINFO info;
-  BOOL bEnabled = bUpdated ? ui.m_bEnabled : pWnd->OnCmdMsg(nID, CN_COMMAND, NULL, &info);
-  DWORD dw = OLECMDF_SUPPORTED;
-  if (bEnabled) dw |= OLECMDF_ENABLED;
-  if (ui.m_nCheck != 0) dw |= OLECMDF_LATCHED;
-  return dw;
+COleCmdUI::COleCmdUI(OLECMD* rgCmds, ULONG cCmds, const GUID* pGroup)
+    : m_nCmdTextFlag(0), m_rgCmds(rgCmds), m_pGuidCmdGroup(pGroup) {
+  m_nIndexMax = cCmds;
+}
+
+void COleCmdUI::Enable(BOOL bOn) {
+  if (m_rgCmds != NULL && m_nIndex < m_nIndexMax) {
+    if (bOn)
+      m_rgCmds[m_nIndex].cmdf |= OLECMDF_ENABLED;
+    else
+      m_rgCmds[m_nIndex].cmdf &= ~OLECMDF_ENABLED;
+  }
+  m_bEnableChanged = TRUE;
+}
+
+// 1 is latched, 2 (indeterminate) is ninched.
+void COleCmdUI::SetCheck(int nCheck) {
+  if (m_rgCmds == NULL || m_nIndex >= m_nIndexMax) return;
+  OLECMD& cmd = m_rgCmds[m_nIndex];
+  cmd.cmdf &= ~(OLECMDF_LATCHED | OLECMDF_NINCHED);
+  if (nCheck == 1)
+    cmd.cmdf |= OLECMDF_LATCHED;
+  else if (nCheck == 2)
+    cmd.cmdf |= OLECMDF_NINCHED;
+}
+
+void COleCmdUI::SetText(LPCTSTR lpszText) { m_strText = lpszText; }
+
+BOOL COleCmdUI::DoUpdate(CCmdTarget* pTarget, BOOL bDisableIfNoHandler) {
+  if (m_rgCmds == NULL || m_nIndex >= m_nIndexMax) return FALSE;
+  m_rgCmds[m_nIndex].cmdf = OLECMDF_SUPPORTED;
+  if (pTarget == NULL) return TRUE;
+  m_bEnableChanged = FALSE;
+  BOOL bUpdated = pTarget->OnCmdMsg(m_nID, CN_UPDATE_COMMAND_UI, this, NULL);
+  if (!bUpdated || !m_bEnableChanged) {
+    // No update handler: a command handler enables it.
+    AFX_CMDHANDLERINFO info;
+    info.pTarget = NULL;
+    BOOL bHandler = pTarget->OnCmdMsg(m_nID, CN_COMMAND, NULL, &info);
+    if (bHandler || !bDisableIfNoHandler) Enable(TRUE);
+  }
+  return bUpdated;
 }
 
 STDMETHODIMP_(ULONG) CDocObjectServer::XOleCommandTarget::AddRef() {
@@ -361,11 +379,31 @@ STDMETHODIMP CDocObjectServer::XOleCommandTarget::QueryStatus(const GUID* pguidC
   if (pcmdtext != NULL) pcmdtext->cwActual = 0;
   CWnd* pWnd = pThis->GetCommandWnd();
   BOOL bAnyGroup = FALSE;
+  COleCmdUI state(rgCmds, cCmds, pguidCmdGroup);
+  if (pcmdtext != NULL) state.m_nCmdTextFlag = pcmdtext->cmdtextf;
   for (ULONG i = 0; i < cCmds; i++) {
     BOOL bGroup;
     UINT nID = CommandID(pThis->GetCommandMap(), pguidCmdGroup, rgCmds[i].cmdID, bGroup);
     bAnyGroup |= bGroup;
-    rgCmds[i].cmdf = nID != 0 ? CommandState(pWnd, nID) : 0;
+    rgCmds[i].cmdf = 0;
+    if (nID == 0) continue;
+    state.m_nIndex = i;
+    state.m_nID = nID;
+    if (pWnd == NULL)
+      rgCmds[i].cmdf = OLECMDF_SUPPORTED;
+    else
+      state.DoUpdate(pWnd, TRUE);
+  }
+  // The text the first command's update handler gave.
+  if (pcmdtext != NULL && pcmdtext->cmdtextf != OLECMDTEXTF_NONE && !state.m_strText.IsEmpty()) {
+    CStringW strText(state.m_strText);
+    ULONG cw = (ULONG)strText.GetLength() + 1;
+    pcmdtext->cwActual = cw;
+    if (pcmdtext->cwBuf > 0) {
+      ULONG n = cw <= pcmdtext->cwBuf ? cw : pcmdtext->cwBuf;
+      memcpy(pcmdtext->rgwz, (LPCWSTR)strText, (n - 1) * sizeof(WCHAR));
+      pcmdtext->rgwz[n - 1] = 0;
+    }
   }
   if (pguidCmdGroup != NULL && !bAnyGroup) return OLECMDERR_E_UNKNOWNGROUP;
   return S_OK;
@@ -379,14 +417,28 @@ STDMETHODIMP CDocObjectServer::XOleCommandTarget::Exec(const GUID* pguidCmdGroup
   if (nID == 0) return bGroup || pguidCmdGroup == NULL ? OLECMDERR_E_NOTSUPPORTED
                                                        : OLECMDERR_E_UNKNOWNGROUP;
   CWnd* pWnd = pThis->GetCommandWnd();
-  if (pWnd == NULL || !(CommandState(pWnd, nID) & OLECMDF_ENABLED)) return OLECMDERR_E_DISABLED;
+  if (pWnd == NULL) return OLECMDERR_E_DISABLED;
+  OLECMD cmd = {nCmdID, 0};
+  COleCmdUI state(&cmd, 1, pguidCmdGroup);
+  state.m_nIndex = 0;
+  state.m_nID = nID;
+  state.DoUpdate(pWnd, TRUE);
+  if (!(cmd.cmdf & OLECMDF_ENABLED)) return OLECMDERR_E_DISABLED;
   pThis->m_pOwner->InternalAddRef();
   pWnd->SendMessage(WM_COMMAND, nID);
   pThis->m_pOwner->InternalRelease();
   return S_OK;
 }
 
-// IPrint: the container prints through the Print command instead.
+// IPrint: the document's view prints its pages, as it does for the
+// File Print command, to the printer the container names.
+
+#ifndef PRINT_E_CANCELLED
+#define PRINT_E_CANCELLED ((HRESULT)0x80040160L)
+#endif
+#ifndef PRINT_E_NOSUCHPAGE
+#define PRINT_E_NOSUCHPAGE ((HRESULT)0x80040161L)
+#endif
 
 STDMETHODIMP_(ULONG) CDocObjectServer::XPrint::AddRef() {
   METHOD_PROLOGUE_EX_(CDocObjectServer, Print)
@@ -409,18 +461,168 @@ STDMETHODIMP CDocObjectServer::XPrint::SetInitialPageNum(LONG nFirstPage) {
   return S_OK;
 }
 
+static CView* PrintingView(COleServerDoc* pDoc) {
+  POSITION pos = pDoc->GetFirstViewPosition();
+  return pos != NULL ? pDoc->GetNextView(pos) : NULL;
+}
+
+// The pages the view says it has, after OnPreparePrinting.
+static BOOL KnownPages(CPrintInfo* pInfo, UINT* pnMin, UINT* pnMax) {
+  *pnMin = pInfo->GetMinPage();
+  *pnMax = pInfo->GetMaxPage();
+  return *pnMax != 0xFFFF && *pnMax >= *pnMin;
+}
+
 STDMETHODIMP CDocObjectServer::XPrint::GetPageInfo(LPLONG pnFirstPage, LPLONG pcPages) {
   METHOD_PROLOGUE_EX_(CDocObjectServer, Print)
   if (pnFirstPage != NULL) *pnFirstPage = pThis->m_nFirstPage;
   if (pcPages != NULL) *pcPages = 0;
-  return E_NOTIMPL;  // the count is not known before printing
+  CView* pView = PrintingView(pThis->m_pOwner);
+  if (pView == NULL) return E_UNEXPECTED;
+  CPrintInfo info;
+  info.m_bDocObject = TRUE;
+  info.m_dwFlags = PRINTFLAG_DONTACTUALLYPRINT;
+  info.m_nOffsetPage = (UINT)(pThis->m_nFirstPage - 1);
+  pView->OnPreparePrinting(&info);  // the page count is set whether or not there is a printer
+  UINT nMin, nMax;
+  if (!KnownPages(&info, &nMin, &nMax)) return E_NOTIMPL;  // known only by printing
+  if (pcPages != NULL) *pcPages = (LONG)(nMax - nMin + 1);
+  return S_OK;
 }
 
-STDMETHODIMP CDocObjectServer::XPrint::Print(DWORD, DVTARGETDEVICE**, PAGESET**, LPSTGMEDIUM,
-                                             LPCONTINUECALLBACK, LONG, LPLONG pcPagesPrinted,
-                                             LPLONG) {
+// Whether page nPage (counted from 1 within the document) is among those
+// the page set asks for.
+static BOOL InPageSet(const PAGESET* pSet, LONG nPage) {
+  if (pSet == NULL) return TRUE;
+  if ((nPage & 1) ? !pSet->fOddPages : !pSet->fEvenPages) return FALSE;
+  if (pSet->cPageRange == 0) return TRUE;
+  for (ULONG i = 0; i < pSet->cPageRange; i++) {
+    const PAGERANGE& r = pSet->rgPages[i];
+    if (nPage >= r.nFromPage && (r.nToPage == PAGESET_TOLASTPAGE || nPage <= r.nToPage))
+      return TRUE;
+  }
+  return FALSE;
+}
+
+static HDC CreateTargetDC(const DVTARGETDEVICE* ptd) {
+  if (ptd == NULL || ptd->tdDeviceNameOffset == 0) return NULL;
+  const BYTE* pBase = (const BYTE*)ptd;
+  LPCWSTR pszDriver = ptd->tdDriverNameOffset ? (LPCWSTR)(pBase + ptd->tdDriverNameOffset) : NULL;
+  LPCWSTR pszDevice = (LPCWSTR)(pBase + ptd->tdDeviceNameOffset);
+  const DEVMODEW* pdm =
+      ptd->tdExtDevmodeOffset ? (const DEVMODEW*)(pBase + ptd->tdExtDevmodeOffset) : NULL;
+  return ::CreateDCW(pszDriver, pszDevice, NULL, pdm);
+}
+
+STDMETHODIMP CDocObjectServer::XPrint::Print(DWORD grfFlags, DVTARGETDEVICE** pptd,
+                                             PAGESET** ppPageSet, LPSTGMEDIUM pstgmOptions,
+                                             LPCONTINUECALLBACK pCallback, LONG nFirstPage,
+                                             LPLONG pcPagesPrinted, LPLONG pnLastPage) {
+  METHOD_PROLOGUE_EX_(CDocObjectServer, Print)
   if (pcPagesPrinted != NULL) *pcPagesPrinted = 0;
-  return E_NOTIMPL;
+  if (pnLastPage != NULL) *pnLastPage = nFirstPage - 1;
+  CView* pView = PrintingView(pThis->m_pOwner);
+  if (pView == NULL) return E_UNEXPECTED;
+  const PAGESET* pSet = ppPageSet != NULL ? *ppPageSet : NULL;
+  BOOL bPrint = !(grfFlags & PRINTFLAG_DONTACTUALLYPRINT);
+
+  CPrintInfo info;
+  info.m_bDocObject = TRUE;
+  info.m_dwFlags = grfFlags;
+  info.m_nOffsetPage = (UINT)(nFirstPage - 1);
+  // The container's printer, unless the user is to choose one.
+  if (pptd != NULL && *pptd != NULL && !(grfFlags & PRINTFLAG_PROMPTUSER))
+    info.m_pPD->m_pd.hDC = CreateTargetDC(*pptd);
+  BOOL bPrepared = pView->OnPreparePrinting(&info);
+  if (bPrint && !bPrepared)
+    return (grfFlags & PRINTFLAG_PROMPTUSER) ? PRINT_E_CANCELLED : E_FAIL;
+  HDC hDC = info.m_pPD->m_pd.hDC;
+  if (bPrint && hDC == NULL) return E_FAIL;
+
+  UINT nMin, nMax;
+  BOOL bKnown = KnownPages(&info, &nMin, &nMax);
+  if (!bKnown) {
+    nMin = info.GetMinPage();
+    nMax = 0xFFFF;  // until the view stops
+  }
+  if (pSet != NULL && bKnown) {
+    BOOL bAny = FALSE;
+    for (UINT n = nMin; n <= nMax && !bAny; n++) bAny = InPageSet(pSet, (LONG)(n - nMin + 1));
+    if (!bAny) return PRINT_E_NOSUCHPAGE;
+  }
+
+  if (!bPrint) {
+    // Only the count: the pages that would print.
+    LONG nCount = 0, nLast = nFirstPage - 1;
+    UINT nEnd = bKnown ? nMax : nMin;
+    for (UINT n = nMin; n <= nEnd; n++) {
+      LONG nPage = (LONG)(n - nMin + 1);
+      if (!InPageSet(pSet, nPage)) continue;
+      nCount++;
+      nLast = nFirstPage + nPage - 1;
+    }
+    if (pcPagesPrinted != NULL) *pcPagesPrinted = nCount;
+    if (pnLastPage != NULL) *pnLastPage = nLast;
+    return S_OK;
+  }
+
+  CString strTitle = pThis->m_pOwner->GetTitle();
+  if (strTitle.GetLength() > 31) strTitle = strTitle.Left(31);
+  CString strOutput;
+  if ((grfFlags & PRINTFLAG_PRINTTOFILE) && pstgmOptions != NULL &&
+      pstgmOptions->tymed == TYMED_FILE && pstgmOptions->lpszFileName != NULL)
+    strOutput = pstgmOptions->lpszFileName;
+  DOCINFO docInfo;
+  memset(&docInfo, 0, sizeof(docInfo));
+  docInfo.cbSize = sizeof(docInfo);
+  docInfo.lpszDocName = strTitle;
+  docInfo.lpszOutput = strOutput.IsEmpty() ? NULL : (LPCTSTR)strOutput;
+
+  CDC dcPrint;
+  dcPrint.Attach(hDC);
+  dcPrint.m_bPrinting = TRUE;
+  pView->OnBeginPrinting(&dcPrint, &info);
+  HRESULT hr = S_OK;
+  LONG nCount = 0, nLast = nFirstPage - 1;
+  if (dcPrint.StartDoc(&docInfo) == SP_ERROR) {
+    hr = E_FAIL;
+  } else {
+    for (info.m_nCurPage = nMin; info.m_nCurPage <= nMax; info.m_nCurPage++) {
+      LONG nPage = (LONG)(info.m_nCurPage - nMin + 1);
+      if (!InPageSet(pSet, nPage)) continue;
+      pView->OnPrepareDC(&dcPrint, &info);
+      if (!info.m_bContinuePrinting) break;
+      info.m_rectDraw.SetRect(0, 0, dcPrint.GetDeviceCaps(HORZRES),
+                              dcPrint.GetDeviceCaps(VERTRES));
+      dcPrint.DPtoLP(&info.m_rectDraw);
+      if (dcPrint.StartPage() < 0) {
+        hr = E_FAIL;
+        break;
+      }
+      pView->OnPrepareDC(&dcPrint, &info);
+      pView->OnPrint(&dcPrint, &info);
+      if (dcPrint.EndPage() < 0) {
+        hr = E_FAIL;
+        break;
+      }
+      nCount++;
+      nLast = nFirstPage + nPage - 1;
+      if (pCallback != NULL && pCallback->FContinuePrinting(nCount, nLast, NULL) == S_FALSE) {
+        hr = PRINT_E_CANCELLED;
+        break;
+      }
+      if (info.m_nCurPage == 0xFFFF) break;
+    }
+    if (hr == S_OK)
+      dcPrint.EndDoc();
+    else
+      dcPrint.AbortDoc();
+  }
+  pView->OnEndPrinting(&dcPrint, &info);
+  dcPrint.Detach();
+  if (pcPagesPrinted != NULL) *pcPagesPrinted = nCount;
+  if (pnLastPage != NULL) *pnLastPage = nLast;
+  return hr;
 }
 
 // ---------------------------------------------------------------------
@@ -565,8 +767,35 @@ BOOL COleDocObjectItem::GetPageCount(LPLONG pnFirstPage, LPLONG pcPages) {
   return TRUE;
 }
 
-void COleDocObjectItem::DoDefaultPrinting(CView*, CPrintInfo*) {
-  ExecCommand(OLECMDID_PRINT, OLECMDEXECOPT_DONTPROMPTUSER);
+DVTARGETDEVICE* AFXAPI _AfxOleCreateTargetDevice(const PRINTDLG* ppd);
+
+void COleDocObjectItem::DoDefaultPrinting(CView*, CPrintInfo* pInfo) {
+  if (m_pIPrint == NULL && m_lpObject != NULL)
+    m_lpObject->QueryInterface(IID_IPrint, (void**)&m_pIPrint);
+  if (m_pIPrint == NULL) {
+    // Without IPrint, its own Print command.
+    ExecCommand(OLECMDID_PRINT, OLECMDEXECOPT_DONTPROMPTUSER);
+    return;
+  }
+  // The pages and the printer the container's print job has.
+  DVTARGETDEVICE* ptd = pInfo != NULL ? _AfxOleCreateTargetDevice(&pInfo->m_pPD->m_pd) : NULL;
+  PAGESET pageSet;
+  memset(&pageSet, 0, sizeof(pageSet));
+  pageSet.cbStruct = sizeof(pageSet);
+  pageSet.fOddPages = pageSet.fEvenPages = TRUE;
+  pageSet.cPageRange = 1;
+  pageSet.rgPages[0].nFromPage = 1;
+  pageSet.rgPages[0].nToPage = PAGESET_TOLASTPAGE;
+  if (pInfo != NULL && (pInfo->m_pPD->m_pd.Flags & PD_PAGENUMS)) {
+    pageSet.rgPages[0].nFromPage = (LONG)pInfo->GetFromPage();
+    pageSet.rgPages[0].nToPage = (LONG)pInfo->GetToPage();
+  }
+  PAGESET* pSet = &pageSet;
+  LONG nPrinted = 0, nLast = 0;
+  m_pIPrint->Print(PRINTFLAG_MAYBOTHERUSER, ptd != NULL ? &ptd : NULL, &pSet, NULL, NULL,
+                   pInfo != NULL ? (LONG)pInfo->m_nOffsetPage + 1 : 1, &nPrinted, &nLast);
+  if (ptd != NULL) ::CoTaskMemFree(ptd);
+  if (pInfo != NULL) pInfo->m_bContinuePrinting = FALSE;  // the object printed every page
 }
 
 // The DocObject active in the view, if any.
@@ -640,4 +869,71 @@ STDMETHODIMP COleDocObjectItem::XOleDocumentSite::ActivateMe(LPOLEDOCUMENTVIEW p
   hr = pViewToActivate->SetInPlaceSite(lpSite);
   if (FAILED(hr)) return hr;
   return pThis->ActivateView(pViewToActivate);
+}
+
+// ---------------------------------------------------------------------
+// COleDocIPFrameWnd
+
+IMPLEMENT_DYNCREATE(COleDocIPFrameWnd, COleIPFrameWnd)
+
+COleDocIPFrameWnd::COleDocIPFrameWnd() : m_hMenuHelpPopup(NULL), m_hHelpPopup(NULL) {}
+
+COleDocIPFrameWnd::~COleDocIPFrameWnd() {}
+
+// A container that keeps its Help menu (group 5) gets the object's Help
+// popup at the top of it; the rest of the object's menu goes in as for any
+// in-place object.
+BOOL COleDocIPFrameWnd::BuildSharedMenu() {
+  DestroySharedMenu();
+  CDocument* pDoc = GetActiveDocument();
+  CDocTemplate* pTemplate = pDoc != NULL ? pDoc->GetDocTemplate() : NULL;
+  HMENU hServer = pTemplate != NULL ? pTemplate->m_hMenuInPlaceServer : NULL;
+  m_hSharedMenu = ::CreateMenu();
+  if (m_hSharedMenu == NULL) return FALSE;
+  OLEMENUGROUPWIDTHS widths;
+  memset(&widths, 0, sizeof(widths));
+  if (m_lpFrame == NULL || FAILED(m_lpFrame->InsertMenus(m_hSharedMenu, &widths)))
+    memset(&widths, 0, sizeof(widths));
+  LONG nHelp = widths.width[5];
+  widths.width[1] = widths.width[3] = widths.width[5] = 0;
+  if (nHelp == 0) {
+    _AfxMergeMenus(m_hSharedMenu, hServer, widths.width, 1);
+  } else {
+    int nNext = _AfxMergeMenus(m_hSharedMenu, hServer, widths.width, 1, 3, TRUE);
+    int nCount = hServer != NULL ? ::GetMenuItemCount(hServer) : 0;
+    TCHAR szText[256];
+    szText[0] = 0;
+    for (int i = nNext; i < nCount && m_hHelpPopup == NULL; i++) {
+      m_hHelpPopup = ::GetSubMenu(hServer, i);
+      if (m_hHelpPopup != NULL)
+        ::GetMenuString(hServer, i, szText, sizeof(szText) / sizeof(szText[0]), MF_BYPOSITION);
+    }
+    int nPos = 0;
+    for (int g = 0; g < 5; g++) nPos += (int)widths.width[g];
+    HMENU hHelp = ::GetSubMenu(m_hSharedMenu, nPos);
+    if (m_hHelpPopup != NULL && hHelp != NULL &&
+        ::InsertMenu(hHelp, 0, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)m_hHelpPopup,
+                     szText))
+      m_hMenuHelpPopup = hHelp;
+    else
+      m_hHelpPopup = NULL;
+    // The Help menu is the object's: its commands go to the object.
+    widths.width[5] = nHelp;
+  }
+  m_hOleMenu = ::OleCreateMenuDescriptor(m_hSharedMenu, &widths);
+  return TRUE;
+}
+
+void COleDocIPFrameWnd::DestroySharedMenu() {
+  if (m_hMenuHelpPopup != NULL) {
+    for (int i = ::GetMenuItemCount(m_hMenuHelpPopup) - 1; i >= 0; i--) {
+      if (::GetSubMenu(m_hMenuHelpPopup, i) == m_hHelpPopup) {
+        ::RemoveMenu(m_hMenuHelpPopup, i, MF_BYPOSITION);
+        break;
+      }
+    }
+  }
+  m_hMenuHelpPopup = NULL;
+  m_hHelpPopup = NULL;
+  COleIPFrameWnd::DestroySharedMenu();
 }

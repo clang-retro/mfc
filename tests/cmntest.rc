@@ -1,0 +1,29 @@
+// cmntest.rc - resources for cmntest.
+#include <windows.h>
+#include <afxres.h>
+#include "cmntest.h"
+
+// The link control (SysLink) is in comctl32 version 6 only.
+1 24 "cmntest.manifest"
+
+IDR_MAINFRAME MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+END
+
+// The toolbar: version, image width, image height, count, command IDs.
+IDR_MAINFRAME 241
+BEGIN
+  1, 16, 15, 8,
+  ID_FILE_NEW, ID_FILE_OPEN, ID_FILE_SAVE, 0,
+  ID_EDIT_CUT, ID_EDIT_COPY, ID_EDIT_PASTE, 0
+END
+IDR_MAINFRAME BITMAP "toolbar.bmp"
+
+STRINGTABLE
+BEGIN
+  IDR_MAINFRAME "CmnTest"
+END

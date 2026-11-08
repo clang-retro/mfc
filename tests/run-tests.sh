@@ -18,7 +18,7 @@ BIN=${BIN:-}
 CXX=${BIN:+$BIN/}clang++
 RC=${RC:-${BIN:+$BIN/}llvm-windres}
 LDFLAGS=${LDFLAGS:-}
-TESTS=${TESTS:-"core disptest socktest inettest dlgtest sditest mditest docktest splittest richtest dbtest rvtest autotest conntest dragtest oletest srvtest linktest richsrvtest iptest docobtest occtest ctltest dlltest"}
+TESTS=${TESTS:-"core disptest isapitest daotest socktest inettest dlgtest sditest mditest docktest splittest richtest dbtest rvtest dvtest autotest conntest dragtest oletest srvtest linktest richsrvtest iptest docobtest occtest htmltest ctltest cmntest wltest bindtest dlltest"}
 
 if [ -z "${DISPLAY:-}" ] && [ -z "${MFC_TEST_NO_XVFB:-}" ] && command -v xvfb-run >/dev/null 2>&1; then
   MFC_TEST_NO_XVFB=1 exec xvfb-run -a -s "-screen 0 1024x768x24" "$0" "$@"

@@ -8,9 +8,43 @@
 #define __AFXOCC_H__
 
 #include "afxdisp.h"
+#include "ocdb.h"
 
 class COleControlContainer;
 class COleControlSite;
+class CDataSourceControl;
+struct CDataBoundProperty;
+
+// The interface of the older data source controls (the Visual Basic
+// ones), which make the cursor that bound controls use.
+extern "C" const IID IID_IVBDSC;
+struct IVBDSC : public IUnknown {
+  virtual HRESULT STDMETHODCALLTYPE CancelUnload(BOOL* pfCancel) = 0;
+  virtual HRESULT STDMETHODCALLTYPE Error(DWORD dwErr, BOOL* pfShowError) = 0;
+  virtual HRESULT STDMETHODCALLTYPE CreateCursor(ICursor** ppCursor) = 0;
+};
+
+// The extender properties every container gives its controls.
+#ifndef DISPID_NAME
+#define DISPID_NAME (-800)
+#endif
+#ifndef DISPID_DELETE
+#define DISPID_DELETE (-801)
+#endif
+#ifndef DISPID_OBJECT
+#define DISPID_OBJECT (-802)
+#endif
+#ifndef DISPID_PARENT
+#define DISPID_PARENT (-803)
+#endif
+// And the ones this library's sites give: where the control is, in the
+// container's pixels, whether it shows, and its control ID.
+#define AFX_DISPID_EXT_LEFT ((DISPID)0x80010100L)
+#define AFX_DISPID_EXT_TOP ((DISPID)0x80010101L)
+#define AFX_DISPID_EXT_WIDTH ((DISPID)0x80010102L)
+#define AFX_DISPID_EXT_HEIGHT ((DISPID)0x80010103L)
+#define AFX_DISPID_EXT_VISIBLE ((DISPID)0x80010104L)
+#define AFX_DISPID_EXT_ID ((DISPID)0x80010105L)
 
 // The OLE controls of a dialog template, kept between creating the
 // dialog without them and making them on WM_INITDIALOG.
@@ -86,7 +120,23 @@ public:
   virtual DWORD GetDefBtnCode();
   virtual void SetDefaultButton(BOOL bDefault);
   virtual BOOL GetEventIID(IID* piid);
-  virtual BOOL IsWindowlessControl() { return FALSE; }
+  virtual BOOL IsWindowlessControl() { return m_bIsWindowless; }
+
+  // Data binding to a data source control (an OLE DB DataSource, or an
+  // older one that gives an ICursor): a property bound to a field of the
+  // current row, or given the data source; and, for a data source
+  // control's site, its rowset or cursor.
+  virtual void BindDefaultProperty(DISPID dwDispID, VARTYPE vtProp, LPCTSTR szFieldName,
+                                   CWnd* pDSCWnd);
+  virtual void BindProperty(DISPID dwDispId, CWnd* pWndDSC);
+  virtual IUnknown* GetDSCCursor();
+
+  // The extended control (IOleControlSite::GetExtendedControl): an
+  // IDispatch with the extender properties (Name, Object, Parent, Left,
+  // Top, Width, Height, Visible, ID) whose other names and DISPIDs are
+  // the control's own. The caller releases it.
+  virtual LPDISPATCH GetExtendedControl();
+  CString m_strName;  // the extender Name property
 
   COleControlContainer* m_pCtrlCont;
   HWND m_hWnd;
@@ -100,6 +150,7 @@ public:
   COleDispatchDriver m_dispDriver;
   DWORD m_dwEventSink;
   DWORD m_dwPropNotifySink;
+  DWORD m_dwNotifyDBEvents;
   DWORD m_dwMiscStatus;
   DWORD m_dwStyleMask;
   DWORD m_dwStyle;  // the styles the site keeps for the control
@@ -110,8 +161,12 @@ public:
   BOOL m_bSubclassed;  // m_pWndCtrl subclassed the control's window
   CWnd* m_pWndOwned;   // the window object GetDlgItem made, which the site deletes
   CLSID m_clsid;
-  void* m_pWindowlessObject;
+  void* m_pWindowlessObject;  // a windowless control's IOleInPlaceObjectWindowless
   int m_nFreezeEvents;
+  CDataSourceControl* m_pDataSourceControl;  // when this control is a data source
+  CDataBoundProperty* m_pBindings;           // this control's bound properties
+  BOOL m_bIgnoreNotify;                      // setting a bound property from its field
+  IDispatch* m_pExtendedControl;             // made on first asking, released with the site
 
 protected:
   HRESULT CreateOrLoad(REFCLSID clsid, CFile* pPersist, BOOL bStorage, BSTR bstrLicKey);
@@ -122,6 +177,12 @@ protected:
   BOOL SetExtent();
   void FindEventsIID();
   HRESULT FireEvent(AFX_EVENT* pEvent);
+  // A windowless control: its part of the container window to repaint,
+  // and a message for it.
+  void InvalidateWindowless(LPCRECT lpRect, BOOL bErase);
+  HRESULT SendWindowlessMessage(UINT msg, WPARAM wParam, LPARAM lParam, LRESULT* plResult);
+  void OnActivated(DWORD dwFlags);
+  void OnDeactivated();
 
   // IOleClientSite
   BEGIN_INTERFACE_PART(OleClientSite, IOleClientSite)
@@ -133,7 +194,9 @@ protected:
     STDMETHOD(RequestNewObjectLayout)();
   END_INTERFACE_PART(OleClientSite)
 
-  BEGIN_INTERFACE_PART(OleIPSite, IOleInPlaceSite)
+  // IOleInPlaceSite, and IOleInPlaceSiteEx and IOleInPlaceSiteWindowless
+  // for windowless controls.
+  BEGIN_INTERFACE_PART(OleIPSite, IOleInPlaceSiteWindowless)
     STDMETHOD(GetWindow)(HWND*);
     STDMETHOD(ContextSensitiveHelp)(BOOL);
     STDMETHOD(CanInPlaceActivate)();
@@ -147,6 +210,21 @@ protected:
     STDMETHOD(DiscardUndoState)();
     STDMETHOD(DeactivateAndUndo)();
     STDMETHOD(OnPosRectChange)(LPCRECT);
+    STDMETHOD(OnInPlaceActivateEx)(BOOL*, DWORD);
+    STDMETHOD(OnInPlaceDeactivateEx)(BOOL);
+    STDMETHOD(RequestUIActivate)();
+    STDMETHOD(CanWindowlessActivate)();
+    STDMETHOD(GetCapture)();
+    STDMETHOD(SetCapture)(BOOL);
+    STDMETHOD(GetFocus)();
+    STDMETHOD(SetFocus)(BOOL);
+    STDMETHOD(GetDC)(LPCRECT, DWORD, HDC*);
+    STDMETHOD(ReleaseDC)(HDC);
+    STDMETHOD(InvalidateRect)(LPCRECT, BOOL);
+    STDMETHOD(InvalidateRgn)(HRGN, BOOL);
+    STDMETHOD(ScrollRect)(INT, INT, LPCRECT, LPCRECT);
+    STDMETHOD(AdjustRect)(LPRECT);
+    STDMETHOD(OnDefWindowMessage)(UINT, WPARAM, LPARAM, LRESULT*);
   END_INTERFACE_PART(OleIPSite)
 
   BEGIN_INTERFACE_PART(OleControlSite, IOleControlSite)
@@ -172,6 +250,18 @@ protected:
     STDMETHOD(OnRequestEdit)(DISPID);
   END_INTERFACE_PART(PropertyNotifySink)
 
+  // A data source control's notifications (the older, ICursor ones).
+  BEGIN_INTERFACE_PART(NotifyDBEvents, INotifyDBEvents)
+    STDMETHOD(OKToDo)(DWORD, ULONG, DBNOTIFYREASON[]);
+    STDMETHOD(Cancelled)(DWORD, ULONG, DBNOTIFYREASON[]);
+    STDMETHOD(SyncBefore)(DWORD, ULONG, DBNOTIFYREASON[]);
+    STDMETHOD(AboutToDo)(DWORD, ULONG, DBNOTIFYREASON[]);
+    STDMETHOD(FailedToDo)(DWORD, ULONG, DBNOTIFYREASON[]);
+    STDMETHOD(SyncAfter)(DWORD, ULONG, DBNOTIFYREASON[]);
+    STDMETHOD(DidEvent)(DWORD, ULONG, DBNOTIFYREASON[]);
+    HRESULT Notify(DSCSTATE nState, DWORD dwEventWhat, ULONG cReasons, DBNOTIFYREASON rgReasons[]);
+  END_INTERFACE_PART(NotifyDBEvents)
+
   // The control's events; its QueryInterface answers m_iidEvents.
   BEGIN_INTERFACE_PART(EventSink, IDispatch)
     STDMETHOD(GetTypeInfoCount)(UINT*);
@@ -182,6 +272,8 @@ protected:
 
   DECLARE_INTERFACE_MAP()
   friend class COleControlContainer;
+  friend HRESULT AFXAPI _AfxFireDSCNotify(COleControlSite* pSite, DSCSTATE nState,
+                                          DSCREASON nReason);
 };
 
 // ---------------------------------------------------------------------
@@ -211,6 +303,15 @@ public:
   virtual void CreateOleFont(CFont* pFont);
   // Closes every control, before the window goes.
   virtual void DestroyAll();
+
+  // Windowless controls: they draw on the window's DC when it paints,
+  // and get its mouse messages over them and its keys when they have the
+  // focus.
+  virtual BOOL OnPaint(CDC* pDC);
+  virtual BOOL HandleWindowlessMessage(UINT message, WPARAM wParam, LPARAM lParam,
+                                       LRESULT* plResult);
+  // The visible windowless control at a point of the window, the topmost.
+  COleControlSite* FindWindowlessSite(CPoint point) const;
 
   // Dialog item functions that also reach controls.
   virtual CWnd* GetDlgItem(int nID) const;

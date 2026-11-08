@@ -25,6 +25,8 @@ IMPLEMENT_DYNAMIC(CMonthCalCtrl, CWnd)
 IMPLEMENT_DYNAMIC(CIPAddressCtrl, CWnd)
 IMPLEMENT_DYNAMIC(CComboBoxEx, CComboBox)
 IMPLEMENT_DYNAMIC(CReBarCtrl, CWnd)
+IMPLEMENT_DYNAMIC(CLinkCtrl, CWnd)
+IMPLEMENT_DYNAMIC(CPagerCtrl, CWnd)
 
 // Registers the control class (through InitCommonControlsEx) and creates
 // the window.
@@ -59,6 +61,152 @@ AFX_COMMCTL_CREATE(CMonthCalCtrl, AFX_WNDCOMMCTL_DATE_REG, MONTHCAL_CLASS)
 AFX_COMMCTL_CREATE(CIPAddressCtrl, AFX_WNDCOMMCTL_INTERNET_REG, WC_IPADDRESS)
 AFX_COMMCTL_CREATE(CComboBoxEx, AFX_WNDCOMMCTL_USEREX_REG, WC_COMBOBOXEX)
 AFX_COMMCTL_CREATE(CReBarCtrl, AFX_WNDCOMMCTL_COOL_REG, REBARCLASSNAME)
+AFX_COMMCTL_CREATE(CPagerCtrl, AFX_WNDCOMMCTL_PAGER_REG, WC_PAGESCROLLER)
+
+BOOL CPagerCtrl::CreateEx(DWORD dwExStyle, DWORD dwStyle, const RECT& rect, CWnd* pParentWnd,
+                          UINT nID) {
+  return _AfxCreateCommCtl(this, AFX_WNDCOMMCTL_PAGER_REG, WC_PAGESCROLLER, dwExStyle, dwStyle,
+                           rect, pParentWnd, nID);
+}
+
+// ---------------------------------------------------------------------
+// CReBarCtrl
+
+CImageList* CReBarCtrl::GetImageList() const {
+  REBARINFO rbi;
+  memset(&rbi, 0, sizeof(rbi));
+  rbi.cbSize = sizeof(rbi);
+  rbi.fMask = RBIM_IMAGELIST;
+  if (!GetBarInfo(&rbi)) return NULL;
+  return CImageList::FromHandle(rbi.himl);
+}
+
+BOOL CReBarCtrl::SetImageList(CImageList* pImageList) {
+  REBARINFO rbi;
+  memset(&rbi, 0, sizeof(rbi));
+  rbi.cbSize = sizeof(rbi);
+  rbi.fMask = RBIM_IMAGELIST;
+  rbi.himl = pImageList != NULL ? pImageList->GetSafeHandle() : NULL;
+  return SetBarInfo(&rbi);
+}
+
+IDropTarget* CReBarCtrl::GetDropTarget() const {
+  IDropTarget* pTarget = NULL;
+  ::SendMessage(m_hWnd, RB_GETDROPTARGET, 0, (LPARAM)&pTarget);
+  return pTarget;
+}
+
+// ---------------------------------------------------------------------
+// CLinkCtrl: SysLink, whose class name and items are Unicode.
+
+static const TCHAR s_szLinkClass[] = _T("SysLink");
+
+BOOL CLinkCtrl::CreateEx(DWORD dwExStyle, LPCTSTR lpszLinkMarkup, DWORD dwStyle,
+                         const RECT& rect, CWnd* pParentWnd, UINT nID) {
+  if (!AfxDeferRegisterClass(AFX_WNDCOMMCTL_LINK_REG)) {
+    // comctl32 6 only: without it, the class is not there.
+    AfxDeferRegisterClass(AFX_WNDCOMMCTLS_REG);
+  }
+  return CWnd::CreateEx(dwExStyle, s_szLinkClass, lpszLinkMarkup, dwStyle, rect, pParentWnd,
+                        nID);
+}
+
+BOOL CLinkCtrl::CreateEx(DWORD dwExStyle, DWORD dwStyle, const RECT& rect, CWnd* pParentWnd,
+                         UINT nID) {
+  return CreateEx(dwExStyle, NULL, dwStyle, rect, pParentWnd, nID);
+}
+
+BOOL CLinkCtrl::Create(LPCTSTR lpszLinkMarkup, DWORD dwStyle, const RECT& rect, CWnd* pParentWnd,
+                       UINT nID) {
+  return CreateEx(0, lpszLinkMarkup, dwStyle, rect, pParentWnd, nID);
+}
+
+BOOL CLinkCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID) {
+  return CreateEx(0, NULL, dwStyle, rect, pParentWnd, nID);
+}
+
+static void CopyWide(LPWSTR pszDest, UINT cchDest, LPCWSTR pszSrc) {
+  if (cchDest == 0) return;
+  UINT i = 0;
+  for (; pszSrc != NULL && pszSrc[i] != 0 && i + 1 < cchDest; i++) pszDest[i] = pszSrc[i];
+  pszDest[i] = 0;
+}
+
+BOOL CLinkCtrl::SetItemID(int iLink, LPCWSTR szID) {
+  LITEM item;
+  memset(&item, 0, sizeof(item));
+  item.mask = LIF_ITEMINDEX | LIF_ITEMID;
+  item.iLink = iLink;
+  CopyWide(item.szID, MAX_LINKID_TEXT, szID);
+  return SetItem(&item);
+}
+
+BOOL CLinkCtrl::SetItemUrl(int iLink, LPCWSTR szUrl) {
+  LITEM item;
+  memset(&item, 0, sizeof(item));
+  item.mask = LIF_ITEMINDEX | LIF_URL;
+  item.iLink = iLink;
+  CopyWide(item.szUrl, L_MAX_URL_LENGTH, szUrl);
+  return SetItem(&item);
+}
+
+BOOL CLinkCtrl::SetItemState(int iLink, UINT state, UINT stateMask) {
+  LITEM item;
+  memset(&item, 0, sizeof(item));
+  item.mask = LIF_ITEMINDEX | LIF_STATE;
+  item.iLink = iLink;
+  item.state = state;
+  item.stateMask = stateMask;
+  return SetItem(&item);
+}
+
+BOOL CLinkCtrl::GetItemID(int iLink, LPWSTR szID, UINT cchID) const {
+  LITEM item;
+  memset(&item, 0, sizeof(item));
+  item.mask = LIF_ITEMINDEX | LIF_ITEMID;
+  item.iLink = iLink;
+  if (!GetItem(&item)) return FALSE;
+  CopyWide(szID, cchID, item.szID);
+  return TRUE;
+}
+
+BOOL CLinkCtrl::GetItemID(int iLink, CString& strID) const {
+  WCHAR sz[MAX_LINKID_TEXT];
+  if (!GetItemID(iLink, sz, MAX_LINKID_TEXT)) return FALSE;
+  strID = sz;
+  return TRUE;
+}
+
+BOOL CLinkCtrl::GetItemUrl(int iLink, LPWSTR szUrl, UINT cchUrl) const {
+  LITEM item;
+  memset(&item, 0, sizeof(item));
+  item.mask = LIF_ITEMINDEX | LIF_URL;
+  item.iLink = iLink;
+  if (!GetItem(&item)) return FALSE;
+  CopyWide(szUrl, cchUrl, item.szUrl);
+  return TRUE;
+}
+
+BOOL CLinkCtrl::GetItemUrl(int iLink, CString& strUrl) const {
+  LITEM item;
+  memset(&item, 0, sizeof(item));
+  item.mask = LIF_ITEMINDEX | LIF_URL;
+  item.iLink = iLink;
+  if (!GetItem(&item)) return FALSE;
+  strUrl = item.szUrl;
+  return TRUE;
+}
+
+BOOL CLinkCtrl::GetItemState(int iLink, UINT* pnState, UINT stateMask) const {
+  LITEM item;
+  memset(&item, 0, sizeof(item));
+  item.mask = LIF_ITEMINDEX | LIF_STATE;
+  item.iLink = iLink;
+  item.stateMask = stateMask;
+  if (!GetItem(&item)) return FALSE;
+  if (pnState != NULL) *pnState = item.state;
+  return TRUE;
+}
 
 BOOL CListCtrl::CreateEx(DWORD dwExStyle, DWORD dwStyle, const RECT& rect, CWnd* pParentWnd,
                          UINT nID) {

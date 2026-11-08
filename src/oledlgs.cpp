@@ -14,6 +14,8 @@ IMPLEMENT_DYNAMIC(COleUpdateDialog, COleLinksDialog)
 IMPLEMENT_DYNAMIC(COleChangeIconDialog, COleDialog)
 IMPLEMENT_DYNAMIC(COleConvertDialog, COleDialog)
 IMPLEMENT_DYNAMIC(COleBusyDialog, COleDialog)
+IMPLEMENT_DYNAMIC(COleChangeSourceDialog, COleDialog)
+IMPLEMENT_DYNAMIC(COlePropertiesDialog, COleDialog)
 
 // Runs a dialog with the safe owner as its owner, as CDialog::DoModal does.
 template <typename F>
@@ -599,4 +601,255 @@ void COleDocument::OnEditChangeIcon() {
     SetModifiedFlag();
     UpdateAllViews(NULL);
   }
+}
+
+// ---------------------------------------------------------------------
+// The links' last update: when their source last changed.
+
+DWORD COleLinksDialog::FindLink(COleClientItem* pItem) const {
+  for (DWORD dwLink = 1;; dwLink++) {
+    COleClientItem* p = GetLink(dwLink);
+    if (p == NULL) return 0;
+    if (p == pItem) return dwLink;
+  }
+}
+
+STDMETHODIMP COleLinksDialog::XOleUILinkContainer::GetLastUpdate(DWORD dwLink,
+                                                                 FILETIME* lpLastUpdate) {
+  METHOD_PROLOGUE_EX_(COleLinksDialog, OleUILinkContainer)
+  if (lpLastUpdate == NULL) return E_POINTER;
+  memset(lpLastUpdate, 0, sizeof(*lpLastUpdate));
+  COleClientItem* pItem = pThis->GetLink(dwLink);
+  if (pItem == NULL || pItem->m_lpObject == NULL) return E_INVALIDARG;
+  LPOLELINK lpLink = NULL;
+  HRESULT hr = pItem->m_lpObject->QueryInterface(IID_IOleLink, (void**)&lpLink);
+  if (FAILED(hr)) return hr;
+  LPMONIKER lpMoniker = NULL;
+  hr = lpLink->GetSourceMoniker(&lpMoniker);
+  lpLink->Release();
+  if (FAILED(hr) || lpMoniker == NULL) return FAILED(hr) ? hr : E_FAIL;
+  LPBC lpbc = NULL;
+  hr = ::CreateBindCtx(0, &lpbc);
+  if (SUCCEEDED(hr)) {
+    hr = lpMoniker->GetTimeOfLastChange(lpbc, NULL, lpLastUpdate);
+    lpbc->Release();
+  }
+  lpMoniker->Release();
+  return hr;
+}
+
+// ---------------------------------------------------------------------
+// Change Source
+
+static COleDocument* ItemDocument(COleClientItem* pItem) {
+  return pItem != NULL ? pItem->GetDocument() : NULL;
+}
+
+COleChangeSourceDialog::COleChangeSourceDialog(COleClientItem* pItem, CWnd* pParentWnd)
+    : COleDialog(pParentWnd), m_xLinkInfo(ItemDocument(pItem), NULL), m_pItem(pItem) {
+  memset(&m_cs, 0, sizeof(m_cs));
+  m_cs.cbStruct = sizeof(m_cs);
+  m_cs.lpOleUILinkContainer = &m_xLinkInfo.m_xOleUILinkContainer;
+  m_cs.dwLink = m_xLinkInfo.FindLink(pItem);
+  // The link's source now.
+  if (m_cs.dwLink != 0) {
+    LPTSTR lpszName = NULL;
+    ULONG nFileLength = 0;
+    if (SUCCEEDED(m_xLinkInfo.m_xOleUILinkContainer.GetLinkSource(
+            m_cs.dwLink, &lpszName, &nFileLength, NULL, NULL, NULL, NULL))) {
+      m_cs.lpszDisplayName = lpszName;
+      m_cs.nFileLength = nFileLength;
+    }
+  }
+}
+
+COleChangeSourceDialog::~COleChangeSourceDialog() {
+  ::CoTaskMemFree(m_cs.lpszDisplayName);
+  ::CoTaskMemFree(m_cs.lpszFrom);
+  ::CoTaskMemFree(m_cs.lpszTo);
+}
+
+INT_PTR COleChangeSourceDialog::DoModal() {
+  UINT nResult = RunOleDialog(m_pParentWnd, &m_cs.hWndOwner,
+                              [this]() { return ::OleUIChangeSource(&m_cs); });
+  INT_PTR nRet = MapResult(nResult);
+  if (nRet == IDOK && IsValidSource() && m_cs.dwLink != 0 && m_cs.lpszDisplayName != NULL) {
+    ULONG nEaten = 0;
+    m_xLinkInfo.m_xOleUILinkContainer.SetLinkSource(m_cs.dwLink, m_cs.lpszDisplayName,
+                                                    m_cs.nFileLength, &nEaten, FALSE);
+  }
+  return nRet;
+}
+
+// ---------------------------------------------------------------------
+// Object Properties: one object (dwObject 1), the item.
+
+BEGIN_INTERFACE_MAP(COlePropertiesDialog, COleDialog)
+END_INTERFACE_MAP()
+
+COlePropertiesDialog::COlePropertiesDialog(COleClientItem* pItem, UINT nScaleMin,
+                                           UINT nScaleMax, CWnd* pParentWnd)
+    : COleDialog(pParentWnd), m_xLinkInfo(ItemDocument(pItem), NULL), m_pItem(pItem) {
+  memset(&m_op, 0, sizeof(m_op));
+  memset(&m_gp, 0, sizeof(m_gp));
+  memset(&m_vp, 0, sizeof(m_vp));
+  memset(&m_lp, 0, sizeof(m_lp));
+  memset(&m_psh, 0, sizeof(m_psh));
+  m_op.cbStruct = sizeof(m_op);
+  m_gp.cbStruct = sizeof(m_gp);
+  m_vp.cbStruct = sizeof(m_vp);
+  m_lp.cbStruct = sizeof(m_lp);
+  m_psh.dwSize = sizeof(m_psh);
+  m_vp.nScaleMin = (int)nScaleMin;
+  m_vp.nScaleMax = (int)nScaleMax;
+  m_op.lpPS = &m_psh;
+  m_op.dwObject = 1;
+  m_op.lpObjInfo = &m_xOleUIObjInfo;
+  m_op.lpGP = &m_gp;
+  m_op.lpVP = &m_vp;
+  m_gp.lpOP = m_vp.lpOP = m_lp.lpOP = &m_op;
+  if (pItem != NULL && pItem->GetType() == OT_LINK) {
+    m_op.dwFlags |= OPF_OBJECTISLINK;
+    m_op.dwLink = m_xLinkInfo.FindLink(pItem);
+    m_op.lpLinkInfo = &m_xLinkInfo.m_xOleUILinkContainer;
+    m_op.lpLP = &m_lp;
+  }
+}
+
+COlePropertiesDialog::~COlePropertiesDialog() {}
+
+INT_PTR COlePropertiesDialog::DoModal() {
+  UINT nResult = RunOleDialog(m_pParentWnd, &m_psh.hwndParent,
+                              [this]() { return ::OleUIObjectProperties(&m_op); });
+  return MapResult(nResult);
+}
+
+BOOL COlePropertiesDialog::OnApplyScale(COleClientItem*, int, BOOL) { return FALSE; }
+
+STDMETHODIMP_(ULONG) COlePropertiesDialog::XOleUIObjInfo::AddRef() {
+  METHOD_PROLOGUE_EX_(COlePropertiesDialog, OleUIObjInfo)
+  return pThis->ExternalAddRef();
+}
+
+STDMETHODIMP_(ULONG) COlePropertiesDialog::XOleUIObjInfo::Release() {
+  METHOD_PROLOGUE_EX_(COlePropertiesDialog, OleUIObjInfo)
+  return pThis->ExternalRelease();
+}
+
+STDMETHODIMP COlePropertiesDialog::XOleUIObjInfo::QueryInterface(REFIID iid, LPVOID* ppvObj) {
+  METHOD_PROLOGUE_EX_(COlePropertiesDialog, OleUIObjInfo)
+  return pThis->ExternalQueryInterface(&iid, ppvObj);
+}
+
+// The object's size is its storage's, when that is in memory. Its label
+// and type are its full type name, its location the document's (or, for
+// a link, the source's).
+STDMETHODIMP COlePropertiesDialog::XOleUIObjInfo::GetObjectInfo(
+    DWORD dwObject, DWORD* lpdwObjSize, LPTSTR* lplpszLabel, LPTSTR* lplpszType,
+    LPTSTR* lplpszShortType, LPTSTR* lplpszLocation) {
+  METHOD_PROLOGUE_EX_(COlePropertiesDialog, OleUIObjInfo)
+  if (lplpszLabel != NULL) *lplpszLabel = NULL;
+  if (lplpszType != NULL) *lplpszType = NULL;
+  if (lplpszShortType != NULL) *lplpszShortType = NULL;
+  if (lplpszLocation != NULL) *lplpszLocation = NULL;
+  COleClientItem* pItem = pThis->m_pItem;
+  if (dwObject != 1 || pItem == NULL) return E_INVALIDARG;
+  if (lpdwObjSize != NULL) {
+    *lpdwObjSize = (DWORD)-1;  // unknown
+    STATSTG stat;
+    if (pItem->m_lpLockBytes != NULL &&
+        SUCCEEDED(pItem->m_lpLockBytes->Stat(&stat, STATFLAG_NONAME)))
+      *lpdwObjSize = stat.cbSize.HighPart != 0 ? (DWORD)-2 : stat.cbSize.LowPart;
+  }
+  CString strFull, strShort;
+  pItem->GetUserType(USERCLASSTYPE_FULL, strFull);
+  pItem->GetUserType(USERCLASSTYPE_SHORT, strShort);
+  if (lplpszLabel != NULL) *lplpszLabel = TaskString(strFull);
+  if (lplpszType != NULL) *lplpszType = TaskString(strFull);
+  if (lplpszShortType != NULL) *lplpszShortType = TaskString(strShort);
+  if (lplpszLocation != NULL) {
+    CString strLocation;
+    DWORD dwLink = pThis->m_op.dwLink;
+    LPTSTR lpszSource = NULL;
+    if (dwLink != 0 && SUCCEEDED(pThis->m_xLinkInfo.m_xOleUILinkContainer.GetLinkSource(
+                           dwLink, &lpszSource, NULL, NULL, NULL, NULL, NULL))) {
+      strLocation = lpszSource;
+      ::CoTaskMemFree(lpszSource);
+    } else if (COleDocument* pDoc = pItem->GetDocument()) {
+      strLocation = pDoc->GetPathName();
+      if (strLocation.IsEmpty()) strLocation = pDoc->GetTitle();
+    }
+    *lplpszLocation = TaskString(strLocation);
+  }
+  return S_OK;
+}
+
+STDMETHODIMP COlePropertiesDialog::XOleUIObjInfo::GetConvertInfo(
+    DWORD dwObject, CLSID* lpClassID, WORD* lpwFormat, CLSID* lpConvertDefaultClassID,
+    LPCLSID* lplpClsidExclude, UINT* lpcClsidExclude) {
+  METHOD_PROLOGUE_EX_(COlePropertiesDialog, OleUIObjInfo)
+  COleClientItem* pItem = pThis->m_pItem;
+  if (dwObject != 1 || pItem == NULL) return E_INVALIDARG;
+  if (lpClassID != NULL) pItem->GetClassID(lpClassID);
+  if (lpwFormat != NULL) {
+    *lpwFormat = 0;
+    CLIPFORMAT cf = 0;
+    if (pItem->m_lpStorage != NULL && SUCCEEDED(::ReadFmtUserTypeStg(pItem->m_lpStorage, &cf, NULL)))
+      *lpwFormat = cf;
+  }
+  if (lpConvertDefaultClassID != NULL) *lpConvertDefaultClassID = CLSID_NULL;
+  if (lplpClsidExclude != NULL) *lplpClsidExclude = NULL;
+  if (lpcClsidExclude != NULL) *lpcClsidExclude = 0;
+  return S_OK;
+}
+
+STDMETHODIMP COlePropertiesDialog::XOleUIObjInfo::ConvertObject(DWORD dwObject,
+                                                                REFCLSID clsidNew) {
+  METHOD_PROLOGUE_EX_(COlePropertiesDialog, OleUIObjInfo)
+  COleClientItem* pItem = pThis->m_pItem;
+  if (dwObject != 1 || pItem == NULL) return E_INVALIDARG;
+  if (!pItem->ConvertTo(clsidNew)) return pItem->GetLastStatus();
+  if (COleDocument* pDoc = pItem->GetDocument()) {
+    pDoc->SetModifiedFlag();
+    pDoc->UpdateAllViews(NULL);
+  }
+  return S_OK;
+}
+
+STDMETHODIMP COlePropertiesDialog::XOleUIObjInfo::GetViewInfo(DWORD dwObject,
+                                                             HGLOBAL* phMetaPict,
+                                                             DWORD* pdvAspect,
+                                                             int* pnCurrentScale) {
+  METHOD_PROLOGUE_EX_(COlePropertiesDialog, OleUIObjInfo)
+  COleClientItem* pItem = pThis->m_pItem;
+  if (dwObject != 1 || pItem == NULL) return E_INVALIDARG;
+  if (phMetaPict != NULL) *phMetaPict = pItem->GetIconicMetafile();
+  if (pdvAspect != NULL) *pdvAspect = (DWORD)pItem->GetDrawAspect();
+  if (pnCurrentScale != NULL) *pnCurrentScale = 100;
+  return S_OK;
+}
+
+STDMETHODIMP COlePropertiesDialog::XOleUIObjInfo::SetViewInfo(DWORD dwObject, HGLOBAL hMetaPict,
+                                                             DWORD dvAspect, int nCurrentScale,
+                                                             BOOL bRelativeToOrig) {
+  METHOD_PROLOGUE_EX_(COlePropertiesDialog, OleUIObjInfo)
+  COleClientItem* pItem = pThis->m_pItem;
+  if (dwObject != 1 || pItem == NULL) return E_INVALIDARG;
+  BOOL bChanged = FALSE;
+  if ((DVASPECT)dvAspect == DVASPECT_ICON && hMetaPict != NULL) {
+    pItem->SetIconicMetafile(hMetaPict);
+    bChanged = TRUE;
+  }
+  if ((DVASPECT)dvAspect != pItem->GetDrawAspect()) {
+    pItem->SetDrawAspect((DVASPECT)dvAspect);
+    bChanged = TRUE;
+  }
+  if (pThis->OnApplyScale(pItem, nCurrentScale, bRelativeToOrig)) bChanged = TRUE;
+  if (bChanged) {
+    if (COleDocument* pDoc = pItem->GetDocument()) {
+      pDoc->SetModifiedFlag();
+      pDoc->UpdateAllViews(NULL);
+    }
+  }
+  return S_OK;
 }
