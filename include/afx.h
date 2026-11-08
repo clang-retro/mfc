@@ -218,8 +218,8 @@ inline void AFX_CDECL AfxTraceNull(...) {}
 #define ASSERT_POINTER(p, type) ASSERT(((p) != NULL) && AfxIsValidAddress((p), sizeof(type), FALSE))
 #define ASSERT_NULL_OR_POINTER(p, type) ASSERT(((p) == NULL) || AfxIsValidAddress((p), sizeof(type), FALSE))
 
-// DEBUG_NEW records the file and line of an allocation in MFC's debug
-// builds; here it is plain new with the placement form MFC declares.
+// DEBUG_NEW records the file and line of an allocation in debug builds,
+// for the memory diagnostics below.
 void* AFX_CDECL operator new(size_t nSize, LPCSTR lpszFileName, int nLine);
 void* AFX_CDECL operator new[](size_t nSize, LPCSTR lpszFileName, int nLine);
 void AFX_CDECL operator delete(void* p, LPCSTR lpszFileName, int nLine);
@@ -356,17 +356,34 @@ public: \
 // ---------------------------------------------------------------------
 // CObject
 
+// A tracked block for new: an object block when bIsObject. Throws
+// CMemoryException when the allocation fails or the hook refuses it.
+void* AFXAPI _AfxDebugNew(size_t nSize, BOOL bIsObject, LPCSTR lpszFileName, int nLine);
+// Frees a tracked block, or hands any other to the global delete.
+void AFXAPI _AfxDebugDelete(void* p);
+// Whether blocks that are not objects are tracked too: not where the C++
+// runtime's own global delete was linked instead of the library's.
+BOOL AFXAPI _AfxTracksAllBlocks();
+
 class CObject {
 public:
   virtual CRuntimeClass* GetRuntimeClass() const;
   virtual ~CObject() {}
 
+#ifdef _DEBUG
+  // In a debug build objects are tracked, for CMemoryState.
+  void* PASCAL operator new(size_t nSize) { return _AfxDebugNew(nSize, TRUE, NULL, 0); }
+  void* PASCAL operator new(size_t nSize, LPCSTR lpszFileName, int nLine) {
+    return _AfxDebugNew(nSize, TRUE, lpszFileName, nLine);
+  }
+#else
   void* PASCAL operator new(size_t nSize) { return ::operator new(nSize); }
-  void* PASCAL operator new(size_t, void* p) { return p; }
-  void PASCAL operator delete(void* p) { ::operator delete(p); }
-  void PASCAL operator delete(void*, void*) {}
   void* PASCAL operator new(size_t nSize, LPCSTR, int) { return ::operator new(nSize); }
-  void PASCAL operator delete(void* p, LPCSTR, int) { ::operator delete(p); }
+#endif
+  void* PASCAL operator new(size_t, void* p) { return p; }
+  void PASCAL operator delete(void* p) { _AfxDebugDelete(p); }
+  void PASCAL operator delete(void*, void*) {}
+  void PASCAL operator delete(void* p, LPCSTR, int) { _AfxDebugDelete(p); }
 
 protected:
   CObject() {}
@@ -985,14 +1002,64 @@ public:
   void HexDump(LPCTSTR lpszLine, BYTE* pby, int nBytes, int nWidth);
   void Flush();
 
+  // Where the output goes: a file, or OutputDebugString when NULL.
+  CFile* m_pFile;
+
 protected:
   int m_nDepth;
-  CFile* m_pFile;
   void OutputString(LPCTSTR lpsz);
 };
 
 extern CDumpContext afxDump;
 extern BOOL afxTraceEnabled;
+
+// ---------------------------------------------------------------------
+// Memory diagnostics. Blocks from DEBUG_NEW, and objects made in a debug
+// build, are tracked: guarded against overruns, counted by CMemoryState,
+// dumped, and reported as leaks when a debug program ends.
+
+struct CMemoryState {
+  enum blockUsage { freeBlock, objectBlock, bitBlock, crtBlock, ignoredBlock, nBlockUseMax };
+
+  CMemoryState();
+  void Checkpoint();
+  BOOL Difference(const CMemoryState& oldState, const CMemoryState& newState);
+  void DumpStatistics() const;
+  void DumpAllObjectsSince() const;
+  void UpdateData() {}
+
+  LONG m_lCounts[nBlockUseMax];
+  LONG m_lSizes[nBlockUseMax];
+  LONG m_lHighWaterCount;  // the most bytes in use at once
+  LONG m_lTotalCount;      // bytes ever allocated
+  LONG m_lRequest;         // the last allocation's number at the checkpoint
+};
+
+enum AfxMemDF {
+  allocMemDF = 0x01,       // track allocations
+  delayFreeMemDF = 0x02,   // keep freed blocks, filled, to catch late writes
+  checkAlwaysMemDF = 0x04  // AfxCheckMemory on every allocation and free
+};
+extern int afxMemDF;
+
+typedef BOOL(AFXAPI* AFX_ALLOC_HOOK)(size_t nSize, BOOL bObject, LONG lRequestNumber);
+AFX_ALLOC_HOOK AFXAPI AfxSetAllocHook(AFX_ALLOC_HOOK pfnAllocHook);
+void* AFXAPI AfxAllocMemoryDebug(size_t nSize, BOOL bIsObject, LPCSTR lpszFileName, int nLine);
+void AFXAPI AfxFreeMemoryDebug(void* pbData, BOOL bIsObject);
+BOOL AFXAPI AfxCheckMemory();
+BOOL AFXAPI AfxIsMemoryBlock(const void* p, UINT nBytes, LONG* plRequestNumber = NULL);
+BOOL AFXAPI AfxEnableMemoryTracking(BOOL bTrack);
+void AFXAPI AfxDoForAllObjects(void(AFX_CDECL* pfn)(CObject* pObject, void* pContext),
+                               void* pContext);
+BOOL AFXAPI AfxDumpMemoryLeaks();
+BOOL AFXAPI AfxDiagnosticInit();
+
+#if !defined(_DEBUG) && !defined(_AFX_MEMDEBUG_IMPL)
+// As with Visual C++, a release build checks nothing.
+#define AfxCheckMemory() TRUE
+#define AfxIsMemoryBlock(p, nBytes) TRUE
+#define AfxEnableMemoryTracking(bTrack) FALSE
+#endif
 
 // ---------------------------------------------------------------------
 // Global helpers

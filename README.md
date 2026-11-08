@@ -70,6 +70,11 @@ when there is no display:
 
 * `core`: CString, collections, CFile, CArchive and serialization,
   CTime, exceptions and run-time classes, on the console.
+* `memtest`: the memory diagnostics in a debug build: DEBUG_NEW and
+  object blocks, CMemoryState (Checkpoint, Difference, DumpStatistics,
+  DumpAllObjectsSince) caught through afxDump, guard bytes and
+  AfxCheckMemory, AfxIsMemoryBlock, AfxDoForAllObjects, tracking turned
+  off, the allocation hook and delayed frees, on the console.
 * `disptest`: the automation helpers in `afxdisp.h` (COleDateTime and
   its span, COleCurrency, COleVariant, COleSafeArray) and a
   COleDispatchDriver calling an IDispatch written in the test, on the
@@ -277,7 +282,9 @@ request with the stock MinGW-w64 toolchain.
 * Core (`afx.h`, `afxcoll.h`, `afxtempl.h`, `afxstr.h`): CObject and
   CRuntimeClass with dynamic creation and serialization, CString
   (CStringA/CStringW), the collection classes and templates, CFile,
-  CStdioFile, CMemFile, CArchive, CTime, CTimeSpan, exceptions.
+  CStdioFile, CMemFile, CArchive, CTime, CTimeSpan, exceptions, and
+  the memory diagnostics (CMemoryState, AfxCheckMemory, afxMemDF,
+  AfxSetAllocHook, AfxDoForAllObjects and the leak report at exit).
 * Windows (`afxwin.h`): CWinApp, CWinThread, CWnd and message maps,
   command routing and idle updates, GDI objects and device contexts,
   standard controls (and CCheckListBox), CDialog with DDX/DDV, frames,
@@ -415,6 +422,13 @@ request with the stock MinGW-w64 toolchain.
   `_AFX_MSGMAP_MEMBER_POINTERS` defined before `afxwin.h`.
 * An ISAPI parse map's ITS_ string gives the number of a command's
   arguments; each argument is read as its parameter's own C++ type.
+* The memory diagnostics track the blocks DEBUG_NEW makes and, in a
+  debug build, CObject-derived objects. They do not track every
+  allocation, as Visual C++'s debug heap does. The library replaces the
+  global operator delete to free its blocks. When MinGW's libstdc++
+  links its own delete first, only objects are tracked
+  (`_AfxTracksAllBlocks` says which). A tracked block must be freed by
+  the module that made it.
 * `min` and `max` are function templates rather than macros (MinGW-w64
   defines the macros for C only). `NOMINMAX` turns them off.
 * Floating bars are tool windows, so the system draws their captions,

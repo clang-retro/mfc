@@ -136,18 +136,12 @@ BOOL AFXAPI AfxIsValidString(LPCSTR lpsz, int) { return lpsz != NULL; }
 
 void AFXAPI AfxDebugBreak() { DebugBreak(); }
 
-// DEBUG_NEW's placement forms.
-void* AFX_CDECL operator new(size_t nSize, LPCSTR, int) { return ::operator new(nSize); }
-void* AFX_CDECL operator new[](size_t nSize, LPCSTR, int) { return ::operator new[](nSize); }
-void AFX_CDECL operator delete(void* p, LPCSTR, int) { ::operator delete(p); }
-void AFX_CDECL operator delete[](void* p, LPCSTR, int) { ::operator delete[](p); }
-
 // ---------------------------------------------------------------------
 // CDumpContext
 
 CDumpContext afxDump;
 
-CDumpContext::CDumpContext(CFile* pFile) : m_nDepth(0), m_pFile(pFile) {}
+CDumpContext::CDumpContext(CFile* pFile) : m_pFile(pFile), m_nDepth(0) {}
 
 void CDumpContext::OutputString(LPCTSTR lpsz) {
   if (m_pFile) {

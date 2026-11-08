@@ -380,7 +380,6 @@ void AFXAPI AfxFormatString2(CString& rString, UINT nIDS, LPCTSTR lpsz1, LPCTSTR
   AfxFormatStrings(rString, nIDS, rglpsz, 2);
 }
 
-BOOL AFXAPI AfxCheckMemory() { return TRUE; }
 
 void AFXAPI AfxGlobalFree(HGLOBAL hGlobal) {
   if (hGlobal == NULL) return;
