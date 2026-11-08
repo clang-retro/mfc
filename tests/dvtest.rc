@@ -1,0 +1,33 @@
+// dvtest.rc - resources for dvtest.
+#include <windows.h>
+#include <afxres.h>
+#include "dvtest.h"
+
+IDR_MAINFRAME MENU
+BEGIN
+  POPUP "&Record"
+  BEGIN
+    MENUITEM "&First Record", ID_RECORD_FIRST
+    MENUITEM "&Previous Record", ID_RECORD_PREV
+    MENUITEM "&Next Record", ID_RECORD_NEXT
+    MENUITEM "&Last Record", ID_RECORD_LAST
+  END
+END
+
+IDD_RECORD DIALOG 0, 0, 160, 80
+STYLE WS_CHILD
+FONT 8, "MS Shell Dlg"
+BEGIN
+  LTEXT "ID:", -1, 7, 9, 30, 8
+  EDITTEXT IDC_ID, 45, 7, 40, 12, ES_AUTOHSCROLL
+  LTEXT "Name:", -1, 7, 25, 30, 8
+  EDITTEXT IDC_NAME, 45, 23, 100, 12, ES_AUTOHSCROLL
+  LTEXT "Age:", -1, 7, 41, 30, 8
+  EDITTEXT IDC_AGE, 45, 39, 40, 12, ES_AUTOHSCROLL
+  CONTROL "Active", IDC_ACTIVE, "Button", BS_AUTO3STATE | WS_TABSTOP, 45, 56, 60, 10
+END
+
+STRINGTABLE
+BEGIN
+  IDR_MAINFRAME "DvTest\n\nDvTest\n\n\nDvTest.Document\nDvTest Document"
+END
