@@ -314,8 +314,10 @@ when there is no display:
 * `wltest`: windowless controls, with a COleControl of the test's own
   in a frame window: drawing in the container's window (checked by its
   pixels) and InvalidateControl, mouse messages with capture, focus and
-  keys, the control's own GetDC, moving, hiding and destroying, and the
-  same control made windowed when it does not ask for windowless
+  keys, the control's own GetDC, drag and drop through the drop target
+  the container made for the frame (entering, leaving for the frame,
+  coming back, the drop and its data), moving, hiding and destroying,
+  and the same control made windowed when it does not ask for windowless
   activation.
 * `bindtest`: data binding, with a data source control and bound
   controls of the test's own: properties bound to fields follow the
@@ -518,8 +520,11 @@ request with the stock MinGW-w64 toolchain.
   once something is bound to it, and then only of the steps the rowset
   tells of.
   Windowless controls are drawn after the container's own painting,
-  in the order they were made, and are not given drag and drop
-  (GetWindowlessDropTarget is not called).
+  in the order they were made. A drag over one goes to the drop target
+  it gives (IOleInPlaceObjectWindowless::GetDropTarget, which
+  COleControl answers with GetWindowlessDropTarget); when the
+  container's window is no drop target, the container makes it one as
+  such a control is activated.
 * A regular DLL runs in the program's message loop, so its CWinApp's
   OnIdle and PreTranslateMessage are not called (as with Visual C++
   MFC's static library), and the temporary window objects its copy of

@@ -158,11 +158,18 @@ extern void (AFXAPI* _afxPfnRevokeDropTarget)(COleDropTarget*);
 static void AFXAPI RevokeDropTarget(COleDropTarget* pTarget) { pTarget->Revoke(); }
 
 COleDropTarget::COleDropTarget()
-    : m_hWnd(NULL), m_lpDataObject(NULL), m_dropEffectCurrent(DROPEFFECT_NONE) {
+    : m_hWnd(NULL),
+      m_lpDataObject(NULL),
+      m_dropEffectCurrent(DROPEFFECT_NONE),
+      m_pWindowlessTarget(NULL) {
   LoadDragSettings();
 }
 
-COleDropTarget::~COleDropTarget() { Revoke(); }
+COleDropTarget::~COleDropTarget() {
+  Revoke();
+  if (m_pWindowlessTarget != NULL) m_pWindowlessTarget->Release();
+  if (m_lpDataObject != NULL) m_lpDataObject->Release();
+}
 
 BOOL COleDropTarget::Register(CWnd* pWnd) {
   if (pWnd == NULL || pWnd->m_hWnd == NULL) return FALSE;
@@ -243,36 +250,20 @@ STDMETHODIMP COleDropTarget::XDropTarget::QueryInterface(REFIID iid, LPVOID* ppv
   return (HRESULT)pThis->ExternalQueryInterface(&iid, ppvObj);
 }
 
-STDMETHODIMP COleDropTarget::XDropTarget::DragEnter(LPDATAOBJECT pDataObj, DWORD grfKeyState,
-                                                    POINTL pt, LPDWORD pdwEffect) {
-  METHOD_PROLOGUE(COleDropTarget, DropTarget)
-  if (pdwEffect == NULL) return E_INVALIDARG;
-  CWnd* pWnd = CWnd::FromHandle(pThis->m_hWnd);
+// The drop target of the windowless control under a point (in screen
+// coordinates) of the window, if it has one: a drag over such a control
+// is the control's (IOleInPlaceObjectWindowless::GetDropTarget).
+static LPDROPTARGET WindowlessTarget(CWnd* pWnd, POINTL pt) {
+  if (_afxOccHooks == NULL || pWnd == NULL || !_afxOccHooks->pfnHasWindowless(pWnd)) return NULL;
   CPoint point(pt.x, pt.y);
   pWnd->ScreenToClient(&point);
-  if (pThis->m_lpDataObject != NULL) pThis->m_lpDataObject->Release();
-  pThis->m_lpDataObject = pDataObj;
-  if (pDataObj != NULL) pDataObj->AddRef();
-  COleDataObject dataObject;
-  dataObject.Attach(pDataObj, FALSE);
-  DWORD dwAllowed = *pdwEffect;
-  DROPEFFECT effect = DROPEFFECT_NONE;
-  try {
-    effect = pThis->OnDragScroll(pWnd, grfKeyState, point);
-    if ((effect & DROPEFFECT_SCROLL) == 0)
-      effect = pThis->OnDragEnter(pWnd, &dataObject, grfKeyState, point);
-  } catch (CException* e) {
-    e->Delete();
-    effect = DROPEFFECT_NONE;
-  }
-  pThis->m_dropEffectCurrent = *pdwEffect = Allowed(effect, dwAllowed);
-  return S_OK;
+  return _afxOccHooks->pfnWindowlessDropTarget(pWnd, point);
 }
 
-STDMETHODIMP COleDropTarget::XDropTarget::DragOver(DWORD grfKeyState, POINTL pt,
-                                                   LPDWORD pdwEffect) {
-  METHOD_PROLOGUE(COleDropTarget, DropTarget)
-  if (pdwEffect == NULL) return E_INVALIDARG;
+// The window's own part of a drag: OnDragEnter (bEnter) or OnDragOver,
+// after OnDragScroll.
+static void WindowDrag(COleDropTarget* pThis, BOOL bEnter, DWORD grfKeyState, POINTL pt,
+                       LPDWORD pdwEffect) {
   CWnd* pWnd = CWnd::FromHandle(pThis->m_hWnd);
   CPoint point(pt.x, pt.y);
   pWnd->ScreenToClient(&point);
@@ -283,22 +274,81 @@ STDMETHODIMP COleDropTarget::XDropTarget::DragOver(DWORD grfKeyState, POINTL pt,
   try {
     effect = pThis->OnDragScroll(pWnd, grfKeyState, point);
     if ((effect & DROPEFFECT_SCROLL) == 0)
-      effect = pThis->OnDragOver(pWnd, &dataObject, grfKeyState, point);
+      effect = bEnter ? pThis->OnDragEnter(pWnd, &dataObject, grfKeyState, point)
+                      : pThis->OnDragOver(pWnd, &dataObject, grfKeyState, point);
   } catch (CException* e) {
     e->Delete();
     effect = DROPEFFECT_NONE;
   }
   pThis->m_dropEffectCurrent = *pdwEffect = Allowed(effect, dwAllowed);
+}
+
+static void WindowLeave(COleDropTarget* pThis) {
+  try {
+    pThis->OnDragLeave(CWnd::FromHandle(pThis->m_hWnd));
+  } catch (CException* e) {
+    e->Delete();
+  }
+}
+
+// Moves the drag to pTarget (a windowless control's drop target, or NULL
+// for the window), leaving the one it was over. Returns whether it moved.
+static BOOL SwitchTarget(COleDropTarget* pThis, LPDROPTARGET pTarget, DWORD grfKeyState,
+                         POINTL pt, LPDWORD pdwEffect) {
+  if (pTarget == pThis->m_pWindowlessTarget) {
+    if (pTarget != NULL) pTarget->Release();  // the one it holds already
+    return FALSE;
+  }
+  if (pThis->m_pWindowlessTarget != NULL) {
+    pThis->m_pWindowlessTarget->DragLeave();
+    pThis->m_pWindowlessTarget->Release();
+    pThis->m_pWindowlessTarget = NULL;
+  } else {
+    WindowLeave(pThis);
+  }
+  pThis->m_pWindowlessTarget = pTarget;
+  if (pTarget != NULL)
+    pTarget->DragEnter(pThis->m_lpDataObject, grfKeyState, pt, pdwEffect);
+  else
+    WindowDrag(pThis, TRUE, grfKeyState, pt, pdwEffect);
+  return TRUE;
+}
+
+STDMETHODIMP COleDropTarget::XDropTarget::DragEnter(LPDATAOBJECT pDataObj, DWORD grfKeyState,
+                                                    POINTL pt, LPDWORD pdwEffect) {
+  METHOD_PROLOGUE(COleDropTarget, DropTarget)
+  if (pdwEffect == NULL) return E_INVALIDARG;
+  if (pThis->m_lpDataObject != NULL) pThis->m_lpDataObject->Release();
+  pThis->m_lpDataObject = pDataObj;
+  if (pDataObj != NULL) pDataObj->AddRef();
+  if (pThis->m_pWindowlessTarget != NULL) pThis->m_pWindowlessTarget->Release();
+  pThis->m_pWindowlessTarget = WindowlessTarget(CWnd::FromHandle(pThis->m_hWnd), pt);
+  if (pThis->m_pWindowlessTarget != NULL)
+    return pThis->m_pWindowlessTarget->DragEnter(pDataObj, grfKeyState, pt, pdwEffect);
+  WindowDrag(pThis, TRUE, grfKeyState, pt, pdwEffect);
+  return S_OK;
+}
+
+STDMETHODIMP COleDropTarget::XDropTarget::DragOver(DWORD grfKeyState, POINTL pt,
+                                                   LPDWORD pdwEffect) {
+  METHOD_PROLOGUE(COleDropTarget, DropTarget)
+  if (pdwEffect == NULL) return E_INVALIDARG;
+  LPDROPTARGET pTarget = WindowlessTarget(CWnd::FromHandle(pThis->m_hWnd), pt);
+  if (SwitchTarget(pThis, pTarget, grfKeyState, pt, pdwEffect)) return S_OK;
+  if (pThis->m_pWindowlessTarget != NULL)
+    return pThis->m_pWindowlessTarget->DragOver(grfKeyState, pt, pdwEffect);
+  WindowDrag(pThis, FALSE, grfKeyState, pt, pdwEffect);
   return S_OK;
 }
 
 STDMETHODIMP COleDropTarget::XDropTarget::DragLeave() {
   METHOD_PROLOGUE(COleDropTarget, DropTarget)
-  CWnd* pWnd = CWnd::FromHandle(pThis->m_hWnd);
-  try {
-    pThis->OnDragLeave(pWnd);
-  } catch (CException* e) {
-    e->Delete();
+  if (pThis->m_pWindowlessTarget != NULL) {
+    pThis->m_pWindowlessTarget->DragLeave();
+    pThis->m_pWindowlessTarget->Release();
+    pThis->m_pWindowlessTarget = NULL;
+  } else {
+    WindowLeave(pThis);
   }
   if (pThis->m_lpDataObject != NULL) {
     pThis->m_lpDataObject->Release();
@@ -311,6 +361,23 @@ STDMETHODIMP COleDropTarget::XDropTarget::Drop(LPDATAOBJECT pDataObj, DWORD grfK
                                                POINTL pt, LPDWORD pdwEffect) {
   METHOD_PROLOGUE(COleDropTarget, DropTarget)
   if (pdwEffect == NULL) return E_INVALIDARG;
+  // Over a windowless control, the drop is the control's.
+  LPDROPTARGET pTarget = WindowlessTarget(CWnd::FromHandle(pThis->m_hWnd), pt);
+  if (pTarget != NULL || pThis->m_pWindowlessTarget != NULL) {
+    DWORD dwEffect = *pdwEffect;
+    SwitchTarget(pThis, pTarget, grfKeyState, pt, &dwEffect);
+  }
+  if (pThis->m_pWindowlessTarget != NULL) {
+    LPDROPTARGET pControl = pThis->m_pWindowlessTarget;
+    pThis->m_pWindowlessTarget = NULL;
+    HRESULT hr = pControl->Drop(pDataObj, grfKeyState, pt, pdwEffect);
+    pControl->Release();
+    if (pThis->m_lpDataObject != NULL) {
+      pThis->m_lpDataObject->Release();
+      pThis->m_lpDataObject = NULL;
+    }
+    return hr;
+  }
   CWnd* pWnd = CWnd::FromHandle(pThis->m_hWnd);
   CPoint point(pt.x, pt.y);
   pWnd->ScreenToClient(&point);
