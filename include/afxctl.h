@@ -267,6 +267,39 @@ protected:
 };
 
 // ---------------------------------------------------------------------
+// CPictureHolder: a picture object (IPicture) for a control's picture
+// property: empty, or a bitmap, metafile or icon.
+
+class CPictureHolder {
+public:
+  CPictureHolder();
+  ~CPictureHolder();
+
+  BOOL CreateEmpty();
+  BOOL CreateFromBitmap(UINT idResource);
+  // With bTransferOwnership the picture takes the handles, and the CBitmap
+  // and CPalette let go of them.
+  BOOL CreateFromBitmap(CBitmap* pBitmap, CPalette* pPal = NULL, BOOL bTransferOwnership = TRUE);
+  BOOL CreateFromBitmap(HBITMAP hbm, HPALETTE hpal = NULL, BOOL bTransferOwnership = FALSE);
+  // xExt and yExt in HIMETRIC.
+  BOOL CreateFromMetafile(HMETAFILE hmf, int xExt, int yExt, BOOL bTransferOwnership = FALSE);
+  BOOL CreateFromIcon(UINT idResource);
+  BOOL CreateFromIcon(HICON hIcon, BOOL bTransferOwnership = FALSE);
+
+  short GetType();  // a PICTYPE_ value
+  BOOL GetDisplayString(CString& strValue);
+  LPPICTUREDISP GetPictureDispatch();  // AddRef'd
+  void SetPictureDispatch(LPPICTUREDISP pDisp);
+  // Draws the picture over rcRender; rcWBounds bounds a metafile.
+  void Render(CDC* pDC, const CRect& rcRender, const CRect& rcWBounds);
+
+  LPPICTURE m_pPict;
+
+protected:
+  BOOL CreateFromDesc(PICTDESC* pDesc, BOOL bOwn);
+};
+
+// ---------------------------------------------------------------------
 // CPropExchange: saving, loading and resetting a control's properties.
 // DoPropExchange calls the PX_ functions, which go through it.
 
@@ -325,6 +358,9 @@ BOOL AFXAPI PX_Blob(CPropExchange* pPX, LPCTSTR pszPropName, HGLOBAL& hBlob,
                     HGLOBAL hBlobDefault = NULL);
 BOOL AFXAPI PX_Font(CPropExchange* pPX, LPCTSTR pszPropName, CFontHolder& font,
                     const FONTDESC* pFontDesc = NULL, LPFONTDISP pFontDispAmbient = NULL);
+BOOL AFXAPI PX_Picture(CPropExchange* pPX, LPCTSTR pszPropName, CPictureHolder& pict);
+BOOL AFXAPI PX_Picture(CPropExchange* pPX, LPCTSTR pszPropName, CPictureHolder& pict,
+                       CPictureHolder& pictDefault);
 BOOL AFXAPI PX_IUnknown(CPropExchange* pPX, LPCTSTR pszPropName, LPUNKNOWN& pUnk, REFIID iid,
                         LPUNKNOWN pUnkDefault = NULL);
 class CDataPathProperty;
@@ -897,6 +933,145 @@ void AFXAPI DDP_CBString(CDataExchange* pDX, int id, CString& member, LPCTSTR ps
 void AFXAPI DDP_CBStringExact(CDataExchange* pDX, int id, CString& member, LPCTSTR pszPropName);
 void AFXAPI DDP_CBIndex(CDataExchange* pDX, int id, int& member, LPCTSTR pszPropName);
 void AFXAPI DDP_PostProcessing(CDataExchange* pDX);
+
+// ---------------------------------------------------------------------
+// The stock property pages: colors, fonts and pictures. Each lists the
+// objects' properties of its kind by name, from their type information
+// or, without it, the stock names (BackColor, Font, Picture, ...). The
+// system has its own pages for these CLSIDs; where it has none, as under
+// Wine, COleControl::OnProperties uses these.
+
+class CStockPropPage : public COlePropertyPage {
+  DECLARE_DYNAMIC(CStockPropPage)
+public:
+  CStockPropPage(UINT idDlg, UINT idCaption);
+  virtual ~CStockPropPage();
+
+  // ----- Implementation
+  // The properties of the type guid (behind nIndirect pointers) into the
+  // combo box, each with its DISPID; the first is selected.
+  void FillPropnameList(REFGUID guid, int nIndirect, CComboBox& combo);
+  // The selected property: m_strPropName, m_iPropName.
+  void OnSelchangePropname(CComboBox& combo);
+  BOOL OnEditProperty(DISPID dispid, CComboBox& combo);
+  virtual BOOL OnEditProperty(DISPID dispid);
+
+  // A property of every object, by name.
+  BOOL GetPropValue(LPDISPATCH pDisp, LPCTSTR lpszProp, VARIANT* pvar);
+  BOOL SetPropValue(LPCTSTR lpszProp, VARIANT* pvar, BOOL bRef = FALSE);
+
+  LCID m_lcid;
+  CString m_strPropName;
+  int m_iPropName;
+
+protected:
+  // The template the page is made from, built in memory.
+  HGLOBAL m_hTemplate;
+  // Items for BeginTemplate, AddItem and EndTemplate.
+  CByteArray m_template;
+  WORD m_nItems;
+  void BeginTemplate(short cx, short cy);
+  void AddItem(DWORD dwStyle, short x, short y, short cx, short cy, WORD nID, WORD wClass,
+               LPCWSTR lpszText);
+  void EndTemplate();
+  virtual void OnObjectsChanged();
+};
+
+class CColorPropPage : public CStockPropPage {
+  DECLARE_DYNCREATE(CColorPropPage)
+public:
+  CColorPropPage();
+  virtual ~CColorPropPage();
+  virtual BOOL OnInitDialog();
+  virtual void DoDataExchange(CDataExchange* pDX);
+  virtual BOOL OnEditProperty(DISPID dispid);
+  virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam);
+
+  // The color shown for the selected property.
+  OLE_COLOR GetColor() const { return m_color; }
+  void SetColor(OLE_COLOR color);
+
+  enum { IDC_PROPNAME = 1001, IDC_SYSCOLORS = 1002, IDC_COLOR0 = 1010 };
+
+protected:
+  OLE_COLOR m_color;
+  BOOL m_bHaveColor;
+  CMapStringToPtr m_pending;  // the changed colors, by property name
+  void ShowProperty();
+  afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct);
+  DECLARE_MESSAGE_MAP()
+};
+
+class CFontPropPage : public CStockPropPage {
+  DECLARE_DYNCREATE(CFontPropPage)
+public:
+  CFontPropPage();
+  virtual ~CFontPropPage();
+  virtual BOOL OnInitDialog();
+  virtual void DoDataExchange(CDataExchange* pDX);
+  virtual BOOL OnEditProperty(DISPID dispid);
+  virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam);
+
+  // A font's description, as the page shows it.
+  struct FONTSTATE {
+    CString strName;
+    CY cySize;
+    BOOL bBold, bItalic, bUnderline, bStrikethrough;
+  };
+  const FONTSTATE& GetFontState() const { return m_state; }
+  void SetFontState(const FONTSTATE& state);
+
+  enum {
+    IDC_PROPNAME = 1001,
+    IDC_FONTNAME = 1101,
+    IDC_STYLE = 1102,
+    IDC_FONTSIZE = 1103,
+    IDC_STRIKEOUT = 1104,
+    IDC_UNDERLINE = 1105,
+    IDC_SAMPLE = 1106
+  };
+
+protected:
+  FONTSTATE m_state;
+  BOOL m_bHaveFont;
+  BOOL m_bFilling;
+  CFont m_fontSample;
+  CMapStringToPtr m_pending;  // the changed fonts (FONTSTATE*), by property name
+  void ClearPending();
+  void ShowProperty();
+  void ShowState();
+  void ReadControls();
+  void UpdateSample();
+};
+
+class CPicturePropPage : public CStockPropPage {
+  DECLARE_DYNCREATE(CPicturePropPage)
+public:
+  CPicturePropPage();
+  virtual ~CPicturePropPage();
+  virtual BOOL OnInitDialog();
+  virtual void DoDataExchange(CDataExchange* pDX);
+  virtual BOOL OnEditProperty(DISPID dispid);
+  virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam);
+
+  // The picture for the selected property: from a file (as Browse does),
+  // or none (as Clear does).
+  BOOL LoadPictureFile(LPCTSTR lpszPath);
+  void ClearPicture();
+  LPPICTUREDISP GetPicture() const { return m_pPict; }
+
+  enum { IDC_PROPNAME = 1001, IDC_BROWSE = 1201, IDC_CLEAR = 1202, IDC_PICTURE = 1203 };
+
+protected:
+  LPPICTUREDISP m_pPict;  // shown
+  BOOL m_bHavePicture;
+  CMapStringToPtr m_pending;  // AddRef'd pictures, by property name
+  void ShowProperty();
+  void SetPicture(LPPICTUREDISP pPict, BOOL bChanged);
+  void ClearPending();
+  afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct);
+  DECLARE_MESSAGE_MAP()
+};
 
 // The stock property and event masks.
 enum {

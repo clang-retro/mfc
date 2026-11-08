@@ -24,3 +24,8 @@ void AFXAPI _AfxCtlHimetricToPixels(long cx, long cy, SIZE* pSize);
     METHOD_PROLOGUE(COleControl, part);                                      \
     return (HRESULT)pThis->ExternalQueryInterface(&iid, ppv);                \
   }
+
+// The stock property pages (ctlstock.cpp): class objects for those of
+// pClsids the system does not have, for this thread, until revoked.
+int AFXAPI _AfxRegisterStockPropPages(const CLSID* pClsids, ULONG nClsids, DWORD* pCookies);
+void AFXAPI _AfxRevokeStockPropPages(const DWORD* pCookies, ULONG nClsids);
