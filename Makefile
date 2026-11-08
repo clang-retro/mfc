@@ -17,7 +17,7 @@ TARGET ?= i586-pc-windows5.1-gnu
 # Linux and macOS targets (make TARGET=x86_64-linux-gnu, or
 # TARGET=arm64-apple-macos11) build over the portable Win32 layer in
 # port/, which goes into libwinport.a beside the MFC libraries.
-ifneq ($(filter %linux% %linux-gnu %darwin% %apple%,$(TARGET)),)
+ifneq ($(findstring linux,$(TARGET))$(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
 PORTABLE = 1
 endif
 SYSROOT ?=
