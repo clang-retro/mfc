@@ -3263,4 +3263,6 @@ inline UINT _AfxCtlType(UINT msg) {
                                                               : CTLCOLOR_DLG;
 }
 
+#include <afxdll_.h>
+
 #endif // __AFXWIN_H__

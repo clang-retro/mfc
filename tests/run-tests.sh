@@ -7,7 +7,8 @@
 # tests are only built.
 #
 # Logs and screenshots go to $OUT/tests/a (ANSI) and $OUT/tests/u
-# (Unicode).
+# (Unicode), and those of the tests built with the shared library
+# (SHARED_TESTS) to $OUT/tests/sa and $OUT/tests/su.
 set -u
 
 TARGET=${TARGET:-i586-pc-windows5.1-gnu}
@@ -18,6 +19,7 @@ BIN=${BIN:-}
 CXX=${BIN:+$BIN/}clang++
 RC=${RC:-${BIN:+$BIN/}llvm-windres}
 LDFLAGS=${LDFLAGS:-}
+SHARED_TESTS=${SHARED_TESTS-"exttest core sditest dlgtest"}
 TESTS=${TESTS:-"core memtest disptest isapitest daotest socktest inettest dlgtest sditest mditest docktest splittest richtest dbtest rvtest dvtest autotest conntest dragtest oletest srvtest linktest richsrvtest iptest docobtest occtest htmltest ctltest cmntest wltest bindtest dlltest"}
 
 if [ -z "${DISPLAY:-}" ] && [ -z "${MFC_TEST_NO_XVFB:-}" ] && command -v xvfb-run >/dev/null 2>&1; then
@@ -70,18 +72,19 @@ winpath() {
   echo "Z:$(cd "$1" && pwd)" | tr / '\\'
 }
 
-run_test() {  # name exe outdir
+run_test() {  # name exe outdir label
+  label=${4:-$1}
   if [ $HAVE_WINE = 0 ]; then
-    echo "built  $1-$v (no wine; not run)"
+    echo "built  $label-$v (no wine; not run)"
     return
   fi
   MFC_TEST_OUT=$(winpath "$3") timeout 300 wine "$2" > "$3/$1.out" 2>&1
   status=$?
   if [ $status = 0 ]; then
-    echo "PASS   $1-$v"
+    echo "PASS   $label-$v"
     npass=$((npass + 1))
   else
-    echo "FAIL   $1-$v (exit $status)"
+    echo "FAIL   $label-$v (exit $status)"
     [ -f "$3/$1.log" ] && sed 's/^/       /' "$3/$1.log"
     [ -s "$3/$1.out" ] && sed 's/^/       /' "$3/$1.out"
     nfail=$((nfail + 1))
@@ -94,52 +97,90 @@ run_test() {  # name exe outdir
   fi
 }
 
+# Builds and runs one test. With shared=1 the test uses the shared
+# library (_AFXDLL), and its DLL, if it has one, is an extension DLL that
+# the program links with.
+build_and_run() {  # name label exe outdir shared ldflags
+  name=$1 label=$2 exe=$3 outdir=$4 shared=$5 ldflags=$6
+  srcs=tests/$name.cpp
+  dllflags=
+  [ $shared = 1 ] && dllflags=-D_AFXDLL
+  # A test with a DLL of its own: tests/NAME-dll.cpp, with its exports
+  # in tests/NAME-dll.def (or marked in the source, for an extension
+  # DLL) and resources in tests/NAME-dll.rc.
+  if [ -f tests/$name-dll.cpp ]; then
+    dllsrcs=tests/$name-dll.cpp
+    [ -f tests/$name-dll.def ] && dllsrcs="$dllsrcs tests/$name-dll.def"
+    if [ -f tests/$name-dll.rc ]; then
+      "$RC" $RCFLAGS tests/$name-dll.rc -o "$T/$name-dll-res.o" 2>"$T/$name-dll-rc.log" || {
+        echo "FAIL   $label-$v (DLL resources)"; cat "$T/$name-dll-rc.log"; nfail=$((nfail + 1)); return; }
+      dllsrcs="$dllsrcs $T/$name-dll-res.o"
+    fi
+    implib=
+    [ $shared = 1 ] && implib="-Wl,--out-implib,$T/lib$name-dll-$v.a"
+    # shellcheck disable=SC2086
+    "$CXX" $CXXFLAGS $flags $dllflags -shared $dllsrcs -L"$OUT" $ldflags $implib -o "$T/$name-dll-$v.dll" \
+      2>"$T/$name-dll-$v-build.log" || {
+      echo "FAIL   $label-$v (DLL build)"; cat "$T/$name-dll-$v-build.log"; nfail=$((nfail + 1)); return; }
+    [ $shared = 1 ] && srcs="$srcs $T/lib$name-dll-$v.a"
+  fi
+  if [ -f tests/$name.rc ]; then
+    "$RC" $RCFLAGS tests/$name.rc -o "$T/$name-res.o" 2>"$T/$name-rc.log" || {
+      echo "FAIL   $label-$v (resources)"; cat "$T/$name-rc.log"; nfail=$((nfail + 1)); return; }
+    srcs="$srcs $T/$name-res.o -mwindows"
+  fi
+  # shellcheck disable=SC2086
+  "$CXX" $CXXFLAGS $flags $dllflags $srcs -L"$OUT" $ldflags -o "$exe" 2>"$T/$label-$v-build.log" || {
+    echo "FAIL   $label-$v (build)"; cat "$T/$label-$v-build.log"; nfail=$((nfail + 1)); return; }
+  if [ ! -f tests/$name.rc ]; then
+    # The console tests (no resources) report on standard output.
+    if [ $HAVE_WINE = 1 ]; then
+      if timeout 120 wine "$exe" > "$outdir/$name.log" 2>&1; then
+        echo "PASS   $label-$v"; npass=$((npass + 1))
+        # Notes a passing test leaves, such as checks it could not run.
+        grep '^note:' "$outdir/$name.log" | sed 's/^/       /'
+      else
+        echo "FAIL   $label-$v"; sed 's/^/       /' "$outdir/$name.log"; nfail=$((nfail + 1))
+      fi
+    else
+      echo "built  $label-$v (no wine; not run)"
+    fi
+  else
+    run_test "$name" "$exe" "$outdir" "$label"
+  fi
+}
+
 for v in a u; do
   flags=
   [ $v = u ] && flags="-DUNICODE -D_UNICODE"
   for name in $TESTS; do
-    exe=$T/$name-$v.exe
-    srcs=tests/$name.cpp
-    # A test with a DLL of its own: tests/NAME-dll.cpp, with its exports
-    # in tests/NAME-dll.def and resources in tests/NAME-dll.rc.
-    if [ -f tests/$name-dll.cpp ]; then
-      dllsrcs="tests/$name-dll.cpp tests/$name-dll.def"
-      if [ -f tests/$name-dll.rc ]; then
-        "$RC" $RCFLAGS tests/$name-dll.rc -o "$T/$name-dll-res.o" 2>"$T/$name-dll-rc.log" || {
-          echo "FAIL   $name-$v (DLL resources)"; cat "$T/$name-dll-rc.log"; nfail=$((nfail + 1)); continue; }
-        dllsrcs="$dllsrcs $T/$name-dll-res.o"
-      fi
-      # shellcheck disable=SC2086
-      "$CXX" $CXXFLAGS $flags -shared $dllsrcs -L"$OUT" $LDFLAGS -o "$T/$name-dll-$v.dll" \
-        2>"$T/$name-dll-$v-build.log" || {
-        echo "FAIL   $name-$v (DLL build)"; cat "$T/$name-dll-$v-build.log"; nfail=$((nfail + 1)); continue; }
-    fi
-    if [ -f tests/$name.rc ]; then
-      "$RC" $RCFLAGS tests/$name.rc -o "$T/$name-res.o" 2>"$T/$name-rc.log" || {
-        echo "FAIL   $name-$v (resources)"; cat "$T/$name-rc.log"; nfail=$((nfail + 1)); continue; }
-      srcs="$srcs $T/$name-res.o -mwindows"
-    fi
-    # shellcheck disable=SC2086
-    "$CXX" $CXXFLAGS $flags $srcs -L"$OUT" $LDFLAGS -o "$exe" 2>"$T/$name-$v-build.log" || {
-      echo "FAIL   $name-$v (build)"; cat "$T/$name-$v-build.log"; nfail=$((nfail + 1)); continue; }
-    if [ ! -f tests/$name.rc ]; then
-      # The console tests (no resources) report on standard output.
-      if [ $HAVE_WINE = 1 ]; then
-        if timeout 120 wine "$exe" > "$T/$v/$name.log" 2>&1; then
-          echo "PASS   $name-$v"; npass=$((npass + 1))
-          # Notes a passing test leaves, such as checks it could not run.
-          grep '^note:' "$T/$v/$name.log" | sed 's/^/       /'
-        else
-          echo "FAIL   $name-$v"; sed 's/^/       /' "$T/$v/$name.log"; nfail=$((nfail + 1))
-        fi
-      else
-        echo "built  $name-$v (no wine; not run)"
-      fi
-    else
-      run_test "$name" "$exe" "$T/$v"
-    fi
+    build_and_run "$name" "$name" "$T/$name-$v.exe" "$T/$v" 0 "$LDFLAGS"
   done
 done
+
+# The shared library: the tests in SHARED_TESTS again, built with _AFXDLL,
+# their output in $T/sa and $T/su. Wine finds mfc.dll through WINEPATH,
+# with the C++ runtime's DLLs where the compiler has them (MinGW: an
+# exception crosses from one module to another only with libstdc++ and
+# libgcc in DLLs, so -static is left out).
+if [ -n "$SHARED_TESTS" ] && [ -f "$OUT/mfc.dll" ]; then
+  shared_ldflags=$(echo " $LDFLAGS " | sed 's/ -static / /g')
+  winepath=$(winpath "$OUT")
+  for f in libstdc++-6.dll libgcc_s_dw2-1.dll libwinpthread-1.dll; do
+    # shellcheck disable=SC2086
+    p=$("$CXX" $CXXFLAGS -print-file-name=$f 2>/dev/null)
+    [ -f "$p" ] && winepath="$winepath;$(winpath "$(dirname "$p")")"
+  done
+  export WINEPATH="$winepath"
+  for v in a u; do
+    flags=
+    [ $v = u ] && flags="-DUNICODE -D_UNICODE"
+    mkdir -p "$T/s$v"
+    for name in $SHARED_TESTS; do
+      build_and_run "$name" "$name-shared" "$T/$name-shared-$v.exe" "$T/s$v" 1 "$shared_ldflags"
+    done
+  done
+fi
 
 echo "$npass passed, $nfail failed"
 [ $nfail = 0 ]

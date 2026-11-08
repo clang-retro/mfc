@@ -1,0 +1,18 @@
+// exttest-dll.rc - resources of exttest's extension DLL: a string the
+// program does not have, and a dialog.
+#include <windows.h>
+#include <afxres.h>
+#include "exttest.h"
+
+STRINGTABLE
+BEGIN
+  IDS_EXTSTRING "From the DLL"
+  IDS_EXTDOCTEXT "A document of the DLL"
+END
+
+IDD_EXTDLG DIALOGEX 0, 0, 160, 40
+STYLE DS_SETFONT | WS_CHILD | WS_VISIBLE
+FONT 8, "MS Shell Dlg"
+BEGIN
+  LTEXT "The DLL's dialog", IDC_EXTTEXT, 7, 7, 146, 14
+END

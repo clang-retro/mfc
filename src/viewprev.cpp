@@ -309,7 +309,8 @@ BOOL CPreviewView::SetPrintView(CView* pPrintView) {
   m_nZoomState = ZOOM_OUT;
 
   if (AfxGetResourceHandle() != NULL)
-    m_hMagnifyCursor = ::LoadCursor(AfxGetResourceHandle(), MAKEINTRESOURCE(AFX_IDC_MAGNIFY));
+    m_hMagnifyCursor = ::LoadCursor(AfxFindResourceHandle(MAKEINTRESOURCE(AFX_IDC_MAGNIFY), RT_GROUP_CURSOR),
+                                    MAKEINTRESOURCE(AFX_IDC_MAGNIFY));
   if (m_hMagnifyCursor == NULL)
     m_hMagnifyCursor = _AfxCreateMagnifyCursor();
   else
