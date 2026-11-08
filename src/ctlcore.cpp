@@ -1329,10 +1329,15 @@ BOOL COleControl::OnProperties(LPMSG, HWND hWndParent, LPCRECT) {
     if (nID != 0) strName.LoadString(nID);
   }
   CStringW strNameW(strName);
+  // The stock pages, where the system has none.
+  CDWordArray cookies;
+  cookies.SetSize(cPages);
+  _AfxRegisterStockPropPages(pPages, cPages, cookies.GetData());
   PreModalDialog(hWndParent);
   HRESULT hr = ::OleCreatePropertyFrame(hWndParent, 0, 0, strNameW, 1, &pUnk, cPages, pPages,
                                         AmbientLocaleID(), 0, NULL);
   PostModalDialog(hWndParent);
+  _AfxRevokeStockPropPages(cookies.GetData(), cPages);
   return SUCCEEDED(hr);
 }
 

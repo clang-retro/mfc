@@ -17,7 +17,7 @@
 #include "testutil.h"
 
 // The control's own members and events.
-enum { DISPID_VALUE_ = 1, DISPID_LABEL = 2, DISPID_TWICE = 3, DISPID_BUMP = 4 };
+enum { DISPID_VALUE_ = 1, DISPID_LABEL = 2, DISPID_TWICE = 3, DISPID_BUMP = 4, DISPID_PICTURE_ = 5 };
 enum { eventidChanged = 1 };
 
 static const DWORD kMiscStatus =
@@ -82,6 +82,7 @@ public:
     COleControl::DoPropExchange(pPX);
     PX_Long(pPX, _T("Value"), m_nValue, 7);
     PX_String(pPX, _T("Label"), m_strLabel, _T("none"));
+    PX_Picture(pPX, _T("Picture"), m_pict);
   }
   virtual void OnResetState() {
     COleControl::OnResetState();
@@ -105,6 +106,14 @@ public:
     m_nValueChanges++;
     SetModifiedFlag();
     BoundPropertyChanged(DISPID_VALUE_);
+    InvalidateControl();
+  }
+  // A picture property, which the stock picture page sets.
+  CPictureHolder m_pict;
+  LPPICTUREDISP GetPicture() { return m_pict.GetPictureDispatch(); }
+  void SetPicture(LPPICTUREDISP pDisp) {
+    m_pict.SetPictureDispatch(pDisp);
+    SetModifiedFlag();
     InvalidateControl();
   }
   long Twice(long n) { return 2 * n; }
@@ -187,6 +196,7 @@ END_PROPPAGEIDS(CTestCtrl)
 BEGIN_DISPATCH_MAP(CTestCtrl, COleControl)
   DISP_PROPERTY_EX_ID(CTestCtrl, "Value", DISPID_VALUE_, GetValue, SetValue, VT_I4)
   DISP_PROPERTY_ID(CTestCtrl, "Label", DISPID_LABEL, m_strLabel, VT_BSTR)
+  DISP_PROPERTY_EX_ID(CTestCtrl, "Picture", DISPID_PICTURE_, GetPicture, SetPicture, VT_PICTURE)
   DISP_FUNCTION_ID(CTestCtrl, "Twice", DISPID_TWICE, Twice, VT_I4, VTS_I4)
   DISP_FUNCTION_ID(CTestCtrl, "Bump", DISPID_BUMP, Bump, VT_EMPTY, VTS_NONE)
   DISP_STOCKPROP_BACKCOLOR()
@@ -581,6 +591,8 @@ public:
   void TestRegistry();
   void TestPropertyPage();
   void TestPropertyFrame();
+  void TestPictureHolder();
+  void TestStockPages();
   void TestBrowsingAndQuickActivate();
   void TestLicensing();
   void TestDataPath();
@@ -994,6 +1006,47 @@ void CMainFrame::TestHosted() {
   }
 }
 
+// An 8x8 bitmap of one color.
+static HBITMAP MakeBitmap(COLORREF clr) {
+  HDC hdcScreen = ::GetDC(NULL);
+  HBITMAP hbm = ::CreateCompatibleBitmap(hdcScreen, 8, 8);
+  HDC hdc = ::CreateCompatibleDC(hdcScreen);
+  HGDIOBJ hOld = ::SelectObject(hdc, hbm);
+  HBRUSH hBrush = ::CreateSolidBrush(clr);
+  RECT rc = {0, 0, 8, 8};
+  ::FillRect(hdc, &rc, hBrush);
+  ::DeleteObject(hBrush);
+  ::SelectObject(hdc, hOld);
+  ::DeleteDC(hdc);
+  ::ReleaseDC(NULL, hdcScreen);
+  return hbm;
+}
+
+// An 8x8 24-bit .bmp file of one color.
+static void WriteBitmapFile(LPCTSTR lpszPath, COLORREF clr) {
+  BITMAPFILEHEADER bfh;
+  BITMAPINFOHEADER bih;
+  memset(&bfh, 0, sizeof(bfh));
+  memset(&bih, 0, sizeof(bih));
+  bih.biSize = sizeof(bih);
+  bih.biWidth = bih.biHeight = 8;
+  bih.biPlanes = 1;
+  bih.biBitCount = 24;
+  BYTE bits[8 * 8 * 3];
+  for (int i = 0; i < 64; i++) {
+    bits[i * 3] = GetBValue(clr);
+    bits[i * 3 + 1] = GetGValue(clr);
+    bits[i * 3 + 2] = GetRValue(clr);
+  }
+  bfh.bfType = 0x4D42;
+  bfh.bfOffBits = sizeof(bfh) + sizeof(bih);
+  bfh.bfSize = bfh.bfOffBits + sizeof(bits);
+  CFile file(lpszPath, CFile::modeCreate | CFile::modeWrite);
+  file.Write(&bfh, sizeof(bfh));
+  file.Write(&bih, sizeof(bih));
+  file.Write(bits, sizeof(bits));
+}
+
 // Makes a control with CoCreateInstance; the caller owns the IUnknown.
 static LPUNKNOWN NewControl(CTestCtrl** ppCtl) {
   LPUNKNOWN pUnk = NULL;
@@ -1025,6 +1078,8 @@ void CMainFrame::TestPersistence() {
   pCtl->m_strLabel = _T("saved");
   pCtl->SetText(_T("Caption!"));
   pCtl->SetBackColor(RGB(1, 2, 3));
+  CHECK(pCtl->m_pict.GetType() == PICTYPE_NONE);
+  CHECK(pCtl->m_pict.CreateFromBitmap(MakeBitmap(RGB(255, 0, 0)), NULL, TRUE));
   CHECK(pPSI->IsDirty() == S_OK);
 
   LPSTREAM pStm = NULL;
@@ -1052,6 +1107,8 @@ void CMainFrame::TestPersistence() {
     CHECK(pCtl2->InternalGetText() == _T("Caption!"));
     CHECK(pCtl2->GetBackColor() == RGB(1, 2, 3));
     CHECK(pCtl2->InternalGetFont().m_pFont != NULL);
+    TestLog("loaded picture type %d", pCtl2->m_pict.GetType());
+    CHECK(pCtl2->m_pict.GetType() == PICTYPE_BITMAP);
 
     // The same state into a property bag; values at their defaults are
     // left out.
@@ -1280,6 +1337,7 @@ void CMainFrame::TestPropertyPage() {
 // OK.
 static int s_nFrameTicks = 0;
 static BOOL s_bFrameSeen = FALSE;
+static int s_nFrameTabs = 0;
 
 static BOOL CALLBACK FindFrame(HWND hWnd, LPARAM lParam) {
   if (::IsWindowVisible(hWnd) && hWnd != AfxGetMainWnd()->m_hWnd) {
@@ -1302,6 +1360,9 @@ static void CALLBACK FrameTimer(HWND, UINT, UINT_PTR idEvent, DWORD) {
     HWND hPage = CTestPropPage::s_pLast->m_hWnd;
     ::SetDlgItemText(hPage, IDC_VALUE, _T("77"));
     TestSaveWindowBitmap(hFrame, _T("ctltest-frame-props.bmp"));
+    // Both pages, the stock color page included.
+    HWND hTab = ::FindWindowEx(hFrame, NULL, WC_TABCONTROL, NULL);
+    s_nFrameTabs = hTab != NULL ? (int)::SendMessage(hTab, TCM_GETITEMCOUNT, 0, 0) : -1;
     ::PostMessage(hFrame, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED),
                   (LPARAM)::GetDlgItem(hFrame, IDOK));
   } else if (s_nFrameTicks > 50) {
@@ -1329,6 +1390,8 @@ void CMainFrame::TestPropertyFrame() {
     HRESULT hr = pObj->DoVerb(OLEIVERB_PROPERTIES, NULL, NULL, 0, m_hWnd, &rect);
     CHECK(SUCCEEDED(hr));
     CHECK(s_bFrameSeen);
+    TestLog("frame tabs %d", s_nFrameTabs);
+    CHECK(s_nFrameTabs == 2);
     // OK applies the dirty page. Wine's frame (as of Wine 9) never calls
     // IPropertyPage::Apply, so there the page is still dirty at the end.
     if (::GetProcAddress(::GetModuleHandleA("ntdll.dll"), "wine_get_version") != NULL) {
@@ -1678,10 +1741,243 @@ void CMainFrame::TestDataPath() {
   ::DeleteFile(strPath);
 }
 
+// CPictureHolder: the kinds of picture, and drawing one.
+void CMainFrame::TestPictureHolder() {
+  TestLog("picture holder");
+  CPictureHolder pict;
+  CHECK(pict.GetType() == PICTYPE_UNINITIALIZED && pict.GetPictureDispatch() == NULL);
+  CHECK(pict.CreateEmpty() && pict.GetType() == PICTYPE_NONE);
+  CString str;
+  CHECK(pict.GetDisplayString(str) && str == _T("(None)"));
+  // A bitmap the picture owns, from a CBitmap that lets go of it.
+  CBitmap bitmap;
+  bitmap.Attach(MakeBitmap(RGB(0, 0, 255)));
+  CHECK(pict.CreateFromBitmap(&bitmap) && bitmap.GetSafeHandle() == NULL);
+  CHECK(pict.GetType() == PICTYPE_BITMAP && pict.GetDisplayString(str) && str == _T("(Bitmap)"));
+  CClientDC dcScreen(this);
+  CDC dc;
+  dc.CreateCompatibleDC(&dcScreen);
+  CBitmap target;
+  target.CreateCompatibleBitmap(&dcScreen, 32, 32);
+  CBitmap* pOld = dc.SelectObject(&target);
+  dc.FillSolidRect(0, 0, 32, 32, RGB(255, 255, 255));
+  CRect rc(0, 0, 32, 32);
+  pict.Render(&dc, rc, rc);
+  COLORREF clr = dc.GetPixel(16, 16);
+  TestLog("rendered pixel %06lx", (unsigned long)clr);
+  CHECK(clr == RGB(0, 0, 255));
+  dc.SelectObject(pOld);
+  // The dispatch interface, into another holder.
+  LPPICTUREDISP pDisp = pict.GetPictureDispatch();
+  CHECK(pDisp != NULL);
+  CPictureHolder other;
+  other.SetPictureDispatch(pDisp);
+  CHECK(other.m_pPict == pict.m_pPict);
+  if (pDisp != NULL) pDisp->Release();
+  // An icon, and a metafile.
+  CHECK(pict.CreateFromIcon(::LoadIcon(NULL, IDI_APPLICATION)) && pict.GetType() == PICTYPE_ICON);
+  CHECK(pict.GetDisplayString(str) && str == _T("(Icon)"));
+  CMetaFileDC mdc;
+  mdc.Create();
+  mdc.Rectangle(0, 0, 100, 100);
+  HMETAFILE hmf = mdc.Close();
+  CHECK(pict.CreateFromMetafile(hmf, 1000, 1000, TRUE) && pict.GetType() == PICTYPE_METAFILE);
+}
+
+// The stock pages, as the control's property frame shows them: the
+// properties of their kind, and Apply setting them on the control.
+static LPPROPERTYPAGE StockPage(CRuntimeClass* pClass, CStockPropPage** ppPage) {
+  *ppPage = (CStockPropPage*)pClass->CreateObject();
+  if (*ppPage == NULL) return NULL;
+  LPPROPERTYPAGE pPage = (LPPROPERTYPAGE)(*ppPage)->GetInterface(&IID_IPropertyPage);
+  return pPage;  // the creation reference
+}
+
+static void SendCommand(HWND hPage, int nID, UINT nCode) {
+  ::SendMessage(hPage, WM_COMMAND, MAKEWPARAM(nID, nCode), (LPARAM)::GetDlgItem(hPage, nID));
+}
+
+static CString ComboText(HWND hPage, int nID) {
+  CString str;
+  CComboBox* pCombo = (CComboBox*)CWnd::FromHandle(::GetDlgItem(hPage, nID));
+  int i = pCombo->GetCurSel();
+  if (i >= 0) pCombo->GetLBText(i, str);
+  return str;
+}
+
+void CMainFrame::TestStockPages() {
+  TestLog("stock pages");
+  CTestCtrl* pCtl = NULL;
+  LPUNKNOWN pUnkCtl = NewControl(&pCtl);
+  if (pUnkCtl == NULL || pCtl == NULL) return;
+  LPPERSISTSTREAMINIT pInit = NULL;
+  pUnkCtl->QueryInterface(IID_IPersistStreamInit, (void**)&pInit);
+  if (pInit != NULL) {
+    pInit->InitNew();
+    pInit->Release();
+  }
+  CTestPageSite site;
+
+  // Colors: BackColor and ForeColor, the first shown.
+  CStockPropPage* pObj = NULL;
+  LPPROPERTYPAGE pPage = StockPage(RUNTIME_CLASS(CColorPropPage), &pObj);
+  CHECK(pPage != NULL);
+  if (pPage != NULL) {
+    CColorPropPage* pColors = (CColorPropPage*)pObj;
+    PROPPAGEINFO info;
+    memset(&info, 0, sizeof(info));
+    CHECK(pPage->GetPageInfo(&info) == S_OK && CString(info.pszTitle) == _T("Colors"));
+    CHECK(info.size.cx > 200 && info.size.cy > 80);
+    ::CoTaskMemFree(info.pszTitle);
+    pCtl->SetBackColor(RGB(0, 128, 0));
+    pCtl->SetForeColor(0x80000000 | COLOR_WINDOWTEXT);
+    pPage->SetPageSite(&site);
+    CHECK(pPage->SetObjects(1, &pUnkCtl) == S_OK);
+    CRect rcPage(0, 0, info.size.cx, info.size.cy);
+    CHECK(pPage->Activate(m_hWnd, &rcPage, FALSE) == S_OK);
+    HWND hPage = pObj->m_hWnd;
+    CHECK(hPage != NULL);
+    if (hPage != NULL) {
+      CComboBox* pProps =
+          (CComboBox*)CWnd::FromHandle(::GetDlgItem(hPage, CColorPropPage::IDC_PROPNAME));
+      TestLog("color properties %d, first %s", pProps->GetCount(),
+              (const char*)CStringA(ComboText(hPage, CColorPropPage::IDC_PROPNAME)));
+      CHECK(pProps->GetCount() == 2 && pProps->FindStringExact(-1, _T("ForeColor")) >= 0);
+      CHECK(ComboText(hPage, CColorPropPage::IDC_PROPNAME) == _T("BackColor"));
+      CHECK(pColors->GetColor() == RGB(0, 128, 0) && pPage->IsPageDirty() == S_FALSE);
+      // A palette color for BackColor.
+      SendCommand(hPage, CColorPropPage::IDC_COLOR0 + 9, BN_CLICKED);  // red
+      CHECK(pColors->GetColor() == RGB(255, 0, 0) && pPage->IsPageDirty() == S_OK);
+      // ForeColor shows its system color, then takes another.
+      pProps->SelectString(-1, _T("ForeColor"));
+      SendCommand(hPage, CColorPropPage::IDC_PROPNAME, CBN_SELCHANGE);
+      CHECK(pColors->GetColor() == (0x80000000 | COLOR_WINDOWTEXT));
+      CHECK(ComboText(hPage, CColorPropPage::IDC_SYSCOLORS) == _T("Window Text"));
+      CComboBox* pSys =
+          (CComboBox*)CWnd::FromHandle(::GetDlgItem(hPage, CColorPropPage::IDC_SYSCOLORS));
+      pSys->SelectString(-1, _T("Highlight"));
+      SendCommand(hPage, CColorPropPage::IDC_SYSCOLORS, CBN_SELCHANGE);
+      CHECK(pColors->GetColor() == (0x80000000 | COLOR_HIGHLIGHT));
+      CHECK(pCtl->GetBackColor() == RGB(0, 128, 0));  // not until Apply
+      pPage->Show(SW_SHOW);
+      PumpMessages();
+      TestSaveWindowBitmap(hPage, _T("ctltest-colorpage.bmp"));
+      CHECK(pPage->Apply() == S_OK);
+      TestLog("applied colors %08lx %08lx", (unsigned long)pCtl->GetBackColor(),
+              (unsigned long)pCtl->GetForeColor());
+      CHECK(pCtl->GetBackColor() == RGB(255, 0, 0));
+      CHECK(pCtl->GetForeColor() == (0x80000000 | COLOR_HIGHLIGHT));
+      CHECK(pPage->IsPageDirty() == S_FALSE);
+      // EditProperty selects the property.
+      LPPROPERTYPAGE2 pPage2 = NULL;
+      pPage->QueryInterface(IID_IPropertyPage2, (void**)&pPage2);
+      CHECK(pPage2 != NULL && pPage2->EditProperty(DISPID_BACKCOLOR) == S_OK);
+      if (pPage2 != NULL) pPage2->Release();
+      CHECK(ComboText(hPage, CColorPropPage::IDC_PROPNAME) == _T("BackColor"));
+    }
+    pPage->Deactivate();
+    pPage->SetObjects(0, NULL);
+    pPage->SetPageSite(NULL);
+    pPage->Release();
+  }
+
+  // Fonts: the Font property's font object, changed in place.
+  pPage = StockPage(RUNTIME_CLASS(CFontPropPage), &pObj);
+  CHECK(pPage != NULL);
+  if (pPage != NULL) {
+    CHECK(pPage->SetObjects(1, &pUnkCtl) == S_OK);
+    CRect rcPage(0, 0, 400, 200);
+    CHECK(pPage->Activate(m_hWnd, &rcPage, FALSE) == S_OK);
+    HWND hPage = pObj->m_hWnd;
+    CFontPropPage* pFonts = (CFontPropPage*)pObj;
+    LPFONT pFont = pCtl->InternalGetFont().m_pFont;
+    CHECK(hPage != NULL && pFont != NULL);
+    if (hPage != NULL && pFont != NULL) {
+      CHECK(ComboText(hPage, CFontPropPage::IDC_PROPNAME) == _T("Font"));
+      BSTR bstr = NULL;
+      pFont->get_Name(&bstr);
+      CString strName(bstr);
+      ::SysFreeString(bstr);
+      TestLog("font %s; page %s", (const char*)CStringA(strName),
+              (const char*)CStringA(pFonts->GetFontState().strName));
+      CHECK(pFonts->GetFontState().strName == strName);
+      CHECK(ComboText(hPage, CFontPropPage::IDC_STYLE) == _T("Regular"));
+      // Bold Italic, underlined, 14 points.
+      CComboBox* pStyle =
+          (CComboBox*)CWnd::FromHandle(::GetDlgItem(hPage, CFontPropPage::IDC_STYLE));
+      pStyle->SetCurSel(3);
+      SendCommand(hPage, CFontPropPage::IDC_STYLE, CBN_SELCHANGE);
+      ::SendDlgItemMessage(hPage, CFontPropPage::IDC_UNDERLINE, BM_CLICK, 0, 0);
+      CComboBox* pSize =
+          (CComboBox*)CWnd::FromHandle(::GetDlgItem(hPage, CFontPropPage::IDC_FONTSIZE));
+      pSize->SelectString(-1, _T("14"));
+      SendCommand(hPage, CFontPropPage::IDC_FONTSIZE, CBN_SELCHANGE);
+      CHECK(pPage->IsPageDirty() == S_OK);
+      pPage->Show(SW_SHOW);
+      PumpMessages();
+      TestSaveWindowBitmap(hPage, _T("ctltest-fontpage.bmp"));
+      CHECK(pPage->Apply() == S_OK);
+      BOOL bBold = FALSE, bItalic = FALSE, bUnderline = FALSE, bStrike = TRUE;
+      CY cy;
+      cy.int64 = 0;
+      pFont->get_Bold(&bBold);
+      pFont->get_Italic(&bItalic);
+      pFont->get_Underline(&bUnderline);
+      pFont->get_Strikethrough(&bStrike);
+      pFont->get_Size(&cy);
+      TestLog("font after: bold %d italic %d underline %d strike %d size %ld", bBold, bItalic,
+              bUnderline, bStrike, (long)cy.int64);
+      // Wine's font object keeps the size the font's pixel height gives.
+      CHECK(bBold && bItalic && bUnderline && !bStrike);
+      CHECK(cy.int64 >= 135000 && cy.int64 <= 145000);
+    }
+    pPage->Deactivate();
+    pPage->SetObjects(0, NULL);
+    pPage->Release();
+  }
+
+  // Pictures: from a file, then cleared.
+  pPage = StockPage(RUNTIME_CLASS(CPicturePropPage), &pObj);
+  CHECK(pPage != NULL);
+  if (pPage != NULL) {
+    CHECK(pPage->SetObjects(1, &pUnkCtl) == S_OK);
+    CRect rcPage(0, 0, 400, 200);
+    CHECK(pPage->Activate(m_hWnd, &rcPage, FALSE) == S_OK);
+    HWND hPage = pObj->m_hWnd;
+    CPicturePropPage* pPictures = (CPicturePropPage*)pObj;
+    CHECK(hPage != NULL);
+    if (hPage != NULL) {
+      CHECK(ComboText(hPage, CPicturePropPage::IDC_PROPNAME) == _T("Picture"));
+      CHECK(pCtl->m_pict.GetType() == PICTYPE_NONE);
+      // A bitmap file of the test's own.
+      CString strPath = TestOutPath(_T("ctltest-picture.bmp"));
+      WriteBitmapFile(strPath, RGB(0, 255, 0));
+      CHECK(pPictures->LoadPictureFile(strPath));
+      CHECK(pPage->IsPageDirty() == S_OK && pCtl->m_pict.GetType() == PICTYPE_NONE);
+      pPage->Show(SW_SHOW);
+      PumpMessages();
+      TestSaveWindowBitmap(hPage, _T("ctltest-picturepage.bmp"));
+      CHECK(pPage->Apply() == S_OK);
+      TestLog("picture after apply: type %d", pCtl->m_pict.GetType());
+      CHECK(pCtl->m_pict.GetType() == PICTYPE_BITMAP);
+      SendCommand(hPage, CPicturePropPage::IDC_CLEAR, BN_CLICKED);
+      CHECK(pPage->Apply() == S_OK && pCtl->m_pict.GetType() == PICTYPE_NONE);
+      ::DeleteFile(strPath);
+    }
+    pPage->Deactivate();
+    pPage->SetObjects(0, NULL);
+    pPage->Release();
+  }
+  pUnkCtl->Release();
+  CHECK(CTestCtrl::s_nAlive == 0);
+}
+
 void CMainFrame::RunTests() {
   TestHosted();
   TestPropertyPage();
   TestPropertyFrame();
+  TestPictureHolder();
+  TestStockPages();
   TestBrowsingAndQuickActivate();
   TestLicensing();
   TestDataPath();

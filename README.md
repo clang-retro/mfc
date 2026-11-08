@@ -214,7 +214,10 @@ when there is no display:
   registry keys of AfxOleRegisterControlClass, and the control's
   COlePropertyPage, through IPropertyPage (its size and title, DDP_ and
   DDX values from and to one or two controls, dirty controls, Apply)
-  and in the property frame of the Properties verb; IPerPropertyBrowsing
+  and in the property frame of the Properties verb, which also shows
+  the stock color page; the stock color, font and picture pages
+  setting the control's colors, font and picture; CPictureHolder (its
+  kinds of picture, drawing one, PX_Picture); IPerPropertyBrowsing
   and IQuickActivate; and licensing, through IClassFactory2 with and
   without a license file (AfxVerifyLicFile) and a run-time key, also
   from CreateControl; and downloads of a local file through
@@ -329,12 +332,13 @@ request with the stock MinGW-w64 toolchain.
   GetControlFlags, IOleInPlaceObjectWindowless and COleControl's
   windowless SetCapture, SetFocus, GetDC and InvalidateControl),
   DECLARE_OLECREATE_EX, DECLARE_OLECTLTYPE,
-  DECLARE_PROPPAGEIDS, CFontHolder, CPropExchange and the PX_
-  functions, AfxOleRegisterControlClass, licensing (IClassFactory2,
+  DECLARE_PROPPAGEIDS, CFontHolder, CPictureHolder, CPropExchange and
+  the PX_ functions (PX_Picture included), AfxOleRegisterControlClass, licensing (IClassFactory2,
   AfxVerifyLicFile), data path properties (CDataPathProperty,
   CCachedDataPathProperty, PX_DataPath), and property pages:
   COlePropertyPage (IPropertyPage2, made from an ordinary dialog
-  template) and the DDP_ functions.
+  template), the DDP_ functions, and the stock pages CColorPropPage,
+  CFontPropPage and CPicturePropPage.
 * `afxodlgs.h`: the OLE dialogs over oledlg: COleInsertDialog,
   COlePasteSpecialDialog, COleLinksDialog, COleUpdateDialog,
   COleChangeIconDialog, COleConvertDialog, COleBusyDialog,
@@ -459,6 +463,16 @@ request with the stock MinGW-w64 toolchain.
   with the container and server in one process. There Wine gives the
   container the server's own object rather than OLE's handler, and
   COleClientItem::Draw then draws from the object's metafile.
+* The stock property pages are built in memory rather than from
+  resources. Each lists its kind of property from the objects' type
+  information, or, for an object without any, from the stock names
+  (BackColor, ForeColor, BorderColor, FillColor, MaskColor; Font;
+  Picture, MouseIcon, Icon) whose values are of the kind. The system
+  has its own pages for their CLSIDs; where it has none, as under Wine,
+  COleControl::OnProperties registers these for its property frame
+  while the frame is up. A container's own property frame gets the
+  system's pages only. CPicturePropPage::LoadPictureFile is what Browse
+  uses, for programs and tests that pick the file themselves.
 * A DocObject container keeps its in-place menu's fourth group (after
   the third separator, usually Help) in the shared menu, and
   COleDocIPFrameWnd puts the object's Help popup, the first popup of its
