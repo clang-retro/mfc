@@ -203,8 +203,9 @@ when there is no display:
 * `dbtest`: `afxdb.h` against an in-memory ODBC driver written in the
   test (`tests/odbcmock.h`), since Wine has no 32-bit ODBC driver to
   test with: opening, moving, filters, sorts and parameters, nulls,
-  adding, editing and deleting records, transactions, field info and
-  errors, on the console.
+  adding, editing and deleting records, stored procedures (a result
+  set, a return value, output and input/output parameters), transactions,
+  field info and errors, on the console.
 * `rvtest`: a CRecordView over the same driver; the form showing the
   current record, edits written back when moving, nulls shown as empty
   fields and indeterminate check boxes, and the record commands enabled
@@ -357,7 +358,8 @@ request with the stock MinGW-w64 toolchain.
   Paste Special, the selected item). CRichEditDoc is a COleServerDoc,
   so a program serves its documents by overriding OnGetEmbeddedItem.
 * `afxdb.h`: CDatabase, CRecordset (snapshot, dynaset and forward-only,
-  with RFX for the usual types, bookmarks and parameters),
+  with RFX for the usual types, bookmarks and parameters, output
+  parameters of procedures included),
   CRecordView and the DDX_Field functions, CDBException, CDBVariant.
 * `afxdao.h`: the DAO classes over the DAO 3.6 engine (or 3.5):
   CDaoWorkspace, CDaoDatabase, CDaoTableDef, CDaoQueryDef,
@@ -633,8 +635,10 @@ request with the stock MinGW-w64 toolchain.
   UPDATE, INSERT and DELETE statements that match the record by the
   values it read, rather than with positioned cursors, so it works with
   any driver. A dynaset therefore behaves like a snapshot: it does not
-  see other users' changes until Requery. Output parameters of stored
-  procedures are not supported.
+  see other users' changes until Requery. A stored procedure's output
+  and input/output parameters (`outputParam`, `inoutParam`) reach
+  their members once FlushResultSet has gone past the last result set,
+  or as it opens when the procedure has none.
 * The DAO classes drive the engine through its Unicode interfaces in
   ANSI programs too. As with Visual C++, text in their variants is
   VT_BSTRT there (ANSI bytes in the BSTR), so it is converted on the

@@ -162,7 +162,43 @@ struct Stmt {
   int lastCol = 0;
   size_t offset = 0;
   SQLLEN rowCount = -1;
+  // Output parameters a procedure sets once its result set is done
+  // (SQLMoreResults), as drivers return them.
+  std::vector<std::pair<int, Value>> pendingOut;
 };
+
+// Puts a value into a bound output parameter.
+inline void WriteParam(Stmt* stmt, int n, const Value& v) {
+  if (n >= (int)stmt->params.size() || stmt->params[n].p == nullptr) return;
+  Param& prm = stmt->params[n];
+  if (v.kind == kNull) {
+    if (prm.ind) *prm.ind = SQL_NULL_DATA;
+    return;
+  }
+  SQLLEN len = 0;
+  switch (prm.ctype) {
+  case SQL_C_CHAR: {
+    size_t n2 = v.s.size() < (size_t)prm.buflen ? v.s.size() : (size_t)prm.buflen - 1;
+    memcpy(prm.p, v.s.data(), n2);
+    ((char*)prm.p)[n2] = 0;
+    len = (SQLLEN)v.s.size();
+    break;
+  }
+  case SQL_C_WCHAR: {
+    size_t nMax = (size_t)prm.buflen / sizeof(WCHAR);
+    size_t n2 = v.s.size() < nMax ? v.s.size() : nMax - 1;
+    WCHAR* p = (WCHAR*)prm.p;
+    for (size_t k = 0; k < n2; k++) p[k] = (WCHAR)(unsigned char)v.s[k];
+    p[n2] = 0;
+    len = (SQLLEN)(v.s.size() * sizeof(WCHAR));
+    break;
+  }
+  case SQL_C_SLONG: case SQL_C_LONG: *(int*)prm.p = (int)v.i; len = 4; break;
+  case SQL_C_DOUBLE: *(double*)prm.p = v.kind == kReal ? v.d : (double)v.i; len = 8; break;
+  default: return;
+  }
+  if (prm.ind) *prm.ind = len;
+}
 
 // ---------------------------------------------------------------------
 // A small SQL reader
@@ -354,8 +390,65 @@ struct Parser {
     if (Peek().type != Token::kEnd) throw Error{"42000", "Syntax error near '" + Peek().text + "'"};
   }
 
+  // {[? =] CALL name(?, ...)}: the procedures the tests call.
+  //   GREET(name, greeting): returns the greeting's length and gives
+  //     "Hello, <name>" in its output parameter, after a result set of
+  //     two rows (WORD: "Hello" and the name); a NULL name gives NULLs.
+  //   BUMP(n): adds 10 to its input/output parameter, with no result set.
+  void Call() {
+    pos++;  // {
+    bool bReturn = false;
+    if (IsSym("?")) {
+      pos++;
+      ExpectSym("=");
+      bReturn = true;
+    }
+    ExpectWord("CALL");
+    std::string name = Name();
+    int nArgs = 0;
+    if (IsSym("(")) {
+      pos++;
+      while (!IsSym(")")) {
+        if (IsSym("?")) nArgs++;
+        else if (!IsSym(",")) throw Error{"42000", "Syntax error near '" + Peek().text + "'"};
+        pos++;
+      }
+      pos++;
+    }
+    ExpectSym("}");
+    int base = bReturn ? 1 : 0;
+    stmt->resultCols.clear();
+    stmt->result.clear();
+    stmt->pendingOut.clear();
+    stmt->rowCount = -1;
+    if (strcasecmp(name.c_str(), "GREET") == 0 && bReturn && nArgs == 2) {
+      Value who = ParamValue(base);
+      stmt->resultCols.push_back({"WORD", SQL_VARCHAR, false});
+      stmt->result.push_back({Value::Text("Hello")});
+      stmt->result.push_back({who});
+      if (who.kind == kNull) {
+        stmt->pendingOut.push_back({0, Value::Int(0)});
+        stmt->pendingOut.push_back({base + 1, Value()});
+      } else {
+        std::string greeting = "Hello, " + who.s;
+        stmt->pendingOut.push_back({0, Value::Int((long long)greeting.size())});
+        stmt->pendingOut.push_back({base + 1, Value::Text(greeting)});
+      }
+    } else if (strcasecmp(name.c_str(), "BUMP") == 0 && !bReturn && nArgs == 1) {
+      Value v = ParamValue(base);
+      WriteParam(stmt, base, Value::Int(v.i + 10));
+      stmt->rowCount = 1;
+    } else {
+      throw Error{"42000", "Unknown procedure " + name};
+    }
+  }
+
   void Run() {
     State& g = G();
+    if (IsSym("{")) {
+      Call();
+      return;
+    }
     if (IsWord("SELECT")) {
       pos++;
       std::vector<std::string> names;
@@ -766,6 +859,14 @@ SQLRETURN SQL_API SQLRowCount(SQLHSTMT hstmt, SQLLEN* RowCount) {
   return SQL_SUCCESS;
 }
 
-SQLRETURN SQL_API SQLMoreResults(SQLHSTMT) { return SQL_NO_DATA; }
+SQLRETURN SQL_API SQLMoreResults(SQLHSTMT hstmt) {
+  mock::Stmt* stmt = (mock::Stmt*)hstmt;
+  // No more result sets: a procedure's output parameters arrive.
+  for (auto& out : stmt->pendingOut) mock::WriteParam(stmt, out.first, out.second);
+  stmt->pendingOut.clear();
+  stmt->resultCols.clear();
+  stmt->result.clear();
+  return SQL_NO_DATA;
+}
 
 SQLRETURN SQL_API SQLCancel(SQLHSTMT) { return SQL_SUCCESS; }
