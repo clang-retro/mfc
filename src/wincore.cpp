@@ -360,6 +360,14 @@ BOOL CWnd::OnWndMsg(UINT message, WPARAM wParam, LPARAM lParam, LRESULT* pResult
     goto LReturnTrue;
   }
 
+  // A drag list box's notification goes back to the list box first.
+  if (message >= 0xC000) {
+    static const UINT s_nDragListMsg = ::RegisterWindowMessage(_T("commctrl_DragListMsg"));
+    if (message == s_nDragListMsg && lParam != 0 &&
+        ReflectLastMsg(((DRAGLISTINFO*)lParam)->hWnd, &lResult))
+      goto LReturnTrue;
+  }
+
   {
     BOOL bCtlColor = message >= WM_CTLCOLORMSGBOX && message <= WM_CTLCOLORSTATIC;
     for (const AFX_MSGMAP* pMap = GetMessageMap(); pMap != NULL;
@@ -811,6 +819,8 @@ BOOL AFXAPI AfxDeferRegisterClass(LONG fToRegister) {
       {AFX_WNDCOMMCTL_COOL_REG, ICC_COOL_CLASSES},
       {AFX_WNDCOMMCTL_USEREX_REG, ICC_USEREX_CLASSES},
       {AFX_WNDCOMMCTL_DATE_REG, ICC_DATE_CLASSES},
+      {AFX_WNDCOMMCTL_PAGER_REG, ICC_PAGESCROLLER_CLASS},
+      {AFX_WNDCOMMCTL_LINK_REG, ICC_LINK_CLASS},
   };
   for (size_t i = 0; i < sizeof(commctls) / sizeof(commctls[0]); i++) {
     if ((fToRegister & commctls[i].fReg) && _AfxInitCommonControls(commctls[i].dwICC))

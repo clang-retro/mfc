@@ -1924,6 +1924,53 @@ public:
   virtual BOOL OnChildNotify(UINT, WPARAM, LPARAM, LRESULT*);
 };
 
+// CCheckListBox: an owner-drawn list box (LBS_OWNERDRAWFIXED or
+// _VARIABLE, with LBS_HASSTRINGS) with a check box by each item. A change
+// of a check sends the parent CLBN_CHKCHANGE through WM_COMMAND.
+#define CLBN_CHKCHANGE 40
+
+class CCheckListBox : public CListBox {
+  DECLARE_DYNAMIC(CCheckListBox)
+public:
+  CCheckListBox();
+  virtual ~CCheckListBox();
+  virtual BOOL Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID);
+
+  // BS_CHECKBOX, BS_AUTOCHECKBOX, BS_3STATE or BS_AUTO3STATE.
+  void SetCheckStyle(UINT nStyle);
+  UINT GetCheckStyle() { return m_nStyle; }
+  void SetCheck(int nIndex, int nCheck);  // 0, 1, or 2 (indeterminate)
+  int GetCheck(int nIndex);
+  void Enable(int nIndex, BOOL bEnabled = TRUE);
+  BOOL IsEnabled(int nIndex);
+
+  // Where the check box goes in the item; the default is its left end,
+  // centered vertically.
+  virtual CRect OnGetCheckPosition(CRect rectItem, CRect rectCheckBox);
+  virtual void DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct);
+  virtual void MeasureItem(LPMEASUREITEMSTRUCT lpMeasureItemStruct);
+
+  // ----- Implementation
+  virtual BOOL OnChildNotify(UINT, WPARAM, LPARAM, LRESULT*);
+  virtual void PreSubclassWindow();
+  virtual LRESULT WindowProc(UINT message, WPARAM wParam, LPARAM lParam);
+  void PreDrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct);
+  void PreMeasureItem(LPMEASUREITEMSTRUCT lpMeasureItemStruct);
+  int CalcMinimumItemHeight();
+  CSize CheckSize() const;
+  void InvalidateCheck(int nIndex);
+  // Toggles the check as a click or the space bar does.
+  void ToggleCheck(int nIndex);
+
+  UINT m_nStyle;
+  int m_cyText;
+
+  afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+  afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
+  afx_msg void OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
+  DECLARE_MESSAGE_MAP()
+};
+
 class CComboBox : public CWnd {
   DECLARE_DYNAMIC(CComboBox)
 public:
@@ -3194,6 +3241,8 @@ void AFXAPI AfxDeleteObject(HGDIOBJ* pObject);
 #define AFX_WNDCOMMCTL_COOL_REG 0x08000
 #define AFX_WNDCOMMCTL_USEREX_REG 0x10000
 #define AFX_WNDCOMMCTL_DATE_REG 0x20000
+#define AFX_WNDCOMMCTL_PAGER_REG 0x40000
+#define AFX_WNDCOMMCTL_LINK_REG 0x80000
 
 #define AFX_WND _T("AfxWnd")
 #define AFX_WNDCONTROLBAR _T("AfxControlBar")
