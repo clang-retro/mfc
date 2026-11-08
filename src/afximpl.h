@@ -12,8 +12,11 @@ void AFXAPI _AfxRegisterInPlaceDockSite(CFrameWnd* pFrame, BOOL bAdd);
 // Shared in-place menus (oleipcli.cpp): copies the groups of hMenuSource,
 // split by separators, into hMenuShared (nFirstGroup 0 for a container's
 // groups 0, 2 and 4; 1 for an object's 1, 3 and 5), and takes them out.
-void AFXAPI _AfxMergeMenus(HMENU hMenuShared, HMENU hMenuSource, LONG* lpMenuWidths,
-                           int nFirstGroup);
+// nLastGroup (nFirstGroup + 4 when -1) is the last group filled: past it,
+// with bStop the merge stops, and otherwise the rest goes into it. The
+// result is the position in hMenuSource where the merge stopped.
+int AFXAPI _AfxMergeMenus(HMENU hMenuShared, HMENU hMenuSource, LONG* lpMenuWidths,
+                          int nFirstGroup, int nLastGroup = -1, BOOL bStop = FALSE);
 void AFXAPI _AfxUnmergeMenus(HMENU hMenuShared, HMENU hMenuSource);
 
 // Idle updates for in-place frames, which are not under the main window

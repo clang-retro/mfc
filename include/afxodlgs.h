@@ -1,5 +1,6 @@
 // afxodlgs.h - the OLE dialogs: Insert Object, Paste Special, Links,
-// Change Icon, Convert, Server Busy and Update Links, over oledlg.
+// Change Icon, Convert, Server Busy, Update Links, Change Source and
+// Object Properties, over oledlg.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -114,7 +115,9 @@ public:
   CView* m_pView;
 
 public:
-  BEGIN_INTERFACE_PART(OleUILinkContainer, IOleUILinkContainer)
+  // The links' IOleUILinkContainer, which is also their IOleUILinkInfo
+  // (for Object Properties).
+  BEGIN_INTERFACE_PART(OleUILinkContainer, IOleUILinkInfo)
     STDMETHOD_(DWORD, GetNextLink)(DWORD dwLink);
     STDMETHOD(SetLinkUpdateOptions)(DWORD dwLink, DWORD dwUpdateOpt);
     STDMETHOD(GetLinkUpdateOptions)(DWORD dwLink, DWORD* lpdwUpdateOpt);
@@ -126,7 +129,11 @@ public:
     STDMETHOD(OpenLinkSource)(DWORD dwLink);
     STDMETHOD(UpdateLink)(DWORD dwLink, BOOL fErrorMessage, BOOL fReserved);
     STDMETHOD(CancelLink)(DWORD dwLink);
+    STDMETHOD(GetLastUpdate)(DWORD dwLink, FILETIME* lpLastUpdate);
   END_INTERFACE_PART(OleUILinkContainer)
+
+  // The number of pItem among the links, or 0.
+  DWORD FindLink(COleClientItem* pItem) const;
 
   DECLARE_INTERFACE_MAP()
 };
@@ -203,6 +210,76 @@ public:
 
 protected:
   Selection m_selection;
+};
+
+// ---------------------------------------------------------------------
+// Change Source: a new source for a link. On OK with a valid source, the
+// link takes it.
+
+class COleChangeSourceDialog : public COleDialog {
+  DECLARE_DYNAMIC(COleChangeSourceDialog)
+public:
+  explicit COleChangeSourceDialog(COleClientItem* pItem, CWnd* pParentWnd = NULL);
+  virtual ~COleChangeSourceDialog();
+  virtual INT_PTR DoModal();
+
+  // The source's whole name, its file part and its item part.
+  CString GetDisplayName() const { return CString(m_cs.lpszDisplayName); }
+  CString GetFileName() const { return GetDisplayName().Left((int)m_cs.nFileLength); }
+  CString GetItemName() const { return GetDisplayName().Mid((int)m_cs.nFileLength); }
+  // What the source changed from and to, when only their ends differ.
+  CString GetFromPrefix() const { return CString(m_cs.lpszFrom); }
+  CString GetToPrefix() const { return CString(m_cs.lpszTo); }
+  BOOL IsValidSource() const { return (m_cs.dwFlags & CSF_VALIDSOURCE) != 0; }
+
+  OLEUICHANGESOURCE m_cs;
+
+protected:
+  COleLinksDialog m_xLinkInfo;  // the item's document's links
+  COleClientItem* m_pItem;
+};
+
+// ---------------------------------------------------------------------
+// Object Properties: the General, View and (for a link) Link pages of an
+// item.
+
+class COlePropertiesDialog : public COleDialog {
+  DECLARE_DYNAMIC(COlePropertiesDialog)
+public:
+  explicit COlePropertiesDialog(COleClientItem* pItem, UINT nScaleMin = 10,
+                                UINT nScaleMax = 500, CWnd* pParentWnd = NULL);
+  virtual ~COlePropertiesDialog();
+  virtual INT_PTR DoModal();
+
+  // The View page changed the item's scale (in percent); TRUE when the
+  // program applied it.
+  virtual BOOL OnApplyScale(COleClientItem* pItem, int nCurrentScale, BOOL bRelativeToOrig);
+
+  OLEUIOBJECTPROPS m_op;
+  OLEUIGNRLPROPS m_gp;
+  OLEUIVIEWPROPS m_vp;
+  OLEUILINKPROPS m_lp;
+  PROPSHEETHEADER m_psh;
+
+  BEGIN_INTERFACE_PART(OleUIObjInfo, IOleUIObjInfo)
+    STDMETHOD(GetObjectInfo)(DWORD dwObject, DWORD* lpdwObjSize, LPTSTR* lplpszLabel,
+                             LPTSTR* lplpszType, LPTSTR* lplpszShortType,
+                             LPTSTR* lplpszLocation);
+    STDMETHOD(GetConvertInfo)(DWORD dwObject, CLSID* lpClassID, WORD* lpwFormat,
+                              CLSID* lpConvertDefaultClassID, LPCLSID* lplpClsidExclude,
+                              UINT* lpcClsidExclude);
+    STDMETHOD(ConvertObject)(DWORD dwObject, REFCLSID clsidNew);
+    STDMETHOD(GetViewInfo)(DWORD dwObject, HGLOBAL* phMetaPict, DWORD* pdvAspect,
+                           int* pnCurrentScale);
+    STDMETHOD(SetViewInfo)(DWORD dwObject, HGLOBAL hMetaPict, DWORD dvAspect,
+                           int nCurrentScale, BOOL bRelativeToOrig);
+  END_INTERFACE_PART(OleUIObjInfo)
+
+  DECLARE_INTERFACE_MAP()
+
+protected:
+  COleLinksDialog m_xLinkInfo;  // the item's document's links
+  COleClientItem* m_pItem;
 };
 
 #endif  // __AFXODLGS_H__

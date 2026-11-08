@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 #include <afxdisp.h>
+#include <afxole.h>
 
 IMPLEMENT_DYNAMIC(COleObjectFactory, CCmdTarget)
 
@@ -24,6 +25,12 @@ BOOL AFXAPI AfxOleInit() {
   if (FAILED(::OleInitialize(NULL))) return FALSE;
   g_bOleInit = TRUE;
   _afxPfnOleTerm = AfxOleTerm;  // CWinApp::ExitInstance ends it
+  // The thread's message filter.
+  CWinThread* pThread = AfxGetThread();
+  if (pThread != NULL && pThread->m_pMessageFilter == NULL) {
+    pThread->m_pMessageFilter = new COleMessageFilter;
+    pThread->m_pMessageFilter->Register();
+  }
   return TRUE;
 }
 
@@ -32,6 +39,12 @@ void AFXAPI AfxOleTerm(BOOL bJustRevoke) {
   if (bJustRevoke) return;
   _AfxReleaseTypeLibCaches();
   if (!g_bOleInit) return;
+  CWinThread* pThread = AfxGetThread();
+  if (pThread != NULL && pThread->m_pMessageFilter != NULL) {
+    pThread->m_pMessageFilter->Revoke();
+    delete pThread->m_pMessageFilter;
+    pThread->m_pMessageFilter = NULL;
+  }
   ::OleUninitialize();
   g_bOleInit = FALSE;
   _afxPfnOleTerm = NULL;

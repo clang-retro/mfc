@@ -49,6 +49,7 @@ class CMenu;
 class CCmdTarget;
 class CCmdUI;
 class COleDropTarget;
+class COleMessageFilter;
 class COleControlContainer;
 class COleControlSite;
 struct _AFX_OCC_DIALOG_INFO;
@@ -2872,6 +2873,7 @@ public:
   AFX_THREADPROC m_pfnThreadProc;
   CPoint m_ptCursorLast;
   UINT m_nMsgLast;
+  COleMessageFilter* m_pMessageFilter;  // AfxOleInit's, for this thread
 
   void CommonConstruct();
   BOOL DispatchThreadMessageEx(MSG* msg);
