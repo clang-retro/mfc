@@ -223,6 +223,12 @@ when there is no display:
   from CreateControl; and downloads of a local file through
   CMonikerFile, CAsyncMonikerFile and a CCachedDataPathProperty loaded
   from a property bag (PX_DataPath).
+* `cmntest`: a CReBar with a toolbar, a combo box and a second row in
+  its bands (the frame's layout as rows come and go, idle updates of
+  the bands' controls), CReBarCtrl, CCheckListBox (item data, clicks
+  on the box, the space bar, disabled items, three states), a
+  CDragListBox drag, CLinkCtrl (in comctl32 6, from the test's
+  manifest) and CPagerCtrl.
 * `wltest`: windowless controls, with a COleControl of the test's own
   in a frame window: drawing in the container's window (checked by its
   pixels) and InvalidateControl, mouse messages with capture, focus and
@@ -253,12 +259,12 @@ request with the stock MinGW-w64 toolchain.
   CStdioFile, CMemFile, CArchive, CTime, CTimeSpan, exceptions.
 * Windows (`afxwin.h`): CWinApp, CWinThread, CWnd and message maps,
   command routing and idle updates, GDI objects and device contexts,
-  standard controls, CDialog with DDX/DDV, frames, documents and views
-  (SDI and MDI), CScrollView, printing.
+  standard controls (and CCheckListBox), CDialog with DDX/DDV, frames,
+  documents and views (SDI and MDI), CScrollView, printing.
 * `afxext.h`: CToolBar, CStatusBar, CDialogBar, docking and floating
   (dock bars, CMiniFrameWnd, drag and drop, CDockState), CSplitterWnd (static and dynamic, with split boxes and shared
-  scroll bars), CFormView, CEditView,
-  CBitmapButton, CRectTracker.
+  scroll bars), CReBar (toolbars, dialog bars and other windows in
+  its bands), CFormView, CEditView, CBitmapButton, CRectTracker.
 * `afxrich.h`: CRichEditView and CRichEditDoc (rich text or plain text
   files, formatting the selection, find and replace, printing), with
   OLE objects in the text through CRichEditCntrItem (Insert Object,
@@ -350,8 +356,9 @@ request with the stock MinGW-w64 toolchain.
   Not Responding dialog lets the user decide.
 * `afxdlgs.h`: the common dialogs (file, color, font, print, page setup,
   find/replace) and CPropertySheet/CPropertyPage, wizards included.
-* `afxcmn.h`, `afxcview.h`: the common controls, CImageList, CListView,
-  CTreeView. `afxmt.h`: synchronization objects.
+* `afxcmn.h`, `afxcview.h`: the common controls (CReBarCtrl,
+  CLinkCtrl, CPagerCtrl and CDragListBox among them), CImageList,
+  CListView, CTreeView. `afxmt.h`: synchronization objects.
 * `afxinet.h`: the internet classes over WinINet: CInternetSession
   (OpenURL, options, cookies, the status callback), CHttpConnection and
   CHttpFile, CFtpConnection, CFtpFileFind, CGopherConnection,

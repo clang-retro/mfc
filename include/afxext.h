@@ -311,6 +311,42 @@ public:
 };
 
 // ---------------------------------------------------------------------
+// CReBar: a rebar control as a control bar. AddBar puts a toolbar, a
+// dialog bar or any child window into a band of its own.
+
+class CReBarCtrl;
+
+class CReBar : public CControlBar {
+  DECLARE_DYNAMIC(CReBar)
+public:
+  CReBar();
+  virtual ~CReBar();
+
+  BOOL Create(CWnd* pParentWnd, DWORD dwCtrlStyle = RBS_BANDBORDERS,
+              DWORD dwStyle = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN |
+                              CBRS_TOP,
+              UINT nID = AFX_IDW_REBAR);
+  CReBarCtrl& GetReBarCtrl() const { return *(CReBarCtrl*)this; }
+  BOOL AddBar(CWnd* pBar, LPCTSTR pszText = NULL, CBitmap* pbmp = NULL,
+              DWORD dwStyle = RBBS_GRIPPERALWAYS | RBBS_FIXEDBMP);
+  BOOL AddBar(CWnd* pBar, COLORREF clrFore, COLORREF clrBack, LPCTSTR pszText = NULL,
+              DWORD dwStyle = RBBS_GRIPPERALWAYS);
+
+  virtual CSize CalcFixedLayout(BOOL bStretch, BOOL bHorz);
+  virtual CSize CalcDynamicLayout(int nLength, DWORD nMode);
+  virtual void OnUpdateCmdUI(CFrameWnd* pTarget, BOOL bDisableIfNoHndler);
+  virtual INT_PTR OnToolHitTest(CPoint point, TOOLINFO* pTI) const;
+
+  // ----- Implementation
+  BOOL _AddBar(CWnd* pBar, REBARBANDINFO* pRBBI);
+  afx_msg void OnPaint();
+  afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+  afx_msg void OnHeightChange(NMHDR* pNMHDR, LRESULT* pResult);
+  afx_msg void OnSize(UINT nType, int cx, int cy);
+  DECLARE_MESSAGE_MAP()
+};
+
+// ---------------------------------------------------------------------
 // CDockState: where a frame's control bars are, which are floating and
 // which are shown. CFrameWnd::SaveBarState and LoadBarState keep it in
 // the application's profile; Serialize keeps it in an archive.
