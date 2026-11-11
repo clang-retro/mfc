@@ -625,7 +625,7 @@ BOOL COleVariant::operator==(const VARIANT& var) const {
     case VT_UNKNOWN: return punkVal == var.punkVal;
     default:
       if ((vt & VT_ARRAY) != 0 && (vt & VT_TYPEMASK) == VT_UI1) {
-        long lo1, hi1, lo2, hi2;
+        LONG lo1, hi1, lo2, hi2;
         ::SafeArrayGetLBound(parray, 1, &lo1);
         ::SafeArrayGetUBound(parray, 1, &hi1);
         ::SafeArrayGetLBound(var.parray, 1, &lo2);
@@ -774,7 +774,7 @@ CArchive& AFXAPI operator<<(CArchive& ar, COleVariant varSrc) {
     case VT_BSTR: ar << CString(varSrc.bstrVal != NULL ? varSrc.bstrVal : L""); break;
     default:
       if (varSrc.vt == (VT_ARRAY | VT_UI1)) {
-        long lo, hi;
+        LONG lo, hi;
         ::SafeArrayGetLBound(varSrc.parray, 1, &lo);
         ::SafeArrayGetUBound(varSrc.parray, 1, &hi);
         DWORD n = (DWORD)(hi - lo + 1);
@@ -978,7 +978,7 @@ void COleSafeArray::Create(VARTYPE vtSrc, DWORD dwDims, SAFEARRAYBOUND* rgsaboun
 
 void COleSafeArray::CreateOneDim(VARTYPE vtSrc, DWORD dwElements, const void* pvSrcData,
                                  long nLBound) {
-  SAFEARRAYBOUND bound = {dwElements, nLBound};
+  SAFEARRAYBOUND bound = {dwElements, (LONG)nLBound};
   Create(vtSrc, 1, &bound);
   if (pvSrcData != NULL && dwElements > 0) {
     void* pvData;
@@ -1000,14 +1000,14 @@ void COleSafeArray::DestroyData() { AfxCheckError(::SafeArrayDestroyData(parray)
 void COleSafeArray::DestroyDescriptor() { AfxCheckError(::SafeArrayDestroyDescriptor(parray)); }
 
 DWORD COleSafeArray::GetOneDimSize() {
-  long lo, hi;
+  LONG lo, hi;
   GetLBound(1, &lo);
   GetUBound(1, &hi);
   return (DWORD)(hi - lo + 1);
 }
 
 void COleSafeArray::ResizeOneDim(DWORD dwElements) {
-  long lo;
+  LONG lo;
   GetLBound(1, &lo);
   SAFEARRAYBOUND bound = {dwElements, lo};
   Redim(&bound);
@@ -1030,23 +1030,23 @@ void COleSafeArray::AllocDescriptor(DWORD dwDims) {
 
 void COleSafeArray::Copy(LPSAFEARRAY* ppsa) { AfxCheckError(::SafeArrayCopy(parray, ppsa)); }
 
-void COleSafeArray::GetLBound(DWORD dwDim, long* pLBound) {
+void COleSafeArray::GetLBound(DWORD dwDim, LONG* pLBound) {
   AfxCheckError(::SafeArrayGetLBound(parray, dwDim, pLBound));
 }
 
-void COleSafeArray::GetUBound(DWORD dwDim, long* pUBound) {
+void COleSafeArray::GetUBound(DWORD dwDim, LONG* pUBound) {
   AfxCheckError(::SafeArrayGetUBound(parray, dwDim, pUBound));
 }
 
-void COleSafeArray::GetElement(long* rgIndices, void* pvData) {
+void COleSafeArray::GetElement(LONG* rgIndices, void* pvData) {
   AfxCheckError(::SafeArrayGetElement(parray, rgIndices, pvData));
 }
 
-void COleSafeArray::PtrOfIndex(long* rgIndices, void** ppvData) {
+void COleSafeArray::PtrOfIndex(LONG* rgIndices, void** ppvData) {
   AfxCheckError(::SafeArrayPtrOfIndex(parray, rgIndices, ppvData));
 }
 
-void COleSafeArray::PutElement(long* rgIndices, void* pvData) {
+void COleSafeArray::PutElement(LONG* rgIndices, void* pvData) {
   AfxCheckError(::SafeArrayPutElement(parray, rgIndices, pvData));
 }
 

@@ -27,7 +27,7 @@ int AFX_CDECL AfxVFormatA(char* pszBuf, int nMax, const char* pszFormat, va_list
 int AFX_CDECL AfxVFormatW(WCHAR* pszBuf, int nMax, const WCHAR* pszFormat, va_list args);
 
 struct CStringData {
-  long nRefs;        // -1 locked (never freed); the shared empty string too
+  LONG nRefs;        // -1 locked (never freed); the shared empty string too
   int nDataLength;   // characters, not counting the terminating zero
   int nAllocLength;  // characters that fit, not counting the zero
   void* data() { return this + 1; }

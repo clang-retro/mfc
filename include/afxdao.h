@@ -764,7 +764,12 @@ void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, BYTE& value, CDaoRecords
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, int& value, CDaoRecordset* pRecordset);
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, UINT& value, CDaoRecordset* pRecordset);
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, long& value, CDaoRecordset* pRecordset);
+#ifndef _WINPORT
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, DWORD& value, CDaoRecordset* pRecordset);
+#else
+// DWORD is UINT here, so the extra overload takes unsigned long.
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, unsigned long& value, CDaoRecordset* pRecordset);
+#endif
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, CString& value,
                           CDaoRecordset* pRecordset);
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, LPTSTR pstrValue, int nMaxLen,

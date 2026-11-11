@@ -1,0 +1,216 @@
+// olectl.h - OLE controls: stock properties, events and ambient
+// properties, their errors, fonts and pictures, property frames, and the
+// reflected control messages.
+//
+// Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
+#ifndef _WINPORT_OLECTL_H
+#define _WINPORT_OLECTL_H
+
+#include <ole2.h>
+#include <ocidl.h>
+
+extern "C" {
+
+extern const CLSID CLSID_CFontPropPage, CLSID_CColorPropPage, CLSID_CPicturePropPage, CLSID_PersistPropset,
+    CLSID_ConvertVBX, CLSID_StdFont, CLSID_StdPicture;
+extern const GUID GUID_HIMETRIC, GUID_COLOR, GUID_XPOSPIXEL, GUID_YPOSPIXEL, GUID_XSIZEPIXEL, GUID_YSIZEPIXEL,
+    GUID_XPOS, GUID_YPOS, GUID_XSIZE, GUID_YSIZE, GUID_TRISTATE, GUID_OPTIONVALUEEXCLUSIVE, GUID_CHECKVALUEEXCLUSIVE,
+    GUID_FONTNAME, GUID_FONTSIZE, GUID_FONTBOLD, GUID_FONTITALIC, GUID_FONTUNDERSCORE, GUID_FONTSTRIKETHROUGH,
+    GUID_HANDLE;
+
+// Errors
+#define STD_CTL_SCODE(n) MAKE_SCODE(SEVERITY_ERROR, FACILITY_CONTROL, n)
+#define CUSTOM_CTL_SCODE(n) MAKE_SCODE(SEVERITY_ERROR, FACILITY_CONTROL, n)
+
+#define CONNECT_E_FIRST MAKE_SCODE(SEVERITY_ERROR, FACILITY_ITF, 0x0200)
+#define CONNECT_E_NOCONNECTION (CONNECT_E_FIRST + 0)
+#define CONNECT_E_ADVISELIMIT (CONNECT_E_FIRST + 1)
+#define CONNECT_E_CANNOTCONNECT (CONNECT_E_FIRST + 2)
+#define CONNECT_E_OVERRIDDEN (CONNECT_E_FIRST + 3)
+#define SELFREG_E_FIRST MAKE_SCODE(SEVERITY_ERROR, FACILITY_ITF, 0x0200)
+#define PERPROP_E_FIRST MAKE_SCODE(SEVERITY_ERROR, FACILITY_ITF, 0x0200)
+#define PERPROP_E_NOPAGEAVAILABLE (PERPROP_E_FIRST + 0)
+
+// Status bits in the registry
+#define OLEMISC_ACTIVATEWHENVISIBLE_ 0x100
+
+// Stock properties
+#define DISPID_AUTOSIZE (-500)
+#define DISPID_BACKCOLOR (-501)
+#define DISPID_BACKSTYLE (-502)
+#define DISPID_BORDERCOLOR (-503)
+#define DISPID_BORDERSTYLE (-504)
+#define DISPID_BORDERWIDTH (-505)
+#define DISPID_DRAWMODE (-507)
+#define DISPID_DRAWSTYLE (-508)
+#define DISPID_DRAWWIDTH (-509)
+#define DISPID_FILLCOLOR (-510)
+#define DISPID_FILLSTYLE (-511)
+#define DISPID_FONT (-512)
+#define DISPID_FORECOLOR (-513)
+#define DISPID_ENABLED (-514)
+#define DISPID_HWND (-515)
+#define DISPID_TABSTOP (-516)
+#define DISPID_TEXT (-517)
+#define DISPID_CAPTION (-518)
+#define DISPID_BORDERVISIBLE (-519)
+#define DISPID_APPEARANCE (-520)
+#define DISPID_MOUSEPOINTER (-521)
+#define DISPID_MOUSEICON (-522)
+#define DISPID_PICTURE (-523)
+#define DISPID_VALID (-524)
+#define DISPID_READYSTATE (-525)
+#define DISPID_REFRESH (-550)
+#define DISPID_DOCLICK (-551)
+#define DISPID_ABOUTBOX (-552)
+#define DISPID_CLICK (-600)
+#define DISPID_DBLCLICK (-601)
+#define DISPID_KEYDOWN (-602)
+#define DISPID_KEYPRESS (-603)
+#define DISPID_KEYUP (-604)
+#define DISPID_MOUSEDOWN (-605)
+#define DISPID_MOUSEMOVE (-606)
+#define DISPID_MOUSEUP (-607)
+#define DISPID_ERROREVENT (-608)
+#define DISPID_READYSTATECHANGE (-609)
+#define DISPID_AMBIENT_BACKCOLOR (-701)
+#define DISPID_AMBIENT_DISPLAYNAME (-702)
+#define DISPID_AMBIENT_FONT (-703)
+#define DISPID_AMBIENT_FORECOLOR (-704)
+#define DISPID_AMBIENT_LOCALEID (-705)
+#define DISPID_AMBIENT_MESSAGEREFLECT (-706)
+#define DISPID_AMBIENT_SCALEUNITS (-707)
+#define DISPID_AMBIENT_TEXTALIGN (-708)
+#define DISPID_AMBIENT_USERMODE (-709)
+#define DISPID_AMBIENT_UIDEAD (-710)
+#define DISPID_AMBIENT_SHOWGRABHANDLES (-711)
+#define DISPID_AMBIENT_SHOWHATCHING (-712)
+#define DISPID_AMBIENT_DISPLAYASDEFAULT (-713)
+#define DISPID_AMBIENT_SUPPORTSMNEMONICS (-714)
+#define DISPID_AMBIENT_AUTOCLIP (-715)
+#define DISPID_AMBIENT_APPEARANCE (-716)
+#define DISPID_AMBIENT_CODEPAGE (-725)
+#define DISPID_AMBIENT_PALETTE (-726)
+#define DISPID_AMBIENT_CHARSET (-727)
+#define DISPID_AMBIENT_TRANSFERPRIORITY (-728)
+#define DISPID_AMBIENT_RIGHTTOLEFT (-732)
+#define DISPID_AMBIENT_TOPTOBOTTOM (-733)
+#define DISPID_Name (-800)
+#define DISPID_Delete (-801)
+#define DISPID_Object (-802)
+#define DISPID_Parent (-803)
+#define DISPID_FONT_NAME 0
+#define DISPID_FONT_SIZE 2
+#define DISPID_FONT_BOLD 3
+#define DISPID_FONT_ITALIC 4
+#define DISPID_FONT_UNDER 5
+#define DISPID_FONT_STRIKE 6
+#define DISPID_FONT_WEIGHT 7
+#define DISPID_FONT_CHARSET 8
+#define DISPID_FONT_CHANGED 9
+#define DISPID_PICT_HANDLE 0
+#define DISPID_PICT_HPAL 2
+#define DISPID_PICT_TYPE 3
+#define DISPID_PICT_WIDTH 4
+#define DISPID_PICT_HEIGHT 5
+#define DISPID_PICT_RENDER 6
+
+// Fonts and pictures
+typedef struct tagFONTDESC {
+  UINT cbSizeofstruct;
+  LPOLESTR lpstrName;
+  CY cySize;
+  SHORT sWeight;
+  SHORT sCharset;
+  BOOL fItalic;
+  BOOL fUnderline;
+  BOOL fStrikethrough;
+} FONTDESC, *LPFONTDESC;
+
+#define PICTYPE_UNINITIALIZED (-1)
+#define PICTYPE_NONE 0
+#define PICTYPE_BITMAP 1
+#define PICTYPE_METAFILE 2
+#define PICTYPE_ICON 3
+#define PICTYPE_ENHMETAFILE 4
+#define PICTURE_SCALABLE 0x1
+#define PICTURE_TRANSPARENT 0x2
+
+typedef struct tagPICTDESC {
+  UINT cbSizeofstruct;
+  UINT picType;
+  union {
+    struct {
+      HBITMAP hbitmap;
+      HPALETTE hpal;
+    } bmp;
+    struct {
+      HMETAFILE hmeta;
+      int xExt;
+      int yExt;
+    } wmf;
+    struct {
+      HICON hicon;
+    } icon;
+    struct {
+      HENHMETAFILE hemf;
+    } emf;
+  };
+} PICTDESC, *LPPICTDESC;
+
+typedef struct tagOCPFIPARAMS {
+  ULONG cbStructSize;
+  HWND hWndOwner;
+  int x;
+  int y;
+  LPCOLESTR lpszCaption;
+  ULONG cObjects;
+  LPUNKNOWN* lplpUnk;
+  ULONG cPages;
+  CLSID* lpPages;
+  LCID lcid;
+  DISPID dispidInitialProperty;
+} OCPFIPARAMS, *LPOCPFIPARAMS;
+
+#define LOADPICTURE_DEFAULT 0x00000000
+#define LOADPICTURE_MONOCHROME 0x00000001
+
+HRESULT WINAPI OleCreatePropertyFrame(HWND hwndOwner, UINT x, UINT y, LPCOLESTR lpszCaption, ULONG cObjects,
+                                      LPUNKNOWN* ppUnk, ULONG cPages, LPCLSID pPageClsID, LCID lcid,
+                                      DWORD dwReserved, LPVOID pvReserved);
+HRESULT WINAPI OleCreatePropertyFrameIndirect(LPOCPFIPARAMS lpParams);
+HRESULT WINAPI OleTranslateColor(OLE_COLOR clr, HPALETTE hpal, COLORREF* lpcolorref);
+HRESULT WINAPI OleCreateFontIndirect(LPFONTDESC lpFontDesc, REFIID riid, LPVOID* lplpvObj);
+HRESULT WINAPI OleCreatePictureIndirect(LPPICTDESC lpPictDesc, REFIID riid, BOOL fOwn, LPVOID* lplpvObj);
+HRESULT WINAPI OleLoadPicture(LPSTREAM lpstream, LONG lSize, BOOL fRunmode, REFIID riid, LPVOID* lplpvObj);
+HRESULT WINAPI OleLoadPictureEx(LPSTREAM lpstream, LONG lSize, BOOL fRunmode, REFIID riid, DWORD xSizeDesired,
+                                DWORD ySizeDesired, DWORD dwFlags, LPVOID* lplpvObj);
+HRESULT WINAPI OleLoadPicturePath(LPOLESTR szURLorPath, LPUNKNOWN punkCaller, DWORD dwReserved,
+                                  OLE_COLOR clrReserved, REFIID riid, LPVOID* ppvRet);
+HCURSOR WINAPI OleIconToCursor(HINSTANCE hinstExe, HICON hIcon);
+
+// Messages reflected to controls from their parents
+#define OCM__BASE (WM_USER + 0x1c00)
+#define OCM_COMMAND (OCM__BASE + WM_COMMAND)
+#define OCM_CTLCOLORBTN (OCM__BASE + WM_CTLCOLORBTN)
+#define OCM_CTLCOLOREDIT (OCM__BASE + WM_CTLCOLOREDIT)
+#define OCM_CTLCOLORDLG (OCM__BASE + WM_CTLCOLORDLG)
+#define OCM_CTLCOLORLISTBOX (OCM__BASE + WM_CTLCOLORLISTBOX)
+#define OCM_CTLCOLORMSGBOX (OCM__BASE + WM_CTLCOLORMSGBOX)
+#define OCM_CTLCOLORSCROLLBAR (OCM__BASE + WM_CTLCOLORSCROLLBAR)
+#define OCM_CTLCOLORSTATIC (OCM__BASE + WM_CTLCOLORSTATIC)
+#define OCM_DRAWITEM (OCM__BASE + WM_DRAWITEM)
+#define OCM_MEASUREITEM (OCM__BASE + WM_MEASUREITEM)
+#define OCM_DELETEITEM (OCM__BASE + WM_DELETEITEM)
+#define OCM_VKEYTOITEM (OCM__BASE + WM_VKEYTOITEM)
+#define OCM_CHARTOITEM (OCM__BASE + WM_CHARTOITEM)
+#define OCM_COMPAREITEM (OCM__BASE + WM_COMPAREITEM)
+#define OCM_HSCROLL (OCM__BASE + WM_HSCROLL)
+#define OCM_VSCROLL (OCM__BASE + WM_VSCROLL)
+#define OCM_PARENTNOTIFY (OCM__BASE + WM_PARENTNOTIFY)
+#define OCM_NOTIFY (OCM__BASE + WM_NOTIFY)
+
+}  // extern "C"
+
+#endif

@@ -1,0 +1,81 @@
+// shellapi.h - the shell: dropped files, running documents, file
+// information and icons.
+//
+// Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
+#ifndef _WINPORT_SHELLAPI_H
+#define _WINPORT_SHELLAPI_H
+
+#include <windows.h>
+
+extern "C" {
+
+void WINAPI DragAcceptFiles(HWND, BOOL);
+UINT WINAPI DragQueryFileA(HDROP, UINT, LPSTR, UINT);
+UINT WINAPI DragQueryFileW(HDROP, UINT, LPWSTR, UINT);
+BOOL WINAPI DragQueryPoint(HDROP, LPPOINT);
+void WINAPI DragFinish(HDROP);
+HINSTANCE WINAPI ShellExecuteA(HWND, LPCSTR, LPCSTR, LPCSTR, LPCSTR, INT);
+HINSTANCE WINAPI ShellExecuteW(HWND, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, INT);
+HINSTANCE WINAPI FindExecutableA(LPCSTR, LPCSTR, LPSTR);
+HINSTANCE WINAPI FindExecutableW(LPCWSTR, LPCWSTR, LPWSTR);
+HICON WINAPI ExtractIconA(HINSTANCE, LPCSTR, UINT);
+HICON WINAPI ExtractIconW(HINSTANCE, LPCWSTR, UINT);
+LPWSTR* WINAPI CommandLineToArgvW(LPCWSTR, int*);
+#define SE_ERR_FNF 2
+#define SE_ERR_PNF 3
+#define SE_ERR_ACCESSDENIED 5
+#define SE_ERR_OOM 8
+#define SE_ERR_DLLNOTFOUND 32
+#define SE_ERR_SHARE 26
+#define SE_ERR_ASSOCINCOMPLETE 27
+#define SE_ERR_DDETIMEOUT 28
+#define SE_ERR_DDEFAIL 29
+#define SE_ERR_DDEBUSY 30
+#define SE_ERR_NOASSOC 31
+
+typedef struct _SHFILEINFOA {
+  HICON hIcon;
+  int iIcon;
+  DWORD dwAttributes;
+  CHAR szDisplayName[MAX_PATH];
+  CHAR szTypeName[80];
+} SHFILEINFOA;
+typedef struct _SHFILEINFOW {
+  HICON hIcon;
+  int iIcon;
+  DWORD dwAttributes;
+  WCHAR szDisplayName[MAX_PATH];
+  WCHAR szTypeName[80];
+} SHFILEINFOW;
+#define SHGFI_ICON 0x000000100
+#define SHGFI_DISPLAYNAME 0x000000200
+#define SHGFI_TYPENAME 0x000000400
+#define SHGFI_ATTRIBUTES 0x000000800
+#define SHGFI_ICONLOCATION 0x000001000
+#define SHGFI_EXETYPE 0x000002000
+#define SHGFI_SYSICONINDEX 0x000004000
+#define SHGFI_LINKOVERLAY 0x000008000
+#define SHGFI_SELECTED 0x000010000
+#define SHGFI_LARGEICON 0x000000000
+#define SHGFI_SMALLICON 0x000000001
+#define SHGFI_OPENICON 0x000000002
+#define SHGFI_SHELLICONSIZE 0x000000004
+#define SHGFI_PIDL 0x000000008
+#define SHGFI_USEFILEATTRIBUTES 0x000000010
+DWORD_PTR WINAPI SHGetFileInfoA(LPCSTR, DWORD, SHFILEINFOA*, UINT, UINT);
+DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR, DWORD, SHFILEINFOW*, UINT, UINT);
+#define SHCNE_ASSOCCHANGED 0x08000000L
+#define SHCNF_IDLIST 0x0000
+void WINAPI SHChangeNotify(LONG, UINT, LPCVOID, LPCVOID);
+
+#define DragQueryFile __WINPORT_AW(DragQueryFile)
+#define ShellExecute __WINPORT_AW(ShellExecute)
+#define FindExecutable __WINPORT_AW(FindExecutable)
+#define ExtractIcon __WINPORT_AW(ExtractIcon)
+#define SHFILEINFO __WINPORT_AW(SHFILEINFO)
+#define SHGetFileInfo __WINPORT_AW(SHGetFileInfo)
+
+}  // extern "C"
+
+#endif

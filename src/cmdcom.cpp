@@ -343,8 +343,9 @@ static void GetMember(void* pm, VARTYPE vt, VARIANT* pResult) {
   case VT_UI1: pResult->bVal = *(BYTE*)pm; break;
   case VT_I2: pResult->iVal = *(short*)pm; break;
   case VT_UI2: pResult->uiVal = *(USHORT*)pm; break;
-  case VT_I4: case VT_ERROR: pResult->lVal = *(long*)pm; break;
-  case VT_UI4: pResult->ulVal = *(ULONG*)pm; break;
+  // A VT_I4 member is a long, which may be wider than VT_I4.
+  case VT_I4: case VT_ERROR: pResult->lVal = (LONG)*(long*)pm; break;
+  case VT_UI4: pResult->ulVal = (ULONG)*(unsigned long*)pm; break;
   case VT_I8: case VT_UI8: pResult->llVal = *(LONGLONG*)pm; break;
   case VT_R4: pResult->fltVal = *(float*)pm; break;
   case VT_R8: case VT_DATE: pResult->dblVal = *(double*)pm; break;
@@ -367,7 +368,8 @@ static void SetMember(void* pm, VARTYPE vt, AFX_DISPARG& a) {
   switch (vt) {
   case VT_I1: case VT_UI1: *(BYTE*)pm = v.bVal; break;
   case VT_I2: case VT_UI2: *(USHORT*)pm = v.uiVal; break;
-  case VT_I4: case VT_UI4: case VT_ERROR: *(ULONG*)pm = v.ulVal; break;
+  case VT_I4: case VT_ERROR: *(long*)pm = v.lVal; break;
+  case VT_UI4: *(unsigned long*)pm = v.ulVal; break;
   case VT_I8: case VT_UI8: *(LONGLONG*)pm = v.llVal; break;
   case VT_R4: *(float*)pm = v.fltVal; break;
   case VT_R8: case VT_DATE: *(double*)pm = v.dblVal; break;

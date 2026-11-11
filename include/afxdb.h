@@ -14,7 +14,7 @@
 #include <sql.h>
 #include <sqlext.h>
 
-#ifndef _AFX_NOFORCE_LIBS
+#if !defined(_AFX_NOFORCE_LIBS) && defined(_WIN32)
 __asm__(".section .drectve,\"yn\"\n"
         ".ascii \" -defaultlib:odbc32\"\n"
         ".text");
@@ -501,7 +501,12 @@ void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, BYTE& value, CRecordset*
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, int& value, CRecordset* pRecordset);
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, UINT& value, CRecordset* pRecordset);
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, long& value, CRecordset* pRecordset);
+#ifndef _WINPORT
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, DWORD& value, CRecordset* pRecordset);
+#else
+// DWORD is UINT here, so the extra overload takes unsigned long.
+void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, unsigned long& value, CRecordset* pRecordset);
+#endif
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, CString& value, CRecordset* pRecordset);
 void AFXAPI DDX_FieldText(CDataExchange* pDX, int nIDC, LPTSTR pstrValue, int nMaxLen,
                           CRecordset* pRecordset);

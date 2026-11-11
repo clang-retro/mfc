@@ -761,7 +761,7 @@ public:
   }
   void SetSel(CHARRANGE& cr) { ::SendMessage(m_hWnd, EM_EXSETSEL, 0, (LPARAM)&cr); }
   void SetSel(long nStartChar, long nEndChar) {
-    CHARRANGE cr = {nStartChar, nEndChar};
+    CHARRANGE cr = {(LONG)nStartChar, (LONG)nEndChar};
     SetSel(cr);
   }
   CString GetSelText() const;

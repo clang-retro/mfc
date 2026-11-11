@@ -10,7 +10,7 @@
 #include "afx.h"
 #include <wininet.h>
 
-#ifndef _AFX_NOFORCE_LIBS
+#if !defined(_AFX_NOFORCE_LIBS) && defined(_WIN32)
 __asm__(".section .drectve,\"yn\"\n"
         ".ascii \" -defaultlib:wininet\"\n"
         ".text");

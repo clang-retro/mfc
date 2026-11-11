@@ -1220,7 +1220,7 @@ public:
   virtual BOOL OnCreateAggregates() { return TRUE; }
   virtual LPUNKNOWN GetInterfaceHook(const void*) { return NULL; }
 
-  long m_dwRef;
+  LONG m_dwRef;
   LPUNKNOWN m_pOuterUnknown;
   AFX_MODULE_STATE* m_pModuleState;  // the module the object was made in
   _AfxInnerUnknownImpl m_xInnerUnknown;
@@ -2549,7 +2549,11 @@ void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, short& value);
 void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, int& value);
 void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, UINT& value);
 void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, long& value);
+#ifndef _WINPORT
 void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, DWORD& value);
+#else
+void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, unsigned long& value);
+#endif
 void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, LONGLONG& value);
 void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, ULONGLONG& value);
 void AFXAPI DDX_Text(CDataExchange* pDX, int nIDC, CString& value);

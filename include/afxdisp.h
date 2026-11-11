@@ -422,11 +422,11 @@ public:
   void AllocData();
   void AllocDescriptor(DWORD dwDims);
   void Copy(LPSAFEARRAY* ppsa);
-  void GetLBound(DWORD dwDim, long* pLBound);
-  void GetUBound(DWORD dwDim, long* pUBound);
-  void GetElement(long* rgIndices, void* pvData);
-  void PtrOfIndex(long* rgIndices, void** ppvData);
-  void PutElement(long* rgIndices, void* pvData);
+  void GetLBound(DWORD dwDim, LONG* pLBound);
+  void GetUBound(DWORD dwDim, LONG* pUBound);
+  void GetElement(LONG* rgIndices, void* pvData);
+  void PtrOfIndex(LONG* rgIndices, void** ppvData);
+  void PutElement(LONG* rgIndices, void* pvData);
   void Lock();
   void Unlock();
   DWORD GetDim();
@@ -543,6 +543,13 @@ inline T* _AfxDispPtr(AFX_DISPARG& a, std::true_type) {
 template <class T>
 inline T* _AfxDispPtr(AFX_DISPARG& a, std::false_type) {
   if (a.v.vt == VT_BOOL && sizeof(T) == sizeof(BOOL)) return (T*)&a.bVal;
+  // A 32-bit value for a wider integer (long where it is 64 bits): widen
+  // it in place; the caller reads back the low half, which on a
+  // little-endian system is where the union keeps the 32-bit members.
+  if (std::is_integral<T>::value && sizeof(T) == 8 && (a.v.vt == VT_I4 || a.v.vt == VT_ERROR))
+    a.v.llVal = a.v.lVal;
+  else if (std::is_integral<T>::value && sizeof(T) == 8 && a.v.vt == VT_UI4)
+    a.v.ullVal = a.v.ulVal;
   return (T*)&a.v.llVal;  // the union's members all start here
 }
 template <class T>

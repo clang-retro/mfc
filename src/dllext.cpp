@@ -15,11 +15,18 @@ static const int CRIT_DYNLINKLIST = 1;  // the lock for the module state's DLL l
 
 // The bytes of a loaded module's image.
 static void ModuleRange(HMODULE hModule, const BYTE** ppStart, const BYTE** ppEnd) {
+#ifdef _WINPORT
+  // A module there is not a PE image, and there are no extension DLLs
+  // yet, so no classes belong to one.
+  (void)hModule;
+  *ppStart = *ppEnd = NULL;
+#else
   const BYTE* pBase = (const BYTE*)hModule;
   const IMAGE_DOS_HEADER* pDos = (const IMAGE_DOS_HEADER*)pBase;
   const IMAGE_NT_HEADERS* pNt = (const IMAGE_NT_HEADERS*)(pBase + pDos->e_lfanew);
   *ppStart = pBase;
   *ppEnd = pBase + pNt->OptionalHeader.SizeOfImage;
+#endif
 }
 
 BOOL AFXAPI AfxInitExtensionModule(AFX_EXTENSION_MODULE& state, HMODULE hModule) {
