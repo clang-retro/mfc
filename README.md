@@ -64,6 +64,15 @@ nothing to do and the program and the DLL need not use the same
 library build. `AfxDllGetClassObject`, `AfxDllCanUnloadNow` and
 `COleObjectFactory::UpdateRegistryAll` implement the usual exports.
 
+A regular DLL can use `mfc.dll` instead (see below): build it with
+`-D_AFXDLL -D_USRDLL`, as Visual C++ does. It then shares the library
+with the program but keeps a module state of its own (its CWinApp,
+instance and resource handles, window classes, window objects and OLE
+factories), and each function it exports starts with
+`AFX_MANAGE_STATE(AfxGetStaticModuleState())`, which makes that state
+the current one until the function returns. The DLL's windows and COM
+objects switch to it themselves.
+
 ### Linux and macOS
 
 A portable layer in `port/` implements the part of the Win32 API that MFC
@@ -318,15 +327,17 @@ when there is no display:
   program, AfxGetApp in the DLL, exceptions from one module caught in
   the other, objects and memory freed in the other module, and a
   CStringArray grown in both. It runs only against the shared library,
-  as do `core`, `sditest` and `dlgtest` a second time (`SHARED_TESTS`;
-  logs in `tests/sa` and `tests/su`).
+  as do `core`, `sditest`, `dlgtest` and `dlltest` a second time
+  (`SHARED_TESTS`; logs in `tests/sa` and `tests/su`).
 * `dlltest`: MFC in a DLL: a control in a regular DLL (`dlltest-dll`,
   built like an `.ocx`) registered through DllRegisterServer, made by
   COM from the registry and hosted by the program (properties, methods
-  and events across the two copies of the library), the DLL's own
-  instance, resources and CWinApp, a dialog from the DLL's template, and
-  unloading through DllCanUnloadNow, with the DLL's ExitInstance and
-  window classes.
+  and events across the two modules), the DLL's own instance, resources
+  and CWinApp, a dialog from the DLL's template whose messages run in the
+  DLL's state, and unloading through DllCanUnloadNow, with the DLL's
+  ExitInstance and window classes. It runs with the static library and
+  again with `mfc.dll` (`_AFXDLL` and `_USRDLL`), where AFX_MANAGE_STATE
+  switches between the two modules' states.
 * `ctltest`: writing a control with COleControl, the test being both
   its server and its container: stock and custom properties, a method,
   stock and custom events, verbs from its message map (ON_OLEVERB,
@@ -571,11 +582,11 @@ request with the stock MinGW-w64 toolchain.
   such a control is activated.
 * A regular DLL runs in the program's message loop, so its CWinApp's
   OnIdle and PreTranslateMessage are not called (as with Visual C++
-  MFC's static library), and the temporary window objects its copy of
-  the library makes are freed when the DLL unloads. A regular DLL
-  uses the static library: one built with `_AFXDLL` (sharing
-  `mfc.dll`, with `AFX_MANAGE_STATE` switching between its state and
-  the program's) is not supported.
+  MFC), and the temporary window objects it makes are freed when the
+  DLL unloads. With `mfc.dll`, the DLL's module state holds its
+  CWinApp, instance and resource handles, window classes, handle maps
+  and OLE factories and object count; the program's run-time class list
+  (CRuntimeClass::FromName) and AfxGetThread are shared with it.
 * The shared library is one DLL, with the database, OLE and network
   classes that Visual C++ puts in DLLs of their own, so it imports
   `odbc32`, `wininet`, `ws2_32`, `oledlg` and `urlmon` whatever the

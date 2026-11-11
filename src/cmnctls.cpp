@@ -232,11 +232,11 @@ BOOL CRichEditCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UI
 // CImageList
 
 static CHandleMap* afxMapHIMAGELIST(BOOL bCreate = FALSE) {
-  AFX_THREAD_STATE* pState = AfxGetThreadState();
-  if (pState->m_pmapHIMAGELIST == NULL && bCreate)
-    pState->m_pmapHIMAGELIST =
+  _AFX_HANDLE_MAPS* pMaps = _AfxGetHandleMaps();
+  if (pMaps->m_pmapHIMAGELIST == NULL && bCreate)
+    pMaps->m_pmapHIMAGELIST =
         new CHandleMap(RUNTIME_CLASS(CImageList), offsetof(CImageList, m_hImageList));
-  return pState->m_pmapHIMAGELIST;
+  return pMaps->m_pmapHIMAGELIST;
 }
 
 CImageList::~CImageList() { DeleteImageList(); }

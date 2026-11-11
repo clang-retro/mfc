@@ -6,6 +6,7 @@
 #define IDC_DLLTEXT 201
 #define IDS_FROMEXE 101  // the program's string of the same number
 #define IDC_CTL 2001
+#define WM_DLLTEST_STATE (WM_APP + 1)  // asks the DLL's dialog about its state
 
 // The control's members and events.
 enum { DISPID_DLLVALUE = 1, DISPID_DLLBUMP = 2 };

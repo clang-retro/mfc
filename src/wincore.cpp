@@ -250,9 +250,18 @@ LRESULT CALLBACK AfxWndProc(HWND hWnd, UINT nMsg, WPARAM wParam, LPARAM lParam) 
   return AfxCallWndProc(pWnd, hWnd, nMsg, wParam, lParam);
 }
 
-WNDPROC AFXAPI AfxGetAfxWndProc() { return &AfxWndProc; }
+// A regular DLL's windows get a window procedure of the DLL's, which makes
+// the DLL's state the current one, so that its handle maps find them.
+WNDPROC AFXAPI AfxGetAfxWndProc() {
+  WNDPROC pfn = AfxGetModuleState()->m_pfnAfxWndProc;
+  return pfn != NULL ? pfn : &AfxWndProc;
+}
 
 LRESULT AFXAPI AfxCallWndProc(CWnd* pWnd, HWND hWnd, UINT nMsg, WPARAM wParam, LPARAM lParam) {
+#ifdef _AFXDLL
+  // A regular DLL's window runs in the DLL's state.
+  AFX_MANAGE_STATE(pWnd->m_pModuleState);
+#endif
   AFX_THREAD_STATE* pState = AfxGetThreadState();
   MSG oldState = pState->m_lastSentMsg;
   pState->m_lastSentMsg.hwnd = hWnd;

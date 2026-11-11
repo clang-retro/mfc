@@ -115,8 +115,11 @@ __asm__(".section .drectve,\"yn\"\n"
 // carries this one, which only calls the library's. Like Visual C++ MFC,
 // that means such a DLL does not write a DllMain; _AFX_NO_DLLMAIN turns
 // it off for one that must. An extension DLL (_AFXDLL) writes its own,
-// which calls AfxInitExtensionModule.
-#if !defined(_AFX_NO_DLLMAIN) && !defined(_AFXDLL) && defined(_WIN32)
+// which calls AfxInitExtensionModule. A regular DLL that shares mfc.dll
+// (_AFXDLL with _USRDLL or _WINDLL, without _AFXEXT) takes its DllMain
+// from libmfcs.a, which gives the DLL its own module state.
+#if !defined(_AFX_NO_DLLMAIN) && defined(_WIN32) && \
+    (!defined(_AFXDLL) || (!defined(_AFXEXT) && (defined(_USRDLL) || defined(_WINDLL))))
 extern "C" BOOL WINAPI _AfxDllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved);
 extern "C" __attribute__((used)) inline BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason,
                                                             LPVOID lpReserved) {
@@ -185,10 +188,34 @@ inline bool _AfxIsNullPtr(const void* p) {
 #ifndef AFX_DEPRECATED
 #define AFX_DEPRECATED(x)
 #endif
-#define AFX_MANAGE_STATE(p)
+// Module state. A regular DLL built with _AFXDLL has a state of its own
+// (its CWinApp, instance and resource handles, window classes, OLE
+// factories), and each function it exports starts with
+// AFX_MANAGE_STATE(AfxGetStaticModuleState()), which makes that state the
+// current one until the function returns. Elsewhere there is one state
+// per module, and AFX_MANAGE_STATE does nothing.
 struct AFX_MODULE_STATE;
 AFX_MODULE_STATE* __stdcall AfxGetModuleState();
+AFX_MODULE_STATE* __stdcall AfxGetAppModuleState();
+AFX_MODULE_STATE* __stdcall AfxSetModuleState(AFX_MODULE_STATE* pNewState);
+#ifdef _AFXDLL
+AFX_MODULE_STATE* __stdcall AfxGetStaticModuleState();
+struct AFX_MAINTAIN_STATE {
+  explicit AFX_MAINTAIN_STATE(AFX_MODULE_STATE* pNewState)
+      : m_pPrevModuleState(AfxSetModuleState(pNewState)) {}
+  ~AFX_MAINTAIN_STATE() { AfxSetModuleState(m_pPrevModuleState); }
+  AFX_MODULE_STATE* m_pPrevModuleState;
+  AFX_MAINTAIN_STATE(const AFX_MAINTAIN_STATE&) = delete;
+  AFX_MAINTAIN_STATE& operator=(const AFX_MAINTAIN_STATE&) = delete;
+};
+typedef AFX_MAINTAIN_STATE AFX_MAINTAIN_STATE2;
+#define AFX_MANAGE_STATE(p) AFX_MAINTAIN_STATE2 _ctlState(p);
+#define AFX_MANAGE_STATE_NO_INIT_MANAGED(p) AFX_MANAGE_STATE(p)
+#else
+#define AFX_MANAGE_STATE(p)
+#define AFX_MANAGE_STATE_NO_INIT_MANAGED(p)
 #define AfxGetStaticModuleState() AfxGetModuleState()
+#endif
 
 #ifndef _countof
 #define _countof(a) (sizeof(a) / sizeof((a)[0]))

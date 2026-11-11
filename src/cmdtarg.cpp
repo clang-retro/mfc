@@ -9,6 +9,7 @@ IMPLEMENT_DYNAMIC(CCmdTarget, CObject)
 CCmdTarget::CCmdTarget()
     : m_dwRef(1),
       m_pOuterUnknown(NULL),
+      m_pModuleState(AfxGetModuleState()),
       m_bAutomation(FALSE),
       m_bConnections(FALSE),
       m_bAggregation(FALSE),
