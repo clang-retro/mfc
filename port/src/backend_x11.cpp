@@ -64,30 +64,9 @@ struct KeyMap {
   bool ext;
 };
 const KeyMap kKeys[] = {
-    {XK_BackSpace, VK_BACK, false},     {XK_Tab, VK_TAB, false},          {XK_ISO_Left_Tab, VK_TAB, false},
-    {XK_Return, VK_RETURN, false},      {XK_Escape, VK_ESCAPE, false},    {XK_space, VK_SPACE, false},
-    {XK_Pause, VK_PAUSE, false},        {XK_Print, VK_SNAPSHOT, true},    {XK_Insert, VK_INSERT, true},
-    {XK_Delete, VK_DELETE, true},       {XK_Home, VK_HOME, true},         {XK_End, VK_END, true},
-    {XK_Prior, VK_PRIOR, true},         {XK_Next, VK_NEXT, true},         {XK_Left, VK_LEFT, true},
-    {XK_Right, VK_RIGHT, true},         {XK_Up, VK_UP, true},             {XK_Down, VK_DOWN, true},
-    {XK_Shift_L, VK_LSHIFT, false},     {XK_Shift_R, VK_RSHIFT, false},   {XK_Control_L, VK_LCONTROL, false},
-    {XK_Control_R, VK_RCONTROL, true},  {XK_Alt_L, VK_LMENU, false},      {XK_Alt_R, VK_RMENU, true},
-    {XK_Meta_L, VK_LMENU, false},       {XK_Meta_R, VK_RMENU, true},      {XK_ISO_Level3_Shift, VK_RMENU, true},
-    {XK_Super_L, VK_LWIN, true},        {XK_Super_R, VK_RWIN, true},      {XK_Menu, VK_APPS, true},
-    {XK_Caps_Lock, VK_CAPITAL, false},  {XK_Num_Lock, VK_NUMLOCK, true},  {XK_Scroll_Lock, VK_SCROLL, false},
-    {XK_KP_0, VK_NUMPAD0, false},       {XK_KP_1, VK_NUMPAD1, false},     {XK_KP_2, VK_NUMPAD2, false},
-    {XK_KP_3, VK_NUMPAD3, false},       {XK_KP_4, VK_NUMPAD4, false},     {XK_KP_5, VK_NUMPAD5, false},
-    {XK_KP_6, VK_NUMPAD6, false},       {XK_KP_7, VK_NUMPAD7, false},     {XK_KP_8, VK_NUMPAD8, false},
-    {XK_KP_9, VK_NUMPAD9, false},       {XK_KP_Insert, VK_INSERT, false}, {XK_KP_End, VK_END, false},
-    {XK_KP_Down, VK_DOWN, false},       {XK_KP_Next, VK_NEXT, false},     {XK_KP_Left, VK_LEFT, false},
-    {XK_KP_Begin, VK_CLEAR, false},     {XK_KP_Right, VK_RIGHT, false},   {XK_KP_Home, VK_HOME, false},
-    {XK_KP_Up, VK_UP, false},           {XK_KP_Prior, VK_PRIOR, false},   {XK_KP_Delete, VK_DELETE, false},
-    {XK_KP_Decimal, VK_DECIMAL, false}, {XK_KP_Add, VK_ADD, false},       {XK_KP_Subtract, VK_SUBTRACT, false},
-    {XK_KP_Multiply, VK_MULTIPLY, false}, {XK_KP_Divide, VK_DIVIDE, true}, {XK_KP_Enter, VK_RETURN, true},
-    {XK_minus, VK_OEM_MINUS, false},    {XK_equal, VK_OEM_PLUS, false},   {XK_bracketleft, VK_OEM_4, false},
-    {XK_bracketright, VK_OEM_6, false}, {XK_semicolon, VK_OEM_1, false},  {XK_apostrophe, VK_OEM_7, false},
-    {XK_grave, VK_OEM_3, false},        {XK_backslash, VK_OEM_5, false},  {XK_comma, VK_OEM_COMMA, false},
-    {XK_period, VK_OEM_PERIOD, false},  {XK_slash, VK_OEM_2, false},      {XK_less, VK_OEM_102, false},
+#define KEY(name, vk, ext) {XK_##name, vk, ext},
+#include "keysyms.inc"
+#undef KEY
 };
 
 UINT VkOf(KeySym sym, bool* ext) {
@@ -484,6 +463,7 @@ struct X11Backend : Backend {
           if (sym == XK_BackSpace) ch = L'\b';
           if (sym == XK_Tab || sym == XK_ISO_Left_Tab) ch = L'\t';
           if (sym == XK_Escape) ch = 0x1B;
+          if (ch == 0x7F) ch = 0;  // Delete is a key, not text
         }
         // The key's text comes from X, with its layout, rather than from
         // TranslateMessage (bit 25 tells it so).

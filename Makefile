@@ -61,7 +61,7 @@ OBJS_A = $(patsubst src/%.cpp,$(OUT)/a/%.o,$(SRCS))
 OBJS_U = $(patsubst src/%.cpp,$(OUT)/u/%.o,$(SRCS))
 HDRS = $(wildcard include/*.h) $(wildcard src/*.h) src/wnd_handlers.inc
 ifeq ($(PORTABLE),1)
-HDRS += $(wildcard port/include/*.h) $(wildcard port/src/*.h)
+HDRS += $(wildcard port/include/*.h) $(wildcard port/src/*.h) $(wildcard port/src/*.inc)
 endif
 
 # The shared library: every source, built with _AFXDLL; the files that

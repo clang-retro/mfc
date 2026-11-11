@@ -1,10 +1,11 @@
 // backend.cpp - choosing the backend that shows top-level windows, and
 // the headless one, which shows nothing.
 //
-// WINPORT_BACKEND names the backend: "x11" shows windows on the X
-// display, and "headless" keeps every window in memory, which suits
-// tests and programs run without a display. Without it the X display is
-// used when DISPLAY names one, and headless otherwise. WINPORT_SCREEN=WIDTHxHEIGHT sets the headless screen's size.
+// WINPORT_BACKEND names the backend: "wayland" shows windows through
+// the Wayland compositor, "x11" on the X display, and "headless" keeps
+// every window in memory, which suits tests and programs run without a
+// display. Without it the compositor is used when WAYLAND_DISPLAY names
+// one, then the X display when DISPLAY names one, and headless otherwise. WINPORT_SCREEN=WIDTHxHEIGHT sets the headless screen's size.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -62,11 +63,17 @@ Backend* GetBackend() {
       if (strcmp(name, "x11") == 0) {
         b = NewX11Backend();
         if (!b) fprintf(stderr, "winport: cannot open the X display; windows stay in memory\n");
+      } else if (strcmp(name, "wayland") == 0) {
+        b = NewWaylandBackend();
+        if (!b) fprintf(stderr, "winport: cannot reach the Wayland compositor; windows stay in memory\n");
       } else if (strcmp(name, "headless") != 0) {
         fprintf(stderr, "winport: no backend named %s; windows stay in memory\n", name);
       }
-    } else if (getenv("DISPLAY") && *getenv("DISPLAY")) {
-      b = NewX11Backend();
+    } else {
+      const char* wl = getenv("WAYLAND_DISPLAY");
+      const char* x = getenv("DISPLAY");
+      if (wl && *wl) b = NewWaylandBackend();
+      if (!b && x && *x) b = NewX11Backend();
     }
     return b ? b : NewHeadlessBackend();
   }();
