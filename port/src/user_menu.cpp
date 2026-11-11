@@ -564,8 +564,19 @@ void Glyph(HDC dc, const RECT& box, const char* const (&rows)[N], COLORREF color
   DeleteObject(br);
 }
 
-void DrawSpecialBitmap(HDC dc, HBITMAP b, const RECT& r) {
+void DrawSpecialBitmap(HDC dc, HBITMAP b, const RECT& r, ULONG_PTR data) {
   UINT_PTR v = (UINT_PTR)b;
+  if (v == (UINT_PTR)HBMMENU_SYSTEM) {
+    // The icon of the window named by the item data: an MDI child's.
+    HWND w = (HWND)data;
+    HICON icon = w ? (HICON)SendMessageW(w, WM_GETICON, ICON_SMALL, 0) : NULL;
+    if (!icon && w) icon = (HICON)GetClassLongPtrW(w, GCLP_HICONSM);
+    if (!icon && w) icon = (HICON)GetClassLongPtrW(w, GCLP_HICON);
+    if (!icon) icon = LoadIconW(NULL, MAKEINTRESOURCEW(32512));
+    int cx = GetSystemMetrics(SM_CXSMICON), cy = GetSystemMetrics(SM_CYSMICON);
+    DrawIconEx(dc, (r.left + r.right - cx) / 2, (r.top + r.bottom - cy) / 2, icon, cx, cy, 0, NULL, DI_NORMAL);
+    return;
+  }
   UINT state = 0;
   if (v == (UINT_PTR)HBMMENU_MBAR_CLOSE || v == (UINT_PTR)HBMMENU_MBAR_CLOSE_D || v == (UINT_PTR)HBMMENU_POPUP_CLOSE)
     state = DFCS_CAPTIONCLOSE;
@@ -577,7 +588,7 @@ void DrawSpecialBitmap(HDC dc, HBITMAP b, const RECT& r) {
   else if (v == (UINT_PTR)HBMMENU_POPUP_MAXIMIZE)
     state = DFCS_CAPTIONMAX;
   else
-    return;  // HBMMENU_SYSTEM: the window's icon, drawn by the MDI code
+    return;
   if (v == (UINT_PTR)HBMMENU_MBAR_CLOSE_D || v == (UINT_PTR)HBMMENU_MBAR_MINIMIZE_D) state |= DFCS_INACTIVE;
   RECT box = r;
   InflateRect(&box, -1, -2);
@@ -622,7 +633,7 @@ void DrawItem(HDC dc, HMENU h, MenuObj* m, int index, bool bar) {
   COLORREF fore = GetSysColor(gray ? COLOR_GRAYTEXT : selected ? COLOR_HIGHLIGHTTEXT : COLOR_MENUTEXT);
   if (it.Bitmap()) {
     if (SpecialBitmap(it.bmp)) {
-      DrawSpecialBitmap(dc, it.bmp, r);
+      DrawSpecialBitmap(dc, it.bmp, r, it.data);
     } else if (it.bmp != HBMMENU_CALLBACK) {
       SIZE s = BitmapSize(it.bmp);
       int x = bar ? r.left : r.left + Gutter();

@@ -1263,7 +1263,11 @@ BOOL WINAPI ShowWindow(HWND h, int cmd) {
         }
         RECT in = FrameInsets(w->style, w->exStyle, false);
         target.left -= in.left;
-        target.top -= in.top - (in.top > in.left ? in.top - in.left : 0);
+        // An MDI child hides its caption too: the frame's menu bar takes its buttons.
+        if (w->exStyle & WS_EX_MDICHILD)
+          target.top -= in.top;
+        else
+          target.top -= in.top - (in.top > in.left ? in.top - in.left : 0);
         target.right += in.right;
         target.bottom += in.bottom;
         resize = true;

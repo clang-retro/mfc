@@ -71,6 +71,7 @@ void RegisterSystemClasses() {
   RegisterButtonClasses();
   RegisterEditClass();
   RegisterListClasses();
+  RegisterMdiClass();
 }
 
 }  // namespace winport

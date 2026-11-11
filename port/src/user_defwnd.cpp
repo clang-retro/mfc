@@ -83,6 +83,8 @@ Frame Layout(Window* w) {
 bool In(const RECT& r, POINT p) { return p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom; }
 
 bool IsActive(Window* w) {
+  // An MDI child is never the active window; its frame tells it with WM_NCACTIVATE.
+  if (w->exStyle & WS_EX_MDICHILD) return w->ncActive;
   Window* t = w->TopLevel();
   return QueueFor(t->tid)->active == t->hwnd;
 }
@@ -484,6 +486,7 @@ static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
     case WM_NCHITTEST: return HitTest(w, POINT{(SHORT)LOWORD(lp), (SHORT)HIWORD(lp)});
     case WM_NCPAINT: DrawFrame(w); return 0;
     case WM_NCACTIVATE:
+      w->ncActive = wp != 0;
       if (ReallyVisible(w) && HasCaption(w->style)) DrawFrame(w);
       return TRUE;
     case WM_PAINT: {

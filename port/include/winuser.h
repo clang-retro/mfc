@@ -2393,6 +2393,8 @@ BOOL WINAPI TranslateMDISysAccel(HWND, LPMSG);
 UINT WINAPI ArrangeIconicWindows(HWND);
 WORD WINAPI CascadeWindows(HWND, UINT, const RECT*, UINT, const HWND*);
 WORD WINAPI TileWindows(HWND, UINT, const RECT*, UINT, const HWND*);
+HWND WINAPI CreateMDIWindowA(LPCSTR, LPCSTR, DWORD, int, int, int, int, HWND, HINSTANCE, LPARAM);
+HWND WINAPI CreateMDIWindowW(LPCWSTR, LPCWSTR, DWORD, int, int, int, int, HWND, HINSTANCE, LPARAM);
 LRESULT WINAPI SendMessageA(HWND, UINT, WPARAM, LPARAM);
 LRESULT WINAPI SendMessageW(HWND, UINT, WPARAM, LPARAM);
 LRESULT WINAPI SendMessageTimeoutA(HWND, UINT, WPARAM, LPARAM, UINT, UINT, PDWORD_PTR);
@@ -2843,6 +2845,7 @@ int WINAPI wvsprintfW(LPWSTR, LPCWSTR, va_list);
 #define DefWindowProc __WINPORT_AW(DefWindowProc)
 #define CallWindowProc __WINPORT_AW(CallWindowProc)
 #define DefFrameProc __WINPORT_AW(DefFrameProc)
+#define CreateMDIWindow __WINPORT_AW(CreateMDIWindow)
 #define DefMDIChildProc __WINPORT_AW(DefMDIChildProc)
 #define SendMessage __WINPORT_AW(SendMessage)
 #define SendMessageTimeout __WINPORT_AW(SendMessageTimeout)

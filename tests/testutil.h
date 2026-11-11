@@ -14,7 +14,7 @@ static CString TestOutPath(LPCTSTR lpszName) {
   TCHAR szDir[MAX_PATH];
   DWORD n = ::GetEnvironmentVariable(_T("MFC_TEST_OUT"), szDir, MAX_PATH);
   CString strPath = (n > 0 && n < MAX_PATH) ? szDir : _T(".");
-  if (strPath.Right(1) != _T("\\") && strPath.Right(1) != _T("/")) strPath += _T("\\");
+  if (strPath.Right(1) != _T("\\") && strPath.Right(1) != _T("/")) strPath += _T("/");
   return strPath + lpszName;
 }
 

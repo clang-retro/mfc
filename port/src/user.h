@@ -85,6 +85,7 @@ struct Window {
   void* native = NULL;
   RECT normalRect = {0, 0, 0, 0};  // where the window goes when restored
   HDC ownDC = NULL;                // a CS_OWNDC window's DC
+  bool ncActive = false;           // an MDI child's caption is drawn active
 
   bool Visible() const { return (style & WS_VISIBLE) != 0; }
   bool Child() const { return (style & WS_CHILD) != 0 && parent != NULL; }
@@ -208,6 +209,7 @@ void RegisterDialogClass();  // user_dialog.cpp
 void RegisterButtonClasses();  // user_button.cpp: Button, Static, ScrollBar
 void RegisterEditClass();  // user_edit.cpp
 void RegisterListClasses();  // user_listbox.cpp: ListBox, ComboLBox, ComboBox
+void RegisterMdiClass();  // user_mdi.cpp: MDIClient
 void DrawMenuBarIn(Window* w, HDC dc, const RECT& bar);
 void MenuCommand(Window* w, WPARAM wParam, LPARAM lParam);
 void MenusOnDestroy(Window* w);

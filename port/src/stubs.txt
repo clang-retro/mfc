@@ -28,10 +28,6 @@ CreateOleAdviseHolder
 CreatePropertySheetPageA
 CreatePropertySheetPageW
 CreateURLMoniker
-DefFrameProcA
-DefFrameProcW
-DefMDIChildProcA
-DefMDIChildProcW
 DeleteEnhMetaFile
 DeleteMetaFile
 DoDragDrop
@@ -156,7 +152,6 @@ StgCreateDocfile
 StgCreateDocfileOnILockBytes
 StgOpenStorage
 StgOpenStorageOnILockBytes
-TranslateMDISysAccel
 UnRegisterTypeLib
 WSAAsyncSelect
 WinHelpA

@@ -5,7 +5,7 @@
 // device contexts, bitmaps and DIBs, raster operations, regions,
 // clipping, mapping modes and scrolling, lines, shapes, paths and
 // text, icons, accelerators and menus, dialogs and the standard
-// controls; and a CWnd with a message map
+// controls, MDI; and a CWnd with a message map
 // on top.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
@@ -1274,6 +1274,110 @@ static void TestDialogsAndControls() {
   CHECK(g_initParam == 2);
 }
 
+// ---------------------------------------------------------------------
+// MDI: a frame, its client and children, and the window menu.
+
+static HWND g_mdiClient = NULL;
+
+static LRESULT CALLBACK MdiFrameProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  return ::DefFrameProcW(h, g_mdiClient, msg, wp, lp);
+}
+
+static int g_mdiActivations = 0;
+static LRESULT CALLBACK MdiChildProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_MDIACTIVATE && (HWND)lp == h) g_mdiActivations++;
+  return ::DefMDIChildProcW(h, msg, wp, lp);
+}
+
+static void TestMdi() {
+  HINSTANCE inst = ::GetModuleHandleW(NULL);
+  WNDCLASSW wc = {};
+  wc.lpfnWndProc = MdiFrameProc;
+  wc.hInstance = inst;
+  wc.lpszClassName = L"MdiFrame";
+  ::RegisterClassW(&wc);
+  wc.lpfnWndProc = MdiChildProc;
+  wc.lpszClassName = L"MdiChild";
+  ::RegisterClassW(&wc);
+
+  HMENU bar = ::CreateMenu(), win = ::CreatePopupMenu();
+  ::AppendMenuW(win, MF_STRING, 300, L"&Cascade");
+  ::AppendMenuW(bar, MF_POPUP, (UINT_PTR)win, L"&Window");
+  HWND frame = ::CreateWindowExW(0, L"MdiFrame", L"Frame", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 600, 400,
+                                 NULL, bar, inst, NULL);
+  CLIENTCREATESTRUCT ccs = {win, 0xFF00};
+  g_mdiClient = ::CreateWindowExW(0, L"MDICLIENT", NULL, WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN, 0, 0, 0, 0, frame,
+                                  NULL, inst, &ccs);
+  CHECK(g_mdiClient != NULL);
+  ::SendMessageW(frame, WM_SIZE, 0, 0);
+  RECT fc, cc;
+  ::GetClientRect(frame, &fc);
+  ::GetClientRect(g_mdiClient, &cc);
+  CHECK(cc.right == fc.right && cc.bottom == fc.bottom);
+
+  MDICREATESTRUCTW mcs = {L"MdiChild", L"One", inst, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                          WS_VISIBLE, 0};
+  HWND one = (HWND)::SendMessageW(g_mdiClient, WM_MDICREATE, 0, (LPARAM)&mcs);
+  mcs.szTitle = L"Two";
+  HWND two = (HWND)::SendMessageW(g_mdiClient, WM_MDICREATE, 0, (LPARAM)&mcs);
+  CHECK(one && two && ::GetParent(one) == g_mdiClient);
+  CHECK(::GetWindowLongW(one, GWL_EXSTYLE) & WS_EX_MDICHILD);
+  BOOL maxed = TRUE;
+  CHECK((HWND)::SendMessageW(g_mdiClient, WM_MDIGETACTIVE, 0, (LPARAM)&maxed) == two && !maxed);
+  CHECK(g_mdiActivations == 2);
+  // The window menu lists the children, the active one checked.
+  CHECK(::GetMenuItemCount(win) == 4);
+  CHECK(::GetMenuState(win, 0xFF01, MF_BYCOMMAND) & MF_CHECKED);
+  wchar_t text[64];
+  ::GetMenuStringW(win, 0xFF00, text, 64, MF_BYCOMMAND);
+  CHECK(wcscmp(text, L"&1 One") == 0);
+  // Choosing one from the menu activates it.
+  ::SendMessageW(frame, WM_COMMAND, 0xFF00, 0);
+  CHECK((HWND)::SendMessageW(g_mdiClient, WM_MDIGETACTIVE, 0, 0) == one);
+  ::SendMessageW(g_mdiClient, WM_MDINEXT, 0, 0);
+  CHECK((HWND)::SendMessageW(g_mdiClient, WM_MDIGETACTIVE, 0, 0) == two);
+
+  // Maximized: the caption goes, the buttons and title go to the frame.
+  int items = ::GetMenuItemCount(bar);
+  ::SendMessageW(g_mdiClient, WM_MDIMAXIMIZE, (WPARAM)two, 0);
+  CHECK(::IsZoomed(two));
+  CHECK((HWND)::SendMessageW(g_mdiClient, WM_MDIGETACTIVE, 0, (LPARAM)&maxed) == two && maxed);
+  CHECK(::GetMenuItemCount(bar) == items + 4);
+  ::GetWindowTextW(frame, text, 64);
+  CHECK(wcscmp(text, L"Frame - [Two]") == 0);
+  RECT kc;
+  ::GetClientRect(two, &kc);
+  CHECK(kc.right == cc.right && kc.bottom == cc.bottom);
+  // Activating another keeps the maximized state.
+  ::SendMessageW(g_mdiClient, WM_MDIACTIVATE, (WPARAM)one, 0);
+  CHECK(::IsZoomed(one) && !::IsZoomed(two));
+  ::GetWindowTextW(frame, text, 64);
+  CHECK(wcscmp(text, L"Frame - [One]") == 0);
+  // The restore button, through the frame.
+  ::SendMessageW(frame, WM_COMMAND, SC_RESTORE, 0);
+  CHECK(!::IsZoomed(one) && ::GetMenuItemCount(bar) == items);
+  ::GetWindowTextW(frame, text, 64);
+  CHECK(wcscmp(text, L"Frame") == 0);
+
+  // Tiling side by side.
+  CHECK(::SendMessageW(g_mdiClient, WM_MDITILE, MDITILE_VERTICAL, 0) == 2);
+  RECT r1, r2;
+  ::GetWindowRect(one, &r1);
+  ::GetWindowRect(two, &r2);
+  CHECK(r1.top == r2.top && (r1.right == r2.left || r2.right == r1.left));
+
+  // Closing the active one activates the other and renumbers it.
+  ::SendMessageW(one, WM_CLOSE, 0, 0);
+  CHECK(!::IsWindow(one));
+  CHECK((HWND)::SendMessageW(g_mdiClient, WM_MDIGETACTIVE, 0, 0) == two);
+  CHECK(::GetDlgCtrlID(two) == 0xFF00 && ::GetMenuItemCount(win) == 3);
+  ::SendMessageW(g_mdiClient, WM_MDIDESTROY, (WPARAM)two, 0);
+  CHECK(!::IsWindow(two) && ::SendMessageW(g_mdiClient, WM_MDIGETACTIVE, 0, 0) == 0);
+  CHECK(::GetMenuItemCount(win) == 1);
+  ::DestroyWindow(frame);
+  g_mdiClient = NULL;
+}
+
 // A CWnd with a message map
 
 class CTestWnd : public CWnd {
@@ -1355,6 +1459,7 @@ int main() {
   TestIconsAndAccelerators();
   TestMenus();
   TestDialogsAndControls();
+  TestMdi();
   TestCWnd();
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;
