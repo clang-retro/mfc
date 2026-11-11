@@ -58,6 +58,7 @@ void RegisterCommonControls() {
   RegisterBarClasses();
   RegisterSimpleClasses();
   RegisterListView();
+  RegisterTreeView();
 }
 
 }  // namespace winport

@@ -5,7 +5,8 @@
 // device contexts, bitmaps and DIBs, raster operations, regions,
 // clipping, mapping modes and scrolling, lines, shapes, paths and
 // text, icons, accelerators and menus, dialogs and the standard
-// controls, MDI, image lists, the common controls and the list view;
+// controls, MDI, image lists, the common controls, the list view and
+// the tree view;
 // and a CWnd with a message map
 // on top.
 //
@@ -1823,6 +1824,144 @@ static void TestListView() {
   ::DestroyWindow(host);
 }
 
+static HTREEITEM TreeAdd(HWND tv, HTREEITEM parent, const wchar_t* text, LPARAM data,
+                         HTREEITEM after = TVI_LAST) {
+  TVINSERTSTRUCTW ins = {};
+  ins.hParent = parent;
+  ins.hInsertAfter = after;
+  ins.item.mask = TVIF_TEXT | TVIF_PARAM;
+  ins.item.pszText = (LPWSTR)text;
+  ins.item.lParam = data;
+  return (HTREEITEM)::SendMessageW(tv, TVM_INSERTITEMW, 0, (LPARAM)&ins);
+}
+
+static HTREEITEM TreeNext(HWND tv, HTREEITEM h, UINT code) {
+  return (HTREEITEM)::SendMessageW(tv, TVM_GETNEXTITEM, code, (LPARAM)h);
+}
+
+static std::wstring TreeText(HWND tv, HTREEITEM h) {
+  wchar_t buf[64] = L"";
+  TVITEMW it = {};
+  it.mask = TVIF_TEXT;
+  it.hItem = h;
+  it.pszText = buf;
+  it.cchTextMax = 64;
+  ::SendMessageW(tv, TVM_GETITEMW, 0, (LPARAM)&it);
+  return buf;
+}
+
+static int CALLBACK CompareParamDown(LPARAM a, LPARAM b, LPARAM) { return (int)(b - a); }
+
+static void TestTreeView() {
+  HINSTANCE inst = ::GetModuleHandleW(NULL);
+  HWND host = ::CreateWindowW(L"CtlHost", L"Tree", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, 0, 0, 300, 320, NULL,
+                              NULL, inst, NULL);
+  HWND tv = ::CreateWindowExW(WS_EX_CLIENTEDGE, WC_TREEVIEWW, L"",
+                              WS_CHILD | WS_VISIBLE | TVS_HASLINES | TVS_HASBUTTONS | TVS_LINESATROOT |
+                                  TVS_EDITLABELS | TVS_SHOWSELALWAYS,
+                              10, 10, 260, 260, host, (HMENU)30, inst, NULL);
+  CHECK(tv != NULL);
+
+  HTREEITEM fruit = TreeAdd(tv, TVI_ROOT, L"Fruit", 1);
+  HTREEITEM veg = TreeAdd(tv, TVI_ROOT, L"Vegetables", 2);
+  HTREEITEM pear = TreeAdd(tv, fruit, L"Pear", 13);
+  HTREEITEM apple = TreeAdd(tv, fruit, L"Apple", 11, TVI_FIRST);
+  HTREEITEM fig = TreeAdd(tv, fruit, L"Fig", 12, TVI_SORT);
+  HTREEITEM leek = TreeAdd(tv, veg, L"Leek", 21);
+  CHECK(fruit && veg && pear && apple && fig && leek);
+  CHECK(::SendMessageW(tv, TVM_GETCOUNT, 0, 0) == 6);
+  CHECK(TreeNext(tv, NULL, TVGN_ROOT) == fruit && TreeNext(tv, fruit, TVGN_NEXT) == veg);
+  CHECK(TreeNext(tv, fruit, TVGN_CHILD) == apple && TreeNext(tv, apple, TVGN_NEXT) == fig &&
+        TreeNext(tv, fig, TVGN_NEXT) == pear);
+  CHECK(TreeNext(tv, pear, TVGN_PARENT) == fruit && TreeNext(tv, fruit, TVGN_PARENT) == NULL);
+  CHECK(TreeText(tv, fig) == L"Fig");
+
+  // Closed parents hide their children.
+  CHECK(TreeNext(tv, fruit, TVGN_NEXTVISIBLE) == veg);
+  RECT r;
+  *(HTREEITEM*)&r = apple;
+  CHECK(!::SendMessageW(tv, TVM_GETITEMRECT, TRUE, (LPARAM)&r));
+  g_notifies.clear();
+  CHECK(::SendMessageW(tv, TVM_EXPAND, TVE_EXPAND, (LPARAM)fruit));
+  CHECK(Notified(TVN_ITEMEXPANDINGW) && Notified(TVN_ITEMEXPANDEDW));
+  CHECK(::SendMessageW(tv, TVM_GETITEMSTATE, (WPARAM)fruit, TVIS_EXPANDED) == TVIS_EXPANDED);
+  CHECK(TreeNext(tv, fruit, TVGN_NEXTVISIBLE) == apple);
+  *(HTREEITEM*)&r = apple;
+  CHECK(::SendMessageW(tv, TVM_GETITEMRECT, TRUE, (LPARAM)&r) && r.right > r.left);
+  // Only the first TVM_EXPAND tells the parent.
+  ::SendMessageW(tv, TVM_EXPAND, TVE_COLLAPSE, (LPARAM)fruit);
+  g_notifies.clear();
+  ::SendMessageW(tv, TVM_EXPAND, TVE_EXPAND, (LPARAM)fruit);
+  CHECK(!Notified(TVN_ITEMEXPANDINGW));
+
+  // Selection.
+  g_notifies.clear();
+  CHECK(::SendMessageW(tv, TVM_SELECTITEM, TVGN_CARET, (LPARAM)fig));
+  CHECK(Notified(TVN_SELCHANGINGW) && Notified(TVN_SELCHANGEDW));
+  CHECK(TreeNext(tv, NULL, TVGN_CARET) == fig);
+  CHECK(::SendMessageW(tv, TVM_GETITEMSTATE, (WPARAM)fig, TVIS_SELECTED) == TVIS_SELECTED);
+  // Selecting a hidden item opens its parent.
+  ::SendMessageW(tv, TVM_SELECTITEM, TVGN_CARET, (LPARAM)leek);
+  CHECK(::SendMessageW(tv, TVM_GETITEMSTATE, (WPARAM)veg, TVIS_EXPANDED) == TVIS_EXPANDED);
+
+  // The keyboard.
+  ::SetFocus(tv);
+  ::SendMessageW(tv, WM_KEYDOWN, VK_UP, 0);
+  CHECK(TreeNext(tv, NULL, TVGN_CARET) == veg);
+  ::SendMessageW(tv, WM_KEYDOWN, VK_LEFT, 0);
+  CHECK(::SendMessageW(tv, TVM_GETITEMSTATE, (WPARAM)veg, TVIS_EXPANDED) == 0);
+  ::SendMessageW(tv, WM_KEYDOWN, VK_HOME, 0);
+  CHECK(TreeNext(tv, NULL, TVGN_CARET) == fruit);
+  ::SendMessageW(tv, WM_KEYDOWN, VK_RIGHT, 0);
+  ::SendMessageW(tv, WM_KEYDOWN, VK_RIGHT, 0);
+  CHECK(TreeNext(tv, NULL, TVGN_CARET) == apple);
+  ::SendMessageW(tv, WM_CHAR, 'p', 0);
+  CHECK(TreeNext(tv, NULL, TVGN_CARET) == pear);
+
+  // Hit testing and a click on the button.
+  *(HTREEITEM*)&r = veg;
+  ::SendMessageW(tv, TVM_GETITEMRECT, TRUE, (LPARAM)&r);
+  TVHITTESTINFO ht = {};
+  ht.pt.x = r.left + 3;
+  ht.pt.y = (r.top + r.bottom) / 2;
+  CHECK((HTREEITEM)::SendMessageW(tv, TVM_HITTEST, 0, (LPARAM)&ht) == veg && (ht.flags & TVHT_ONITEMLABEL));
+  ht.pt.x = r.left - 10;
+  CHECK((HTREEITEM)::SendMessageW(tv, TVM_HITTEST, 0, (LPARAM)&ht) == veg && (ht.flags & TVHT_ONITEMBUTTON));
+  ::SendMessageW(tv, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(ht.pt.x, ht.pt.y));
+  ::SendMessageW(tv, WM_LBUTTONUP, 0, MAKELPARAM(ht.pt.x, ht.pt.y));
+  CHECK(::SendMessageW(tv, TVM_GETITEMSTATE, (WPARAM)veg, TVIS_EXPANDED) == TVIS_EXPANDED);
+  g_notifies.clear();
+  ::SendMessageW(tv, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(r.left + 3, ht.pt.y));
+  ::SendMessageW(tv, WM_LBUTTONUP, 0, MAKELPARAM(r.left + 3, ht.pt.y));
+  CHECK(TreeNext(tv, NULL, TVGN_CARET) == veg && Notified(NM_CLICK));
+
+  // Editing a label.
+  g_notifies.clear();
+  HWND edit = (HWND)::SendMessageW(tv, TVM_EDITLABELW, 0, (LPARAM)leek);
+  CHECK(edit && Notified(TVN_BEGINLABELEDITW));
+  if (edit) {
+    ::SetWindowTextW(edit, L"Onion");
+    CHECK(::SendMessageW(tv, TVM_ENDEDITLABELNOW, FALSE, 0));
+    CHECK(Notified(TVN_ENDLABELEDITW) && ::SendMessageW(tv, TVM_GETEDITCONTROL, 0, 0) == 0);
+  }
+
+  // Sorting.
+  TVSORTCB sort = {fruit, CompareParamDown, 0};
+  CHECK(::SendMessageW(tv, TVM_SORTCHILDRENCB, 0, (LPARAM)&sort));
+  CHECK(TreeNext(tv, fruit, TVGN_CHILD) == pear && TreeNext(tv, pear, TVGN_NEXT) == fig);
+  CHECK(::SendMessageW(tv, TVM_SORTCHILDREN, 0, (LPARAM)fruit));
+  CHECK(TreeNext(tv, fruit, TVGN_CHILD) == apple);
+
+  // Deleting a branch with the caret in it moves the caret.
+  ::SendMessageW(tv, TVM_SELECTITEM, TVGN_CARET, (LPARAM)fig);
+  g_notifies.clear();
+  CHECK(::SendMessageW(tv, TVM_DELETEITEM, 0, (LPARAM)fruit));
+  CHECK(Notified(TVN_DELETEITEMW) && ::SendMessageW(tv, TVM_GETCOUNT, 0, 0) == 2);
+  CHECK(TreeNext(tv, NULL, TVGN_CARET) == veg);
+  CHECK(::SendMessageW(tv, TVM_DELETEITEM, 0, (LPARAM)TVI_ROOT) && ::SendMessageW(tv, TVM_GETCOUNT, 0, 0) == 0);
+  ::DestroyWindow(host);
+}
+
 static void TestCWnd() {
   CTestWnd wnd;
   CString cls = AfxRegisterWndClass(CS_HREDRAW | CS_VREDRAW, NULL, (HBRUSH)(COLOR_WINDOW + 1));
@@ -1872,6 +2011,7 @@ int main() {
   TestImageLists();
   TestCommonControls();
   TestListView();
+  TestTreeView();
   TestCWnd();
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;
