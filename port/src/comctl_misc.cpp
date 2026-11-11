@@ -57,6 +57,7 @@ HFONT ControlFont() { return (HFONT)GetStockObject(DEFAULT_GUI_FONT); }
 void RegisterCommonControls() {
   RegisterBarClasses();
   RegisterSimpleClasses();
+  RegisterListView();
 }
 
 }  // namespace winport

@@ -1549,6 +1549,9 @@ typedef struct tagNMITEMACTIVATE {
   LPARAM lParam;
   UINT uKeyFlags;
 } NMITEMACTIVATE, *LPNMITEMACTIVATE;
+#define LVKF_ALT 0x0001
+#define LVKF_CONTROL 0x0002
+#define LVKF_SHIFT 0x0004
 typedef struct tagNMLVCUSTOMDRAW {
   NMCUSTOMDRAW nmcd;
   COLORREF clrText;

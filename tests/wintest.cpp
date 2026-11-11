@@ -5,7 +5,8 @@
 // device contexts, bitmaps and DIBs, raster operations, regions,
 // clipping, mapping modes and scrolling, lines, shapes, paths and
 // text, icons, accelerators and menus, dialogs and the standard
-// controls, MDI, image lists, the common controls; and a CWnd with a message map
+// controls, MDI, image lists, the common controls and the list view;
+// and a CWnd with a message map
 // on top.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
@@ -1654,6 +1655,174 @@ static void TestCommonControls() {
   ::DestroyWindow(host);
 }
 
+static int CALLBACK CompareDown(LPARAM a, LPARAM b, LPARAM) { return (int)(b - a); }
+
+static void TestListView() {
+  HINSTANCE inst = ::GetModuleHandleW(NULL);
+  HWND host = ::CreateWindowW(L"CtlHost", L"List", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, 0, 0, 420, 320, NULL,
+                              NULL, inst, NULL);
+  HWND lv = ::CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"", WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_EDITLABELS,
+                              10, 10, 380, 250, host, (HMENU)20, inst, NULL);
+  CHECK(lv != NULL);
+  HWND header = (HWND)::SendMessageW(lv, LVM_GETHEADER, 0, 0);
+  CHECK(header != NULL);
+
+  // Columns go to the header.
+  LVCOLUMNW col = {};
+  col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
+  col.fmt = LVCFMT_LEFT;
+  col.cx = 150;
+  col.pszText = (LPWSTR)L"Name";
+  CHECK(::SendMessageW(lv, LVM_INSERTCOLUMNW, 0, (LPARAM)&col) == 0);
+  col.fmt = LVCFMT_RIGHT;
+  col.cx = 80;
+  col.pszText = (LPWSTR)L"Size";
+  CHECK(::SendMessageW(lv, LVM_INSERTCOLUMNW, 1, (LPARAM)&col) == 1);
+  CHECK(::SendMessageW(header, HDM_GETITEMCOUNT, 0, 0) == 2);
+  CHECK(::SendMessageW(lv, LVM_GETCOLUMNWIDTH, 1, 0) == 80);
+  wchar_t buf[64] = L"";
+  LVCOLUMNW gc = {};
+  gc.mask = LVCF_TEXT | LVCF_FMT;
+  gc.pszText = buf;
+  gc.cchTextMax = 64;
+  CHECK(::SendMessageW(lv, LVM_GETCOLUMNW, 1, (LPARAM)&gc) && wcscmp(buf, L"Size") == 0 && gc.fmt == LVCFMT_RIGHT);
+
+  // Items and subitems.
+  g_notifies.clear();
+  const wchar_t* names[] = {L"apple", L"banana", L"cherry", L"date"};
+  for (int i = 0; i < 4; i++) {
+    LVITEMW it = {};
+    it.mask = LVIF_TEXT | LVIF_PARAM;
+    it.iItem = i;
+    it.pszText = (LPWSTR)names[i];
+    it.lParam = i * 10;
+    CHECK(::SendMessageW(lv, LVM_INSERTITEMW, 0, (LPARAM)&it) == i);
+    wchar_t size[16];
+    swprintf(size, 16, L"%d KB", (i + 1) * 3);
+    it.mask = LVIF_TEXT;
+    it.iSubItem = 1;
+    it.pszText = size;
+    CHECK(::SendMessageW(lv, LVM_SETITEMTEXTW, i, (LPARAM)&it));
+  }
+  CHECK(Notified(LVN_INSERTITEM));
+  CHECK(::SendMessageW(lv, LVM_GETITEMCOUNT, 0, 0) == 4);
+  LVITEMW get = {};
+  get.iSubItem = 1;
+  get.pszText = buf;
+  get.cchTextMax = 64;
+  CHECK(::SendMessageW(lv, LVM_GETITEMTEXTW, 2, (LPARAM)&get) == 4 && wcscmp(buf, L"9 KB") == 0);
+  get.mask = LVIF_TEXT | LVIF_PARAM;
+  get.iItem = 1;
+  get.iSubItem = 0;
+  CHECK(::SendMessageW(lv, LVM_GETITEMW, 0, (LPARAM)&get) && wcscmp(buf, L"banana") == 0 && get.lParam == 10);
+  LVFINDINFOW fi = {};
+  fi.flags = LVFI_STRING;
+  fi.psz = L"Cherry";
+  CHECK(::SendMessageW(lv, LVM_FINDITEMW, (WPARAM)-1, (LPARAM)&fi) == 2);
+  fi.flags = LVFI_PARAM;
+  fi.lParam = 30;
+  CHECK(::SendMessageW(lv, LVM_FINDITEMW, (WPARAM)-1, (LPARAM)&fi) == 3);
+
+  // Selection through state, with notifications.
+  g_notifies.clear();
+  LVITEMW st = {};
+  st.stateMask = LVIS_SELECTED | LVIS_FOCUSED;
+  st.state = LVIS_SELECTED | LVIS_FOCUSED;
+  CHECK(::SendMessageW(lv, LVM_SETITEMSTATE, 1, (LPARAM)&st));
+  CHECK(Notified(LVN_ITEMCHANGING) && Notified(LVN_ITEMCHANGED));
+  CHECK(::SendMessageW(lv, LVM_GETSELECTEDCOUNT, 0, 0) == 1);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_SELECTED) == 1);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_FOCUSED) == 1);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, 1, LVNI_BELOW) == 2);
+
+  // Geometry and hit testing.
+  RECT ir = {LVIR_BOUNDS};
+  CHECK(::SendMessageW(lv, LVM_GETITEMRECT, 2, (LPARAM)&ir) && ir.right - ir.left == 230 && ir.bottom > ir.top);
+  LVHITTESTINFO ht = {};
+  ht.pt.x = ir.left + 20;
+  ht.pt.y = (ir.top + ir.bottom) / 2;
+  CHECK(::SendMessageW(lv, LVM_HITTEST, 0, (LPARAM)&ht) == 2 && (ht.flags & LVHT_ONITEM));
+  ht.pt.x = ir.left + 190;
+  CHECK(::SendMessageW(lv, LVM_SUBITEMHITTEST, 0, (LPARAM)&ht) == 2 && ht.iSubItem == 1);
+
+  // The keyboard moves the selection; a click selects and notifies.
+  ::SetFocus(lv);
+  ::SendMessageW(lv, WM_KEYDOWN, VK_DOWN, 0);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_SELECTED) == 2);
+  CHECK(::SendMessageW(lv, LVM_GETSELECTEDCOUNT, 0, 0) == 1);
+  g_notifies.clear();
+  RECT r0 = {LVIR_LABEL};
+  ::SendMessageW(lv, LVM_GETITEMRECT, 0, (LPARAM)&r0);
+  LPARAM at = MAKELPARAM(r0.left + 5, (r0.top + r0.bottom) / 2);
+  ::SendMessageW(lv, WM_LBUTTONDOWN, MK_LBUTTON, at);
+  ::SendMessageW(lv, WM_LBUTTONUP, 0, at);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_SELECTED) == 0 && Notified(NM_CLICK));
+  ::SendMessageW(lv, WM_KEYDOWN, VK_END, 0);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_FOCUSED) == 3);
+  g_notifies.clear();
+  ::SendMessageW(lv, WM_CHAR, 'b', 0);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_FOCUSED) == 1);
+
+  // Label editing ends with the parent's say.
+  HWND edit = (HWND)::SendMessageW(lv, LVM_EDITLABELW, 1, 0);
+  CHECK(edit != NULL && Notified(LVN_BEGINLABELEDITW));
+  if (edit) {
+    ::SetWindowTextW(edit, L"blueberry");
+    ::SendMessageW(edit, WM_KEYDOWN, VK_RETURN, 0);
+    CHECK(Notified(LVN_ENDLABELEDITW) && ::SendMessageW(lv, LVM_GETEDITCONTROL, 0, 0) == 0);
+  }
+
+  // Sorting by lParam, descending.
+  CHECK(::SendMessageW(lv, LVM_SORTITEMS, 0, (LPARAM)CompareDown));
+  get.mask = LVIF_PARAM;
+  get.iItem = 0;
+  CHECK(::SendMessageW(lv, LVM_GETITEMW, 0, (LPARAM)&get) && get.lParam == 30);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_FOCUSED) == 2);
+
+  // Check boxes are state images 1 and 2.
+  ::SendMessageW(lv, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT,
+                 LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+  CHECK(::SendMessageW(lv, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0) == (LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT));
+  CHECK((::SendMessageW(lv, LVM_GETITEMSTATE, 0, LVIS_STATEIMAGEMASK) >> 12) == 1);
+  st.stateMask = LVIS_STATEIMAGEMASK;
+  st.state = INDEXTOSTATEIMAGEMASK(2);
+  ::SendMessageW(lv, LVM_SETITEMSTATE, 0, (LPARAM)&st);
+  CHECK((::SendMessageW(lv, LVM_GETITEMSTATE, 0, LVIS_STATEIMAGEMASK) >> 12) == 2);
+
+  // Deleting.
+  g_notifies.clear();
+  CHECK(::SendMessageW(lv, LVM_DELETEITEM, 3, 0) && Notified(LVN_DELETEITEM));
+  CHECK(::SendMessageW(lv, LVM_GETITEMCOUNT, 0, 0) == 3);
+
+  // The other views lay the items out on their own.
+  ::SetWindowLongW(lv, GWL_STYLE, (::GetWindowLongW(lv, GWL_STYLE) & ~LVS_TYPEMASK) | LVS_ICON);
+  RECT a = {LVIR_BOUNDS}, b = {LVIR_BOUNDS};
+  ::SendMessageW(lv, LVM_GETITEMRECT, 0, (LPARAM)&a);
+  ::SendMessageW(lv, LVM_GETITEMRECT, 1, (LPARAM)&b);
+  CHECK(b.left > a.left && b.top == a.top && !(::GetWindowLongW(header, GWL_STYLE) & WS_VISIBLE));
+  ::SetWindowLongW(lv, GWL_STYLE, (::GetWindowLongW(lv, GWL_STYLE) & ~LVS_TYPEMASK) | LVS_LIST);
+  ::SendMessageW(lv, LVM_GETITEMRECT, 0, (LPARAM)&a);
+  ::SendMessageW(lv, LVM_GETITEMRECT, 1, (LPARAM)&b);
+  CHECK(b.left == a.left && b.top > a.top);
+  ::SetWindowLongW(lv, GWL_STYLE, (::GetWindowLongW(lv, GWL_STYLE) & ~LVS_TYPEMASK) | LVS_REPORT);
+  CHECK(::GetWindowLongW(header, GWL_STYLE) & WS_VISIBLE);
+
+  // Owner data: the list view keeps only the count and the states.
+  HWND od = ::CreateWindowW(WC_LISTVIEWW, L"", WS_CHILD | LVS_REPORT | LVS_OWNERDATA, 0, 0, 100, 100, host,
+                            (HMENU)21, inst, NULL);
+  ::SendMessageW(od, LVM_SETITEMCOUNT, 1000, 0);
+  CHECK(::SendMessageW(od, LVM_GETITEMCOUNT, 0, 0) == 1000);
+  st.stateMask = LVIS_SELECTED;
+  st.state = LVIS_SELECTED;
+  ::SendMessageW(od, LVM_SETITEMSTATE, 500, (LPARAM)&st);
+  CHECK(::SendMessageW(od, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_SELECTED) == 500);
+
+  g_notifies.clear();
+  CHECK(::SendMessageW(lv, LVM_DELETEALLITEMS, 0, 0) && Notified(LVN_DELETEALLITEMS));
+  CHECK(::SendMessageW(lv, LVM_GETITEMCOUNT, 0, 0) == 0);
+  ::DestroyWindow(host);
+}
+
 static void TestCWnd() {
   CTestWnd wnd;
   CString cls = AfxRegisterWndClass(CS_HREDRAW | CS_VREDRAW, NULL, (HBRUSH)(COLOR_WINDOW + 1));
@@ -1702,6 +1871,7 @@ int main() {
   TestMdi();
   TestImageLists();
   TestCommonControls();
+  TestListView();
   TestCWnd();
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;
