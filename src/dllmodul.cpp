@@ -10,6 +10,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 
+#ifndef _AFX_BUILDING_DLL  // not in mfc.dll: a regular DLL uses the static library; mfc.dll has dllinit.cpp
+
 static void UnregisterClasses(HINSTANCE hInstance) {
   AFX_MODULE_STATE* pModuleState = AfxGetModuleState();
   CStringArray* pList = pModuleState->m_pstrUnregisterList;
@@ -55,3 +57,5 @@ extern "C" BOOL WINAPI _AfxDllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID l
   }
   return TRUE;
 }
+
+#endif  // _AFX_BUILDING_DLL

@@ -7,6 +7,8 @@
 #include "afximpl.h"
 #include <afxisapi.h>
 
+#ifndef _AFX_BUILDING_DLL  // not in mfc.dll: an ISAPI DLL is a regular DLL, which uses the static library
+
 extern CHttpServer* _afxIsapiServer;
 extern CHttpFilter* _afxIsapiFilter;
 
@@ -40,3 +42,5 @@ BOOL WINAPI TerminateFilter(DWORD dwFlags) {
 }
 
 }  // extern "C"
+
+#endif  // _AFX_BUILDING_DLL

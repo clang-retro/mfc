@@ -1,0 +1,22 @@
+// exttest.rc - resources of exttest: the frame's menu and title, and
+// MFC's own resources.
+#include <windows.h>
+#include <afxres.h>
+#include "exttest.h"
+
+IDR_MAINFRAME MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&New", ID_FILE_NEW
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+END
+
+STRINGTABLE
+BEGIN
+  IDR_MAINFRAME "ExtTest\n\nExtTest"
+  IDS_APPSTRING "From the program"
+END
+
+#include "afxres.rc"

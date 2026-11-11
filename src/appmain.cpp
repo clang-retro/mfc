@@ -5,6 +5,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 
+#ifndef _AFX_BUILDING_DLL  // not in mfc.dll: each program has its own WinMain, from libmfcs.a
+
 #ifdef _UNICODE
 extern "C" int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine,
                                int nCmdShow) {
@@ -30,3 +32,5 @@ extern "C" int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPST
   return AfxWinMain(hInstance, hPrevInstance, lpCmdLine, nCmdShow);
 }
 #endif
+
+#endif  // _AFX_BUILDING_DLL

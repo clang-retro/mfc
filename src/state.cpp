@@ -27,10 +27,44 @@ void AFXAPI AfxSetResourceHandle(HINSTANCE hInstResource) {
   g_moduleState.m_hCurrentResourceHandle = hInstResource;
 }
 
+// The program's resources come first, then those of its extension DLLs
+// (CDynLinkLibrary), then those of the DLLs marked as system DLLs.
 HINSTANCE AFXAPI AfxFindResourceHandle(LPCTSTR lpszName, LPCTSTR lpszType) {
-  (void)lpszName;
-  (void)lpszType;
-  return AfxGetResourceHandle();
+  HINSTANCE hInst = AfxGetResourceHandle();
+  if (g_moduleState.m_pFirstDLL == NULL || ::FindResource(hInst, lpszName, lpszType) != NULL)
+    return hInst;
+  for (int nPass = 0; nPass < 2; nPass++) {
+    for (CDynLinkLibrary* p = g_moduleState.m_pFirstDLL; p != NULL; p = p->m_pNextDLL) {
+      if (p->m_bSystem != (nPass == 1) || p->m_hResource == NULL) continue;
+      if (::FindResource(p->m_hResource, lpszName, lpszType) != NULL) return p->m_hResource;
+    }
+  }
+  return hInst;
+}
+
+// Whether the string table of hInst has string nID (strings are kept in
+// blocks of 16, each a length and that many characters).
+static BOOL HasString(HINSTANCE hInst, UINT nID) {
+  HRSRC hRes = ::FindResource(hInst, MAKEINTRESOURCE((nID >> 4) + 1), RT_STRING);
+  if (hRes == NULL) return FALSE;
+  HGLOBAL hGlobal = ::LoadResource(hInst, hRes);
+  const WORD* p = hGlobal != NULL ? (const WORD*)::LockResource(hGlobal) : NULL;
+  if (p == NULL) return FALSE;
+  const WORD* pEnd = (const WORD*)((const BYTE*)p + ::SizeofResource(hInst, hRes));
+  for (UINT i = 0; i < (nID & 15) && p < pEnd; i++) p += 1 + *p;
+  return p < pEnd && *p != 0;
+}
+
+HINSTANCE AFXAPI AfxFindStringResourceHandle(UINT nID) {
+  HINSTANCE hInst = AfxGetResourceHandle();
+  if (g_moduleState.m_pFirstDLL == NULL || HasString(hInst, nID)) return hInst;
+  for (int nPass = 0; nPass < 2; nPass++) {
+    for (CDynLinkLibrary* p = g_moduleState.m_pFirstDLL; p != NULL; p = p->m_pNextDLL) {
+      if (p->m_bSystem != (nPass == 1) || p->m_hResource == NULL) continue;
+      if (HasString(p->m_hResource, nID)) return p->m_hResource;
+    }
+  }
+  return hInst;
 }
 
 LPCTSTR AFXAPI AfxGetAppName() { return g_moduleState.m_lpszCurrentAppName; }
@@ -380,7 +414,6 @@ void AFXAPI AfxFormatString2(CString& rString, UINT nIDS, LPCTSTR lpsz1, LPCTSTR
   AfxFormatStrings(rString, nIDS, rglpsz, 2);
 }
 
-BOOL AFXAPI AfxCheckMemory() { return TRUE; }
 
 void AFXAPI AfxGlobalFree(HGLOBAL hGlobal) {
   if (hGlobal == NULL) return;

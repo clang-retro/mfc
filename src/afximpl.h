@@ -40,6 +40,9 @@ struct _AFX_OCC_HOOKS {
   BOOL(AFXAPI* pfnWindowlessMessage)(CWnd* pWnd, UINT message, WPARAM wParam, LPARAM lParam,
                                      LRESULT* plResult);
   void(AFXAPI* pfnPaintWindowless)(CWnd* pWnd, HRGN hRgnUpdate);
+  // The drop target of the windowless control at a point (AddRef'd), or
+  // NULL.
+  LPDROPTARGET(AFXAPI* pfnWindowlessDropTarget)(CWnd* pWnd, CPoint point);
 };
 extern const _AFX_OCC_HOOKS* _afxOccHooks;
 // What a control site calls once a control is data bound (occdb.cpp):
@@ -115,8 +118,9 @@ struct AFX_THREAD_STATE {
 AFX_THREAD_STATE* AFXAPI AfxGetThreadState();
 void AFXAPI AfxTermThreadState();
 
-// Process-wide state. This library is linked statically, so there is
-// exactly one module.
+// Process-wide state. There is exactly one: the library is linked
+// statically into one module, or it is the shared mfc.dll that the
+// program and its extension DLLs use together.
 struct AFX_MODULE_STATE {
   CWinApp* m_pCurrentWinApp;
   HINSTANCE m_hCurrentInstanceHandle;
@@ -126,7 +130,12 @@ struct AFX_MODULE_STATE {
   CStringArray* m_pstrUnregisterList;  // the window classes a DLL takes away when it unloads
   BOOL m_bInitialized;
   BOOL m_bDLL;  // the library is in a DLL (DllMain ran)
+  CDynLinkLibrary* m_pFirstDLL;  // the extension DLLs, searched for resources
 };
+
+// Takes the classes in [pStart, pEnd), the image of a module being
+// unloaded, out of the list CRuntimeClass::FromName searches.
+void AFXAPI _AfxRemoveClasses(const BYTE* pStart, const BYTE* pEnd);
 AFX_MODULE_STATE* AFXAPI AfxGetModuleState();
 
 CHandleMap* AFXAPI afxMapHWND(BOOL bCreate = FALSE);

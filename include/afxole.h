@@ -180,7 +180,9 @@ public:
 
 // ---------------------------------------------------------------------
 // COleDropTarget: receives drops on a window. For a CView it calls the
-// view's OnDragEnter, OnDragOver, OnDrop and the rest.
+// view's OnDragEnter, OnDragOver, OnDrop and the rest. A drag over a
+// windowless ActiveX control in the window goes to the control's own
+// drop target.
 
 class COleDropTarget : public CCmdTarget {
   DECLARE_DYNAMIC(COleDropTarget)
@@ -205,6 +207,7 @@ public:
   HWND m_hWnd;
   LPDATAOBJECT m_lpDataObject;  // during a drag
   DROPEFFECT m_dropEffectCurrent;
+  LPDROPTARGET m_pWindowlessTarget;  // the windowless control the drag is over
 
   static int nScrollInset;
   static UINT nScrollDelay;

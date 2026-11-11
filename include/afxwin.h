@@ -3156,7 +3156,6 @@ void AFXAPI AfxFormatString2(CString& rString, UINT nIDS, LPCTSTR lpsz1, LPCTSTR
 void AFXAPI AfxFormatStrings(CString& rString, UINT nIDS, LPCTSTR const* rglpsz, int nString);
 void AFXAPI AfxFormatStrings(CString& rString, LPCTSTR lpszFormat, LPCTSTR const* rglpsz,
                              int nString);
-BOOL AFXAPI AfxCheckMemory();
 void AFXAPI AfxLockTempMaps();
 BOOL AFXAPI AfxUnlockTempMaps(BOOL bDeleteTemps = TRUE);
 CWinThread* AFXAPI AfxBeginThread(AFX_THREADPROC pfnThreadProc, LPVOID pParam,
@@ -3267,5 +3266,7 @@ inline UINT _AfxCtlType(UINT msg) {
   return msg >= WM_CTLCOLORMSGBOX && msg <= WM_CTLCOLORSTATIC ? msg - WM_CTLCOLORMSGBOX
                                                               : CTLCOLOR_DLG;
 }
+
+#include <afxdll_.h>
 
 #endif // __AFXWIN_H__

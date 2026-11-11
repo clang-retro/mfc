@@ -23,9 +23,11 @@ make BIN=/path/to/llvm/bin CFG=/path/to/cfg/win32-picolibc.cfg
 make TARGET=i686-w64-mingw32 STDLIB=
 ```
 
-The libraries go to `build/<triple>` (or `build/<config name>`).
-`make install PREFIX=dir` copies the headers to `dir/include/mfc` and the
-libraries to `dir/lib`.
+The libraries go to `build/<triple>` (or `build/<config name>`): the
+static libraries `libmfc.a` and `libmfcu.a` (Unicode), and the shared
+library, `mfc.dll` and `mfcu.dll` (see below). `make static` builds only
+the static ones. `make install PREFIX=dir` copies the headers to
+`dir/include/mfc`, the libraries to `dir/lib` and the DLLs to `dir/bin`.
 
 A program then needs only the include path and the library path:
 
@@ -95,6 +97,50 @@ The ANSI code page there is UTF-8, `WCHAR` is the system's 32-bit
 `LONG*` needs `LONG`; in dispatch maps `long` remains the type of
 `VT_I4`, as MFC documents.
 
+### The shared library
+
+A program built with `_AFXDLL` uses the library in `mfc.dll` (`mfcu.dll`
+for Unicode), which goes next to the program. `afx.h` then names
+`mfcdll` (the import library) and `mfcs` (`mfcudll` and `mfcus`), the
+latter with the few pieces each module keeps for itself, such as
+`WinMain`:
+
+```sh
+clang++ --config=winxp.cfg -D_AFXDLL -Ipath/to/mfc/include app.cpp app-res.o \
+  -Lpath/to/build/i586-pc-windows5.1-gnu -mwindows -o app.exe
+```
+
+The DLL uses no C runtime DLL of its own choosing: it is built with the
+same C library as the program (`msvcrt.dll`, or a static picolibc in
+each module, whose `malloc` takes its blocks from the process heap), so
+memory from `new` or `malloc` in one module can be freed in another.
+With MinGW and libstdc++, link without `-static`, so that libstdc++ and
+libgcc are DLLs too: only then does an exception thrown in one module
+reach a `catch` in another.
+
+An extension DLL is built with `_AFXDLL` and `_AFXEXT` and shares the
+program's `mfc.dll`: its classes, marked `AFX_EXT_CLASS` (functions
+`AFX_EXT_API`), are part of the program, and its resources are found
+after the program's own. Its `DllMain` registers it:
+
+```cpp
+static AFX_EXTENSION_MODULE extDLL = {NULL, NULL};
+extern "C" int APIENTRY DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID) {
+  if (dwReason == DLL_PROCESS_ATTACH) {
+    if (!AfxInitExtensionModule(extDLL, hInstance)) return 0;
+    new CDynLinkLibrary(extDLL);
+  } else if (dwReason == DLL_PROCESS_DETACH) {
+    AfxTermExtensionModule(extDLL);
+  }
+  return 1;
+}
+```
+
+```sh
+clang++ --config=winxp.cfg -D_AFXDLL -Ipath/to/mfc/include -shared ext.cpp ext-res.o \
+  -Lpath/to/build/i586-pc-windows5.1-gnu -Wl,--out-implib,libext.a -o ext.dll
+```
+
 ## Testing
 
 `make check` (with the same variables as the build) builds the programs
@@ -103,6 +149,11 @@ when there is no display:
 
 * `core`: CString, collections, CFile, CArchive and serialization,
   CTime, exceptions and run-time classes, on the console.
+* `memtest`: the memory diagnostics in a debug build: DEBUG_NEW and
+  object blocks, CMemoryState (Checkpoint, Difference, DumpStatistics,
+  DumpAllObjectsSince) caught through afxDump, guard bytes and
+  AfxCheckMemory, AfxIsMemoryBlock, AfxDoForAllObjects, tracking turned
+  off, the allocation hook and delayed frees, on the console.
 * `disptest`: the automation helpers in `afxdisp.h` (COleDateTime and
   its span, COleCurrency, COleVariant, COleSafeArray) and a
   COleDispatchDriver calling an IDispatch written in the test, on the
@@ -185,8 +236,9 @@ when there is no display:
 * `dbtest`: `afxdb.h` against an in-memory ODBC driver written in the
   test (`tests/odbcmock.h`), since Wine has no 32-bit ODBC driver to
   test with: opening, moving, filters, sorts and parameters, nulls,
-  adding, editing and deleting records, transactions, field info and
-  errors, on the console.
+  adding, editing and deleting records, stored procedures (a result
+  set, a return value, output and input/output parameters), transactions,
+  field info and errors, on the console.
 * `rvtest`: a CRecordView over the same driver; the form showing the
   current record, edits written back when moving, nulls shown as empty
   fields and indeterminate check boxes, and the record commands enabled
@@ -249,6 +301,16 @@ when there is no display:
   and a dialog template with controls among ordinary items (made on
   WM_INITDIALOG in the template's tab order, state from DLGINIT after
   its license key, DDX_Control and the DDX_OC functions).
+* `exttest`: an extension DLL (`exttest-dll`), with the program and the
+  DLL using `mfc.dll`: the DLL's document and view in the program's
+  document template, a command routed to the DLL's message map, the
+  DLL's serializable class through FromName and CArchive, strings and a
+  dialog template from the DLL's resources and the program's from the
+  program, AfxGetApp in the DLL, exceptions from one module caught in
+  the other, objects and memory freed in the other module, and a
+  CStringArray grown in both. It runs only against the shared library,
+  as do `core`, `sditest` and `dlgtest` a second time (`SHARED_TESTS`;
+  logs in `tests/sa` and `tests/su`).
 * `dlltest`: MFC in a DLL: a control in a regular DLL (`dlltest-dll`,
   built like an `.ocx`) registered through DllRegisterServer, made by
   COM from the registry and hosted by the program (properties, methods
@@ -286,8 +348,10 @@ when there is no display:
 * `wltest`: windowless controls, with a COleControl of the test's own
   in a frame window: drawing in the container's window (checked by its
   pixels) and InvalidateControl, mouse messages with capture, focus and
-  keys, the control's own GetDC, moving, hiding and destroying, and the
-  same control made windowed when it does not ask for windowless
+  keys, the control's own GetDC, drag and drop through the drop target
+  the container made for the frame (entering, leaving for the frame,
+  coming back, the drop and its data), moving, hiding and destroying,
+  and the same control made windowed when it does not ask for windowless
   activation.
 * `bindtest`: data binding, with a data source control and bound
   controls of the test's own: properties bound to fields follow the
@@ -310,7 +374,9 @@ request with the stock MinGW-w64 toolchain.
 * Core (`afx.h`, `afxcoll.h`, `afxtempl.h`, `afxstr.h`): CObject and
   CRuntimeClass with dynamic creation and serialization, CString
   (CStringA/CStringW), the collection classes and templates, CFile,
-  CStdioFile, CMemFile, CArchive, CTime, CTimeSpan, exceptions.
+  CStdioFile, CMemFile, CArchive, CTime, CTimeSpan, exceptions, and
+  the memory diagnostics (CMemoryState, AfxCheckMemory, afxMemDF,
+  AfxSetAllocHook, AfxDoForAllObjects and the leak report at exit).
 * Windows (`afxwin.h`): CWinApp, CWinThread, CWnd and message maps,
   command routing and idle updates, GDI objects and device contexts,
   standard controls (and CCheckListBox), CDialog with DDX/DDV, frames,
@@ -325,7 +391,8 @@ request with the stock MinGW-w64 toolchain.
   Paste Special, the selected item). CRichEditDoc is a COleServerDoc,
   so a program serves its documents by overriding OnGetEmbeddedItem.
 * `afxdb.h`: CDatabase, CRecordset (snapshot, dynaset and forward-only,
-  with RFX for the usual types, bookmarks and parameters),
+  with RFX for the usual types, bookmarks and parameters, output
+  parameters of procedures included),
   CRecordView and the DDX_Field functions, CDBException, CDBVariant.
 * `afxdao.h`: the DAO classes over the DAO 3.6 engine (or 3.5):
   CDaoWorkspace, CDaoDatabase, CDaoTableDef, CDaoQueryDef,
@@ -448,6 +515,13 @@ request with the stock MinGW-w64 toolchain.
   `_AFX_MSGMAP_MEMBER_POINTERS` defined before `afxwin.h`.
 * An ISAPI parse map's ITS_ string gives the number of a command's
   arguments; each argument is read as its parameter's own C++ type.
+* The memory diagnostics track the blocks DEBUG_NEW makes and, in a
+  debug build, CObject-derived objects. They do not track every
+  allocation, as Visual C++'s debug heap does. The library replaces the
+  global operator delete to free its blocks. When MinGW's libstdc++
+  links its own delete first, only objects are tracked
+  (`_AfxTracksAllBlocks` says which). A tracked block must be freed by
+  the module that made it.
 * `min` and `max` are function templates rather than macros (MinGW-w64
   defines the macros for C only). `NOMINMAX` turns them off.
 * Floating bars are tool windows, so the system draws their captions,
@@ -481,15 +555,29 @@ request with the stock MinGW-w64 toolchain.
   once something is bound to it, and then only of the steps the rowset
   tells of.
   Windowless controls are drawn after the container's own painting,
-  in the order they were made, and are not given drag and drop
-  (GetWindowlessDropTarget is not called).
+  in the order they were made. A drag over one goes to the drop target
+  it gives (IOleInPlaceObjectWindowless::GetDropTarget, which
+  COleControl answers with GetWindowlessDropTarget); when the
+  container's window is no drop target, the container makes it one as
+  such a control is activated.
 * A regular DLL runs in the program's message loop, so its CWinApp's
   OnIdle and PreTranslateMessage are not called (as with Visual C++
   MFC's static library), and the temporary window objects its copy of
-  the library makes are freed when the DLL unloads. Extension DLLs
-  (`AFX_EXT_CLASS`, CDynLinkLibrary), which share one MFC DLL with the
-  program, are not supported, since the library is only linked
-  statically.
+  the library makes are freed when the DLL unloads. A regular DLL
+  uses the static library: one built with `_AFXDLL` (sharing
+  `mfc.dll`, with `AFX_MANAGE_STATE` switching between its state and
+  the program's) is not supported.
+* The shared library is one DLL, with the database, OLE and network
+  classes that Visual C++ puts in DLLs of their own, so it imports
+  `odbc32`, `wininet`, `ws2_32`, `oledlg` and `urlmon` whatever the
+  program uses. Each module keeps its own C runtime state where the C
+  library is linked statically (picolibc): a `FILE*` or `errno` belongs
+  to the module that has it.
+* An extension DLL's classes and resources are found while it is
+  loaded; AfxTermExtensionModule takes its classes out of the list
+  CRuntimeClass::FromName searches. AFX_EXTENSION_MODULE's
+  pFirstSharedClass and pFirstSharedFactory stay NULL: the classes and
+  OLE factories go into the program's lists as the DLL loads.
 * An asynchronous moniker file's bind status callback is not
   aggregated: CreateBindStatusCallback ignores its pUnkControlling.
 * The gopher classes call WinINet's gopher functions, which Internet
@@ -580,8 +668,10 @@ request with the stock MinGW-w64 toolchain.
   UPDATE, INSERT and DELETE statements that match the record by the
   values it read, rather than with positioned cursors, so it works with
   any driver. A dynaset therefore behaves like a snapshot: it does not
-  see other users' changes until Requery. Output parameters of stored
-  procedures are not supported.
+  see other users' changes until Requery. A stored procedure's output
+  and input/output parameters (`outputParam`, `inoutParam`) reach
+  their members once FlushResultSet has gone past the last result set,
+  or as it opens when the procedure has none.
 * The DAO classes drive the engine through its Unicode interfaces in
   ANSI programs too. As with Visual C++, text in their variants is
   VT_BSTRT there (ANSI bytes in the BSTR), so it is converted on the

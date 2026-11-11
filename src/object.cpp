@@ -3,6 +3,7 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "stdafx.h"
+#include "afximpl.h"
 
 // ---------------------------------------------------------------------
 // CObject
@@ -44,6 +45,15 @@ CObject* AFXAPI AfxStaticDownCast(CRuntimeClass* pClass, CObject* pObject) {
 
 namespace {
 CRuntimeClass* g_pFirstClass = NULL;
+}
+
+void AFXAPI _AfxRemoveClasses(const BYTE* pStart, const BYTE* pEnd) {
+  for (CRuntimeClass** pp = &g_pFirstClass; *pp != NULL;) {
+    if ((const BYTE*)*pp >= pStart && (const BYTE*)*pp < pEnd)
+      *pp = (*pp)->m_pNextClass;
+    else
+      pp = &(*pp)->m_pNextClass;
+  }
 }
 
 AFX_CLASSINIT::AFX_CLASSINIT(CRuntimeClass* pNewClass) {
@@ -136,18 +146,12 @@ BOOL AFXAPI AfxIsValidString(LPCSTR lpsz, int) { return lpsz != NULL; }
 
 void AFXAPI AfxDebugBreak() { DebugBreak(); }
 
-// DEBUG_NEW's placement forms.
-void* AFX_CDECL operator new(size_t nSize, LPCSTR, int) { return ::operator new(nSize); }
-void* AFX_CDECL operator new[](size_t nSize, LPCSTR, int) { return ::operator new[](nSize); }
-void AFX_CDECL operator delete(void* p, LPCSTR, int) { ::operator delete(p); }
-void AFX_CDECL operator delete[](void* p, LPCSTR, int) { ::operator delete[](p); }
-
 // ---------------------------------------------------------------------
 // CDumpContext
 
 CDumpContext afxDump;
 
-CDumpContext::CDumpContext(CFile* pFile) : m_nDepth(0), m_pFile(pFile) {}
+CDumpContext::CDumpContext(CFile* pFile) : m_pFile(pFile), m_nDepth(0) {}
 
 void CDumpContext::OutputString(LPCTSTR lpsz) {
   if (m_pFile) {

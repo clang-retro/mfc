@@ -279,6 +279,86 @@ static void TestBrowse() {
   rs.Close();
 }
 
+// A procedure's result set, return value and parameters (the mock's
+// GREET), and one with an input/output parameter and no result set (BUMP).
+class CGreetSet : public CRecordset {
+public:
+  CString m_Word;
+  long m_nLength;
+  CString m_strName;
+  CString m_strGreeting;
+  CGreetSet(CDatabase* pdb) : CRecordset(pdb), m_nLength(-1) {
+    m_nFields = 1;
+    m_nParams = 3;
+    m_nDefaultType = forwardOnly;
+  }
+  virtual CString GetDefaultSQL() { return _T("{? = CALL GREET(?, ?)}"); }
+  virtual void DoFieldExchange(CFieldExchange* pFX) {
+    pFX->SetFieldType(CFieldExchange::outputColumn);
+    RFX_Text(pFX, _T("[WORD]"), m_Word);
+    pFX->SetFieldType(CFieldExchange::outputParam);
+    RFX_Long(pFX, _T("Length"), m_nLength);
+    pFX->SetFieldType(CFieldExchange::inputParam);
+    RFX_Text(pFX, _T("Name"), m_strName);
+    pFX->SetFieldType(CFieldExchange::outputParam);
+    RFX_Text(pFX, _T("Greeting"), m_strGreeting, 50);
+  }
+};
+
+class CBumpSet : public CRecordset {
+public:
+  long m_n;
+  CBumpSet(CDatabase* pdb) : CRecordset(pdb), m_n(0) {
+    m_nParams = 1;
+    m_nDefaultType = forwardOnly;
+  }
+  virtual CString GetDefaultSQL() { return _T("{CALL BUMP(?)}"); }
+  virtual void DoFieldExchange(CFieldExchange* pFX) {
+    pFX->SetFieldType(CFieldExchange::inoutParam);
+    RFX_Long(pFX, _T("N"), m_n);
+  }
+};
+
+static void TestProcedures() {
+  CDatabase db;
+  db.OpenEx(_T("DSN=Mock"), CDatabase::noOdbcDialog);
+  CGreetSet gs(&db);
+  gs.m_strName = _T("Ada");
+  CHECK(gs.Open());
+  CHECK(gs.GetSQL() == _T("{? = CALL GREET(?, ?)}"));
+  CHECK(gs.m_Word == _T("Hello"));
+  gs.MoveNext();
+  CHECK(gs.m_Word == _T("Ada"));
+  gs.MoveNext();
+  CHECK(gs.IsEOF());
+  // The output parameters come after the last result set.
+  CHECK(gs.m_nLength == -1 && gs.m_strGreeting.IsEmpty());
+  CHECK(!gs.FlushResultSet());
+  CHECK(gs.m_nLength == 10 && gs.m_strGreeting == _T("Hello, Ada"));
+
+  // Again with another input, and with a NULL one, which gives NULLs.
+  gs.m_strName = _T("Grace");
+  CHECK(gs.Requery());
+  CHECK(gs.m_Word == _T("Hello"));
+  while (gs.FlushResultSet()) {}
+  CHECK(gs.m_nLength == 12 && gs.m_strGreeting == _T("Hello, Grace"));
+  gs.SetParamNull(1);
+  CHECK(gs.Requery());
+  while (gs.FlushResultSet()) {}
+  CHECK(gs.m_nLength == 0 && gs.m_strGreeting.IsEmpty());
+  gs.Close();
+
+  // An input/output parameter, from a procedure without a result set.
+  CBumpSet bs(&db);
+  bs.m_n = 5;
+  CHECK(bs.Open());
+  CHECK(bs.IsBOF() && bs.IsEOF());
+  CHECK(bs.m_n == 15);
+  CHECK(bs.Requery());
+  CHECK(bs.m_n == 25);
+  bs.Close();
+}
+
 static void TestFilterAndParams() {
   CDatabase db;
   db.OpenEx(_T("DSN=Mock"), CDatabase::noOdbcDialog);
@@ -589,6 +669,7 @@ int main() {
   TestDatabase();
   TestBrowse();
   TestFilterAndParams();
+  TestProcedures();
   ResetTables();
   TestUpdate();
   ResetTables();
