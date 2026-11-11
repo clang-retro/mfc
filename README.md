@@ -113,7 +113,8 @@ text. Windows show on Wayland, on X11 or with Cocoa on macOS (Mac OS X
 10.4 and later, PowerPC and Intel); `WINPORT_BACKEND` picks one
 (`wayland`, `x11`, `cocoa`, or `headless` to keep windows in memory, as
 the tests do). Wayland, X11 and xkbcommon are loaded when a program
-starts, so it runs without them. The functions not written yet are
+starts, so it runs without them. Text copied and pasted through the
+clipboard goes to and from other programs. The functions not written yet are
 listed in `port/src/stubs.txt` and fail with `ERROR_CALL_NOT_IMPLEMENTED`;
 `WINPORT_DEBUG=1` names each one the first time a program calls it.
 

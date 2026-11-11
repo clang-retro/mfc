@@ -38,7 +38,8 @@ namespace {
   F(XFreeGC) F(XPutImage) F(XInitImage) F(XFlush) F(XPending) F(XNextEvent) F(XLookupString) F(XLookupKeysym) \
   F(XSetTransientForHint) F(XSetWMNormalHints) F(XSetWMHints) F(XStoreName) F(XDefineCursor)                  \
   F(XCreateFontCursor) F(XRaiseWindow) F(XSetInputFocus) F(XWarpPointer) F(XGetWindowAttributes)               \
-  F(XTranslateCoordinates) F(XSync) F(XFreeCursor)
+  F(XTranslateCoordinates) F(XSync) F(XFreeCursor) F(XSetSelectionOwner) F(XGetSelectionOwner)          \
+  F(XConvertSelection) F(XGetWindowProperty) F(XFree) F(XSendEvent) F(XCheckTypedWindowEvent) F(XCheckTypedEvent)
 
 struct XLib {
 #define F(name) decltype(&::name) name = nullptr;
@@ -75,6 +76,19 @@ struct XcursorLib {
     XcursorImageDestroy = (decltype(XcursorImageDestroy))dlsym(lib, "XcursorImageDestroy");
     XcursorImageLoadCursor = (decltype(XcursorImageLoadCursor))dlsym(lib, "XcursorImageLoadCursor");
     return XcursorImageCreate && XcursorImageDestroy && XcursorImageLoadCursor;
+  }
+};
+
+// libXfixes, which says when another program takes the clipboard.
+struct XfixesLib {
+  Bool (*XFixesQueryExtension)(Display* dpy, int* eventBase, int* errorBase) = nullptr;
+  void (*XFixesSelectSelectionInput)(Display* dpy, ::Window w, Atom selection, unsigned long mask) = nullptr;
+  bool Load() {
+    void* lib = dlopen("libXfixes.so.3", RTLD_NOW | RTLD_LOCAL);
+    if (!lib) return false;
+    XFixesQueryExtension = (decltype(XFixesQueryExtension))dlsym(lib, "XFixesQueryExtension");
+    XFixesSelectSelectionInput = (decltype(XFixesSelectSelectionInput))dlsym(lib, "XFixesSelectSelectionInput");
+    return XFixesQueryExtension && XFixesSelectSelectionInput;
   }
 };
 
@@ -159,6 +173,14 @@ struct X11Backend : Backend {
   Cursor cursor = 0;          // the one the windows show
   bool cursorOwned = false;   // made for a program's cursor, freed when replaced
   std::map<unsigned, Cursor> fontCursors;
+  // The clipboard: an unmapped window owns it and is sent its requests.
+  ::Window clipWin = 0;
+  Atom clipboard = 0, targets = 0, textPlain = 0, clipProp = 0, incr = 0;
+  std::string clipText;  // UTF-8, what this program offers
+  int fixesEvent = -1;   // XFixesSelectionNotify, when the server has XFixes
+  DWORD clipGeneration = 0;
+  bool notified = false;  // a SelectionNotify came through the event loop
+  XSelectionEvent notifyEvent = {};
   bool moving = false;  // a ConfigureNotify is moving one of ours
   DWORD lastPress = 0;
 
@@ -196,6 +218,19 @@ struct X11Backend : Backend {
     arrow = x.XCreateFontCursor(dpy, XC_left_ptr);
     cursor = arrow;
     haveXcursor = xcursor.Load();
+    clipboard = x.XInternAtom(dpy, "CLIPBOARD", False);
+    targets = x.XInternAtom(dpy, "TARGETS", False);
+    textPlain = x.XInternAtom(dpy, "text/plain;charset=utf-8", False);
+    clipProp = x.XInternAtom(dpy, "WINPORT_CLIPBOARD", False);
+    incr = x.XInternAtom(dpy, "INCR", False);
+    XSetWindowAttributes ca = {};
+    clipWin = x.XCreateWindow(dpy, root, -10, -10, 1, 1, 0, 0, InputOnly, CopyFromParent, 0, &ca);
+    XfixesLib fixes;
+    int errorBase;
+    if (fixes.Load() && fixes.XFixesQueryExtension(dpy, &fixesEvent, &errorBase))
+      fixes.XFixesSelectSelectionInput(dpy, clipWin, clipboard, 1 /* XFixesSetSelectionOwnerNotifyMask */);
+    else
+      fixesEvent = -1;
     return true;
   }
 
@@ -435,6 +470,118 @@ struct X11Backend : Backend {
   }
 
   // ---------------------------------------------------------------
+  // The clipboard
+
+  bool ClipboardForeign(DWORD* generation) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!dpy) return false;
+    ::Window owner = x.XGetSelectionOwner(dpy, clipboard);
+    if (owner == None || owner == clipWin) return false;
+    if (fixesEvent >= 0) {
+      XEvent e;
+      while (x.XCheckTypedEvent(dpy, fixesEvent, &e)) clipGeneration++;
+      *generation = clipGeneration ^ (DWORD)owner;
+    } else {
+      // Without XFixes there is no telling: look again every two seconds.
+      *generation = (DWORD)owner ^ (GetTickCount() / 2000);
+    }
+    return true;
+  }
+
+  // Waits for the owner's answer to a request for the clipboard.
+  bool AwaitNotify(XSelectionEvent* out) {
+    DWORD start = GetTickCount();
+    for (;;) {
+      XEvent e;
+      if (x.XCheckTypedWindowEvent(dpy, clipWin, SelectionNotify, &e)) {
+        *out = e.xselection;
+        return true;
+      }
+      if (notified) {
+        notified = false;
+        *out = notifyEvent;
+        return true;
+      }
+      if (GetTickCount() - start > 1000) return false;
+      pollfd fd = {ConnectionNumber(dpy), POLLIN, 0};
+      poll(&fd, 1, 20);
+    }
+  }
+
+  bool ClipboardFetch(std::wstring* text) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!dpy) return false;
+    for (Atom type : {utf8, (Atom)XA_STRING}) {
+      notified = false;
+      x.XConvertSelection(dpy, clipboard, type, clipProp, clipWin, CurrentTime);
+      x.XFlush(dpy);
+      XSelectionEvent ev;
+      if (!AwaitNotify(&ev)) return false;
+      if (ev.property == None) continue;
+      Atom got;
+      int format;
+      unsigned long n, after;
+      unsigned char* data = NULL;
+      if (x.XGetWindowProperty(dpy, clipWin, clipProp, 0, 0x1000000, True, AnyPropertyType, &got, &format, &n, &after,
+                               &data) != Success)
+        return false;
+      bool ok = false;
+      if (data && got != incr && format == 8) {
+        std::string bytes((const char*)data, n);
+        if (got == XA_STRING) {
+          text->clear();
+          for (unsigned char c : bytes) *text += (wchar_t)c;
+        } else {
+          *text = Widen(bytes.c_str(), (int)bytes.size());
+        }
+        ok = true;
+      }
+      if (data) x.XFree(data);
+      return ok;
+    }
+    return false;
+  }
+
+  void ClipboardOwn(const std::wstring& text) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!dpy) return;
+    clipText = Narrow(text.c_str(), (int)text.size());
+    x.XSetSelectionOwner(dpy, clipboard, clipWin, CurrentTime);
+    x.XFlush(dpy);
+  }
+
+  // Another program asks for the clipboard.
+  void Request(const XSelectionRequestEvent& r) {
+    XEvent reply = {};
+    reply.xselection.type = SelectionNotify;
+    reply.xselection.display = r.display;
+    reply.xselection.requestor = r.requestor;
+    reply.xselection.selection = r.selection;
+    reply.xselection.target = r.target;
+    reply.xselection.time = r.time;
+    Atom prop = r.property != None ? r.property : r.target;
+    reply.xselection.property = prop;
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (r.target == targets) {
+      Atom list[] = {targets, utf8, textPlain, XA_STRING};
+      x.XChangeProperty(dpy, r.requestor, prop, XA_ATOM, 32, PropModeReplace, (const unsigned char*)list, 4);
+    } else if (r.target == utf8 || r.target == textPlain) {
+      x.XChangeProperty(dpy, r.requestor, prop, r.target, 8, PropModeReplace, (const unsigned char*)clipText.data(),
+                        (int)clipText.size());
+    } else if (r.target == XA_STRING) {
+      std::wstring w = Widen(clipText.c_str(), (int)clipText.size());
+      std::string latin1;
+      for (wchar_t c : w) latin1 += c < 0x100 ? (char)c : '?';
+      x.XChangeProperty(dpy, r.requestor, prop, XA_STRING, 8, PropModeReplace, (const unsigned char*)latin1.data(),
+                        (int)latin1.size());
+    } else {
+      reply.xselection.property = None;
+    }
+    x.XSendEvent(dpy, r.requestor, False, 0, &reply);
+    x.XFlush(dpy);
+  }
+
+  // ---------------------------------------------------------------
   // Input
 
   WPARAM Keys(unsigned state) {
@@ -454,6 +601,19 @@ struct X11Backend : Backend {
   }
 
   void Handle(XEvent& e) {
+    if (e.xany.window == clipWin && clipWin) {
+      if (e.type == SelectionRequest) {
+        Request(e.xselectionrequest);
+      } else if (e.type == SelectionNotify) {
+        std::lock_guard<std::recursive_mutex> g(lock);
+        notifyEvent = e.xselection;
+        notified = true;
+      } else if (fixesEvent >= 0 && e.type == fixesEvent) {
+        std::lock_guard<std::recursive_mutex> g(lock);
+        clipGeneration++;
+      }
+      return;
+    }
     Native* n;
     {
       std::lock_guard<std::recursive_mutex> g(lock);

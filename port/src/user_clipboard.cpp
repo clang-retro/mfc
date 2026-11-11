@@ -1,8 +1,11 @@
 // user_clipboard.cpp - the clipboard: formats and their data, delayed
 // rendering, text in its three forms, and clipboard viewers.
 //
-// The clipboard lives in the process. Data handed to SetClipboardData
-// belongs to the clipboard until it is emptied. Text set in one of
+// The clipboard lives in the process, and its text is shared with other
+// programs through the backend: when the program changes the clipboard
+// it takes the system's, and when another program has taken it, its
+// text comes in as the clipboard is opened or asked about. Data handed
+// to SetClipboardData belongs to the clipboard until it is emptied. Text set in one of
 // CF_TEXT, CF_OEMTEXT and CF_UNICODETEXT can be read in the others; the
 // ANSI and OEM code pages are both UTF-8 here.
 //
@@ -100,6 +103,37 @@ HANDLE Synthesize(Clipboard& c, UINT format) {
 
 bool OpenedByCaller(Clipboard& c) { return c.open && c.openThread == GetCurrentThreadId(); }
 
+// Which of the other programs' clipboards is on ours.
+bool g_imported = false;
+DWORD g_importedGeneration = 0;
+
+// Brings in the text another program has put on the system's clipboard,
+// replacing what was here.
+void Import(Clipboard& c) {
+  if (c.open && !OpenedByCaller(c)) return;
+  DWORD generation;
+  if (!GetBackend()->ClipboardForeign(&generation)) return;
+  if (g_imported && generation == g_importedGeneration) return;
+  g_imported = true;
+  g_importedGeneration = generation;
+  std::wstring text;
+  bool have = GetBackend()->ClipboardFetch(&text);
+  for (Entry& e : c.entries)
+    if (!e.synthesized) FreeData(e.format, e.data);
+  c.entries.clear();
+  if (c.owner && IsWindow(c.owner)) PostMessageW(c.owner, WM_DESTROYCLIPBOARD, 0, 0);
+  c.owner = NULL;
+  c.sequence++;
+  if (have && !text.empty()) {
+    HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, (text.size() + 1) * sizeof(wchar_t));
+    if (h) {
+      memcpy(GlobalLock(h), text.c_str(), (text.size() + 1) * sizeof(wchar_t));
+      GlobalUnlock(h);
+      c.entries.push_back({CF_UNICODETEXT, h, false});
+    }
+  }
+}
+
 }  // namespace
 
 extern "C" {
@@ -115,12 +149,33 @@ BOOL WINAPI OpenClipboard(HWND h) {
   c.openThread = GetCurrentThreadId();
   c.openWindow = h;
   c.changed = false;
+  Import(c);
   return TRUE;
 }
 
 BOOL WINAPI CloseClipboard(void) {
   HWND viewer;
   bool changed;
+  {
+    // What the program put here goes to the system's clipboard, as text.
+    Clipboard& c = Board();
+    std::unique_lock<std::recursive_mutex> g(c.lock);
+    if (OpenedByCaller(c) && c.changed) {
+      bool text = false;
+      for (Entry& e : c.entries)
+        if (IsText(e.format)) text = true;
+      g.unlock();
+      std::wstring s;
+      if (HANDLE h = text ? GetClipboardData(CF_UNICODETEXT) : NULL) {
+        if (const wchar_t* p = (const wchar_t*)GlobalLock(h)) {
+          s = p;
+          GlobalUnlock(h);
+        }
+      }
+      GetBackend()->ClipboardOwn(s);
+      g_imported = false;
+    }
+  }
   {
     Clipboard& c = Board();
     std::lock_guard<std::recursive_mutex> g(c.lock);
@@ -219,6 +274,7 @@ HANDLE WINAPI GetClipboardData(UINT format) {
 BOOL WINAPI IsClipboardFormatAvailable(UINT format) {
   Clipboard& c = Board();
   std::lock_guard<std::recursive_mutex> g(c.lock);
+  Import(c);
   if (Find(c, format)) return TRUE;
   if (IsText(format))
     for (Entry& e : c.entries)
@@ -229,6 +285,7 @@ BOOL WINAPI IsClipboardFormatAvailable(UINT format) {
 int WINAPI CountClipboardFormats(void) {
   Clipboard& c = Board();
   std::lock_guard<std::recursive_mutex> g(c.lock);
+  Import(c);
   int n = 0;
   bool text = false;
   for (Entry& e : c.entries) {

@@ -153,6 +153,26 @@ struct CocoaBackend : Backend {
     cocoa::SetCursor(!h, p.systemId, (const uint32_t*)p.argb.data(), p.width, p.height, p.hotspot.x, p.hotspot.y);
   }
 
+  long pasteboardCount = -1;  // the general pasteboard's, when this program last set it
+
+  bool ClipboardForeign(DWORD* generation) override {
+    long count = cocoa::PasteboardChangeCount();
+    if (count == pasteboardCount) return false;
+    *generation = (DWORD)count;
+    return true;
+  }
+
+  bool ClipboardFetch(std::wstring* text) override {
+    std::u16string u;
+    if (!cocoa::PasteboardText(&u)) return false;
+    text->assign(u.begin(), u.end());
+    return true;
+  }
+
+  void ClipboardOwn(const std::wstring& text) override {
+    pasteboardCount = cocoa::SetPasteboardText(std::u16string(text.begin(), text.end()));
+  }
+
   void Wait(DWORD timeout) override { cocoa::Wait(timeout == INFINITE ? -1 : (long)timeout); }
   void Wake() override { cocoa::Wake(); }
 };

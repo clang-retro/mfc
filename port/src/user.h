@@ -252,6 +252,13 @@ struct Backend {
   virtual bool BeginMoveSize(Window* /*w*/, LRESULT /*hit*/) { return false; }
   // The pointer's shape over the program's windows; NULL hides it.
   virtual void SetCursor(HCURSOR /*c*/) {}
+  // The system's clipboard. ClipboardForeign says whether another
+  // program holds it, with a number that changes when it puts something
+  // new there; ClipboardFetch gets its text. ClipboardOwn takes it for
+  // this program, with the text to give others (empty for none).
+  virtual bool ClipboardForeign(DWORD* /*generation*/) { return false; }
+  virtual bool ClipboardFetch(std::wstring* /*text*/) { return false; }
+  virtual void ClipboardOwn(const std::wstring& /*text*/) {}
   // Waits up to timeout ms for input, handing what comes to the input
   // functions above; returns early when WakeBackend is called. Called
   // without the lock.

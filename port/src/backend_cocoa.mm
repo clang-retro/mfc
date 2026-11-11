@@ -382,6 +382,38 @@ void SetCursor(bool hidden, int systemId, const uint32_t* argb, int width, int h
   [pool release];
 }
 
+long PasteboardChangeCount() {
+  return (long)[[NSPasteboard generalPasteboard] changeCount];
+}
+
+bool PasteboardText(std::u16string* text) {
+  NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+  NSString* s = [[NSPasteboard generalPasteboard] stringForType:NSStringPboardType];
+  bool ok = s != nil;
+  if (ok) {
+    text->resize([s length]);
+    if (!text->empty()) [s getCharacters:(unichar*)&(*text)[0]];
+  }
+  [pool release];
+  return ok;
+}
+
+long SetPasteboardText(const std::u16string& text) {
+  NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+  NSPasteboard* pb = [NSPasteboard generalPasteboard];
+  if (text.empty()) {
+    [pb declareTypes:[NSArray array] owner:nil];
+  } else {
+    [pb declareTypes:[NSArray arrayWithObject:NSStringPboardType] owner:nil];
+    NSString* s = [[NSString alloc] initWithCharacters:(const unichar*)text.data() length:text.size()];
+    [pb setString:s forType:NSStringPboardType];
+    [s release];
+  }
+  long count = (long)[pb changeCount];
+  [pool release];
+  return count;
+}
+
 void Wait(long timeout) {
   NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
   for (size_t i = 0; i < g_wins.size(); i++) [g_wins[i]->window displayIfNeeded];

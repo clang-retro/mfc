@@ -39,6 +39,10 @@
 #define wl_pointer_interface (*winport_wl_pointer_interface)
 #define wl_keyboard_interface (*winport_wl_keyboard_interface)
 #define wl_output_interface (*winport_wl_output_interface)
+#define wl_data_device_manager_interface (*winport_wl_data_device_manager_interface)
+#define wl_data_device_interface (*winport_wl_data_device_interface)
+#define wl_data_source_interface (*winport_wl_data_source_interface)
+#define wl_data_offer_interface (*winport_wl_data_offer_interface)
 #pragma push_macro("interface")
 #undef interface  // winport.h makes it mean struct, as on Windows
 #include <wayland-client.h>
@@ -64,8 +68,11 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <map>
 #include <mutex>
 #include <set>
+#include <string>
+#include <vector>
 
 // The pointers the helpers above go through.
 extern "C" {
@@ -80,6 +87,10 @@ const struct wl_interface* winport_wl_seat_interface;
 const struct wl_interface* winport_wl_pointer_interface;
 const struct wl_interface* winport_wl_keyboard_interface;
 const struct wl_interface* winport_wl_output_interface;
+const struct wl_interface* winport_wl_data_device_manager_interface;
+const struct wl_interface* winport_wl_data_device_interface;
+const struct wl_interface* winport_wl_data_source_interface;
+const struct wl_interface* winport_wl_data_offer_interface;
 }
 
 namespace winport {
@@ -126,7 +137,8 @@ struct WlLib {
     P(wl_proxy_set_user_data) P(wl_proxy_get_user_data) P(wl_registry_interface) P(wl_compositor_interface)
     P(wl_surface_interface) P(wl_shm_interface) P(wl_shm_pool_interface) P(wl_buffer_interface)
     P(wl_callback_interface) P(wl_seat_interface) P(wl_pointer_interface) P(wl_keyboard_interface)
-    P(wl_output_interface)
+    P(wl_output_interface) P(wl_data_device_manager_interface) P(wl_data_device_interface)
+    P(wl_data_source_interface) P(wl_data_offer_interface)
 #undef P
 #define F(name)                                \
   name = (decltype(&::name))dlsym(xkb, #name); \
@@ -343,6 +355,14 @@ struct WaylandBackend : Backend {
   wl_keyboard* keyboard = NULL;
   wl_output* output = NULL;
   void* wmBase = NULL;
+  // The clipboard
+  wl_data_device_manager* dataManager = NULL;
+  wl_data_device* dataDevice = NULL;
+  std::map<wl_data_offer*, std::vector<std::string>> offers;  // and their types
+  wl_data_offer* selection = NULL;  // what the clipboard holds
+  DWORD selectionGeneration = 0;
+  wl_data_source* source = NULL;    // ours, while the clipboard is this program's
+  std::string sourceText;           // UTF-8
   SIZE screen = {1024, 768};
   int wakePipe[2] = {-1, -1};
   std::recursive_mutex lock;  // the windows' buffers and the sets below
@@ -390,6 +410,11 @@ struct WaylandBackend : Backend {
       return false;
     }
     wl.wl_display_roundtrip(dpy);  // the seat's devices, the output's mode
+    if (dataManager && seat) {
+      dataDevice = wl_data_device_manager_get_data_device(dataManager, seat);
+      static const wl_data_device_listener dl = {DataOffer, DataEnter, DataLeave, DataMotion, DataDrop, DataSelection};
+      wl_data_device_add_listener(dataDevice, &dl, this);
+    }
     if (pipe(wakePipe) == 0) {
       fcntl(wakePipe[0], F_SETFL, O_NONBLOCK);
       fcntl(wakePipe[1], F_SETFL, O_NONBLOCK);
@@ -431,6 +456,9 @@ struct WaylandBackend : Backend {
       b->seat = (wl_seat*)wl_registry_bind(r, name, &wl_seat_interface, std::min<uint32_t>(version, 5));
       static const wl_seat_listener sl = {SeatCaps, SeatName};
       wl_seat_add_listener(b->seat, &sl, b);
+    } else if (strcmp(iface, "wl_data_device_manager") == 0 && !b->dataManager) {
+      b->dataManager = (wl_data_device_manager*)wl_registry_bind(r, name, &wl_data_device_manager_interface,
+                                                                 std::min<uint32_t>(version, 3));
     } else if (strcmp(iface, "wl_output") == 0 && !b->output && version >= 2) {
       b->output = (wl_output*)wl_registry_bind(r, name, &wl_output_interface, 2);
       static const wl_output_listener ol = {OutGeometry, OutMode, OutDone, OutScale, NULL, NULL};
@@ -798,6 +826,149 @@ struct WaylandBackend : Backend {
     releaseAfterGrab = true;
     wl.wl_display_flush(dpy);
     return true;
+  }
+
+  // ---------------------------------------------------------------
+  // The clipboard
+
+  static void OfferType(void* data, wl_data_offer* offer, const char* mime) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    std::lock_guard<std::recursive_mutex> g(b->lock);
+    auto it = b->offers.find(offer);
+    if (it != b->offers.end()) it->second.push_back(mime);
+  }
+  static void OfferActions(void*, wl_data_offer*, uint32_t) {}
+  static void OfferAction(void*, wl_data_offer*, uint32_t) {}
+  static void DataOffer(void* data, wl_data_device*, wl_data_offer* offer) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    std::lock_guard<std::recursive_mutex> g(b->lock);
+    b->offers[offer];
+    static const wl_data_offer_listener ol = {OfferType, OfferActions, OfferAction};
+    wl_data_offer_add_listener(offer, &ol, b);
+  }
+  void DropOffer(wl_data_offer* offer) {
+    if (!offer) return;
+    offers.erase(offer);
+    wl_data_offer_destroy(offer);
+  }
+  // Dragging and dropping between programs is not done yet.
+  static void DataEnter(void* data, wl_data_device*, uint32_t, wl_surface*, wl_fixed_t, wl_fixed_t,
+                        wl_data_offer* offer) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    std::lock_guard<std::recursive_mutex> g(b->lock);
+    if (offer != b->selection) b->DropOffer(offer);
+  }
+  static void DataLeave(void*, wl_data_device*) {}
+  static void DataMotion(void*, wl_data_device*, uint32_t, wl_fixed_t, wl_fixed_t) {}
+  static void DataDrop(void*, wl_data_device*) {}
+  static void DataSelection(void* data, wl_data_device*, wl_data_offer* offer) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    std::lock_guard<std::recursive_mutex> g(b->lock);
+    if (b->selection && b->selection != offer) b->DropOffer(b->selection);
+    b->selection = offer;
+    b->selectionGeneration++;
+  }
+
+  static void SourceTarget(void*, wl_data_source*, const char*) {}
+  static void SourceSend(void* data, wl_data_source*, const char*, int32_t fd) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    std::string text;
+    {
+      std::lock_guard<std::recursive_mutex> g(b->lock);
+      text = b->sourceText;
+    }
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
+    size_t done = 0;
+    while (done < text.size()) {
+      ssize_t n = write(fd, text.data() + done, text.size() - done);
+      if (n <= 0) break;
+      done += (size_t)n;
+    }
+    close(fd);
+  }
+  static void SourceCancelled(void* data, wl_data_source* src) {
+    // Another program has taken the clipboard.
+    WaylandBackend* b = (WaylandBackend*)data;
+    std::lock_guard<std::recursive_mutex> g(b->lock);
+    if (b->source == src) b->source = NULL;
+    wl_data_source_destroy(src);
+  }
+  static void SourceDropped(void*, wl_data_source*) {}
+  static void SourceFinished(void*, wl_data_source*) {}
+  static void SourceAction(void*, wl_data_source*, uint32_t) {}
+
+  // The text types the clipboard can hold, best first.
+  static const char* const* TextTypes() {
+    static const char* const types[] = {"text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "TEXT", "STRING",
+                                        NULL};
+    return types;
+  }
+
+  bool ClipboardForeign(DWORD* generation) override {
+    if (!dpy || !dataDevice) return false;
+    // Take in a change that has come but not been handled.
+    wl.wl_display_dispatch_pending(dpy);
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (source || !selection) return false;
+    *generation = selectionGeneration;
+    return true;
+  }
+
+  bool ClipboardFetch(std::wstring* text) override {
+    std::unique_lock<std::recursive_mutex> g(lock);
+    if (!dpy || !selection) return false;
+    const char* type = NULL;
+    const std::vector<std::string>& have = offers[selection];
+    for (const char* const* t = TextTypes(); *t && !type; t++)
+      for (const std::string& h : have)
+        if (h == *t) {
+          type = *t;
+          break;
+        }
+    if (!type) return false;
+    int fds[2];
+    if (pipe2(fds, O_CLOEXEC) != 0) return false;
+    wl_data_offer_receive(selection, type, fds[1]);
+    close(fds[1]);
+    wl.wl_display_flush(dpy);
+    g.unlock();
+    std::string bytes;
+    ULONGLONG end = Millis() + 1000;
+    for (;;) {
+      ULONGLONG now = Millis();
+      if (now >= end) break;
+      pollfd p = {fds[0], POLLIN, 0};
+      if (poll(&p, 1, (int)(end - now)) <= 0) break;
+      char buf[4096];
+      ssize_t n = read(fds[0], buf, sizeof buf);
+      if (n <= 0) break;
+      bytes.append(buf, (size_t)n);
+    }
+    close(fds[0]);
+    if (strcmp(type, "STRING") == 0) {
+      text->clear();
+      for (unsigned char c : bytes) *text += (wchar_t)c;
+    } else {
+      *text = Widen(bytes.c_str(), (int)bytes.size());
+    }
+    return true;
+  }
+
+  void ClipboardOwn(const std::wstring& text) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!dpy || !dataDevice) return;
+    if (source) wl_data_source_destroy(source);
+    source = NULL;
+    sourceText = Narrow(text.c_str(), (int)text.size());
+    if (!text.empty()) {
+      source = wl_data_device_manager_create_data_source(dataManager);
+      static const wl_data_source_listener sl = {SourceTarget,  SourceSend,     SourceCancelled,
+                                                 SourceDropped, SourceFinished, SourceAction};
+      wl_data_source_add_listener(source, &sl, this);
+      for (const char* const* t = TextTypes(); *t; t++) wl_data_source_offer(source, *t);
+    }
+    wl_data_device_set_selection(dataDevice, source, lastSerial);
+    wl.wl_display_flush(dpy);
   }
 
   // ---------------------------------------------------------------

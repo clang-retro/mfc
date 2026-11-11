@@ -15,6 +15,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <string>
+
 namespace winport {
 namespace cocoa {
 
@@ -33,6 +35,11 @@ void Invalidate(Win* w, int x, int y, int width, int height);  // in the window
 // The pointer's shape: a system cursor by its IDC_ number, or else the
 // picture (ARGB, not premultiplied, top row first); hidden hides it.
 void SetCursor(bool hidden, int systemId, const uint32_t* argb, int width, int height, int hotX, int hotY);
+// The general pasteboard: its change count, its text (false when it has
+// none), and putting text there, which returns the new change count.
+long PasteboardChangeCount();
+bool PasteboardText(std::u16string* text);
+long SetPasteboardText(const std::u16string& text);
 // Takes and handles events for up to timeout ms (-1 for no limit), or
 // until Wake.
 void Wait(long timeout);
