@@ -176,14 +176,20 @@ CDumpContext& CDumpContext::operator<<(LPCWSTR lpsz) {
 DC_FMT(const void*, "$%p")
 DC_FMT(BYTE, "%u")
 DC_FMT(WORD, "%u")
-DC_FMT(UINT, "%u")
 DC_FMT(LONG, "%ld")
 DC_FMT(DWORD, "%lu")
+#ifndef _WINPORT
+DC_FMT(UINT, "%u")
 DC_FMT(int, "%d")
+#endif
 DC_FMT(LONGLONG, "%I64d")
 DC_FMT(ULONGLONG, "%I64u")
 #undef DC_FMT
 CDumpContext& CDumpContext::operator<<(float f) { return *this << (double)f; }
+#ifdef _WINPORT
+CDumpContext& CDumpContext::operator<<(long n) { return *this << (LONGLONG)n; }
+CDumpContext& CDumpContext::operator<<(unsigned long n) { return *this << (ULONGLONG)n; }
+#endif
 CDumpContext& CDumpContext::operator<<(double d) {
   CString s;
   s.Format(_T("%f"), d);

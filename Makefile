@@ -18,6 +18,12 @@
 BIN ?=
 CFG ?=
 TARGET ?= i586-pc-windows5.1-gnu
+# Linux and macOS targets (make TARGET=x86_64-linux-gnu, or
+# TARGET=arm64-apple-macos11) build over the portable Win32 layer in
+# port/, which goes into libwinport.a beside the MFC libraries.
+ifneq ($(findstring linux,$(TARGET))$(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
+PORTABLE = 1
+endif
 SYSROOT ?=
 ifneq ($(CFG),)
 OUT ?= build/$(basename $(notdir $(CFG)))
@@ -45,9 +51,18 @@ ALL_CXXFLAGS = $(TARGET_FLAGS) $(STDLIB) -fno-delete-null-pointer-checks \
   -Iinclude -Isrc $(CXXFLAGS)
 
 SRCS = $(wildcard src/*.cpp)
+ifeq ($(PORTABLE),1)
+PORT_SRCS = $(wildcard port/src/*.cpp)
+PORT_OBJS = $(patsubst port/src/%.cpp,$(OUT)/port/%.o,$(PORT_SRCS))
+ALL_CXXFLAGS += -Iport/include -fPIC
+PORT_LIB = $(OUT)/libwinport.a
+endif
 OBJS_A = $(patsubst src/%.cpp,$(OUT)/a/%.o,$(SRCS))
 OBJS_U = $(patsubst src/%.cpp,$(OUT)/u/%.o,$(SRCS))
 HDRS = $(wildcard include/*.h) $(wildcard src/*.h) src/wnd_handlers.inc
+ifeq ($(PORTABLE),1)
+HDRS += $(wildcard port/include/*.h) $(wildcard port/src/*.h)
+endif
 
 # The shared library: every source, built with _AFXDLL; the files that
 # each module keeps for itself are empty there and make up libmfcs.a.
@@ -62,10 +77,23 @@ DEF_STRIP = $(if $(filter i%86,$(firstword $(subst -, ,$(MACHINE)))),1,0)
 
 STATIC_LIBS = $(OUT)/libmfc.a $(OUT)/libmfcu.a
 SHARED_LIBS = $(OUT)/mfc.dll $(OUT)/mfcu.dll $(OUT)/libmfcs.a $(OUT)/libmfcus.a
+# Linux and macOS have no shared library build yet.
+ifeq ($(PORTABLE),1)
+STATIC_LIBS += $(PORT_LIB)
+SHARED_LIBS =
+endif
 
 all: $(STATIC_LIBS) $(SHARED_LIBS)
 static: $(STATIC_LIBS)
 shared: $(SHARED_LIBS)
+
+$(PORT_LIB): $(PORT_OBJS)
+	rm -f $@
+	$(AR) rcs $@ $^
+
+$(OUT)/port/%.o: port/src/%.cpp $(HDRS)
+	@mkdir -p $(dir $@)
+	$(CXX) $(ALL_CXXFLAGS) -Iport/src -c $< -o $@
 
 $(OUT)/libmfc.a: $(OBJS_A)
 	rm -f $@
@@ -122,9 +150,15 @@ $(OUT)/su/%.o: src/%.cpp $(HDRS)
 install: all
 	mkdir -p $(PREFIX)/include/mfc $(PREFIX)/lib $(PREFIX)/bin
 	cp include/*.h include/*.rc $(PREFIX)/include/mfc/
+ifeq ($(PORTABLE),1)
+	cp $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PORT_LIB) $(PREFIX)/lib/
+	mkdir -p $(PREFIX)/include/winport
+	cp port/include/*.h $(PREFIX)/include/winport/
+else
 	cp $(OUT)/libmfc.a $(OUT)/libmfcu.a $(OUT)/libmfcs.a $(OUT)/libmfcus.a \
 	  $(OUT)/libmfcdll.a $(OUT)/libmfcudll.a $(PREFIX)/lib/
 	cp $(OUT)/mfc.dll $(OUT)/mfcu.dll $(PREFIX)/bin/
+endif
 
 check: all
 	BIN=$(BIN) STDLIB="$(STDLIB)" RC="$(TEST_RC)" LDFLAGS="$(LDFLAGS)" CFG=$(CFG) SYSROOT=$(SYSROOT) TARGET=$(TARGET) OUT=$(OUT) sh tests/run-tests.sh

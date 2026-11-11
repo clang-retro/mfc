@@ -213,17 +213,17 @@ static void TestVariant() {
 
 static void TestSafeArray() {
   COleSafeArray sa;
-  long data[4] = {10, 20, 30, 40};
+  LONG data[4] = {10, 20, 30, 40};
   sa.CreateOneDim(VT_I4, 4, data);
   CHECK(sa.vt == (VT_ARRAY | VT_I4));
   CHECK(sa.GetDim() == 1);
   CHECK(sa.GetOneDimSize() == 4);
-  CHECK(sa.GetElemSize() == sizeof(long));
-  long lo = -1, hi = -1;
+  CHECK(sa.GetElemSize() == sizeof(LONG));
+  LONG lo = -1, hi = -1;
   sa.GetLBound(1, &lo);
   sa.GetUBound(1, &hi);
   CHECK(lo == 0 && hi == 3);
-  long idx = 2, val = 0;
+  LONG idx = 2, val = 0;
   sa.GetElement(&idx, &val);
   CHECK(val == 30);
   val = 99;
@@ -236,7 +236,7 @@ static void TestSafeArray() {
   idx = 5;
   val = 123;
   sa.PutElement(&idx, &val);
-  long* p = NULL;
+  LONG* p = NULL;
   sa.AccessData((void**)&p);
   CHECK(p[0] == 10 && p[2] == 99 && p[4] == 0 && p[5] == 123);
   sa.UnaccessData();
@@ -261,7 +261,7 @@ static void TestSafeArray() {
   DWORD dims[2] = {3, 2};
   grid.Create(VT_R8, 2, dims);
   CHECK(grid.GetDim() == 2);
-  long ij[2] = {2, 1};
+  LONG ij[2] = {2, 1};
   double dv = 1.25;
   grid.PutElement(ij, &dv);
   dv = 0;

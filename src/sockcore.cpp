@@ -394,7 +394,7 @@ BOOL CAsyncSocket::Accept(CAsyncSocket& rConnectedSocket, SOCKADDR* lpSockAddr,
 }
 
 BOOL CAsyncSocket::IOCtl(long lCommand, DWORD* lpArgument) {
-  return ::ioctlsocket(m_hSocket, lCommand, (u_long*)lpArgument) != SOCKET_ERROR;
+  return ::ioctlsocket(m_hSocket, lCommand, (ULONG*)lpArgument) != SOCKET_ERROR;
 }
 
 BOOL CAsyncSocket::ShutDown(int nHow) { return ::shutdown(m_hSocket, nHow) != SOCKET_ERROR; }

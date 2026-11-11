@@ -280,7 +280,9 @@ BOOL COlePropertyPage::ReadProperty(LPCTSTR lpszProp, VARTYPE vt, void* pValue) 
   ::VariantInit(&var);
   HRESULT hr = m_ppDisp[0]->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
                                    &params, &var, NULL, NULL);
-  if (SUCCEEDED(hr) && var.vt != vt) hr = ::VariantChangeType(&var, &var, 0, vt);
+  // VT_I8 and VT_UI8 mark a 64-bit long member; the property is still 32-bit.
+  VARTYPE vtWire = vt == VT_I8 ? (VARTYPE)VT_I4 : vt == VT_UI8 ? (VARTYPE)VT_UI4 : vt;
+  if (SUCCEEDED(hr) && var.vt != vtWire) hr = ::VariantChangeType(&var, &var, 0, vtWire);
   if (FAILED(hr)) {
     ::VariantClear(&var);
     return FALSE;
@@ -288,8 +290,10 @@ BOOL COlePropertyPage::ReadProperty(LPCTSTR lpszProp, VARTYPE vt, void* pValue) 
   switch (vt) {
     case VT_UI1: *(BYTE*)pValue = var.bVal; break;
     case VT_I2: *(short*)pValue = var.iVal; break;
-    case VT_I4: *(long*)pValue = var.lVal; break;
+    case VT_I4: *(LONG*)pValue = var.lVal; break;
     case VT_UI4: *(ULONG*)pValue = var.ulVal; break;
+    case VT_I8: *(LONGLONG*)pValue = var.lVal; break;
+    case VT_UI8: *(ULONGLONG*)pValue = var.ulVal; break;
     case VT_R4: *(float*)pValue = var.fltVal; break;
     case VT_R8: *(double*)pValue = var.dblVal; break;
     case VT_BOOL: *(int*)pValue = var.boolVal != VARIANT_FALSE ? 1 : 0; break;
@@ -326,8 +330,16 @@ BOOL COlePropertyPage::WriteProperties() {
     switch (pEntry->vt) {
       case VT_UI1: var.bVal = *(BYTE*)pEntry->pValue; break;
       case VT_I2: var.iVal = *(short*)pEntry->pValue; break;
-      case VT_I4: var.lVal = *(long*)pEntry->pValue; break;
+      case VT_I4: var.lVal = *(LONG*)pEntry->pValue; break;
       case VT_UI4: var.ulVal = *(ULONG*)pEntry->pValue; break;
+      case VT_I8:
+        var.vt = VT_I4;
+        var.lVal = (LONG) * (LONGLONG*)pEntry->pValue;
+        break;
+      case VT_UI8:
+        var.vt = VT_UI4;
+        var.ulVal = (ULONG) * (ULONGLONG*)pEntry->pValue;
+        break;
       case VT_R4: var.fltVal = *(float*)pEntry->pValue; break;
       case VT_R8: var.dblVal = *(double*)pEntry->pValue; break;
       case VT_BOOL: var.boolVal = *(int*)pEntry->pValue ? VARIANT_TRUE : VARIANT_FALSE; break;
@@ -376,8 +388,11 @@ static void DDPExchange(CDataExchange* pDX, int id, void* pValue, VARTYPE vt, LP
     pPage->ReadProperty(pszPropName, vt, pValue);
 }
 
-// The members of these types are the size of the VARIANT field.
-static_assert(sizeof(int) == sizeof(long) && sizeof(UINT) == sizeof(ULONG), "32-bit int");
+// int and UINT members are the size of the VARIANT field. A long member
+// is too on Windows, but may be 64-bit elsewhere.
+static_assert(sizeof(int) == sizeof(LONG) && sizeof(UINT) == sizeof(ULONG), "32-bit int");
+#define _AFX_VT_LONG (sizeof(long) == sizeof(LONG) ? (VARTYPE)VT_I4 : (VARTYPE)VT_I8)
+#define _AFX_VT_ULONG (sizeof(long) == sizeof(LONG) ? (VARTYPE)VT_UI4 : (VARTYPE)VT_UI8)
 
 void AFXAPI DDP_Text(CDataExchange* pDX, int id, BYTE& member, LPCTSTR pszPropName) {
   DDPExchange(pDX, id, &member, VT_UI1, pszPropName);
@@ -392,11 +407,17 @@ void AFXAPI DDP_Text(CDataExchange* pDX, int id, UINT& member, LPCTSTR pszPropNa
   DDPExchange(pDX, id, &member, VT_UI4, pszPropName);
 }
 void AFXAPI DDP_Text(CDataExchange* pDX, int id, long& member, LPCTSTR pszPropName) {
-  DDPExchange(pDX, id, &member, VT_I4, pszPropName);
+  DDPExchange(pDX, id, &member, _AFX_VT_LONG, pszPropName);
 }
+#ifndef _WINPORT
 void AFXAPI DDP_Text(CDataExchange* pDX, int id, DWORD& member, LPCTSTR pszPropName) {
   DDPExchange(pDX, id, &member, VT_UI4, pszPropName);
 }
+#else
+void AFXAPI DDP_Text(CDataExchange* pDX, int id, unsigned long& member, LPCTSTR pszPropName) {
+  DDPExchange(pDX, id, &member, _AFX_VT_ULONG, pszPropName);
+}
+#endif
 void AFXAPI DDP_Text(CDataExchange* pDX, int id, float& member, LPCTSTR pszPropName) {
   DDPExchange(pDX, id, &member, VT_R4, pszPropName);
 }

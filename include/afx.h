@@ -75,7 +75,7 @@ inline typename std::common_type<_AfxT1, _AfxT2>::type max(_AfxT1 a, _AfxT2 b) {
 // Unicode): its import library is libmfcdll.a, and libmfcs.a holds the
 // few pieces each module keeps for itself (WinMain, and the operator
 // delete that sends memory-tracked blocks back to the DLL).
-#ifndef _AFX_NOFORCE_LIBS
+#if !defined(_AFX_NOFORCE_LIBS) && defined(_WIN32)
 #ifdef _UNICODE
 #define _AFX_LIB_SUFFIX "u"
 #else
@@ -116,7 +116,7 @@ __asm__(".section .drectve,\"yn\"\n"
 // that means such a DLL does not write a DllMain; _AFX_NO_DLLMAIN turns
 // it off for one that must. An extension DLL (_AFXDLL) writes its own,
 // which calls AfxInitExtensionModule.
-#if !defined(_AFX_NO_DLLMAIN) && !defined(_AFXDLL)
+#if !defined(_AFX_NO_DLLMAIN) && !defined(_AFXDLL) && defined(_WIN32)
 extern "C" BOOL WINAPI _AfxDllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved);
 extern "C" __attribute__((used)) inline BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason,
                                                             LPVOID lpReserved) {
@@ -919,11 +919,21 @@ public:
   CArchive& operator<<(double d) { return WriteT(d); }
   CArchive& operator<<(LONGLONG dwdw) { return WriteT(dwdw); }
   CArchive& operator<<(ULONGLONG dwdw) { return WriteT(dwdw); }
+#ifndef _WINPORT
   CArchive& operator<<(int i) { return WriteT((LONG)i); }
+#else
+  // The portable layer's LONG is int (32 bits on every system it runs
+  // on), so long gets the overload int has on Windows, written in the
+  // same 32 bits.
+  CArchive& operator<<(long l) { return WriteT((LONG)l); }
+  CArchive& operator<<(unsigned long u) { return WriteT((DWORD)u); }
+#endif
   CArchive& operator<<(short w) { return WriteT((WORD)w); }
   CArchive& operator<<(char ch) { return WriteT((BYTE)ch); }
   CArchive& operator<<(signed char ch) { return WriteT((BYTE)ch); }
+#ifndef _WINPORT
   CArchive& operator<<(unsigned u) { return WriteT((LONG)u); }
+#endif
   CArchive& operator<<(bool b) { return WriteT((BYTE)(b ? 1 : 0)); }
 #if !defined(_NATIVE_WCHAR_T_DEFINED) || 1
   CArchive& operator<<(wchar_t ch) { return WriteT((WORD)ch); }
@@ -941,11 +951,18 @@ public:
   CArchive& operator>>(double& d) { return ReadT(d); }
   CArchive& operator>>(LONGLONG& dwdw) { return ReadT(dwdw); }
   CArchive& operator>>(ULONGLONG& dwdw) { return ReadT(dwdw); }
+#ifndef _WINPORT
   CArchive& operator>>(int& i) { LONG l; ReadT(l); i = (int)l; return *this; }
+#else
+  CArchive& operator>>(long& l) { LONG x; ReadT(x); l = x; return *this; }
+  CArchive& operator>>(unsigned long& u) { DWORD x; ReadT(x); u = x; return *this; }
+#endif
   CArchive& operator>>(short& w) { WORD x; ReadT(x); w = (short)x; return *this; }
   CArchive& operator>>(char& ch) { BYTE x; ReadT(x); ch = (char)x; return *this; }
   CArchive& operator>>(signed char& ch) { BYTE x; ReadT(x); ch = (signed char)x; return *this; }
+#ifndef _WINPORT
   CArchive& operator>>(unsigned& u) { LONG l; ReadT(l); u = (unsigned)l; return *this; }
+#endif
   CArchive& operator>>(bool& b) { BYTE x; ReadT(x); b = x != 0; return *this; }
   CArchive& operator>>(wchar_t& ch) { WORD x; ReadT(x); ch = (wchar_t)x; return *this; }
   CArchive& operator>>(CObject*& pOb) { pOb = ReadObject(NULL); return *this; }
@@ -1024,12 +1041,17 @@ public:
   CDumpContext& operator<<(const CObject& ob);
   CDumpContext& operator<<(BYTE by);
   CDumpContext& operator<<(WORD w);
-  CDumpContext& operator<<(UINT u);
   CDumpContext& operator<<(LONG l);
   CDumpContext& operator<<(DWORD dw);
   CDumpContext& operator<<(float f);
   CDumpContext& operator<<(double d);
+#ifndef _WINPORT
+  CDumpContext& operator<<(UINT u);
   CDumpContext& operator<<(int n);
+#else  // LONG and DWORD are int and unsigned there
+  CDumpContext& operator<<(long n);
+  CDumpContext& operator<<(unsigned long n);
+#endif
   CDumpContext& operator<<(LONGLONG n);
   CDumpContext& operator<<(ULONGLONG n);
   CDumpContext& operator<<(HWND h) { return *this << (const void*)h; }

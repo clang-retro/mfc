@@ -261,7 +261,7 @@ int VFormat(C* buf, int max, const C* f, va_list args) {
       long long v;
       if (size == 3) v = va_arg(args, long long);
       else if (size == 4) v = (long long)va_arg(args, INT_PTR);
-      else if (size == 2) v = va_arg(args, long);
+      else if (size == 2) v = va_arg(args, LONG);  // 32 bits, as on Windows
       else v = va_arg(args, int);
       if (size == 1) v = (short)v;
       bool neg = v < 0;
@@ -276,7 +276,7 @@ int VFormat(C* buf, int max, const C* f, va_list args) {
       unsigned long long v;
       if (size == 3) v = va_arg(args, unsigned long long);
       else if (size == 4) v = (unsigned long long)va_arg(args, UINT_PTR);
-      else if (size == 2) v = va_arg(args, unsigned long);
+      else if (size == 2) v = va_arg(args, ULONG);
       else v = va_arg(args, unsigned int);
       if (size == 1) v = (unsigned short)v;
       PutInt(o, s, v, false, t == 'u' ? 10 : t == 'o' ? 8 : 16, t == 'X', false);

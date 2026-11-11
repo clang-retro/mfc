@@ -26,6 +26,47 @@ if [ -z "${DISPLAY:-}" ] && [ -z "${MFC_TEST_NO_XVFB:-}" ] && command -v xvfb-ru
   MFC_TEST_NO_XVFB=1 exec xvfb-run -a -s "-screen 0 1024x768x24" "$0" "$@"
 fi
 
+# Linux and macOS: the programs build over the portable layer and run
+# directly. Only the tests the layer can run so far are on the list.
+case "$TARGET" in
+  *linux*|*darwin*|*apple*) NATIVE=1 ;;
+  *) NATIVE=0 ;;
+esac
+if [ $NATIVE = 1 ]; then
+  TESTS=${NATIVE_TESTS:-"core disptest"}
+  T=$OUT/tests
+  mkdir -p "$T/a" "$T/u"
+  CXXFLAGS="--target=$TARGET ${SYSROOT:+--sysroot=$SYSROOT} ${STDLIB--stdlib=libc++} -std=c++17"
+  CXXFLAGS="$CXXFLAGS -Wall -Wno-unused-function -Wno-overloaded-virtual -Wno-missing-exception-spec"
+  CXXFLAGS="$CXXFLAGS -Iport/include -Iinclude -Itests"
+  nfail=0
+  npass=0
+  # macOS has no timeout(1) unless coreutils is installed.
+  TIMEOUT="timeout 120"
+  command -v timeout >/dev/null 2>&1 || TIMEOUT=
+  command -v gtimeout >/dev/null 2>&1 && [ -z "$TIMEOUT" ] && TIMEOUT="gtimeout 120"
+  for v in a u; do
+    flags=
+    lib=-lmfc
+    [ $v = u ] && flags="-DUNICODE -D_UNICODE" && lib=-lmfcu
+    for name in $TESTS; do
+      exe=$T/$name-$v
+      # shellcheck disable=SC2086
+      "$CXX" $CXXFLAGS $flags tests/$name.cpp -L"$OUT" $LDFLAGS $lib -lwinport -ldl -lpthread -o "$exe" \
+        2>"$T/$name-$v-build.log" || {
+        echo "FAIL   $name-$v (build)"; cat "$T/$name-$v-build.log"; nfail=$((nfail + 1)); continue; }
+      if MFC_TEST_OUT="$T/$v" WINPORT_REGISTRY="$T/$v/registry.reg" $TIMEOUT "$exe" > "$T/$v/$name.log" 2>&1; then
+        echo "PASS   $name-$v"; npass=$((npass + 1))
+      else
+        echo "FAIL   $name-$v"; sed 's/^/       /' "$T/$v/$name.log"; nfail=$((nfail + 1))
+      fi
+    done
+  done
+  echo "$npass passed, $nfail failed"
+  [ $nfail = 0 ]
+  exit
+fi
+
 HAVE_WINE=1
 command -v wine >/dev/null 2>&1 || HAVE_WINE=0
 export WINEDEBUG=${WINEDEBUG:--all}

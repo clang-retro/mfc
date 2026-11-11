@@ -52,7 +52,9 @@ public:
   CHtmlStream& operator<<(int n);
   CHtmlStream& operator<<(long dw);
   CHtmlStream& operator<<(DWORD dw);
+#ifndef _WINPORT  // where DWORD is UINT, the DWORD one takes it
   CHtmlStream& operator<<(UINT n) { return *this << (DWORD)n; }
+#endif
   CHtmlStream& operator<<(float f);
   CHtmlStream& operator<<(double d);
   CHtmlStream& operator<<(const CHtmlStream& stream);
@@ -107,7 +109,9 @@ public:
   CHttpServerContext& operator<<(int n);
   CHttpServerContext& operator<<(long dw);
   CHttpServerContext& operator<<(DWORD dw);
+#ifndef _WINPORT  // where DWORD is UINT, the DWORD one takes it
   CHttpServerContext& operator<<(UINT n) { return *this << (DWORD)n; }
+#endif
   CHttpServerContext& operator<<(float f);
   CHttpServerContext& operator<<(double d);
   CHttpServerContext& operator<<(const CHtmlStream& stream);
