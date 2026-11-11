@@ -251,7 +251,8 @@ layer and runs them directly; `NATIVE_TESTS` names others to try.
   commands, closing.
 * `docktest`: toolbars docked side by side and on each edge, floating,
   dragged with the mouse, double-clicked, resized while floating, and
-  the layout saved and loaded with SaveBarState and LoadBarState.
+  the layout saved and loaded with SaveBarState and LoadBarState. With
+  clang-retro's compiler its message map names handlers both ways.
 * `splittest`: a dynamic splitter split by dragging its split boxes and
   with Window > Split from the keyboard, panes scrolling together on
   shared scroll bars, next and previous pane, and unsplitting by
@@ -270,7 +271,8 @@ layer and runs them directly; `NATIVE_TESTS` names others to try.
   test with: opening, moving, filters, sorts and parameters, nulls,
   adding, editing and deleting records, stored procedures (a result
   set, a return value, output and input/output parameters), transactions,
-  field info and errors, on the console.
+  field info and errors, and a dynaset seeing another connection's
+  changes and deletions where a snapshot does not, on the console.
 * `rvtest`: a CRecordView over the same driver; the form showing the
   current record, edits written back when moving, nulls shown as empty
   fields and indeterminate check boxes, and the record commands enabled
@@ -364,8 +366,12 @@ layer and runs them directly; `NATIVE_TESTS` names others to try.
   registry keys of AfxOleRegisterControlClass, and the control's
   COlePropertyPage, through IPropertyPage (its size and title, DDP_ and
   DDX values from and to one or two controls, dirty controls, Apply)
-  and in the property frame of the Properties verb, which also shows
-  the stock color page; the stock color, font and picture pages
+  and in the property frame of the Properties verb or of
+  COleControlSite::ShowPropertyFrame, which also shows the stock color
+  page; IViewObjectEx hit testing, drawing clipped to the control's
+  bounds or with the DC left as it is (the clipPaintDC and
+  canOptimizeDraw flags), and IPointerInactive for a control with the
+  pointerInactive flag; the stock color, font and picture pages
   setting the control's colors, font and picture; CPictureHolder (its
   kinds of picture, drawing one, PX_Picture); IPerPropertyBrowsing
   and IQuickActivate; and licensing, through IClassFactory2 with and
@@ -493,9 +499,11 @@ request with the stock MinGW-w64 toolchain.
   ambient properties, IViewObject drawing and persistence through
   streams, storages and property bags), COleControlModule, event maps,
   verb maps (ON_OLEVERB, ON_STDOLEVERB), IPerPropertyBrowsing,
-  IQuickActivate, GetExtendedControl, windowless activation (the windowlessActivate flag of
-  GetControlFlags, IOleInPlaceObjectWindowless and COleControl's
-  windowless SetCapture, SetFocus, GetDC and InvalidateControl),
+  IQuickActivate, GetExtendedControl, the GetControlFlags flags
+  (windowlessActivate, clipPaintDC, canOptimizeDraw, noFlickerActivate,
+  pointerInactive), IViewObjectEx, IPointerInactive, windowless
+  activation (IOleInPlaceObjectWindowless and COleControl's windowless
+  SetCapture, SetFocus, GetDC and InvalidateControl),
   DECLARE_OLECREATE_EX, DECLARE_OLECTLTYPE,
   DECLARE_PROPPAGEIDS, CFontHolder, CPictureHolder, CPropExchange and
   the PX_ functions (PX_Picture included), AfxOleRegisterControlClass, licensing (IClassFactory2,
@@ -545,8 +553,12 @@ request with the stock MinGW-w64 toolchain.
 * Message map handler names: Visual C++ 6 code writes plain names
   (`ON_COMMAND(ID_X, OnX)`), later code writes member pointers
   (`ON_COMMAND(ID_X, &CMyView::OnX)`). Standard C++ has no expression
-  that accepts both, so the second form needs
-  `_AFX_MSGMAP_MEMBER_POINTERS` defined before `afxwin.h`.
+  that accepts both. clang-retro's compiler has a preprocessor builtin
+  for it (`__starts_with_ampersand`), so with it the maps take either
+  form, mixed as code likes, with nothing to set (message maps, dispatch
+  and event sink maps, DHTML event maps). With other compilers the
+  second form needs `_AFX_MSGMAP_MEMBER_POINTERS` defined before
+  `afxwin.h`.
 * An ISAPI parse map's ITS_ string gives the number of a command's
   arguments; each argument is read as its parameter's own C++ type.
 * The memory diagnostics track the blocks DEBUG_NEW makes and, in a
@@ -576,8 +588,7 @@ request with the stock MinGW-w64 toolchain.
   overloaded. Drag scrolling starts as soon as the pointer is in the
   inset, without waiting nScrollDelay. A connection point's cookie is
   the sink's interface pointer.
-* Containment does not implement property pages for the container.
-  The extended control's own properties are Name, Object, Parent and
+* The extended control's own properties are Name, Object, Parent and
   Left, Top, Width, Height, Visible and ID (in the container window's
   pixels, with DISPIDs of this library's, AFX_DISPID_EXT_*); Parent is
   the container window's IDispatch when it has automation. Data binding
@@ -612,8 +623,6 @@ request with the stock MinGW-w64 toolchain.
   CRuntimeClass::FromName searches. AFX_EXTENSION_MODULE's
   pFirstSharedClass and pFirstSharedFactory stay NULL: the classes and
   OLE factories go into the program's lists as the DLL loads.
-* An asynchronous moniker file's bind status callback is not
-  aggregated: CreateBindStatusCallback ignores its pUnkControlling.
 * The gopher classes call WinINet's gopher functions, which Internet
   Explorer 7 and later removed and Wine does not have, so they are not
   tested; neither is https, which needs a server with a certificate.
@@ -635,9 +644,7 @@ request with the stock MinGW-w64 toolchain.
   IPropertyPage::Apply, so under Wine the OK and Apply buttons of a
   control's property frame do not change the control; Windows applies
   the pages.
-* COleControl's windowless controls ignore the other GetControlFlags
-  flags (flicker-free and unclipped drawing, pointer inactivity). A
-  control's binary stream (IPersistStreamInit, IPersistStorage, DLGINIT
+* A control's binary stream (IPersistStreamInit, IPersistStorage, DLGINIT
   data) has this library's own format, not the one Visual C++ MFC
   writes; property bags hold the same names and values.
 * COleDocument saves its items in its own format,
@@ -701,8 +708,11 @@ request with the stock MinGW-w64 toolchain.
 * CRecordset keeps the rows it has fetched and writes changes with
   UPDATE, INSERT and DELETE statements that match the record by the
   values it read, rather than with positioned cursors, so it works with
-  any driver. A dynaset therefore behaves like a snapshot: it does not
-  see other users' changes until Requery. A stored procedure's output
+  any driver. A dynaset (or dynamic recordset) asks the driver for a
+  keyset-driven cursor and reads each record again as it moves to it,
+  so other users' changes and deletions show; records they add show
+  after Requery, in a dynamic recordset too. With a driver that has no
+  keyset-driven cursors, a dynaset behaves like a snapshot. A stored procedure's output
   and input/output parameters (`outputParam`, `inoutParam`) reach
   their members once FlushResultSet has gone past the last result set,
   or as it opens when the procedure has none.

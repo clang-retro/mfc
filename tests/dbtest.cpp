@@ -24,6 +24,7 @@ static void ResetTables() {
   g.tables.clear();
   g.log.clear();
   g.readOnly = false;
+  g.noKeyset = false;
   mock::Table people;
   people.name = "people";
   people.cols = {{"ID", SQL_INTEGER, true},   {"NAME", SQL_VARCHAR, false},
@@ -664,6 +665,90 @@ static void TestExecuteAndTransactions() {
   CHECK(mock::G().nOpenStatements == 0);
 }
 
+// A dynaset reads each record again as it moves to it, through a
+// keyset-driven cursor, so it sees what other users changed and deleted
+// (but not what they added); a snapshot keeps what it read.
+static void TestDynaset() {
+  CDatabase db, other;
+  db.OpenEx(_T("DSN=Mock"), CDatabase::noOdbcDialog);
+  other.OpenEx(_T("DSN=Mock"), CDatabase::noOdbcDialog);
+  CPeopleSet dyn(&db), snap(&db);
+  dyn.Open(CRecordset::dynaset);
+  snap.Open(CRecordset::snapshot);
+  CHECK(dyn.m_Name == _T("Ada") && snap.m_Name == _T("Ada"));
+  dyn.MoveNext();
+  snap.MoveNext();
+
+  other.ExecuteSQL(_T("UPDATE people SET NAME = 'Ada L', AGE = 37 WHERE ID = 1"));
+  other.ExecuteSQL(_T("UPDATE people SET AGE = 81 WHERE ID = 2"));
+  other.ExecuteSQL(_T("DELETE FROM people WHERE ID = 3"));
+  other.ExecuteSQL(_T("INSERT INTO people (ID, NAME) VALUES (9, 'Zed')"));
+
+  dyn.MovePrev();
+  CHECK(dyn.m_ID == 1 && dyn.m_Name == _T("Ada L") && dyn.m_Age == 37);
+  snap.MovePrev();
+  CHECK(snap.m_ID == 1 && snap.m_Name == _T("Ada") && snap.m_Age == 36);
+
+  // The changed record can be edited: the dynaset matches it by the
+  // values it now has; the snapshot's old values match no record.
+  dyn.MoveNext();
+  CHECK(dyn.m_ID == 2 && dyn.m_Age == 81);
+  dyn.Edit();
+  dyn.m_Name = _T("Brian K");
+  CHECK(dyn.Update());
+  CHECK(Cell(2, "NAME").s == "Brian K" && Cell(2, "AGE").i == 81);
+  snap.MoveNext();
+  snap.Edit();
+  snap.m_Name = _T("Brian X");
+  CHECK(DBError([&] { snap.Update(); }) == AFX_SQL_ERROR_NO_ROWS_AFFECTED);
+  snap.CancelUpdate();
+
+  // Another user's deletion shows as a deleted record.
+  dyn.MoveNext();
+  CHECK(dyn.IsDeleted());
+  snap.MoveNext();
+  CHECK(snap.m_ID == 3 && !snap.IsDeleted());
+
+  // Added records are not part of either until Requery.
+  dyn.MoveLast();
+  CHECK(dyn.GetRecordCount() == 5 && dyn.m_ID == 5);
+  dyn.Requery();
+  dyn.MoveLast();
+  CHECK(dyn.GetRecordCount() == 5 && dyn.m_ID == 9);  // 3 gone, 9 added
+
+  // A changed current record is read again with Move(0).
+  dyn.MoveFirst();
+  other.ExecuteSQL(_T("UPDATE people SET AGE = 38 WHERE ID = 1"));
+  CHECK(dyn.m_Age == 37);
+  dyn.Move(0);
+  CHECK(dyn.m_Age == 38);
+  dyn.Close();
+  snap.Close();
+
+  // skipDeletedRecords passes over the records other users deleted.
+  CPeopleSet skip(&db);
+  skip.Open(CRecordset::dynaset, NULL, CRecordset::skipDeletedRecords);
+  other.ExecuteSQL(_T("DELETE FROM people WHERE ID = 2"));
+  skip.MoveNext();
+  CHECK(skip.m_ID == 4);
+  skip.MovePrev();
+  CHECK(skip.m_ID == 1);
+  skip.Close();
+
+  // With a driver that has no keyset-driven cursors, a dynaset keeps what
+  // it read, like a snapshot.
+  mock::G().noKeyset = true;
+  CPeopleSet plain(&db);
+  plain.Open(CRecordset::dynaset);
+  plain.MoveNext();
+  other.ExecuteSQL(_T("UPDATE people SET AGE = 39 WHERE ID = 1"));
+  plain.MovePrev();
+  CHECK(plain.m_ID == 1 && plain.m_Age == 38);
+  plain.Close();
+  mock::G().noKeyset = false;
+  CHECK(mock::G().nOpenStatements == 0);
+}
+
 int main() {
   ResetTables();
   TestDatabase();
@@ -676,6 +761,8 @@ int main() {
   TestReadOnlyAndForwardOnly();
   TestAdHoc();
   TestExecuteAndTransactions();
+  ResetTables();
+  TestDynaset();
   if (g_failures == 0) printf("PASS: all database tests\n");
   else printf("%d failure(s)\n", g_failures);
   return g_failures ? 1 : 0;

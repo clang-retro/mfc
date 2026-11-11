@@ -132,27 +132,50 @@ BOOL CMonikerFile::Detach(CFileException*) {
 // The bind status callback. It holds a pointer back to its file, which
 // the file clears when it closes, since urlmon may keep the callback a
 // little longer.
+//
+// It can be aggregated: made with a controlling IUnknown, it hands that
+// object its own IUnknown (m_xInner, which alone counts the callback's
+// references), and its IBindStatusCallback passes QueryInterface, AddRef
+// and Release on to the controlling object. A file's override of
+// CreateBindStatusCallback uses that to add interfaces of its own (such
+// as IHttpNegotiate or IAuthenticate) to the callback urlmon sees.
 
 class CAsyncMonikerFile::XBindStatusCallback final : public IBindStatusCallback {
 public:
-  explicit XBindStatusCallback(CAsyncMonikerFile* pOwner) : m_cRef(1), m_pOwner(pOwner) {}
+  XBindStatusCallback(CAsyncMonikerFile* pOwner, IUnknown* pUnkOuter)
+      : m_cRef(1), m_pOwner(pOwner), m_pUnkOuter(pUnkOuter != NULL ? pUnkOuter : &m_xInner) {
+    m_xInner.m_pThis = this;
+  }
 
-  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
-    if (ppv == NULL) return E_POINTER;
-    if (::IsEqualIID(iid, IID_IUnknown) || ::IsEqualIID(iid, IID_IBindStatusCallback)) {
-      *ppv = static_cast<IBindStatusCallback*>(this);
-      AddRef();
+  // The callback's own IUnknown.
+  struct XInner final : public IUnknown {
+    XBindStatusCallback* m_pThis;
+    STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+      if (ppv == NULL) return E_POINTER;
+      if (::IsEqualIID(iid, IID_IUnknown)) {
+        *ppv = static_cast<IUnknown*>(this);
+      } else if (::IsEqualIID(iid, IID_IBindStatusCallback)) {
+        *ppv = static_cast<IBindStatusCallback*>(m_pThis);
+      } else {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+      }
+      static_cast<IUnknown*>(*ppv)->AddRef();
       return S_OK;
     }
-    *ppv = NULL;
-    return E_NOINTERFACE;
+    STDMETHOD_(ULONG, AddRef)() { return (ULONG)::InterlockedIncrement(&m_pThis->m_cRef); }
+    STDMETHOD_(ULONG, Release)() {
+      LONG n = ::InterlockedDecrement(&m_pThis->m_cRef);
+      if (n == 0) delete m_pThis;
+      return (ULONG)n;
+    }
+  } m_xInner;
+
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    return m_pUnkOuter->QueryInterface(iid, ppv);
   }
-  STDMETHOD_(ULONG, AddRef)() { return (ULONG)::InterlockedIncrement(&m_cRef); }
-  STDMETHOD_(ULONG, Release)() {
-    LONG n = ::InterlockedDecrement(&m_cRef);
-    if (n == 0) delete this;
-    return (ULONG)n;
-  }
+  STDMETHOD_(ULONG, AddRef)() { return m_pUnkOuter->AddRef(); }
+  STDMETHOD_(ULONG, Release)() { return m_pUnkOuter->Release(); }
 
   STDMETHOD(OnStartBinding)(DWORD, IBinding* pib) {
     if (m_pOwner == NULL) return E_ABORT;
@@ -222,6 +245,7 @@ public:
 
   LONG m_cRef;
   CAsyncMonikerFile* m_pOwner;
+  IUnknown* m_pUnkOuter;  // the controlling object, or m_xInner
 };
 
 // ---------------------------------------------------------------------
@@ -232,15 +256,17 @@ CAsyncMonikerFile::CAsyncMonikerFile()
 
 CAsyncMonikerFile::~CAsyncMonikerFile() { CAsyncMonikerFile::Close(); }
 
-IUnknown* CAsyncMonikerFile::CreateBindStatusCallback(IUnknown*) {
+IUnknown* CAsyncMonikerFile::CreateBindStatusCallback(IUnknown* pUnkControlling) {
   if (m_pCallback != NULL) {
     m_pCallback->m_pOwner = NULL;
-    m_pCallback->Release();
+    m_pCallback->m_xInner.Release();
   }
-  // We keep one reference, so that Close can cut the callback off.
-  m_pCallback = new XBindStatusCallback(this);
-  m_pCallback->AddRef();
-  return m_pCallback;
+  // We keep one reference, so that Close can cut the callback off. The
+  // caller gets the callback's own IUnknown, which is what a controlling
+  // object keeps.
+  m_pCallback = new XBindStatusCallback(this, pUnkControlling);
+  m_pCallback->m_xInner.AddRef();
+  return &m_pCallback->m_xInner;
 }
 
 DWORD CAsyncMonikerFile::GetBindInfo() const {
@@ -358,7 +384,7 @@ void CAsyncMonikerFile::Close() {
   if (m_pCallback != NULL) m_pCallback->m_pOwner = NULL;
   if (m_pBinding != NULL) m_pBinding->Abort();
   if (m_pCallback != NULL) {
-    m_pCallback->Release();
+    m_pCallback->m_xInner.Release();
     m_pCallback = NULL;
   }
   if (m_pBSC != NULL) {

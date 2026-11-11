@@ -5,6 +5,7 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
+#include "ctlimpl.h"
 #include <afxocc.h>
 #include <olectl.h>
 #include <afxole.h>
@@ -767,6 +768,40 @@ CWnd* COleControlSite::SetFocus(LPMSG lpmsg) {
   return pOld;
 }
 
+BOOL COleControlSite::ShowPropertyFrame() {
+  if (m_pObject == NULL) return FALSE;
+  ISpecifyPropertyPages* pSpecify = NULL;
+  if (FAILED(m_pObject->QueryInterface(IID_ISpecifyPropertyPages, (void**)&pSpecify))) return FALSE;
+  CAUUID pages = {0, NULL};
+  HRESULT hr = pSpecify->GetPages(&pages);
+  pSpecify->Release();
+  if (FAILED(hr) || pages.cElems == 0) {
+    ::CoTaskMemFree(pages.pElems);
+    return FALSE;
+  }
+  // The frame's title: the control's name in the container, or its type.
+  CString strName = m_strName;
+  if (strName.IsEmpty()) {
+    LPOLESTR pszType = NULL;
+    if (SUCCEEDED(m_pObject->GetUserType(USERCLASSTYPE_SHORT, &pszType)) && pszType != NULL) {
+      strName = pszType;
+      ::CoTaskMemFree(pszType);
+    }
+  }
+  CStringW strNameW(strName);
+  HWND hWndParent = m_pCtrlCont->m_pWnd->GetSafeHwnd();
+  // The stock pages, where the system has none.
+  CDWordArray cookies;
+  cookies.SetSize(pages.cElems);
+  _AfxRegisterStockPropPages(pages.pElems, pages.cElems, cookies.GetData());
+  LPUNKNOWN pUnk = m_pObject;
+  hr = ::OleCreatePropertyFrame(hWndParent, 0, 0, strNameW, 1, &pUnk, pages.cElems, pages.pElems,
+                                ::GetUserDefaultLCID(), 0, NULL);
+  _AfxRevokeStockPropPages(cookies.GetData(), pages.cElems);
+  ::CoTaskMemFree(pages.pElems);
+  return SUCCEEDED(hr);
+}
+
 BOOL COleControlSite::DoVerb(LONG nVerb, LPMSG lpMsg) {
   if (m_pObject == NULL) return FALSE;
   return SUCCEEDED(m_pObject->DoVerb(nVerb, lpMsg, &m_xOleClientSite, 0,
@@ -962,8 +997,12 @@ STDMETHODIMP COleControlSite::XOleIPSite::OnInPlaceActivateEx(BOOL* pfNoRedraw, 
   pThis->OnActivated(dwFlags);
   return S_OK;
 }
-STDMETHODIMP COleControlSite::XOleIPSite::OnInPlaceDeactivateEx(BOOL) {
+STDMETHODIMP COleControlSite::XOleIPSite::OnInPlaceDeactivateEx(BOOL fNoRedraw) {
   SITE(OleIPSite);
+  // A windowed control that does not look the same inactive is drawn
+  // again by the container (as a windowless one always is).
+  if (!fNoRedraw && !pThis->m_bIsWindowless && pThis->m_pCtrlCont->m_pWnd->GetSafeHwnd() != NULL)
+    pThis->m_pCtrlCont->m_pWnd->InvalidateRect(&pThis->m_rect, TRUE);
   pThis->OnDeactivated();
   return S_OK;
 }
@@ -1208,7 +1247,10 @@ STDMETHODIMP COleControlSite::XOleControlSite::OnFocus(BOOL bGotFocus) {
     pThis->m_pCtrlCont->m_pSiteFocus = NULL;
   return S_OK;
 }
-STDMETHODIMP COleControlSite::XOleControlSite::ShowPropertyFrame() { return E_NOTIMPL; }
+STDMETHODIMP COleControlSite::XOleControlSite::ShowPropertyFrame() {
+  SITE(OleControlSite);
+  return pThis->ShowPropertyFrame() ? S_OK : E_FAIL;
+}
 
 // ---------------------------------------------------------------------
 // Ambient properties
@@ -1466,8 +1508,19 @@ COleControlSite* COleControlContainer::FindWindowlessSite(CPoint point) const {
   POSITION pos = m_listSitesOrWnds.GetTailPosition();
   while (pos != NULL) {
     COleControlSite* pSite = (COleControlSite*)m_listSitesOrWnds.GetPrev(pos);
-    if (pSite->m_bIsWindowless && (pSite->m_dwStyle & WS_VISIBLE) && pSite->m_rect.PtInRect(point))
-      return pSite;
+    if (!pSite->m_bIsWindowless || !(pSite->m_dwStyle & WS_VISIBLE) ||
+        !pSite->m_rect.PtInRect(point))
+      continue;
+    // A control that is not a rectangle says where it is (IViewObjectEx).
+    IViewObjectEx* pViewEx = NULL;
+    if (pSite->m_pObject != NULL &&
+        SUCCEEDED(pSite->m_pObject->QueryInterface(IID_IViewObjectEx, (void**)&pViewEx))) {
+      DWORD dwHit = HITRESULT_HIT;
+      HRESULT hr = pViewEx->QueryHitPoint(DVASPECT_CONTENT, &pSite->m_rect, point, 0, &dwHit);
+      pViewEx->Release();
+      if (SUCCEEDED(hr) && dwHit == HITRESULT_OUTSIDE) continue;
+    }
+    return pSite;
   }
   return NULL;
 }
@@ -1484,9 +1537,14 @@ BOOL COleControlContainer::OnPaint(CDC* pDC) {
     if (FAILED(pSite->m_pObject->QueryInterface(IID_IViewObject, (void**)&pView))) continue;
     RECTL rcl = {pSite->m_rect.left, pSite->m_rect.top, pSite->m_rect.right,
                  pSite->m_rect.bottom};
-    if (SUCCEEDED(pView->Draw(DVASPECT_CONTENT, -1, NULL, NULL, NULL, pDC->m_hDC, &rcl, NULL,
+    // The control may leave its objects in the DC (canOptimizeDraw): the
+    // DC is put back after each.
+    DVASPECTINFO info = {sizeof(DVASPECTINFO), DVASPECTINFOFLAG_CANOPTIMIZE};
+    int nSaved = pDC->SaveDC();
+    if (SUCCEEDED(pView->Draw(DVASPECT_CONTENT, -1, &info, NULL, NULL, pDC->m_hDC, &rcl, NULL,
                               NULL, 0)))
       bDrew = TRUE;
+    pDC->RestoreDC(nSaved);
     pView->Release();
   }
   return bDrew;

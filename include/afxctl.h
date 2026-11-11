@@ -417,7 +417,33 @@ public:
     windowlessActivate = 0x0020,
     canOptimizeDraw = 0x0040,
   };
+  // fastBeginPaint is the default way of painting here. clipPaintDC
+  // keeps OnDraw inside the control's rectangle (clear it for a control
+  // that never draws outside). noFlickerActivate: the control looks the
+  // same active and inactive, so activating and deactivating it need not
+  // redraw it. canOptimizeDraw: OnDraw may leave the DC's state as it
+  // finds it when the container allows that (IsOptimizedDraw).
+  // pointerInactive: the control answers IPointerInactive, so that a
+  // container can give it the mouse while it is not active.
   virtual DWORD GetControlFlags();
+  // Whether the container lets this drawing leave the DC's objects
+  // selected (DVASPECTINFOFLAG_CANOPTIMIZE; canOptimizeDraw).
+  BOOL IsOptimizedDraw() const { return m_bOptimizedDraw; }
+  // IPointerInactive, with pointerInactive.
+  virtual DWORD GetActivationPolicy();
+  virtual void OnInactiveMouseMove(LPCRECT lprcBounds, long x, long y, DWORD dwKeyState);
+  virtual BOOL OnInactiveSetCursor(LPCRECT lprcBounds, long x, long y, DWORD dwMouseMsg,
+                                   BOOL bSetAlways);
+  // IViewObjectEx: hit testing and the view's status, for containers that
+  // draw windowless controls themselves. A point or rectangle is in the
+  // container's coordinates, as is lpRectBounds, the control's.
+  virtual DWORD GetViewStatus();
+  virtual BOOL OnQueryHitPoint(DWORD dwAspect, LPCRECT pRectBounds, POINT ptlLoc,
+                               LONG lCloseHint, DWORD* pHitResult);
+  virtual BOOL OnQueryHitRect(DWORD dwAspect, LPCRECT pRectBounds, LPCRECT prcLoc,
+                              LONG lCloseHint, DWORD* pHitResult);
+  virtual BOOL OnGetNaturalExtent(DWORD dwAspect, LONG lindex, DVTARGETDEVICE* ptd,
+                                  HDC hicTargetDev, DVEXTENTINFO* pExtentInfo, LPSIZEL psizel);
   // A message from the container; its mouse coordinates are the
   // control's own. The default sends it through the message map.
   virtual BOOL OnWindowlessMessage(UINT msg, WPARAM wParam, LPARAM lParam, LRESULT* plResult);
@@ -584,6 +610,7 @@ public:
   BOOL m_bUIActive;
   BOOL m_bInPlaceSiteEx;
   BOOL m_bInPlaceSiteWndless;
+  BOOL m_bOptimizedDraw;  // while Draw runs: IsOptimizedDraw
   LPOLEINPLACESITEWINDOWLESS m_pInPlaceSiteWndless;
   short m_nFreezeEvents;
   BOOL m_bPendingUIActivation;
@@ -712,7 +739,7 @@ public:
     STDMETHOD(FreezeEvents)(BOOL bFreeze);
   END_INTERFACE_PART(OleControl)
 
-  BEGIN_INTERFACE_PART(ViewObject, IViewObject2)
+  BEGIN_INTERFACE_PART(ViewObject, IViewObjectEx)
     STDMETHOD(Draw)(DWORD dwDrawAspect, LONG lindex, void* pvAspect, DVTARGETDEVICE* ptd,
                     HDC hdcTargetDev, HDC hdcDraw, LPCRECTL lprcBounds, LPCRECTL lprcWBounds,
                     BOOL(STDMETHODCALLTYPE* pfnContinue)(ULONG_PTR dwContinue),
@@ -724,7 +751,22 @@ public:
     STDMETHOD(SetAdvise)(DWORD aspects, DWORD advf, LPADVISESINK pAdvSink);
     STDMETHOD(GetAdvise)(DWORD* pAspects, DWORD* pAdvf, LPADVISESINK* ppAdvSink);
     STDMETHOD(GetExtent)(DWORD dwDrawAspect, LONG lindex, DVTARGETDEVICE* ptd, LPSIZEL lpsizel);
+    STDMETHOD(GetRect)(DWORD dwAspect, LPRECTL pRect);
+    STDMETHOD(GetViewStatus)(DWORD* pdwStatus);
+    STDMETHOD(QueryHitPoint)(DWORD dwAspect, LPCRECT pRectBounds, POINT ptlLoc, LONG lCloseHint,
+                             DWORD* pHitResult);
+    STDMETHOD(QueryHitRect)(DWORD dwAspect, LPCRECT pRectBounds, LPCRECT pRectLoc,
+                            LONG lCloseHint, DWORD* pHitResult);
+    STDMETHOD(GetNaturalExtent)(DWORD dwAspect, LONG lindex, DVTARGETDEVICE* ptd,
+                                HDC hicTargetDev, DVEXTENTINFO* pExtentInfo, LPSIZEL psizel);
   END_INTERFACE_PART(ViewObject)
+
+  BEGIN_INTERFACE_PART(PointerInactive, IPointerInactive)
+    STDMETHOD(GetActivationPolicy)(DWORD* pdwPolicy);
+    STDMETHOD(OnInactiveMouseMove)(LPCRECT pRectBounds, LONG x, LONG y, DWORD grfKeyState);
+    STDMETHOD(OnInactiveSetCursor)(LPCRECT pRectBounds, LONG x, LONG y, DWORD dwMouseMsg,
+                                   BOOL fSetAlways);
+  END_INTERFACE_PART(PointerInactive)
 
   BEGIN_INTERFACE_PART(PersistStreamInit, IPersistStreamInit)
     STDMETHOD(GetClassID)(LPCLSID pClassID);

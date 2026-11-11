@@ -655,7 +655,7 @@ inline AFX_DISPINVOKE _AfxDispThunk(R (C::*)(A...) const) {
 }
 
 #define _AFX_DISP_FN(theClass, pfn) \
-  reinterpret_cast<AFX_PMSG>(&theClass::pfn), _AfxDispThunk(&theClass::pfn)
+  reinterpret_cast<AFX_PMSG>(_AFX_PMF(theClass, pfn)), _AfxDispThunk(_AFX_PMF(theClass, pfn))
 #define _AFX_DISP_NOFN (AFX_PMSG)0, (AFX_DISPINVOKE)0
 #define _AFX_DISP_MEMBER(theClass, memberName) \
   [](CCmdTarget* p) -> void* { return (void*)&static_cast<theClass*>(p)->memberName; }

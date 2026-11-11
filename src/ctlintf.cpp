@@ -10,9 +10,13 @@
 #include "ctlimpl.h"
 
 // The primary dispatch interface is the control's IDispatch.
+// IPointerInactive is there only for a control that asks for it.
 LPUNKNOWN COleControl::GetInterfaceHook(const void* piid) {
   if (m_piidPrimary != NULL && ::IsEqualIID(*(const IID*)piid, *m_piidPrimary))
     return GetIDispatch(FALSE);
+  if (::IsEqualIID(*(const IID*)piid, IID_IPointerInactive) &&
+      (GetControlFlags() & pointerInactive))
+    return &m_xPointerInactive;
   return NULL;
 }
 
@@ -425,8 +429,9 @@ STDMETHODIMP COleControl::XOleControl::FreezeEvents(BOOL bFreeze) {
 
 CTL_IUNKNOWN(ViewObject)
 
-STDMETHODIMP COleControl::XViewObject::Draw(DWORD dwDrawAspect, LONG, void*, DVTARGETDEVICE*,
-                                           HDC, HDC hdcDraw, LPCRECTL lprcBounds, LPCRECTL,
+STDMETHODIMP COleControl::XViewObject::Draw(DWORD dwDrawAspect, LONG, void* pvAspect,
+                                           DVTARGETDEVICE*, HDC, HDC hdcDraw,
+                                           LPCRECTL lprcBounds, LPCRECTL,
                                            BOOL(STDMETHODCALLTYPE*)(ULONG_PTR), ULONG_PTR) {
   METHOD_PROLOGUE(COleControl, ViewObject);
   if (dwDrawAspect != DVASPECT_CONTENT) return DV_E_DVASPECT;
@@ -439,12 +444,24 @@ STDMETHODIMP COleControl::XViewObject::Draw(DWORD dwDrawAspect, LONG, void*, DVT
   else
     return E_INVALIDARG;
   CDC* pDC = CDC::FromHandle(hdcDraw);
+  DWORD dwFlags = pThis->GetControlFlags();
+  // An IViewObjectEx container may let the control leave its objects in
+  // the DC (canOptimizeDraw); it then restores the DC itself.
+  const DVASPECTINFO* pInfo = (const DVASPECTINFO*)pvAspect;
+  BOOL bOptimize = (dwFlags & canOptimizeDraw) && pInfo != NULL &&
+                   pInfo->cb >= sizeof(DVASPECTINFO) &&
+                   (pInfo->dwFlags & DVASPECTINFOFLAG_CANOPTIMIZE);
   int nSaved = ::SaveDC(hdcDraw);
   DWORD dwType = ::GetObjectType(hdcDraw);
-  if (dwType == OBJ_METADC || dwType == OBJ_ENHMETADC)
+  BOOL bOldOptimized = pThis->m_bOptimizedDraw;
+  pThis->m_bOptimizedDraw = bOptimize;
+  if (dwType == OBJ_METADC || dwType == OBJ_ENHMETADC) {
     pThis->OnDrawMetafile(pDC, rcBounds);
-  else
+  } else {
+    if (dwFlags & clipPaintDC) pDC->IntersectClipRect(rcBounds);
     pThis->OnDraw(pDC, rcBounds, rcBounds);
+  }
+  pThis->m_bOptimizedDraw = bOldOptimized;
   ::RestoreDC(hdcDraw, nSaved);
   return S_OK;
 }
@@ -493,6 +510,81 @@ STDMETHODIMP COleControl::XViewObject::GetExtent(DWORD dwDrawAspect, LONG, DVTAR
   lpsizel->cx = pThis->m_cxExtent;
   lpsizel->cy = pThis->m_cyExtent;
   return S_OK;
+}
+
+STDMETHODIMP COleControl::XViewObject::GetRect(DWORD dwAspect, LPRECTL pRect) {
+  METHOD_PROLOGUE(COleControl, ViewObject);
+  if (pRect == NULL) return E_POINTER;
+  if (dwAspect != DVASPECT_CONTENT) return DV_E_DVASPECT;
+  // The control's extent, from its origin, in HIMETRIC.
+  pRect->left = pRect->top = 0;
+  pRect->right = pThis->m_cxExtent;
+  pRect->bottom = pThis->m_cyExtent;
+  return S_OK;
+}
+
+STDMETHODIMP COleControl::XViewObject::GetViewStatus(DWORD* pdwStatus) {
+  METHOD_PROLOGUE(COleControl, ViewObject);
+  if (pdwStatus == NULL) return E_POINTER;
+  *pdwStatus = pThis->GetViewStatus();
+  return S_OK;
+}
+
+STDMETHODIMP COleControl::XViewObject::QueryHitPoint(DWORD dwAspect, LPCRECT pRectBounds,
+                                                    POINT ptlLoc, LONG lCloseHint,
+                                                    DWORD* pHitResult) {
+  METHOD_PROLOGUE(COleControl, ViewObject);
+  if (pRectBounds == NULL || pHitResult == NULL) return E_POINTER;
+  return pThis->OnQueryHitPoint(dwAspect, pRectBounds, ptlLoc, lCloseHint, pHitResult)
+             ? S_OK
+             : E_FAIL;
+}
+
+STDMETHODIMP COleControl::XViewObject::QueryHitRect(DWORD dwAspect, LPCRECT pRectBounds,
+                                                   LPCRECT pRectLoc, LONG lCloseHint,
+                                                   DWORD* pHitResult) {
+  METHOD_PROLOGUE(COleControl, ViewObject);
+  if (pRectBounds == NULL || pRectLoc == NULL || pHitResult == NULL) return E_POINTER;
+  return pThis->OnQueryHitRect(dwAspect, pRectBounds, pRectLoc, lCloseHint, pHitResult)
+             ? S_OK
+             : E_FAIL;
+}
+
+STDMETHODIMP COleControl::XViewObject::GetNaturalExtent(DWORD dwAspect, LONG lindex,
+                                                       DVTARGETDEVICE* ptd, HDC hicTargetDev,
+                                                       DVEXTENTINFO* pExtentInfo,
+                                                       LPSIZEL psizel) {
+  METHOD_PROLOGUE(COleControl, ViewObject);
+  if (psizel == NULL) return E_POINTER;
+  return pThis->OnGetNaturalExtent(dwAspect, lindex, ptd, hicTargetDev, pExtentInfo, psizel)
+             ? S_OK
+             : E_NOTIMPL;
+}
+
+// ---------------------------------------------------------------------
+// IPointerInactive: the mouse over the control while it is not active
+
+CTL_IUNKNOWN(PointerInactive)
+
+STDMETHODIMP COleControl::XPointerInactive::GetActivationPolicy(DWORD* pdwPolicy) {
+  METHOD_PROLOGUE(COleControl, PointerInactive);
+  if (pdwPolicy == NULL) return E_POINTER;
+  *pdwPolicy = pThis->GetActivationPolicy();
+  return S_OK;
+}
+
+STDMETHODIMP COleControl::XPointerInactive::OnInactiveMouseMove(LPCRECT pRectBounds, LONG x,
+                                                               LONG y, DWORD grfKeyState) {
+  METHOD_PROLOGUE(COleControl, PointerInactive);
+  pThis->OnInactiveMouseMove(pRectBounds, x, y, grfKeyState);
+  return S_OK;
+}
+
+STDMETHODIMP COleControl::XPointerInactive::OnInactiveSetCursor(LPCRECT pRectBounds, LONG x,
+                                                               LONG y, DWORD dwMouseMsg,
+                                                               BOOL fSetAlways) {
+  METHOD_PROLOGUE(COleControl, PointerInactive);
+  return pThis->OnInactiveSetCursor(pRectBounds, x, y, dwMouseMsg, fSetAlways) ? S_OK : S_FALSE;
 }
 
 // ---------------------------------------------------------------------

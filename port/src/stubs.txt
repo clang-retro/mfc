@@ -208,12 +208,15 @@ SQLExecDirectA
 SQLExecDirectW
 SQLExecute
 SQLFetch
+SQLFetchScroll
 SQLFreeHandle
 SQLGetData
 SQLGetDiagRecA
 SQLGetDiagRecW
 SQLGetInfoA
 SQLGetInfoW
+SQLGetStmtAttrA
+SQLGetStmtAttrW
 SQLMoreResults
 SQLNumResultCols
 SQLPrepareA
