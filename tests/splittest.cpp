@@ -42,7 +42,7 @@ static CRect ClientRectOf(CWnd* pWnd, CWnd* pIn) {
 }
 
 static void LogRect(const char* pszName, const CRect& r) {
-  TestLog("%s %ld,%ld-%ld,%ld", pszName, r.left, r.top, r.right, r.bottom);
+  TestLog("%s %d,%d-%d,%d", pszName, r.left, r.top, r.right, r.bottom);
 }
 
 class CMainFrame : public CFrameWnd {
@@ -142,7 +142,7 @@ public:
         split.SendMessage(WM_HSCROLL, MAKEWPARAM(SB_LINEDOWN, 0), (LPARAM)pHBar->m_hWnd);
         CPoint pt0 = Pane(0, 0)->GetDeviceScrollPosition();
         CPoint pt1 = Pane(1, 0)->GetDeviceScrollPosition();
-        TestLog("after hscroll %ld,%ld and %ld,%ld", pt0.x, pt0.y, pt1.x, pt1.y);
+        TestLog("after hscroll %d,%d and %d,%d", pt0.x, pt0.y, pt1.x, pt1.y);
         CHECK(pt0.x == 220 && pt1.x == 220);
         // Each row has its own vertical bar.
         CWnd* pVBar1 = Bar(AFX_IDW_VSCROLL_FIRST + 1);
@@ -178,7 +178,7 @@ public:
         Pane(1, 1)->SendMessage(WM_MOUSEWHEEL, MAKEWPARAM(0, -WHEEL_DELTA), 0);
         CPoint pt10 = Pane(1, 0)->GetDeviceScrollPosition();
         CPoint pt11 = Pane(1, 1)->GetDeviceScrollPosition();
-        TestLog("after wheel %ld and %ld", pt10.y, pt11.y);
+        TestLog("after wheel %d and %d", pt10.y, pt11.y);
         CHECK(pt10.y > 150 && pt10.y == pt11.y);
         CHECK(Pane(0, 0)->GetDeviceScrollPosition().y == 0);
         TestSaveWindowBitmap(m_hWnd, _T("splittest-split.bmp"));
@@ -227,7 +227,7 @@ public:
         // The pane left is the one from column 1, row 0: it keeps the
         // horizontal position of its column (0) and the row's vertical (0).
         CPoint pt = Pane(0, 0)->GetDeviceScrollPosition();
-        TestLog("left with %ld,%ld", pt.x, pt.y);
+        TestLog("left with %d,%d", pt.x, pt.y);
         CHECK(pt.x == 0 && pt.y == 0);
         CHECK(ClientRectOf(Pane(0, 0), &split) == rectInside);
         CHECK(GetActiveView() == Pane(0, 0));

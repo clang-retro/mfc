@@ -231,7 +231,7 @@ public:
     CHECK(pSrvView != NULL && pSrvView->GetParentFrame() == g_pSrvDoc->InPlaceFrame());
     if (pSrvView == NULL) return;
     CRect rect = WindowRectIn(pSrvView->m_hWnd, View()->m_hWnd);
-    TestLog("server view %ld,%ld,%ld,%ld", rect.left, rect.top, rect.right, rect.bottom);
+    TestLog("server view %d,%d,%d,%d", rect.left, rect.top, rect.right, rect.bottom);
     CHECK(rect == rectExpect);
   }
 
@@ -361,7 +361,7 @@ public:
     // The page count, from the server view's OnPreparePrinting.
     LONG nFirst = 0, nPages = 0;
     CHECK(m_pItem->GetPageCount(&nFirst, &nPages));
-    TestLog("pages %ld from %ld", nPages, nFirst);
+    TestLog("pages %d from %d", nPages, nFirst);
     CHECK(nFirst == 1 && nPages == 3 && g_bLastWasDocObject);
     CPrintInfo info;
     CHECK(COleDocObjectItem::OnPreparePrinting(View(), &info));
@@ -422,7 +422,7 @@ public:
       int nBegin = g_nBeginPrinting;
       HRESULT hr = lpPrint->Print(PRINTFLAG_PRINTTOFILE, &ptd, &pSet, &stgm, &cont, 10,
                                   &nPrinted, &nLast);
-      TestLog("Print: %08lx, %ld pages to %ld, printed %s", (unsigned long)hr, nPrinted, nLast,
+      TestLog("Print: %08lx, %d pages to %d, printed %s", (unsigned long)hr, nPrinted, nLast,
               (LPCSTR)CStringA(g_strPrinted));
       CHECK(hr == S_OK && nPrinted == 2 && nLast == 12 && g_strPrinted == _T("23"));
       CHECK(cont.m_nCalls == 2 && cont.m_nLastPage == 12);

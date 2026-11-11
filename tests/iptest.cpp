@@ -188,7 +188,7 @@ public:
   virtual void OnGetItemPosition(CRect& rPosition) { rPosition = m_rect; }
   virtual BOOL OnChangeItemPosition(const CRect& rectPos) {
     g_nPosChanges++;
-    TestLog("position change to %ld,%ld,%ld,%ld", rectPos.left, rectPos.top, rectPos.right,
+    TestLog("position change to %d,%d,%d,%d", rectPos.left, rectPos.top, rectPos.right,
             rectPos.bottom);
     if (!COleClientItem::OnChangeItemPosition(rectPos)) return FALSE;
     m_rect = rectPos;
@@ -281,7 +281,7 @@ public:
     CRect rectFrame = WindowRectIn(pWnd->m_hWnd, View()->m_hWnd);
     CRect rectExpect(m_pItem->m_rect);
     rectExpect.InflateRect(nBorder, nBorder);
-    TestLog("in-place frame %ld,%ld,%ld,%ld", rectFrame.left, rectFrame.top, rectFrame.right,
+    TestLog("in-place frame %d,%d,%d,%d", rectFrame.left, rectFrame.top, rectFrame.right,
             rectFrame.bottom);
     CHECK(rectFrame == rectExpect);
     // The server's view is in it, over the item.
@@ -290,7 +290,7 @@ public:
     CHECK(pSrvView != NULL && pSrvView->GetParentFrame() == g_pIPFrame);
     if (pSrvView != NULL) {
       CRect rectView = WindowRectIn(pSrvView->m_hWnd, View()->m_hWnd);
-      TestLog("server view %ld,%ld,%ld,%ld", rectView.left, rectView.top, rectView.right,
+      TestLog("server view %d,%d,%d,%d", rectView.left, rectView.top, rectView.right,
               rectView.bottom);
       CHECK(rectView == m_pItem->m_rect);
       CHECK(g_pIPFrame->GetActiveView() == pSrvView);
@@ -308,7 +308,7 @@ public:
     CHECK(::GetAncestor(g_pIPFrame->m_wndToolBar.m_hWnd, GA_ROOT) == m_hWnd);
     CRect rectBar = WindowRectIn(g_pIPFrame->m_wndToolBar.m_hWnd, m_hWnd);
     CRect rectCntrView = WindowRectIn(View()->m_hWnd, m_hWnd);
-    TestLog("server toolbar %ld,%ld,%ld,%ld, view top %ld", rectBar.left, rectBar.top,
+    TestLog("server toolbar %d,%d,%d,%d, view top %d", rectBar.left, rectBar.top,
             rectBar.right, rectBar.bottom, rectCntrView.top);
     CHECK(rectBar.top >= 0 && rectBar.top < 4);
     CHECK(rectCntrView.top >= rectBar.bottom && rectCntrView.top <= rectBar.bottom + 4);
@@ -428,7 +428,7 @@ public:
     case 4: {
       if (!Wait(g_nPosChanges > 0, "the new position")) return;
       CHECK(g_nPosChanges == 1);
-      TestLog("item now %ld,%ld,%ld,%ld", m_pItem->m_rect.left, m_pItem->m_rect.top,
+      TestLog("item now %d,%d,%d,%d", m_pItem->m_rect.left, m_pItem->m_rect.top,
               m_pItem->m_rect.right, m_pItem->m_rect.bottom);
       CHECK(m_pItem->m_rect == CRect(20, 20, 260, 140));
       CheckUIActive("after resizing");
@@ -553,7 +553,7 @@ void CMainFrame::CheckTracker() {
   View()->ClientToScreen(&ptScreen);
   ::SetCursorPos(ptScreen.x, ptScreen.y);
   BOOL bMoved = tracker.Track(View(), CPoint(100, 75));
-  TestLog("tracked to %ld,%ld,%ld,%ld", tracker.m_rect.left, tracker.m_rect.top,
+  TestLog("tracked to %d,%d,%d,%d", tracker.m_rect.left, tracker.m_rect.top,
           tracker.m_rect.right, tracker.m_rect.bottom);
   CHECK(bMoved);
   CHECK(tracker.m_rect == CRect(70, 60, 170, 110));
@@ -569,7 +569,7 @@ void CMainFrame::CheckTracker() {
   ::PostMessage(hWnd, WM_LBUTTONUP, 0, MAKELPARAM(60, 40));
   CRectTracker band;
   CHECK(band.TrackRubberBand(View(), CPoint(10, 10)));
-  TestLog("rubber band %ld,%ld,%ld,%ld", band.m_rect.left, band.m_rect.top, band.m_rect.right,
+  TestLog("rubber band %d,%d,%d,%d", band.m_rect.left, band.m_rect.top, band.m_rect.right,
           band.m_rect.bottom);
   CHECK(band.m_rect == CRect(10, 10, 60, 40));
 }

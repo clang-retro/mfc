@@ -363,7 +363,7 @@ void CLinkApp::TestOpenDocument() {
   }
   SIZEL size = {0, 0};
   CHECK(lpItemObj->GetExtent(DVASPECT_CONTENT, &size) == S_OK);
-  TestLog("item extent %ld x %ld", size.cx, size.cy);
+  TestLog("item extent %d x %d", size.cx, size.cy);
   CHECK(size.cx == 1000 && size.cy == 1000);
   CLSID clsid = CLSID_NULL;
   CHECK(lpItemObj->GetUserClassID(&clsid) == S_OK && ::IsEqualCLSID(clsid, CLSID_LinkDoc));

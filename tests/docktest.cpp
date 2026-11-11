@@ -17,7 +17,7 @@ static CRect ScreenRect(CWnd* pWnd) {
 }
 
 static void LogRect(const char* pszName, const CRect& r) {
-  TestLog("%s %ld,%ld-%ld,%ld", pszName, r.left, r.top, r.right, r.bottom);
+  TestLog("%s %d,%d-%d,%d", pszName, r.left, r.top, r.right, r.bottom);
 }
 
 class CMainFrame : public CFrameWnd {
@@ -148,7 +148,7 @@ public:
         for (int i = 0; i < m_wndTools.GetCount(); i++) {
           CRect rc;
           m_wndTools.GetItemRect(i, &rc);
-          TestLog("btn %d style %08x rect %ld,%ld-%ld,%ld", i, m_wndTools.GetButtonStyle(i), rc.left, rc.top, rc.right, rc.bottom);
+          TestLog("btn %d style %08x rect %d,%d-%d,%d", i, m_wndTools.GetButtonStyle(i), rc.left, rc.top, rc.right, rc.bottom);
         }
         CRect rcA, rcB;
         m_wndTools.GetItemRect(0, &rcA);

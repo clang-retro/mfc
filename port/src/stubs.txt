@@ -43,7 +43,6 @@ GetOpenFileNameW
 GetRunningObjectTable
 GetSaveFileNameA
 GetSaveFileNameW
-InitCommonControls
 LoadTypeLib
 OleCreate
 OleCreateFontIndirect
@@ -227,8 +226,6 @@ InternetWriteFile
 # from main: HTML views, DAO, OLE dialogs, controls
 CoInternetCreateSecurityManager
 CoRegisterMessageFilter
-LBItemFromPt
-MakeDragList
 OleCreatePictureIndirect
 OleLoadPicture
 OleUIChangeSourceA

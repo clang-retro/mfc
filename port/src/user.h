@@ -210,6 +210,7 @@ void RegisterButtonClasses();  // user_button.cpp: Button, Static, ScrollBar
 void RegisterEditClass();  // user_edit.cpp
 void RegisterListClasses();  // user_listbox.cpp: ListBox, ComboLBox, ComboBox
 void RegisterMdiClass();  // user_mdi.cpp: MDIClient
+void RegisterCommonControls();  // comctl_misc.cpp: the common control classes
 void DrawMenuBarIn(Window* w, HDC dc, const RECT& bar);
 void MenuCommand(Window* w, WPARAM wParam, LPARAM lParam);
 void MenusOnDestroy(Window* w);
