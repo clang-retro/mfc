@@ -163,10 +163,10 @@ static void TestTree() {
   CHECK(a && b);
   CHECK(::GetParent(a) == top && ::IsChild(top, a) && !::IsChild(a, top));
   CHECK(::GetDlgItem(top, 102) == b && ::GetDlgCtrlID(a) == 101);
-  // The newest child is on top.
-  CHECK(::GetWindow(top, GW_CHILD) == b && ::GetWindow(b, GW_HWNDNEXT) == a);
-  ::SetWindowPos(a, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-  CHECK(::GetWindow(top, GW_CHILD) == a);
+  // Children stay in the order they were made.
+  CHECK(::GetWindow(top, GW_CHILD) == a && ::GetWindow(a, GW_HWNDNEXT) == b);
+  ::SetWindowPos(b, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+  CHECK(::GetWindow(top, GW_CHILD) == b);
 
   POINT p = {0, 0};
   ::ClientToScreen(a, &p);
@@ -287,7 +287,10 @@ static void TestThreads() {
 static HWND g_cbtCreated = NULL;
 static bool g_cbtBeforeNcCreate = false;
 static LRESULT CALLBACK CbtHook(int code, WPARAM wp, LPARAM lp) {
-  if (code == HCBT_CREATEWND) {
+  // Only this test's class counts; Wine makes windows of its own.
+  wchar_t cls[64] = L"";
+  if (code == HCBT_CREATEWND) ::GetClassNameW((HWND)wp, cls, 64);
+  if (code == HCBT_CREATEWND && !g_cbtCreated && lstrcmpW(cls, kClass) == 0) {
     g_cbtCreated = (HWND)wp;
     g_cbtBeforeNcCreate = !Seen(WM_NCCREATE);
   }
@@ -298,6 +301,7 @@ static void TestHooksAndAnsi() {
   HHOOK hook = ::SetWindowsHookExW(WH_CBT, CbtHook, NULL, ::GetCurrentThreadId());
   CHECK(hook != NULL);
   g_msgs.clear();
+  g_cbtCreated = NULL;
   HWND h = NewTop(WS_OVERLAPPEDWINDOW, 0, 0, 200, 100);
   CHECK(g_cbtCreated == h && g_cbtBeforeNcCreate);
   CHECK(::UnhookWindowsHookEx(hook));

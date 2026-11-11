@@ -557,7 +557,9 @@ static HWND CreateWindowCore(DWORD exStyle, LPCWSTR className, LPCWSTR windowNam
     w->extra.resize(cls->wc.cbWndExtra > 0 ? cls->wc.cbWndExtra : 0);
     w->rect = MakeRect(x, y, x + cx, y + cy);
     w->client = MakeRect(0, 0, cx, cy);
-    if (!messageOnly) LinkAfter(w, HWND_TOP);
+    // A child goes below its siblings, so that their order is the order
+    // they were made in (a dialog's tab order); a top-level window on top.
+    if (!messageOnly) LinkAfter(w, (style & WS_CHILD) ? HWND_BOTTOM : HWND_TOP);
     ResizeSurface(w);
     // A top-level window takes its class's menu when it names none.
     if (!(style & WS_CHILD) && !menu && cls->wc.lpszMenuName) {
