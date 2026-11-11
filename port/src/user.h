@@ -227,6 +227,16 @@ void CharInput(Window* top, wchar_t ch);
 void CloseRequested(Window* top);
 void ResizeRequested(Window* top, int width, int height);
 
+// A cursor's picture for a backend: ARGB pixels, not premultiplied, top
+// row first, and its IDC_ number when it is one of the system's.
+struct CursorPicture {
+  int systemId = 0;
+  POINT hotspot = {0, 0};
+  int width = 0, height = 0;
+  std::vector<DWORD> argb;
+};
+bool CursorImage(HCURSOR c, CursorPicture* out);
+
 // The backend: how top-level windows are shown.
 struct Backend {
   virtual ~Backend() {}
@@ -240,6 +250,8 @@ struct Backend {
   // Moving or sizing a top-level window with the mouse, for displays
   // where only the compositor can; hit is HTCAPTION or a frame edge.
   virtual bool BeginMoveSize(Window* /*w*/, LRESULT /*hit*/) { return false; }
+  // The pointer's shape over the program's windows; NULL hides it.
+  virtual void SetCursor(HCURSOR /*c*/) {}
   // Waits up to timeout ms for input, handing what comes to the input
   // functions above; returns early when WakeBackend is called. Called
   // without the lock.

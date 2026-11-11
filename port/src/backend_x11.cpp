@@ -38,7 +38,7 @@ namespace {
   F(XFreeGC) F(XPutImage) F(XInitImage) F(XFlush) F(XPending) F(XNextEvent) F(XLookupString) F(XLookupKeysym) \
   F(XSetTransientForHint) F(XSetWMNormalHints) F(XSetWMHints) F(XStoreName) F(XDefineCursor)                  \
   F(XCreateFontCursor) F(XRaiseWindow) F(XSetInputFocus) F(XWarpPointer) F(XGetWindowAttributes)               \
-  F(XTranslateCoordinates) F(XSync)
+  F(XTranslateCoordinates) F(XSync) F(XFreeCursor)
 
 struct XLib {
 #define F(name) decltype(&::name) name = nullptr;
@@ -56,6 +56,47 @@ struct XLib {
     return true;
   }
 };
+
+// libXcursor, for cursors in color; without it they are black and white
+// font cursors. Its header may be missing, so the image is declared here
+// as the library defines it.
+struct XcursorImageRec {
+  unsigned version, size, width, height, xhot, yhot, delay;
+  unsigned* pixels;  // ARGB, not premultiplied
+};
+struct XcursorLib {
+  XcursorImageRec* (*XcursorImageCreate)(int width, int height) = nullptr;
+  void (*XcursorImageDestroy)(XcursorImageRec* image) = nullptr;
+  Cursor (*XcursorImageLoadCursor)(Display* dpy, const XcursorImageRec* image) = nullptr;
+  bool Load() {
+    void* lib = dlopen("libXcursor.so.1", RTLD_NOW | RTLD_LOCAL);
+    if (!lib) return false;
+    XcursorImageCreate = (decltype(XcursorImageCreate))dlsym(lib, "XcursorImageCreate");
+    XcursorImageDestroy = (decltype(XcursorImageDestroy))dlsym(lib, "XcursorImageDestroy");
+    XcursorImageLoadCursor = (decltype(XcursorImageLoadCursor))dlsym(lib, "XcursorImageLoadCursor");
+    return XcursorImageCreate && XcursorImageDestroy && XcursorImageLoadCursor;
+  }
+};
+
+// The system cursors' nearest X font cursors.
+unsigned FontCursorFor(int id) {
+  switch (id) {
+    case 32513: return XC_xterm;               // IDC_IBEAM
+    case 32514: return XC_watch;               // IDC_WAIT
+    case 32515: return XC_crosshair;           // IDC_CROSS
+    case 32516: return XC_sb_up_arrow;         // IDC_UPARROW
+    case 32640: case 32646: return XC_fleur;   // IDC_SIZE, IDC_SIZEALL
+    case 32642: return XC_bottom_right_corner; // IDC_SIZENWSE
+    case 32643: return XC_bottom_left_corner;  // IDC_SIZENESW
+    case 32644: return XC_sb_h_double_arrow;   // IDC_SIZEWE
+    case 32645: return XC_sb_v_double_arrow;   // IDC_SIZENS
+    case 32648: return XC_circle;              // IDC_NO
+    case 32649: return XC_hand2;               // IDC_HAND
+    case 32650: return XC_watch;               // IDC_APPSTARTING
+    case 32651: return XC_question_arrow;      // IDC_HELP
+  }
+  return XC_left_ptr;
+}
 
 // The keys that are not text, by keysym.
 struct KeyMap {
@@ -113,6 +154,11 @@ struct X11Backend : Backend {
   std::map<::Window, Native*> byXid;
   std::recursive_mutex lock;  // the X connection and the map
   Cursor arrow = 0;
+  XcursorLib xcursor;
+  bool haveXcursor = false;
+  Cursor cursor = 0;          // the one the windows show
+  bool cursorOwned = false;   // made for a program's cursor, freed when replaced
+  std::map<unsigned, Cursor> fontCursors;
   bool moving = false;  // a ConfigureNotify is moving one of ours
   DWORD lastPress = 0;
 
@@ -148,6 +194,8 @@ struct X11Backend : Backend {
     typeTooltip = x.XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_TOOLTIP", False);
     typeCombo = x.XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_COMBO", False);
     arrow = x.XCreateFontCursor(dpy, XC_left_ptr);
+    cursor = arrow;
+    haveXcursor = xcursor.Load();
     return true;
   }
 
@@ -231,7 +279,7 @@ struct X11Backend : Backend {
     a.override_redirect = n->managed ? False : True;
     a.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
                    PointerMotionMask | StructureNotifyMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask;
-    a.cursor = arrow;
+    a.cursor = cursor;
     n->xid = x.XCreateWindow(dpy, root, w->rect.left, w->rect.top, n->width, n->height, 0, CopyFromParent,
                              InputOutput, CopyFromParent, CWBackPixel | CWOverrideRedirect | CWEventMask | CWCursor,
                              &a);
@@ -339,6 +387,50 @@ struct X11Backend : Backend {
     Native* n = NativeOf(w);
     if (!n || !dpy || !n->mapped) return;
     Put(n, r);
+    x.XFlush(dpy);
+  }
+
+  // A cursor in color, or with no font cursor like it, from its picture.
+  Cursor MakeCursor(const CursorPicture& p) {
+    if (!haveXcursor || p.width <= 0 || p.height <= 0) return 0;
+    XcursorImageRec* img = xcursor.XcursorImageCreate(p.width, p.height);
+    if (!img) return 0;
+    img->xhot = std::min<int>(std::max<int>(p.hotspot.x, 0), p.width - 1);
+    img->yhot = std::min<int>(std::max<int>(p.hotspot.y, 0), p.height - 1);
+    memcpy(img->pixels, p.argb.data(), p.argb.size() * 4);
+    Cursor c = xcursor.XcursorImageLoadCursor(dpy, img);
+    xcursor.XcursorImageDestroy(img);
+    return c;
+  }
+
+  void SetCursor(HCURSOR h) override {
+    CursorPicture p;
+    bool have = h && CursorImage(h, &p);
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!dpy) return;
+    Cursor c = 0;
+    bool owned = false;
+    if (!h) {
+      // Hidden: a cursor with nothing in it.
+      CursorPicture blank;
+      blank.width = blank.height = 1;
+      blank.argb.assign(1, 0);
+      c = MakeCursor(blank);
+      owned = c != 0;
+    } else if (have && p.systemId == 0) {
+      c = MakeCursor(p);
+      owned = c != 0;
+    }
+    if (!c) {
+      unsigned shape = FontCursorFor(have ? p.systemId : 0);
+      auto it = fontCursors.find(shape);
+      if (it == fontCursors.end()) it = fontCursors.emplace(shape, x.XCreateFontCursor(dpy, shape)).first;
+      c = it->second;
+    }
+    for (auto& e : byXid) x.XDefineCursor(dpy, e.first, c);
+    if (cursorOwned && cursor != c) x.XFreeCursor(dpy, cursor);
+    cursor = c;
+    cursorOwned = owned;
     x.XFlush(dpy);
   }
 

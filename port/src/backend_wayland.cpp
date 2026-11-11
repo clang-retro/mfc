@@ -361,6 +361,8 @@ struct WaylandBackend : Backend {
   wl_cursor_theme* cursorTheme = NULL;
   wl_surface* cursorSurface = NULL;
   int cursorHotX = 0, cursorHotY = 0;
+  bool cursorHidden = false;
+  Buffer cursorBuffer;  // a program's own cursor
 
   // The keyboard
   Native* kbdIn = NULL;
@@ -396,18 +398,9 @@ struct WaylandBackend : Backend {
     if (wl.cursors) {
       const char* size = getenv("XCURSOR_SIZE");
       cursorTheme = wl.wl_cursor_theme_load(getenv("XCURSOR_THEME"), size ? atoi(size) : 24, shm);
-      wl_cursor* c = cursorTheme ? wl.wl_cursor_theme_get_cursor(cursorTheme, "left_ptr") : NULL;
-      if (!c && cursorTheme) c = wl.wl_cursor_theme_get_cursor(cursorTheme, "default");
-      if (c && c->image_count > 0) {
-        wl_cursor_image* img = c->images[0];
-        cursorSurface = wl_compositor_create_surface(compositor);
-        wl_surface_attach(cursorSurface, wl.wl_cursor_image_get_buffer(img), 0, 0);
-        wl_surface_damage(cursorSurface, 0, 0, img->width, img->height);
-        wl_surface_commit(cursorSurface);
-        cursorHotX = img->hotspot_x;
-        cursorHotY = img->hotspot_y;
-      }
     }
+    cursorSurface = wl_compositor_create_surface(compositor);
+    ThemeCursor("left_ptr");
     char comm[64] = "";
     FILE* f = fopen("/proc/self/comm", "r");
     if (f) {
@@ -808,6 +801,96 @@ struct WaylandBackend : Backend {
   }
 
   // ---------------------------------------------------------------
+  // The pointer's shape
+
+  // Shows a cursor from the theme; false when the theme lacks it.
+  bool ThemeCursor(const char* name) {
+    if (!cursorTheme) return false;
+    wl_cursor* c = wl.wl_cursor_theme_get_cursor(cursorTheme, name);
+    if (!c && strcmp(name, "left_ptr") == 0) c = wl.wl_cursor_theme_get_cursor(cursorTheme, "default");
+    if (!c || c->image_count == 0) return false;
+    wl_cursor_image* img = c->images[0];
+    wl_surface_attach(cursorSurface, wl.wl_cursor_image_get_buffer(img), 0, 0);
+    wl_surface_damage(cursorSurface, 0, 0, img->width, img->height);
+    wl_surface_commit(cursorSurface);
+    cursorHotX = img->hotspot_x;
+    cursorHotY = img->hotspot_y;
+    return true;
+  }
+
+  // Shows a cursor from its picture.
+  bool PictureCursor(const CursorPicture& p) {
+    if (p.width <= 0 || p.height <= 0) return false;
+    Buffer& b = cursorBuffer;
+    FreeBuffer(b);
+    size_t size = (size_t)p.width * p.height * 4;
+    int fd = memfd_create("winport-cursor", MFD_CLOEXEC);
+    if (fd < 0) return false;
+    void* data = ftruncate(fd, (off_t)size) == 0 ? mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0) : MAP_FAILED;
+    if (data == MAP_FAILED) {
+      close(fd);
+      return false;
+    }
+    // The compositor wants alpha premultiplied.
+    DWORD* out = (DWORD*)data;
+    for (size_t i = 0; i < p.argb.size(); i++) {
+      DWORD c = p.argb[i], a = c >> 24;
+      out[i] = (a << 24) | ((((c >> 16) & 0xFF) * a / 255) << 16) | ((((c >> 8) & 0xFF) * a / 255) << 8) |
+               ((c & 0xFF) * a / 255);
+    }
+    wl_shm_pool* pool = wl_shm_create_pool(shm, fd, (int32_t)size);
+    b.buffer = wl_shm_pool_create_buffer(pool, 0, p.width, p.height, p.width * 4, WL_SHM_FORMAT_ARGB8888);
+    wl_shm_pool_destroy(pool);
+    close(fd);
+    b.data = data;
+    b.size = size;
+    b.width = p.width;
+    b.height = p.height;
+    wl_surface_attach(cursorSurface, b.buffer, 0, 0);
+    wl_surface_damage(cursorSurface, 0, 0, p.width, p.height);
+    wl_surface_commit(cursorSurface);
+    cursorHotX = p.hotspot.x;
+    cursorHotY = p.hotspot.y;
+    return true;
+  }
+
+  void ApplyCursor() {
+    if (!pointer || !enterSerial) return;
+    if (cursorHidden) wl_pointer_set_cursor(pointer, enterSerial, NULL, 0, 0);
+    else wl_pointer_set_cursor(pointer, enterSerial, cursorSurface, cursorHotX, cursorHotY);
+  }
+
+  void SetCursor(HCURSOR h) override {
+    CursorPicture p;
+    bool have = h && CursorImage(h, &p);
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!dpy) return;
+    cursorHidden = !h;
+    if (h) {
+      const char* name = NULL;
+      switch (have ? p.systemId : 32512) {
+        case 32512: name = "left_ptr"; break;
+        case 32513: name = "xterm"; break;
+        case 32514: name = "watch"; break;
+        case 32515: name = "crosshair"; break;
+        case 32516: name = "sb_up_arrow"; break;
+        case 32640: case 32646: name = "fleur"; break;
+        case 32642: name = "bottom_right_corner"; break;
+        case 32643: name = "bottom_left_corner"; break;
+        case 32644: name = "sb_h_double_arrow"; break;
+        case 32645: name = "sb_v_double_arrow"; break;
+        case 32648: name = "crossed_circle"; break;
+        case 32649: name = "hand2"; break;
+        case 32650: name = "left_ptr_watch"; break;
+        case 32651: name = "question_arrow"; break;
+      }
+      if (!(name && ThemeCursor(name)) && !(have && PictureCursor(p))) ThemeCursor("left_ptr");
+    }
+    ApplyCursor();
+    wl.wl_display_flush(dpy);
+  }
+
+  // ---------------------------------------------------------------
   // The pointer
 
   static Native* Of(wl_surface* s) {
@@ -838,7 +921,7 @@ struct WaylandBackend : Backend {
     b->enterSerial = serial;
     b->ptrIn = Of(s);
     b->ptrAt = {wl_fixed_to_int(x), wl_fixed_to_int(y)};
-    if (b->cursorSurface) wl_pointer_set_cursor(p, serial, b->cursorSurface, b->cursorHotX, b->cursorHotY);
+    b->ApplyCursor();
     b->EndGrab();
     if (b->ptrIn) MouseInput(b->ptrIn->w, WM_MOUSEMOVE, b->ptrAt.x, b->ptrAt.y, b->Keys());
   }

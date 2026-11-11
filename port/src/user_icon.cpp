@@ -37,6 +37,38 @@ IconObj* IconOf(HICON h) {
   return o;
 }
 
+bool CursorImage(HCURSOR c, CursorPicture* out) {
+  IconObj* o = IconOf(c);
+  if (!o) return false;
+  BitmapObj* mask = GdiAs<BitmapObj>(o->mask, OBJ_BITMAP);
+  BitmapObj* color = o->color ? GdiAs<BitmapObj>(o->color, OBJ_BITMAP) : NULL;
+  if (!mask) return false;
+  out->systemId = o->systemId;
+  out->hotspot = o->hotspot;
+  // Without a color image the mask's lower half is the XOR image.
+  int w = mask->width, h = color ? mask->height : mask->height / 2;
+  if (w <= 0 || h <= 0) return false;
+  out->width = w;
+  out->height = h;
+  out->argb.assign((size_t)w * h, 0);
+  Pixels m = mask->Lock();
+  Pixels x = color ? color->Lock() : m;
+  int xOff = color ? 0 : h;
+  for (int y = 0; y < h; y++)
+    for (int i = 0; i < w; i++) {
+      bool andBit = (m.Row(y)[i] & 0xFFFFFF) != 0;
+      DWORD px = (y + xOff < x.height && i < x.width) ? x.Row(y + xOff)[i] : 0;
+      DWORD& d = out->argb[(size_t)y * w + i];
+      if (o->alpha) d = px;
+      else if (!andBit) d = 0xFF000000 | (px & 0xFFFFFF);
+      else if (px & 0xFFFFFF) d = 0xFF000000;  // inverts the screen: black is the nearest
+      else d = 0;
+    }
+  if (color) color->Unlock();
+  mask->Unlock();
+  return true;
+}
+
 }  // namespace winport
 
 namespace {

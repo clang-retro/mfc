@@ -597,10 +597,16 @@ BOOL WINAPI SetCursorPos(int x, int y) {
 HCURSOR WINAPI SetCursor(HCURSOR c) {
   HCURSOR old = g_cursor;
   g_cursor = c;
+  if (c != old) GetBackend()->SetCursor(g_cursorShown >= 0 ? c : NULL);
   return old;
 }
 HCURSOR WINAPI GetCursor(void) { return g_cursor; }
-int WINAPI ShowCursor(BOOL show) { return show ? ++g_cursorShown : --g_cursorShown; }
+int WINAPI ShowCursor(BOOL show) {
+  int n = show ? ++g_cursorShown : --g_cursorShown;
+  if (n == 0 && show) GetBackend()->SetCursor(g_cursor);
+  if (n == -1 && !show) GetBackend()->SetCursor(NULL);
+  return n;
+}
 
 BOOL WINAPI ClipCursor(const RECT* r) {
   g_clipCursor = r ? *r : MakeRect(0, 0, 0, 0);

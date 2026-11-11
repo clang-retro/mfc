@@ -697,18 +697,28 @@ static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
         if (r) return r;
       }
       return MA_ACTIVATE;
-    case WM_SETCURSOR:
+    case WM_SETCURSOR: {
       if (w->Child() && w->parent && SendTo(w->parent, msg, wp, lp, unicode)) return TRUE;
-      if (LOWORD(lp) == HTCLIENT) {
-        HCURSOR c = w->cls ? w->cls->wc.hCursor : NULL;
-        if (c) {
-          SetCursor(c);
-          return TRUE;
+      // A parent asked about a child leaves the child its own cursor.
+      if ((HWND)wp != h) return FALSE;
+      LPCWSTR shape = (LPCWSTR)IDC_ARROW;
+      switch ((short)LOWORD(lp)) {
+        case HTCLIENT: {
+          HCURSOR c = w->cls ? w->cls->wc.hCursor : NULL;
+          if (c) {
+            SetCursor(c);
+            return TRUE;
+          }
+          return FALSE;
         }
-        return FALSE;
+        case HTLEFT: case HTRIGHT: shape = (LPCWSTR)IDC_SIZEWE; break;
+        case HTTOP: case HTBOTTOM: shape = (LPCWSTR)IDC_SIZENS; break;
+        case HTTOPLEFT: case HTBOTTOMRIGHT: shape = (LPCWSTR)IDC_SIZENWSE; break;
+        case HTTOPRIGHT: case HTBOTTOMLEFT: shape = (LPCWSTR)IDC_SIZENESW; break;
       }
-      SetCursor(LoadCursorW(NULL, (LPCWSTR)IDC_ARROW));
+      SetCursor(LoadCursorW(NULL, shape));
       return FALSE;
+    }
     case WM_ACTIVATE:
       if (LOWORD(wp) != WA_INACTIVE && !(w->style & WS_MINIMIZE)) SetFocus(h);
       return 0;

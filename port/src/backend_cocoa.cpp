@@ -146,6 +146,13 @@ struct CocoaBackend : Backend {
     if (Native* n = (Native*)w->native) cocoa::Invalidate(n->win, r.left, r.top, r.right - r.left, r.bottom - r.top);
   }
 
+  void SetCursor(HCURSOR h) override {
+    CursorPicture p;
+    bool have = h && CursorImage(h, &p);
+    if (!have) p.systemId = 32512;
+    cocoa::SetCursor(!h, p.systemId, (const uint32_t*)p.argb.data(), p.width, p.height, p.hotspot.x, p.hotspot.y);
+  }
+
   void Wait(DWORD timeout) override { cocoa::Wait(timeout == INFINITE ? -1 : (long)timeout); }
   void Wake() override { cocoa::Wake(); }
 };
