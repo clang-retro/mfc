@@ -124,6 +124,30 @@ int DCObj::ScaleX(int dx) const {
   int v = Scale(dx, s.viewportExt.cx, s.windowExt.cx);
   return v < 0 ? -v : v;
 }
+int DCObj::LogicalX(int dx) const {
+  int v = Scale(dx, s.windowExt.cx, s.viewportExt.cx);
+  return v < 0 ? -v : v;
+}
+int DCObj::LogicalY(int dy) const {
+  int v = Scale(dy, s.windowExt.cy, s.viewportExt.cy);
+  return v < 0 ? -v : v;
+}
+
+PtF DCObj::ToDeviceF(double x, double y) const {
+  if (s.graphicsMode == GM_ADVANCED) {
+    const XFORM& m = s.xform;
+    double fx = x * m.eM11 + y * m.eM21 + m.eDx, fy = x * m.eM12 + y * m.eM22 + m.eDy;
+    x = fx;
+    y = fy;
+  }
+  PtF p = {x - s.windowOrg.x, y - s.windowOrg.y};
+  if (s.windowExt.cx) p.x = p.x * s.viewportExt.cx / s.windowExt.cx;
+  if (s.windowExt.cy) p.y = p.y * s.viewportExt.cy / s.windowExt.cy;
+  p.x += s.viewportOrg.x;
+  p.y += s.viewportOrg.y;
+  return p;
+}
+
 int DCObj::ScaleY(int dy) const {
   int v = Scale(dy, s.viewportExt.cy, s.windowExt.cy);
   return v < 0 ? -v : v;

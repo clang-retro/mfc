@@ -3,7 +3,8 @@
 // sending and posting, the message loop, timers, messages between
 // threads, hooks, ANSI and Unicode window procedures, focus, painting,
 // device contexts, bitmaps and DIBs, raster operations, regions,
-// clipping, mapping modes and scrolling; and a CWnd with a message map
+// clipping, mapping modes and scrolling, lines, shapes, paths and
+// text; and a CWnd with a message map
 // on top.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
@@ -564,6 +565,235 @@ static void TestRegionsAndClipping() {
 }
 
 // ---------------------------------------------------------------------
+// Lines, shapes, paths and text
+
+// A 32-bit top-down DIB section in a memory DC, filled white.
+struct Canvas {
+  HDC dc;
+  HBITMAP bm;
+  HGDIOBJ old;
+  DWORD* bits;
+  int w, h;
+  Canvas(int cx, int cy) : w(cx), h(cy) {
+    dc = ::CreateCompatibleDC(NULL);
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+    bi.bmiHeader.biWidth = cx;
+    bi.bmiHeader.biHeight = -cy;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    void* p = NULL;
+    bm = ::CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &p, NULL, 0);
+    bits = (DWORD*)p;
+    old = ::SelectObject(dc, bm);
+    RECT all = {0, 0, cx, cy};
+    ::FillRect(dc, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  }
+  ~Canvas() {
+    ::SelectObject(dc, old);
+    ::DeleteObject(bm);
+    ::DeleteDC(dc);
+  }
+  DWORD At(int x, int y) {
+    ::GdiFlush();
+    return bits[y * w + x] & 0xFFFFFF;
+  }
+  // Whether any pixel in the rectangle differs from white.
+  bool Inked(int l, int t, int r, int b) {
+    ::GdiFlush();
+    for (int y = t; y < b; y++)
+      for (int x = l; x < r; x++)
+        if (x >= 0 && y >= 0 && x < w && y < h && (bits[y * w + x] & 0xFFFFFF) != 0xFFFFFF) return true;
+    return false;
+  }
+};
+
+static void TestShapes() {
+  Canvas c(120, 100);
+  const DWORD kWhite = 0xFFFFFF, kBlack = 0, kRed = 0xFF0000;
+  HBRUSH red = ::CreateSolidBrush(RGB(255, 0, 0));
+  HGDIOBJ oldBrush = ::SelectObject(c.dc, red);
+  // A rectangle leaves out its right and bottom edges; the pen draws the
+  // border and the brush the inside.
+  CHECK(::Rectangle(c.dc, 0, 0, 10, 10));
+  CHECK(c.At(0, 0) == kBlack && c.At(9, 9) == kBlack && c.At(9, 0) == kBlack);
+  CHECK(c.At(5, 5) == kRed && c.At(10, 10) == kWhite && c.At(10, 5) == kWhite);
+  // With no pen the filled area is a pixel smaller each way.
+  HGDIOBJ oldPen = ::SelectObject(c.dc, ::GetStockObject(NULL_PEN));
+  ::Rectangle(c.dc, 20, 0, 30, 10);
+  CHECK(c.At(20, 0) == kRed && c.At(28, 8) == kRed && c.At(29, 9) == kWhite);
+  ::SelectObject(c.dc, ::GetStockObject(BLACK_PEN));
+  // An ellipse: filled in the middle, not in the corners of its box.
+  ::Ellipse(c.dc, 40, 0, 60, 20);
+  CHECK(c.At(50, 10) == kRed && c.At(40, 0) == kWhite && c.At(59, 19) == kWhite);
+  CHECK(c.At(40, 10) == kBlack || c.At(40, 9) == kBlack);
+  // LineTo leaves out the last pixel and moves the current position.
+  ::MoveToEx(c.dc, 0, 30, NULL);
+  CHECK(::LineTo(c.dc, 10, 30));
+  CHECK(c.At(0, 30) == kBlack && c.At(9, 30) == kBlack && c.At(10, 30) == kWhite);
+  POINT cur;
+  CHECK(::GetCurrentPositionEx(c.dc, &cur) && cur.x == 10 && cur.y == 30);
+  // Drawn twice with XOR, a line leaves nothing.
+  int oldRop = ::SetROP2(c.dc, R2_XORPEN);
+  HPEN white = ::CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
+  ::SelectObject(c.dc, white);
+  ::MoveToEx(c.dc, 0, 35, NULL);
+  ::LineTo(c.dc, 20, 45);
+  CHECK(c.At(0, 35) == kBlack);
+  ::MoveToEx(c.dc, 0, 35, NULL);
+  ::LineTo(c.dc, 20, 45);
+  CHECK(!c.Inked(0, 34, 21, 46));
+  ::SetROP2(c.dc, oldRop);
+  // A wide pen is centered on the line.
+  HPEN wide = ::CreatePen(PS_SOLID, 5, RGB(0, 0, 0));
+  ::SelectObject(c.dc, wide);
+  ::MoveToEx(c.dc, 0, 55, NULL);
+  ::LineTo(c.dc, 30, 55);
+  CHECK(c.At(15, 53) == kBlack && c.At(15, 57) == kBlack && c.At(15, 50) == kWhite && c.At(15, 60) == kWhite);
+  ::SelectObject(c.dc, ::GetStockObject(BLACK_PEN));
+  // The fill mode decides whether a star's middle is filled.
+  POINT star[] = {{80, 30}, {92, 70}, {60, 45}, {100, 45}, {68, 70}};
+  ::SetPolyFillMode(c.dc, ALTERNATE);
+  ::Polygon(c.dc, star, 5);
+  CHECK(c.At(80, 52) == kWhite && c.At(80, 40) == kRed);
+  ::SetPolyFillMode(c.dc, WINDING);
+  ::Polygon(c.dc, star, 5);
+  CHECK(c.At(80, 52) == kRed);
+  // Flood fill stops at the border color.
+  ::SelectObject(c.dc, ::GetStockObject(NULL_BRUSH));
+  ::Rectangle(c.dc, 0, 70, 20, 90);
+  HBRUSH blue = ::CreateSolidBrush(RGB(0, 0, 255));
+  ::SelectObject(c.dc, blue);
+  CHECK(::FloodFill(c.dc, 10, 80, RGB(0, 0, 0)));
+  CHECK(c.At(10, 80) == 0x0000FF && c.At(1, 71) == 0x0000FF && c.At(0, 70) == kBlack && c.At(25, 80) == kWhite);
+  ::SelectObject(c.dc, oldBrush);
+  ::SelectObject(c.dc, oldPen);
+  ::DeleteObject(red);
+  ::DeleteObject(blue);
+  ::DeleteObject(white);
+  ::DeleteObject(wide);
+
+  // Paths
+  Canvas p(60, 60);
+  CHECK(::BeginPath(p.dc));
+  ::MoveToEx(p.dc, 10, 10, NULL);
+  ::LineTo(p.dc, 40, 10);
+  ::LineTo(p.dc, 40, 40);
+  CHECK(::CloseFigure(p.dc));
+  CHECK(::EndPath(p.dc));
+  CHECK(!p.Inked(0, 0, 60, 60));
+  int n = ::GetPath(p.dc, NULL, NULL, 0);
+  CHECK(n == 3);
+  POINT pts[3];
+  BYTE types[3];
+  CHECK(::GetPath(p.dc, pts, types, 3) == 3);
+  CHECK(types[0] == PT_MOVETO && types[1] == PT_LINETO && types[2] == (PT_LINETO | PT_CLOSEFIGURE));
+  CHECK(pts[2].x == 40 && pts[2].y == 40);
+  HRGN rgn = ::PathToRegion(p.dc);
+  CHECK(rgn != NULL);
+  RECT box;
+  CHECK(::GetRgnBox(rgn, &box) != ERROR && box.left >= 10 && box.right <= 41 && box.top >= 10 && box.bottom <= 41);
+  CHECK(::PtInRegion(rgn, 35, 15) && !::PtInRegion(rgn, 15, 35));
+  ::DeleteObject(rgn);
+  CHECK(::GetPath(p.dc, NULL, NULL, 0) == -1);  // PathToRegion used the path up
+  ::BeginPath(p.dc);
+  ::Rectangle(p.dc, 5, 5, 25, 25);
+  ::EndPath(p.dc);
+  ::SelectObject(p.dc, ::GetStockObject(BLACK_BRUSH));
+  CHECK(::FillPath(p.dc));
+  CHECK(p.At(15, 15) == kBlack && p.At(30, 30) == kWhite);
+}
+
+static void TestText() {
+  Canvas c(300, 120);
+  HFONT font = ::CreateFontW(-13, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, 0, L"Arial");
+  HGDIOBJ oldFont = ::SelectObject(c.dc, font);
+  TEXTMETRICW tm;
+  CHECK(::GetTextMetricsW(c.dc, &tm));
+  CHECK(tm.tmHeight > 8 && tm.tmHeight < 30 && tm.tmAscent + tm.tmDescent == tm.tmHeight);
+  CHECK(tm.tmAveCharWidth > 0 && tm.tmMaxCharWidth >= tm.tmAveCharWidth);
+  TEXTMETRICA tma;
+  CHECK(::GetTextMetricsA(c.dc, &tma) && tma.tmHeight == tm.tmHeight);
+  wchar_t face[LF_FACESIZE];
+  CHECK(::GetTextFaceW(c.dc, LF_FACESIZE, face) > 0);
+
+  SIZE sz;
+  CHECK(::GetTextExtentPoint32W(c.dc, L"Hello", 5, &sz));
+  CHECK(sz.cx > 10 && sz.cy == tm.tmHeight);
+  SIZE sza;
+  CHECK(::GetTextExtentPoint32A(c.dc, "Hello", 5, &sza) && sza.cx == sz.cx);
+  SIZE wide, narrow;
+  ::GetTextExtentPoint32W(c.dc, L"WWWW", 4, &wide);
+  ::GetTextExtentPoint32W(c.dc, L"iiii", 4, &narrow);
+  CHECK(wide.cx >= narrow.cx);
+  int widths[5];
+  CHECK(::GetCharWidth32W(c.dc, 'a', 'e', widths) && widths[0] > 0);
+  int fit = 0, dx[5];
+  SIZE ext5;
+  CHECK(::GetTextExtentExPointW(c.dc, L"Hello", 5, sz.cx - 1, &fit, dx, &ext5));
+  CHECK(fit == 4 && dx[4] == sz.cx && dx[0] > 0 && dx[0] < dx[4]);
+
+  // Text draws inside its box, from the top-left by default.
+  CHECK(::TextOutW(c.dc, 10, 10, L"Hello", 5));
+  CHECK(c.Inked(10, 10, 10 + sz.cx, 10 + sz.cy));
+  CHECK(!c.Inked(0, 0, 300, 9) && !c.Inked(12 + sz.cx, 0, 300, 120) && !c.Inked(0, 11 + sz.cy, 300, 120));
+  // TA_UPDATECP moves the current position past the text.
+  ::SetTextAlign(c.dc, TA_UPDATECP);
+  ::MoveToEx(c.dc, 100, 10, NULL);
+  ::TextOutW(c.dc, 0, 0, L"Hello", 5);
+  POINT cur;
+  ::GetCurrentPositionEx(c.dc, &cur);
+  CHECK(cur.x == 100 + sz.cx && cur.y == 10);
+  ::SetTextAlign(c.dc, TA_LEFT | TA_TOP);
+  // An opaque background fills the text's box in the background color.
+  ::SetBkColor(c.dc, RGB(0, 255, 0));
+  ::SetBkMode(c.dc, OPAQUE);
+  ::TextOutW(c.dc, 200, 10, L" ", 1);
+  CHECK(c.At(200, 10) == 0x00FF00);
+  ::SetBkMode(c.dc, TRANSPARENT);
+
+  // DrawText measures one line, or breaks words to fit a width.
+  RECT r = {0, 0, 0, 0};
+  int h = ::DrawTextW(c.dc, L"Hello", -1, &r, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+  CHECK(h == tm.tmHeight && r.right == sz.cx && r.bottom == tm.tmHeight);
+  RECT wrap = {0, 0, sz.cx + 5, 0};
+  h = ::DrawTextW(c.dc, L"Hello Hello Hello", -1, &wrap, DT_CALCRECT | DT_WORDBREAK);
+  CHECK(h == 3 * tm.tmHeight && wrap.bottom == h && wrap.right <= sz.cx + 5);
+  // A prefix character is not drawn.
+  RECT pr = {0, 0, 0, 0};
+  ::DrawTextW(c.dc, L"&Hello", -1, &pr, DT_CALCRECT | DT_SINGLELINE);
+  CHECK(pr.right == sz.cx);
+  // Centered in a box, vertically too.
+  RECT box = {0, 50, 300, 110};
+  ::DrawTextW(c.dc, L"Hello", -1, &box, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+  CHECK(c.Inked(140 - sz.cx / 2, 50, 160 + sz.cx / 2, 110) && !c.Inked(0, 50, 145 - sz.cx / 2, 110));
+  // An ellipsis replaces what does not fit, and DT_MODIFYSTRING says so.
+  wchar_t buf[64] = L"Hello Hello Hello";
+  RECT el = {0, 0, sz.cx, 20};
+  ::DrawTextExW(c.dc, buf, -1, &el, DT_SINGLELINE | DT_END_ELLIPSIS | DT_MODIFYSTRING, NULL);
+  size_t len = wcslen(buf);
+  CHECK(len < 17 && len >= 3 && wcscmp(buf + len - 3, L"...") == 0);
+  // Tabs
+  DWORD ext = ::GetTabbedTextExtentW(c.dc, L"a\tb", 3, 0, NULL);
+  CHECK(HIWORD(ext) == tm.tmHeight && LOWORD(ext) >= 8 * tm.tmAveCharWidth);
+
+  // There is at least one font family to enumerate.
+  struct Counter {
+    static int CALLBACK Proc(const LOGFONTW* lf, const TEXTMETRICW*, DWORD, LPARAM n) {
+      if (lf->lfFaceName[0]) ++*(int*)n;
+      return 1;
+    }
+  };
+  int families = 0;
+  LOGFONTW want = {};
+  want.lfCharSet = DEFAULT_CHARSET;
+  ::EnumFontFamiliesExW(c.dc, &want, Counter::Proc, (LPARAM)&families, 0);
+  CHECK(families > 0);
+  ::SelectObject(c.dc, oldFont);
+  ::DeleteObject(font);
+}
+
+// ---------------------------------------------------------------------
 // A CWnd with a message map
 
 class CTestWnd : public CWnd {
@@ -640,6 +870,8 @@ int main() {
   TestMemoryDC();
   TestDIBSections();
   TestRegionsAndClipping();
+  TestShapes();
+  TestText();
   TestCWnd();
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;

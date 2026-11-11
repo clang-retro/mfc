@@ -174,6 +174,16 @@ struct DCState {
 
 enum DCKind { kWindowDC, kMemoryDC, kInfoDC, kPrinterDC, kMetaDC };
 
+// A path figure in device pixel coordinates, where (x, y) is the middle
+// of pixel (x, y).
+struct PtF {
+  double x, y;
+};
+struct Figure {
+  std::vector<PtF> pts;
+  bool closed = false;
+};
+
 struct DCObj : GdiObject {
   explicit DCObj(DCKind k) : GdiObject(k == kMemoryDC ? OBJ_MEMDC : k == kMetaDC ? OBJ_METADC : OBJ_DC), kind(k) {}
   DCKind kind;
@@ -194,6 +204,10 @@ struct DCObj : GdiObject {
   // Printing
   ABORTPROC abortProc = NULL;
   int docState = 0;
+  // BeginPath records figures here until EndPath.
+  enum { kNoPath, kPathOpen, kPathClosed } pathState = kNoPath;
+  std::vector<Figure> path;
+  bool pathFigureOpen = false;  // whether LineTo adds to the last figure
 
   // The area visible on the device, before the application's clipping.
   Region Visible();
@@ -204,6 +218,9 @@ struct DCObj : GdiObject {
   RECT ToDevice(const RECT& r) const;  // normalized
   int ScaleX(int dx) const;            // a logical width in device units
   int ScaleY(int dy) const;
+  int LogicalX(int dx) const;          // a device width in logical units
+  int LogicalY(int dy) const;
+  PtF ToDeviceF(double x, double y) const;  // without rounding
   bool Identity() const {
     return s.windowExt.cx == s.viewportExt.cx && s.windowExt.cy == s.viewportExt.cy;
   }
@@ -257,6 +274,13 @@ BrushPaint PaintFor(DCObj* dc, HBRUSH brush);
 
 // Fills the device rectangle, clipped, with a brush and a raster op.
 void FillDevice(DCObj* dc, const RECT& device, const BrushPaint& paint, DWORD rop3);
+
+// Fills figures, in device coordinates, with one color.
+void FillFiguresDevice(DCObj* dc, const std::vector<Figure>& figs, DWORD color);
+
+// Whether the DC draws on a monochrome bitmap, and a color as it shows there.
+bool IsMonoDC(DCObj* dc);
+DWORD ToMono(DWORD p);
 
 // A ternary raster operation applied to one pixel.
 DWORD Rop3(DWORD rop, DWORD dst, DWORD src, DWORD pat);

@@ -79,6 +79,8 @@ bool UsesSource(DWORD rop) {
   return ((c >> 2) & 0x33) != (c & 0x33);
 }
 
+}  // namespace
+
 bool IsMonoDC(DCObj* dc) {
   if (dc->kind != kMemoryDC) return false;
   BitmapObj* b = GdiAs<BitmapObj>(dc->s.bitmap, OBJ_BITMAP);
@@ -90,6 +92,8 @@ DWORD ToMono(DWORD p) {
   int lum = (int)(((p >> 16) & 0xFF) * 30 + ((p >> 8) & 0xFF) * 59 + (p & 0xFF) * 11) / 100;
   return lum >= 128 ? 0xFFFFFF : 0;
 }
+
+namespace {
 
 bool HatchBit(int hatch, int x, int y) {
   x &= 7;
