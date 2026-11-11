@@ -237,7 +237,8 @@ when there is no display:
   commands, closing.
 * `docktest`: toolbars docked side by side and on each edge, floating,
   dragged with the mouse, double-clicked, resized while floating, and
-  the layout saved and loaded with SaveBarState and LoadBarState.
+  the layout saved and loaded with SaveBarState and LoadBarState. With
+  clang-retro's compiler its message map names handlers both ways.
 * `splittest`: a dynamic splitter split by dragging its split boxes and
   with Window > Split from the keyboard, panes scrolling together on
   shared scroll bars, next and previous pane, and unsplitting by
@@ -531,8 +532,12 @@ request with the stock MinGW-w64 toolchain.
 * Message map handler names: Visual C++ 6 code writes plain names
   (`ON_COMMAND(ID_X, OnX)`), later code writes member pointers
   (`ON_COMMAND(ID_X, &CMyView::OnX)`). Standard C++ has no expression
-  that accepts both, so the second form needs
-  `_AFX_MSGMAP_MEMBER_POINTERS` defined before `afxwin.h`.
+  that accepts both. clang-retro's compiler has a preprocessor builtin
+  for it (`__starts_with_ampersand`), so with it the maps take either
+  form, mixed as code likes, with nothing to set (message maps, dispatch
+  and event sink maps, DHTML event maps). With other compilers the
+  second form needs `_AFX_MSGMAP_MEMBER_POINTERS` defined before
+  `afxwin.h`.
 * An ISAPI parse map's ITS_ string gives the number of a command's
   arguments; each argument is read as its parameter's own C++ type.
 * The memory diagnostics track the blocks DEBUG_NEW makes and, in a
