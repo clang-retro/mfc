@@ -154,7 +154,7 @@ std::vector<uint16_t> Chars(NSString* s) {
 }
 
 // Takes the event when it is for our windows; false leaves it to AppKit.
-bool Handle(NSEvent* e) {
+bool TakeEvent(NSEvent* e) {
   switch ([e type]) {
     case NSKeyDown:
     case NSKeyUp:
@@ -420,7 +420,7 @@ void Wait(long timeout) {
   NSDate* until = timeout < 0 ? [NSDate distantFuture] : [NSDate dateWithTimeIntervalSinceNow:timeout / 1000.0];
   NSEvent* e = [NSApp nextEventMatchingMask:NSAnyEventMask untilDate:until inMode:NSDefaultRunLoopMode dequeue:YES];
   while (e) {
-    if ([e type] != NSApplicationDefined && !Handle(e)) [NSApp sendEvent:e];
+    if ([e type] != NSApplicationDefined && !TakeEvent(e)) [NSApp sendEvent:e];
     e = [NSApp nextEventMatchingMask:NSAnyEventMask
                            untilDate:[NSDate distantPast]
                               inMode:NSDefaultRunLoopMode
