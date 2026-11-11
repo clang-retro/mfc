@@ -351,8 +351,12 @@ when there is no display:
   registry keys of AfxOleRegisterControlClass, and the control's
   COlePropertyPage, through IPropertyPage (its size and title, DDP_ and
   DDX values from and to one or two controls, dirty controls, Apply)
-  and in the property frame of the Properties verb, which also shows
-  the stock color page; the stock color, font and picture pages
+  and in the property frame of the Properties verb or of
+  COleControlSite::ShowPropertyFrame, which also shows the stock color
+  page; IViewObjectEx hit testing, drawing clipped to the control's
+  bounds or with the DC left as it is (the clipPaintDC and
+  canOptimizeDraw flags), and IPointerInactive for a control with the
+  pointerInactive flag; the stock color, font and picture pages
   setting the control's colors, font and picture; CPictureHolder (its
   kinds of picture, drawing one, PX_Picture); IPerPropertyBrowsing
   and IQuickActivate; and licensing, through IClassFactory2 with and
@@ -480,9 +484,11 @@ request with the stock MinGW-w64 toolchain.
   ambient properties, IViewObject drawing and persistence through
   streams, storages and property bags), COleControlModule, event maps,
   verb maps (ON_OLEVERB, ON_STDOLEVERB), IPerPropertyBrowsing,
-  IQuickActivate, GetExtendedControl, windowless activation (the windowlessActivate flag of
-  GetControlFlags, IOleInPlaceObjectWindowless and COleControl's
-  windowless SetCapture, SetFocus, GetDC and InvalidateControl),
+  IQuickActivate, GetExtendedControl, the GetControlFlags flags
+  (windowlessActivate, clipPaintDC, canOptimizeDraw, noFlickerActivate,
+  pointerInactive), IViewObjectEx, IPointerInactive, windowless
+  activation (IOleInPlaceObjectWindowless and COleControl's windowless
+  SetCapture, SetFocus, GetDC and InvalidateControl),
   DECLARE_OLECREATE_EX, DECLARE_OLECTLTYPE,
   DECLARE_PROPPAGEIDS, CFontHolder, CPictureHolder, CPropExchange and
   the PX_ functions (PX_Picture included), AfxOleRegisterControlClass, licensing (IClassFactory2,
@@ -567,8 +573,7 @@ request with the stock MinGW-w64 toolchain.
   overloaded. Drag scrolling starts as soon as the pointer is in the
   inset, without waiting nScrollDelay. A connection point's cookie is
   the sink's interface pointer.
-* Containment does not implement property pages for the container.
-  The extended control's own properties are Name, Object, Parent and
+* The extended control's own properties are Name, Object, Parent and
   Left, Top, Width, Height, Visible and ID (in the container window's
   pixels, with DISPIDs of this library's, AFX_DISPID_EXT_*); Parent is
   the container window's IDispatch when it has automation. Data binding
@@ -603,8 +608,6 @@ request with the stock MinGW-w64 toolchain.
   CRuntimeClass::FromName searches. AFX_EXTENSION_MODULE's
   pFirstSharedClass and pFirstSharedFactory stay NULL: the classes and
   OLE factories go into the program's lists as the DLL loads.
-* An asynchronous moniker file's bind status callback is not
-  aggregated: CreateBindStatusCallback ignores its pUnkControlling.
 * The gopher classes call WinINet's gopher functions, which Internet
   Explorer 7 and later removed and Wine does not have, so they are not
   tested; neither is https, which needs a server with a certificate.
@@ -626,9 +629,7 @@ request with the stock MinGW-w64 toolchain.
   IPropertyPage::Apply, so under Wine the OK and Apply buttons of a
   control's property frame do not change the control; Windows applies
   the pages.
-* COleControl's windowless controls ignore the other GetControlFlags
-  flags (flicker-free and unclipped drawing, pointer inactivity). A
-  control's binary stream (IPersistStreamInit, IPersistStorage, DLGINIT
+* A control's binary stream (IPersistStreamInit, IPersistStorage, DLGINIT
   data) has this library's own format, not the one Visual C++ MFC
   writes; property bags hold the same names and values.
 * COleDocument saves its items in its own format,

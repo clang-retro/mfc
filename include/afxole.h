@@ -324,8 +324,10 @@ public:
   FORMATETC* GetFormatEtc() const { return m_pFormatEtc; }
 
 protected:
-  // The IBindStatusCallback that reports to this object. pUnkControlling
-  // is not used: the callback is not aggregated.
+  // The IBindStatusCallback that reports to this object, as an IUnknown
+  // the caller releases. With pUnkControlling, the callback is aggregated
+  // in that object, and the IUnknown returned is the callback's own,
+  // which the object keeps and asks for IBindStatusCallback.
   virtual IUnknown* CreateBindStatusCallback(IUnknown* pUnkControlling);
   virtual DWORD GetBindInfo() const;
   virtual LONG GetPriority() const;

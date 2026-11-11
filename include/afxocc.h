@@ -115,6 +115,10 @@ public:
   virtual CWnd* SetFocus();
   virtual CWnd* SetFocus(LPMSG lpmsg);
   virtual BOOL DoVerb(LONG nVerb, LPMSG lpMsg = NULL);
+  // The control's property pages in a frame of the container's, over the
+  // container's window; the control's Properties verb comes here
+  // (IOleControlSite::ShowPropertyFrame).
+  virtual BOOL ShowPropertyFrame();
   virtual void FreezeEvents(BOOL bFreeze);
   virtual void GetControlInfo();
   virtual BOOL IsDefaultButton();
