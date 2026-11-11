@@ -547,6 +547,7 @@ static HWND CreateWindowCore(DWORD exStyle, LPCWSTR className, LPCWSTR windowNam
     w->cls = cls;
     w->proc = cls->wc.lpfnWndProc;
     w->unicode = cls->unicode;
+    w->ansiCreate = !unicode;
     w->style = style & ~WS_VISIBLE;
     w->exStyle = exStyle;
     w->parent = parent;

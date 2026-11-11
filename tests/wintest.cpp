@@ -4,7 +4,8 @@
 // threads, hooks, ANSI and Unicode window procedures, focus, painting,
 // device contexts, bitmaps and DIBs, raster operations, regions,
 // clipping, mapping modes and scrolling, lines, shapes, paths and
-// text; and a CWnd with a message map
+// text, icons, accelerators and menus, dialogs and the standard
+// controls; and a CWnd with a message map
 // on top.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
@@ -12,6 +13,7 @@
 #include <afxwin.h>
 #include <stdio.h>
 #include <string.h>
+#include <string>
 #include <vector>
 
 static int g_failures = 0;
@@ -1064,6 +1066,214 @@ static void TestMenus() {
   CHECK(!::IsMenu(bar) && !::IsMenu(file) && !::IsMenu(view));
 }
 
+// ---------------------------------------------------------------------
+// Dialogs from an in-memory template, and the standard controls in them.
+
+// Builds a DLGTEMPLATE with its items, in UTF-16 words.
+struct DlgBuilder {
+  std::vector<WORD> w;
+  WORD* count = NULL;
+  void Dword(DWORD v) {
+    w.push_back(LOWORD(v));
+    w.push_back(HIWORD(v));
+  }
+  void Str(const char* s) {
+    while (*s) w.push_back((WORD)*s++);
+    w.push_back(0);
+  }
+  void Align() {
+    if (w.size() % 2) w.push_back(0);
+  }
+  DlgBuilder(DWORD style, short cx, short cy, const char* title) {
+    Dword(style | DS_SETFONT);
+    Dword(0);
+    w.push_back(0);  // the item count, filled in by Item
+    for (short v : {(short)10, (short)10, cx, cy}) w.push_back((WORD)v);
+    w.push_back(0);  // no menu
+    w.push_back(0);  // the dialog class
+    Str(title);
+    w.push_back(8);
+    Str("MS Shell Dlg");
+  }
+  void Item(WORD cls, DWORD style, short x, short y, short cx, short cy, WORD id, const char* text) {
+    Align();
+    w[4]++;
+    Dword(style | WS_CHILD | WS_VISIBLE);
+    Dword(0);
+    for (short v : {x, y, cx, cy}) w.push_back((WORD)v);
+    w.push_back(id);
+    w.push_back(0xFFFF);
+    w.push_back(cls);
+    Str(text);
+    w.push_back(0);  // no creation data
+  }
+  LPCDLGTEMPLATEW Get() { return (LPCDLGTEMPLATEW)w.data(); }
+};
+
+static LPARAM g_initParam = 0;
+static std::vector<WPARAM> g_dlgCommands;
+
+static INT_PTR CALLBACK TestDlgProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  switch (msg) {
+    case WM_INITDIALOG:
+      g_initParam = lp;
+      if (lp == 2) ::PostMessageW(h, WM_COMMAND, IDOK, 0);
+      return TRUE;
+    case WM_COMMAND:
+      g_dlgCommands.push_back(wp);
+      if (LOWORD(wp) == IDOK && g_initParam == 2) ::EndDialog(h, 7);
+      return TRUE;
+  }
+  return FALSE;
+}
+
+static bool SawCommand(WORD id, WORD code) {
+  for (WPARAM wp : g_dlgCommands)
+    if (LOWORD(wp) == id && HIWORD(wp) == code) return true;
+  return false;
+}
+
+static std::wstring DlgText(HWND dlg, int id) {
+  wchar_t buf[128] = {0};
+  ::GetDlgItemTextW(dlg, id, buf, 128);
+  return buf;
+}
+
+static void TestDialogsAndControls() {
+  DlgBuilder b(WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME, 220, 140, "Dialog");
+  b.Item(0x0080, BS_DEFPUSHBUTTON | WS_TABSTOP | WS_GROUP, 160, 5, 50, 14, IDOK, "OK");
+  b.Item(0x0082, SS_LEFT, 5, 5, 30, 8, 16, "&Name:");
+  b.Item(0x0081, ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP | WS_GROUP, 40, 5, 100, 12, 10, "");
+  b.Item(0x0080, BS_AUTOCHECKBOX | WS_TABSTOP | WS_GROUP, 5, 22, 60, 10, 11, "&Check");
+  b.Item(0x0080, BS_AUTORADIOBUTTON | WS_TABSTOP | WS_GROUP, 5, 34, 60, 10, 12, "One");
+  b.Item(0x0080, BS_AUTORADIOBUTTON, 5, 46, 60, 10, 13, "Two");
+  b.Item(0x0083, LBS_STANDARD | WS_TABSTOP | WS_GROUP, 80, 22, 60, 50, 14, "");
+  b.Item(0x0085, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 150, 22, 60, 60, 15, "");
+
+  g_dlgCommands.clear();
+  HWND dlg = ::CreateDialogIndirectParamW(::GetModuleHandleW(NULL), b.Get(), NULL, TestDlgProc, 1);
+  CHECK(dlg && g_initParam == 1);
+  wchar_t cls[32];
+  ::GetClassNameW(dlg, cls, 32);
+  CHECK(wcscmp(cls, L"#32770") == 0);
+  HWND edit = ::GetDlgItem(dlg, 10);
+  CHECK(edit && ::GetDlgCtrlID(edit) == 10);
+  ::GetClassNameW(edit, cls, 32);
+  CHECK(_wcsicmp(cls, L"Edit") == 0);
+  CHECK(LOWORD(::SendMessageW(dlg, DM_GETDEFID, 0, 0)) == IDOK);
+  RECT units = {0, 0, 4, 8};
+  CHECK(::MapDialogRect(dlg, &units) && units.right > 0 && units.bottom > 0);
+
+  // Text and numbers through the dialog helpers.
+  CHECK(::SetDlgItemTextW(dlg, 10, L"hello world"));
+  CHECK(DlgText(dlg, 10) == L"hello world");
+  CHECK(::SetDlgItemInt(dlg, 10, (UINT)-42, TRUE));
+  BOOL ok = FALSE;
+  CHECK((int)::GetDlgItemInt(dlg, 10, &ok, TRUE) == -42 && ok);
+  ::SetDlgItemTextW(dlg, 10, L"abc");
+  ::GetDlgItemInt(dlg, 10, &ok, TRUE);
+  CHECK(!ok);
+
+  // The edit control: selection, replacement and undo.
+  ::SetWindowTextW(edit, L"hello world");
+  ::SendMessageW(edit, EM_SETSEL, 0, 5);
+  DWORD s0 = 0, s1 = 0;
+  ::SendMessageW(edit, EM_GETSEL, (WPARAM)&s0, (LPARAM)&s1);
+  CHECK(s0 == 0 && s1 == 5);
+  ::SendMessageW(edit, EM_REPLACESEL, TRUE, (LPARAM)L"HELLO");
+  CHECK(DlgText(dlg, 10) == L"HELLO world");
+  CHECK(::SendMessageW(edit, EM_CANUNDO, 0, 0));
+  ::SendMessageW(edit, EM_UNDO, 0, 0);
+  CHECK(DlgText(dlg, 10) == L"hello world");
+  ::SendMessageW(edit, EM_LIMITTEXT, 5, 0);
+  ::SendMessageW(edit, EM_SETSEL, 0, -1);
+  ::SendMessageW(edit, EM_REPLACESEL, FALSE, (LPARAM)L"123456789");
+  CHECK(DlgText(dlg, 10) == L"12345");
+  ::SendMessageW(edit, EM_LIMITTEXT, 0, 0);
+  CHECK(SawCommand(10, EN_CHANGE));
+
+  // Copy and paste through the clipboard, which converts text.
+  ::SetWindowTextW(edit, L"copy me");
+  ::SendMessageW(edit, EM_SETSEL, 0, 4);
+  ::SendMessageW(edit, WM_COPY, 0, 0);
+  CHECK(::IsClipboardFormatAvailable(CF_UNICODETEXT) && ::IsClipboardFormatAvailable(CF_TEXT));
+  if (::OpenClipboard(dlg)) {
+    HANDLE ht = ::GetClipboardData(CF_TEXT);
+    const char* a = ht ? (const char*)::GlobalLock(ht) : NULL;
+    CHECK(a && strcmp(a, "copy") == 0);
+    if (a) ::GlobalUnlock(ht);
+    ::CloseClipboard();
+  }
+  ::SendMessageW(edit, EM_SETSEL, 7, 7);
+  ::SendMessageW(edit, WM_PASTE, 0, 0);
+  CHECK(DlgText(dlg, 10) == L"copy mecopy");
+
+  // Buttons: check boxes and a radio group.
+  CHECK(::IsDlgButtonChecked(dlg, 11) == BST_UNCHECKED);
+  ::SendDlgItemMessageW(dlg, 11, BM_CLICK, 0, 0);
+  CHECK(::IsDlgButtonChecked(dlg, 11) == BST_CHECKED);
+  CHECK(SawCommand(11, BN_CLICKED));
+  CHECK(::CheckDlgButton(dlg, 11, BST_UNCHECKED) && !::IsDlgButtonChecked(dlg, 11));
+  CHECK(::CheckRadioButton(dlg, 12, 13, 12));
+  CHECK(::IsDlgButtonChecked(dlg, 12) && !::IsDlgButtonChecked(dlg, 13));
+  ::SendDlgItemMessageW(dlg, 13, BM_CLICK, 0, 0);
+  CHECK(!::IsDlgButtonChecked(dlg, 12) && ::IsDlgButtonChecked(dlg, 13));
+  CHECK(::GetNextDlgGroupItem(dlg, ::GetDlgItem(dlg, 12), FALSE) == ::GetDlgItem(dlg, 13));
+
+  // The list box, sorted.
+  HWND list = ::GetDlgItem(dlg, 14);
+  for (const wchar_t* s : {L"pear", L"apple", L"fig"}) ::SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)s);
+  CHECK(::SendMessageW(list, LB_GETCOUNT, 0, 0) == 3);
+  wchar_t buf[64];
+  ::SendMessageW(list, LB_GETTEXT, 0, (LPARAM)buf);
+  CHECK(wcscmp(buf, L"apple") == 0);
+  CHECK(::SendMessageW(list, LB_FINDSTRING, (WPARAM)-1, (LPARAM)L"pe") == 2);
+  CHECK(::SendMessageW(list, LB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)L"pe") == LB_ERR);
+  ::SendMessageW(list, LB_SETCURSEL, 1, 0);
+  CHECK(::SendMessageW(list, LB_GETCURSEL, 0, 0) == 1);
+  ::SendMessageW(list, LB_SETITEMDATA, 1, 1234);
+  CHECK(::SendMessageW(list, LB_GETITEMDATA, 1, 0) == 1234);
+  CHECK(::SendMessageW(list, LB_DELETESTRING, 0, 0) == 2);
+  CHECK(::SendMessageW(list, LB_GETCURSEL, 0, 0) == 0);
+
+  // The drop-down list combo box.
+  HWND combo = ::GetDlgItem(dlg, 15);
+  for (const wchar_t* s : {L"red", L"green", L"blue"}) ::SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)s);
+  CHECK(::SendMessageW(combo, CB_GETCOUNT, 0, 0) == 3);
+  ::SendMessageW(combo, CB_SETCURSEL, 1, 0);
+  CHECK(::SendMessageW(combo, CB_GETCURSEL, 0, 0) == 1);
+  CHECK(DlgText(dlg, 15) == L"green");
+  CHECK(::SendMessageW(combo, CB_SELECTSTRING, (WPARAM)-1, (LPARAM)L"bl") == 2);
+  CHECK(DlgText(dlg, 15) == L"blue");
+  COMBOBOXINFO ci = {sizeof ci};
+  CHECK(::GetComboBoxInfo(combo, &ci) && ci.hwndList && ci.hwndCombo == combo);
+  CHECK(!::SendMessageW(combo, CB_GETDROPPEDSTATE, 0, 0));
+
+  // Keyboard navigation through IsDialogMessage.
+  ::ShowWindow(dlg, SW_SHOW);
+  ::SetFocus(edit);
+  MSG m = {};
+  m.hwnd = edit;
+  m.message = WM_KEYDOWN;
+  m.wParam = VK_TAB;
+  CHECK(::IsDialogMessageW(dlg, &m));
+  CHECK(::GetFocus() == ::GetDlgItem(dlg, 11));
+  CHECK(::GetNextDlgTabItem(dlg, edit, FALSE) == ::GetDlgItem(dlg, 11));
+  CHECK(::GetNextDlgTabItem(dlg, edit, TRUE) == ::GetDlgItem(dlg, IDOK));
+  m.hwnd = ::GetFocus();
+  m.wParam = VK_RETURN;
+  g_dlgCommands.clear();
+  CHECK(::IsDialogMessageW(dlg, &m));
+  Pump();
+  CHECK(SawCommand(IDOK, BN_CLICKED));
+  ::DestroyWindow(dlg);
+  CHECK(!::IsWindow(dlg) && !::IsWindow(edit));
+
+  // A modal dialog, ended from its own procedure.
+  CHECK(::DialogBoxIndirectParamW(::GetModuleHandleW(NULL), b.Get(), NULL, TestDlgProc, 2) == 7);
+  CHECK(g_initParam == 2);
+}
+
 // A CWnd with a message map
 
 class CTestWnd : public CWnd {
@@ -1144,6 +1354,7 @@ int main() {
   TestText();
   TestIconsAndAccelerators();
   TestMenus();
+  TestDialogsAndControls();
   TestCWnd();
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;

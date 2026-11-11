@@ -55,6 +55,7 @@ struct Window {
   Class* cls = NULL;
   WNDPROC proc = NULL;
   bool unicode = true;  // the procedure takes W messages
+  bool ansiCreate = false;  // made with CreateWindowExA: an edit control's buffer is ANSI
   DWORD style = 0, exStyle = 0;
   Window* parent = NULL;  // NULL for a top-level window
   Window* owner = NULL;
@@ -194,10 +195,19 @@ void DrawFrame(Window* w);
 // Where the menu bar and the system menu's box lie, in window coordinates.
 RECT MenuBarRect(Window* w);
 RECT SysMenuRect(Window* w);
+// Scroll bars, for windows' own and the ScrollBar control: drawing one
+// at r, and a click on one at r (in w's window coordinates), which sends
+// WM_HSCROLL or WM_VSCROLL to notify with ctl as lParam.
+void PaintScrollBar(HDC dc, const RECT& r, bool vertical, const ScrollBar* sb);
+void ClickScrollBar(Window* w, ScrollBar* sb, RECT r, bool vertical, POINT screen, HWND notify, HWND ctl);
 
 // Menus (user_menu.cpp): the menu window's class, drawing the menu bar,
 // SC_KEYMENU and SC_MOUSEMENU, and a window's menus when it goes.
 void RegisterMenuClass();
+void RegisterDialogClass();  // user_dialog.cpp
+void RegisterButtonClasses();  // user_button.cpp: Button, Static, ScrollBar
+void RegisterEditClass();  // user_edit.cpp
+void RegisterListClasses();  // user_listbox.cpp: ListBox, ComboLBox, ComboBox
 void DrawMenuBarIn(Window* w, HDC dc, const RECT& bar);
 void MenuCommand(Window* w, WPARAM wParam, LPARAM lParam);
 void MenusOnDestroy(Window* w);

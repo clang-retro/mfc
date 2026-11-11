@@ -135,9 +135,12 @@ void DrawArrowBox(HDC dc, RECT r, int dir, bool enabled) {
   }
 }
 
-void DrawScrollBar(Window* w, HDC dc, const RECT& r, bool vertical) {
+}  // namespace
+
+namespace winport {
+
+void PaintScrollBar(HDC dc, const RECT& r, bool vertical, const ScrollBar* sb) {
   if (RectEmpty(r)) return;
-  ScrollBar* sb = BarOf(w, vertical ? SB_VERT : SB_HORZ);
   int a = vertical ? r.right - r.left : r.bottom - r.top;  // arrow box size
   int length = vertical ? r.bottom - r.top : r.right - r.left;
   if (a * 2 > length) a = length / 2;
@@ -156,6 +159,14 @@ void DrawScrollBar(Window* w, HDC dc, const RECT& r, bool vertical) {
                           : MakeRect(trough.left + pos, r.top, trough.left + pos + len, r.bottom);
     DrawEdge(dc, &thumb, EDGE_RAISED, BF_RECT | BF_MIDDLE);
   }
+}
+
+}  // namespace winport
+
+namespace {
+
+void DrawScrollBar(Window* w, HDC dc, const RECT& r, bool vertical) {
+  PaintScrollBar(dc, r, vertical, BarOf(w, vertical ? SB_VERT : SB_HORZ));
 }
 
 // Carets: one at a time, as on Windows.
@@ -197,19 +208,22 @@ void StopCaretTimer() {
 
 // Tracking a click on a window scroll bar: the part clicked, and the
 // scroll code it sends.
-void ScrollBarClick(Window* w, int bar, POINT screen) {
+}  // namespace
+
+namespace winport {
+
+// A click on a scroll bar at r, in w's window coordinates: sends the
+// scroll messages to notify, with ctl as lParam, and drags the thumb.
+void ClickScrollBar(Window* w, ScrollBar* sb, RECT r, bool vertical, POINT screen, HWND notify, HWND ctl) {
   RECT wr = ScreenRect(w);
-  Frame f = Layout(w);
-  RECT r = bar == SB_VERT ? f.vscroll : f.hscroll;
-  bool vertical = bar == SB_VERT;
   POINT p = {screen.x - wr.left, screen.y - wr.top};
   int a = vertical ? r.right - r.left : r.bottom - r.top;
   int length = vertical ? r.bottom - r.top : r.right - r.left;
   if (a * 2 > length) a = length / 2;
   int along = vertical ? p.y - r.top : p.x - r.left;
   UINT msg = vertical ? WM_VSCROLL : WM_HSCROLL;
-  ScrollBar* sb = BarOf(w, bar);
   if (!sb->enabled) return;
+  auto send = [&](WPARAM wp) { SendMessageW(notify, msg, wp, (LPARAM)ctl); };
   int code;
   if (along < a) {
     code = SB_LINEUP;
@@ -243,7 +257,7 @@ void ScrollBarClick(Window* w, int bar, POINT screen) {
           if (track > MaxPos(sb->info)) track = MaxPos(sb->info);
           sb->info.nTrackPos = track;
           if (m.message == WM_LBUTTONUP) break;
-          SendTo(w, msg, MAKEWPARAM(SB_THUMBTRACK, track), 0);
+          send(MAKEWPARAM(SB_THUMBTRACK, track));
           continue;
         }
         if (m.message == WM_KEYDOWN && m.wParam == VK_ESCAPE) break;
@@ -253,13 +267,22 @@ void ScrollBarClick(Window* w, int bar, POINT screen) {
       }
       ReleaseCapture();
       if (!IsWindow(h)) return;
-      SendTo(w, msg, MAKEWPARAM(SB_THUMBPOSITION, track), 0);
-      SendTo(w, msg, SB_ENDSCROLL, 0);
+      send(MAKEWPARAM(SB_THUMBPOSITION, track));
+      if (IsWindow(notify)) send(SB_ENDSCROLL);
       return;
     }
   }
-  SendTo(w, msg, code, 0);
-  if (IsWindow(w->hwnd)) SendTo(w, msg, SB_ENDSCROLL, 0);
+  send(code);
+  if (IsWindow(notify)) send(SB_ENDSCROLL);
+}
+
+}  // namespace winport
+
+namespace {
+
+void ScrollBarClick(Window* w, int bar, POINT screen) {
+  Frame f = Layout(w);
+  ClickScrollBar(w, BarOf(w, bar), bar == SB_VERT ? f.vscroll : f.hscroll, bar == SB_VERT, screen, w->hwnd, NULL);
 }
 
 // Shows or hides a window scroll bar by its style; the frame changes.

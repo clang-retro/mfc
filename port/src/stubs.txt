@@ -16,12 +16,9 @@ CopyEnhMetaFileA
 CopyEnhMetaFileW
 CopyMetaFileA
 CopyMetaFileW
-CountClipboardFormats
 CreateAsyncBindCtx
 CreateBindCtx
 CreateDataAdviseHolder
-CreateDialogIndirectParamA
-CreateDialogIndirectParamW
 CreateFileMoniker
 CreateGenericComposite
 CreateItemMoniker
@@ -37,22 +34,14 @@ DefMDIChildProcA
 DefMDIChildProcW
 DeleteEnhMetaFile
 DeleteMetaFile
-DialogBoxIndirectParamA
-DialogBoxIndirectParamW
 DoDragDrop
 DragFinish
 DragQueryFileA
 DragQueryFileW
-EndDialog
 EndDoc
 EndPage
 FindTextA
 FindTextW
-GetDialogBaseUnits
-GetDlgItemInt
-GetDlgItemTextA
-GetDlgItemTextW
-GetNextDlgTabItem
 GetOpenFileNameA
 GetOpenFileNameW
 GetRunningObjectTable
@@ -67,12 +56,7 @@ ImageList_Merge
 ImageList_Read
 ImageList_Write
 InitCommonControls
-IsClipboardFormatAvailable
-IsDialogMessageA
-IsDialogMessageW
-IsDlgButtonChecked
 LoadTypeLib
-MapDialogRect
 OleCreate
 OleCreateFontIndirect
 OleCreateFromData
@@ -162,13 +146,8 @@ SQLSetConnectAttrW
 SQLSetEnvAttr
 SQLSetStmtAttrA
 SQLSetStmtAttrW
-SendDlgItemMessageA
-SendDlgItemMessageW
 SetAbortProc
 SetConvertStg
-SetDlgItemInt
-SetDlgItemTextA
-SetDlgItemTextW
 SetWindowRgn
 StartDocA
 StartDocW
@@ -259,7 +238,6 @@ InternetSetStatusCallbackW
 InternetWriteFile
 
 # from main: HTML views, DAO, OLE dialogs, controls
-CheckDlgButton
 CoInternetCreateSecurityManager
 CoRegisterMessageFilter
 LBItemFromPt

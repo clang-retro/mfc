@@ -371,24 +371,6 @@ BOOL WINAPI SystemParametersInfoA(UINT action, UINT uiParam, PVOID pv, UINT winI
   return SystemParametersInfoW(action, uiParam, pv, winIni);
 }
 
-// Message boxes, until the window system can show one: the text goes to
-// standard error, and the default button is the answer.
-int WINAPI MessageBoxW(HWND, LPCWSTR text, LPCWSTR caption, UINT type) {
-  fprintf(stderr, "%s%s%s\n", caption ? Narrow(caption).c_str() : "", caption ? ": " : "",
-          text ? Narrow(text).c_str() : "");
-  UINT kind = type & MB_TYPEMASK;
-  UINT def = (type & MB_DEFMASK) >> 8;
-  static const int answers[][3] = {
-      {IDOK, IDOK, IDOK},           {IDOK, IDCANCEL, IDCANCEL},   {IDABORT, IDRETRY, IDIGNORE},
-      {IDYES, IDNO, IDCANCEL},      {IDYES, IDNO, IDNO},          {IDRETRY, IDCANCEL, IDCANCEL},
-      {IDCANCEL, IDTRYAGAIN, IDCONTINUE},
-  };
-  if (kind > 6) kind = 0;
-  return answers[kind][def < 3 ? def : 0];
-}
-int WINAPI MessageBoxA(HWND hwnd, LPCSTR text, LPCSTR caption, UINT type) {
-  return MessageBoxW(hwnd, text ? Widen(text).c_str() : NULL, caption ? Widen(caption).c_str() : NULL, type);
-}
 BOOL WINAPI MessageBeep(UINT) { return TRUE; }
 
 }  // extern "C"
