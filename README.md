@@ -93,8 +93,13 @@ python3 path/to/mfc/port/tools/res2cpp.py -I path/to/mfc/include app.rc -o app-r
 
 It is a work in progress. So far the non-window classes, automation, the
 registry (kept in `~/.config/winport/registry.reg`), resources, sockets
-and COM within one process work; windows and drawing come next, with
-X11, Wayland and Cocoa backends (the Cocoa one for Mac OS X 10.4 and
+and COM within one process work, and so does the window manager: window
+classes and windows, messages and the message loop, timers, hooks,
+focus, painting, and drawing in software with device contexts, bitmaps,
+DIBs, regions, fills and blits. Windows stay in memory for now
+(`WINPORT_BACKEND=headless`); lines, shapes and text, the standard and
+common controls, dialogs and menus come next, then X11, Wayland and
+Cocoa backends to show the windows (the Cocoa one for Mac OS X 10.4 and
 later, PowerPC and Intel). The functions not
 written yet are listed in `port/src/stubs.txt` and fail with
 `ERROR_CALL_NOT_IMPLEMENTED`; `WINPORT_DEBUG=1` names each one the first
@@ -154,7 +159,9 @@ clang++ --config=winxp.cfg -D_AFXDLL -Ipath/to/mfc/include -shared ext.cpp ext-r
 
 `make check` (with the same variables as the build) builds the programs
 in `tests/` in ANSI and Unicode and runs them under Wine, starting Xvfb
-when there is no display:
+when there is no display. For a Linux or macOS target it builds `core`,
+`memtest`, `wintest`, `disptest` and `isapitest` against the portable
+layer and runs them directly; `NATIVE_TESTS` names others to try.
 
 * `core`: CString, collections, CFile, CArchive and serialization,
   CTime, exceptions and run-time classes, on the console.
@@ -163,6 +170,13 @@ when there is no display:
   DumpAllObjectsSince) caught through afxDump, guard bytes and
   AfxCheckMemory, AfxIsMemoryBlock, AfxDoForAllObjects, tracking turned
   off, the allocation hook and delayed frees, on the console.
+* `wintest`: windows and drawing below the MFC classes: window classes
+  and windows, the window tree and coordinates, sending and posting,
+  the message loop, timers, messages between threads, hooks, ANSI and
+  Unicode window procedures, focus, painting and scrolling, memory DCs,
+  monochrome bitmaps, DIB sections, raster operations, regions,
+  clipping, SaveDC and mapping modes; and a CWnd with a message map,
+  on the console.
 * `disptest`: the automation helpers in `afxdisp.h` (COleDateTime and
   its span, COleCurrency, COleVariant, COleSafeArray) and a
   COleDispatchDriver calling an IDispatch written in the test, on the

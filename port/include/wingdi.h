@@ -58,6 +58,7 @@ extern "C" {
 #define DEFAULT_GUI_FONT 17
 #define DC_BRUSH 18
 #define DC_PEN 19
+#define STOCK_LAST 19
 
 // Raster operations
 #define R2_BLACK 1
@@ -1035,7 +1036,7 @@ BOOL WINAPI SetColorAdjustment(HDC, const COLORADJUSTMENT*);
 BOOL WINAPI GetColorAdjustment(HDC, LPCOLORADJUSTMENT);
 UINT WINAPI SetBoundsRect(HDC, LPCRECT, UINT);
 UINT WINAPI GetBoundsRect(HDC, LPRECT, UINT);
-int WINAPI SetLayout(HDC, DWORD);
+DWORD WINAPI SetLayout(HDC, DWORD);
 DWORD WINAPI GetLayout(HDC);
 #define LAYOUT_RTL 0x00000001
 HWND WINAPI WindowFromDC(HDC);
@@ -1236,6 +1237,10 @@ BOOL WINAPI AnimatePalette(HPALETTE, UINT, UINT, const PALETTEENTRY*);
 BOOL WINAPI ResizePalette(HPALETTE, UINT);
 UINT WINAPI GetNearestPaletteIndex(HPALETTE, COLORREF);
 BOOL WINAPI UpdateColors(HDC);
+#define SYSPAL_ERROR 0
+#define SYSPAL_STATIC 1
+#define SYSPAL_NOSTATIC 2
+#define SYSPAL_NOSTATIC256 3
 UINT WINAPI GetSystemPaletteUse(HDC);
 
 // Metafiles
