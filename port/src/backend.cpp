@@ -1,10 +1,12 @@
 // backend.cpp - choosing the backend that shows top-level windows, and
 // the headless one, which shows nothing.
 //
-// WINPORT_BACKEND names the backend: "headless" keeps every window in
-// memory, which suits tests and programs run without a display. Without
-// it the first backend that can start is used, and headless when none
-// can. WINPORT_SCREEN=WIDTHxHEIGHT sets the headless screen's size.
+// WINPORT_BACKEND names the backend: "cocoa" shows windows on macOS,
+// "wayland" through the Wayland compositor, "x11" on the X display, and
+// "headless" keeps every window in memory, which suits tests and
+// programs run without a display. Without it macOS uses Cocoa; elsewhere
+// the compositor is used when WAYLAND_DISPLAY names one, then the X
+// display when DISPLAY names one, and headless otherwise. WINPORT_SCREEN=WIDTHxHEIGHT sets the headless screen's size.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -57,14 +59,43 @@ Backend* NewHeadlessBackend() { return new HeadlessBackend; }
 Backend* GetBackend() {
   static Backend* b = [] {
     const char* name = getenv("WINPORT_BACKEND");
-    if (name && *name && strcmp(name, "headless") != 0)
-      fprintf(stderr, "winport: no backend named %s; windows stay in memory\n", name);
-    return NewHeadlessBackend();
+    Backend* b = NULL;
+    if (name && *name) {
+      if (strcmp(name, "x11") == 0) {
+        b = NewX11Backend();
+        if (!b) fprintf(stderr, "winport: cannot open the X display; windows stay in memory\n");
+      } else if (strcmp(name, "cocoa") == 0) {
+        b = NewCocoaBackend();
+        if (!b) fprintf(stderr, "winport: Cocoa is only on macOS; windows stay in memory\n");
+      } else if (strcmp(name, "wayland") == 0) {
+        b = NewWaylandBackend();
+        if (!b) fprintf(stderr, "winport: cannot reach the Wayland compositor; windows stay in memory\n");
+      } else if (strcmp(name, "headless") != 0) {
+        fprintf(stderr, "winport: no backend named %s; windows stay in memory\n", name);
+      }
+    } else {
+#ifdef __APPLE__
+      b = NewCocoaBackend();
+#endif
+      const char* wl = getenv("WAYLAND_DISPLAY");
+      const char* x = getenv("DISPLAY");
+      if (!b && wl && *wl) b = NewWaylandBackend();
+      if (!b && x && *x) b = NewX11Backend();
+    }
+    return b ? b : NewHeadlessBackend();
   }();
   return b;
 }
 
 // The standard control classes register here as they are written.
-void RegisterSystemClasses() {}
+void RegisterSystemClasses() {
+  RegisterMenuClass();
+  RegisterDialogClass();
+  RegisterButtonClasses();
+  RegisterEditClass();
+  RegisterListClasses();
+  RegisterMdiClass();
+  RegisterCommonControls();
+}
 
 }  // namespace winport

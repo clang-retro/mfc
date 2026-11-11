@@ -102,7 +102,7 @@ public:
         m_wndToolBar.GetWindowRect(&rcTool);
         m_wndStatusBar.GetWindowRect(&rcStatus);
         GetView()->GetWindowRect(&rcView);
-        TestLog("client %ld,%ld-%ld,%ld tool %ld,%ld-%ld,%ld status %ld,%ld-%ld,%ld view %ld,%ld-%ld,%ld",
+        TestLog("client %d,%d-%d,%d tool %d,%d-%d,%d status %d,%d-%d,%d view %d,%d-%d,%d",
                 rcClient.left, rcClient.top, rcClient.right, rcClient.bottom, rcTool.left,
                 rcTool.top, rcTool.right, rcTool.bottom, rcStatus.left, rcStatus.top,
                 rcStatus.right, rcStatus.bottom, rcView.left, rcView.top, rcView.right,
@@ -220,7 +220,7 @@ public:
         TestLog("preview: page text '%s'", (LPCSTR)CStringA(m_wndStatusBar.GetPaneText(0)));
         CHECK(m_wndStatusBar.GetPaneText(0) == _T("Page 1"));
         CRect rcPage = pPreview->m_pPageInfo[0].rectScreen;
-        TestLog("preview: page %ld,%ld-%ld,%ld", rcPage.left, rcPage.top, rcPage.right,
+        TestLog("preview: page %d,%d-%d,%d", rcPage.left, rcPage.top, rcPage.right,
                 rcPage.bottom);
         CHECK(rcPage.Width() > 50 && rcPage.Height() > rcPage.Width());
         break;

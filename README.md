@@ -91,6 +91,9 @@ clang++ -std=c++17 -Ipath/to/mfc/port/include -Ipath/to/mfc/include app.cpp \
   -Lpath/to/build/x86_64-linux-gnu -lmfc -lwinport -ldl -lpthread -o app
 ```
 
+On macOS the system libraries are `-framework Cocoa -lpthread` instead
+of `-ldl -lpthread`.
+
 A program's resources go in as C++: `port/tools/res2cpp.py` compiles the
 `.rc` file with `llvm-rc` and writes the result as a source file that
 registers it when the program starts (it needs Python 3, `llvm-rc` and
@@ -105,14 +108,25 @@ registry (kept in `~/.config/winport/registry.reg`), resources, sockets
 and COM within one process work, and so does the window manager: window
 classes and windows, messages and the message loop, timers, hooks,
 focus, painting, and drawing in software with device contexts, bitmaps,
-DIBs, regions, fills and blits. Windows stay in memory for now
-(`WINPORT_BACKEND=headless`); lines, shapes and text, the standard and
-common controls, dialogs and menus come next, then X11, Wayland and
-Cocoa backends to show the windows (the Cocoa one for Mac OS X 10.4 and
-later, PowerPC and Intel). The functions not
-written yet are listed in `port/src/stubs.txt` and fail with
-`ERROR_CALL_NOT_IMPLEMENTED`; `WINPORT_DEBUG=1` names each one the first
-time a program calls it.
+DIBs, regions, fills and blits, lines, curves, shapes and paths, and
+text. Windows show on Wayland, on X11 or with Cocoa on macOS (Mac OS X
+10.4 and later, PowerPC and Intel); `WINPORT_BACKEND` picks one
+(`wayland`, `x11`, `cocoa`, or `headless` to keep windows in memory, as
+the tests do). Wayland, X11 and xkbcommon are loaded when a program
+starts, so it runs without them. Text copied and pasted through the
+clipboard goes to and from other programs. The functions not written yet are
+listed in `port/src/stubs.txt` and fail with `ERROR_CALL_NOT_IMPLEMENTED`;
+`WINPORT_DEBUG=1` names each one the first time a program calls it.
+
+Text uses the TrueType and OpenType fonts installed on the system,
+read with [stb_truetype](https://github.com/nothings/stb) (public domain
+or MIT, in `port/src/third_party/`); Windows names such as MS Sans Serif,
+Times New Roman and Courier New map to similar installed families
+(Arial, Liberation, DejaVu, Helvetica and so on). `WINPORT_FONTS` lists
+the folders to search instead of the system's, separated by colons; set
+to `builtin`, text uses only the built-in fallback, the public domain
+X11 6x13 bitmap font (`port/tools/gen-builtin-font.py` makes
+`port/src/font_builtin.inc` from it).
 
 The ANSI code page there is UTF-8, `WCHAR` is the system's 32-bit
 `wchar_t`, and `long` is 64 bits on 64-bit systems while `LONG` and
@@ -184,8 +198,9 @@ layer and runs them directly; `NATIVE_TESTS` names others to try.
   the message loop, timers, messages between threads, hooks, ANSI and
   Unicode window procedures, focus, painting and scrolling, memory DCs,
   monochrome bitmaps, DIB sections, raster operations, regions,
-  clipping, SaveDC and mapping modes; and a CWnd with a message map,
-  on the console.
+  clipping, SaveDC and mapping modes, lines, shapes, fill modes, flood
+  fills, paths, text metrics and extents, TextOut and DrawText; and a
+  CWnd with a message map, on the console.
 * `disptest`: the automation helpers in `afxdisp.h` (COleDateTime and
   its span, COleCurrency, COleVariant, COleSafeArray) and a
   COleDispatchDriver calling an IDispatch written in the test, on the

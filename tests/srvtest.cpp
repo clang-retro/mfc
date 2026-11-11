@@ -464,7 +464,7 @@ public:
         CHECK(strType == _T("SrvTest Document"));
         CSize size(0, 0);
         CHECK(m_pItem->GetExtent(&size));
-        TestLog("extent %ld x %ld", size.cx, size.cy);
+        TestLog("extent %d x %d", size.cx, size.cy);
         CHECK(size == CSize(2000, 1000));
         m_dwPid = ItemData(m_pItem, CfProcess());
         TestLog("server process %lu (this one %lu)", m_dwPid, ::GetCurrentProcessId());

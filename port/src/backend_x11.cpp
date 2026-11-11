@@ -1,0 +1,790 @@
+// backend_x11.cpp - showing top-level windows on an X11 display.
+//
+// Each top-level window becomes an X window without the window
+// manager's frame, since the window draws its own caption and borders,
+// and its surface is copied to the X window as it changes. Menus, list
+// drop-downs and tooltips go around the window manager. libX11 is loaded
+// when the backend starts, so programs run without it when there is no
+// display.
+//
+// Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
+#include "user.h"
+
+#if defined(__unix__) && !defined(__APPLE__) && __has_include(<X11/Xlib.h>)
+
+#include <X11/Xatom.h>
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <X11/cursorfont.h>
+#include <X11/keysym.h>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+
+#include <map>
+#include <mutex>
+
+namespace winport {
+
+namespace {
+
+#define X11_FUNCTIONS(F)                                                                                        \
+  F(XInitThreads) F(XOpenDisplay) F(XCloseDisplay) F(XInternAtom) F(XCreateWindow) F(XDestroyWindow)           \
+  F(XMapRaised) F(XUnmapWindow) F(XMoveResizeWindow) F(XChangeProperty) F(XSetWMProtocols) F(XCreateGC)        \
+  F(XFreeGC) F(XPutImage) F(XInitImage) F(XFlush) F(XPending) F(XNextEvent) F(XLookupString) F(XLookupKeysym) \
+  F(XSetTransientForHint) F(XSetWMNormalHints) F(XSetWMHints) F(XStoreName) F(XDefineCursor)                  \
+  F(XCreateFontCursor) F(XRaiseWindow) F(XSetInputFocus) F(XWarpPointer) F(XGetWindowAttributes)               \
+  F(XTranslateCoordinates) F(XSync) F(XFreeCursor) F(XSetSelectionOwner) F(XGetSelectionOwner)          \
+  F(XConvertSelection) F(XGetWindowProperty) F(XFree) F(XSendEvent) F(XCheckTypedWindowEvent) F(XCheckTypedEvent)
+
+struct XLib {
+#define F(name) decltype(&::name) name = nullptr;
+  X11_FUNCTIONS(F)
+#undef F
+  bool Load() {
+    void* lib = dlopen("libX11.so.6", RTLD_NOW | RTLD_LOCAL);
+    if (!lib) lib = dlopen("libX11.so", RTLD_NOW | RTLD_LOCAL);
+    if (!lib) return false;
+#define F(name)                                         \
+  name = (decltype(&::name))dlsym(lib, #name);          \
+  if (!name) return false;
+    X11_FUNCTIONS(F)
+#undef F
+    return true;
+  }
+};
+
+// libXcursor, for cursors in color; without it they are black and white
+// font cursors. Its header may be missing, so the image is declared here
+// as the library defines it.
+struct XcursorImageRec {
+  unsigned version, size, width, height, xhot, yhot, delay;
+  unsigned* pixels;  // ARGB, not premultiplied
+};
+struct XcursorLib {
+  XcursorImageRec* (*XcursorImageCreate)(int width, int height) = nullptr;
+  void (*XcursorImageDestroy)(XcursorImageRec* image) = nullptr;
+  Cursor (*XcursorImageLoadCursor)(Display* dpy, const XcursorImageRec* image) = nullptr;
+  bool Load() {
+    void* lib = dlopen("libXcursor.so.1", RTLD_NOW | RTLD_LOCAL);
+    if (!lib) return false;
+    XcursorImageCreate = (decltype(XcursorImageCreate))dlsym(lib, "XcursorImageCreate");
+    XcursorImageDestroy = (decltype(XcursorImageDestroy))dlsym(lib, "XcursorImageDestroy");
+    XcursorImageLoadCursor = (decltype(XcursorImageLoadCursor))dlsym(lib, "XcursorImageLoadCursor");
+    return XcursorImageCreate && XcursorImageDestroy && XcursorImageLoadCursor;
+  }
+};
+
+// libXfixes, which says when another program takes the clipboard.
+struct XfixesLib {
+  Bool (*XFixesQueryExtension)(Display* dpy, int* eventBase, int* errorBase) = nullptr;
+  void (*XFixesSelectSelectionInput)(Display* dpy, ::Window w, Atom selection, unsigned long mask) = nullptr;
+  bool Load() {
+    void* lib = dlopen("libXfixes.so.3", RTLD_NOW | RTLD_LOCAL);
+    if (!lib) return false;
+    XFixesQueryExtension = (decltype(XFixesQueryExtension))dlsym(lib, "XFixesQueryExtension");
+    XFixesSelectSelectionInput = (decltype(XFixesSelectSelectionInput))dlsym(lib, "XFixesSelectSelectionInput");
+    return XFixesQueryExtension && XFixesSelectSelectionInput;
+  }
+};
+
+// The system cursors' nearest X font cursors.
+unsigned FontCursorFor(int id) {
+  switch (id) {
+    case 32513: return XC_xterm;               // IDC_IBEAM
+    case 32514: return XC_watch;               // IDC_WAIT
+    case 32515: return XC_crosshair;           // IDC_CROSS
+    case 32516: return XC_sb_up_arrow;         // IDC_UPARROW
+    case 32640: case 32646: return XC_fleur;   // IDC_SIZE, IDC_SIZEALL
+    case 32642: return XC_bottom_right_corner; // IDC_SIZENWSE
+    case 32643: return XC_bottom_left_corner;  // IDC_SIZENESW
+    case 32644: return XC_sb_h_double_arrow;   // IDC_SIZEWE
+    case 32645: return XC_sb_v_double_arrow;   // IDC_SIZENS
+    case 32648: return XC_circle;              // IDC_NO
+    case 32649: return XC_hand2;               // IDC_HAND
+    case 32650: return XC_watch;               // IDC_APPSTARTING
+    case 32651: return XC_question_arrow;      // IDC_HELP
+  }
+  return XC_left_ptr;
+}
+
+// The keys that are not text, by keysym.
+struct KeyMap {
+  KeySym sym;
+  BYTE vk;
+  bool ext;
+};
+const KeyMap kKeys[] = {
+#define KEY(name, vk, ext) {XK_##name, vk, ext},
+#include "keysyms.inc"
+#undef KEY
+};
+
+UINT VkOf(KeySym sym, bool* ext) {
+  *ext = false;
+  if (sym >= XK_a && sym <= XK_z) return 'A' + (UINT)(sym - XK_a);
+  if (sym >= XK_A && sym <= XK_Z) return 'A' + (UINT)(sym - XK_A);
+  if (sym >= XK_0 && sym <= XK_9) return '0' + (UINT)(sym - XK_0);
+  if (sym >= XK_F1 && sym <= XK_F24) return VK_F1 + (UINT)(sym - XK_F1);
+  for (const KeyMap& k : kKeys)
+    if (k.sym == sym) {
+      *ext = k.ext;
+      return k.vk;
+    }
+  return 0;
+}
+
+// The text a keysym types, for the keysyms that carry one.
+wchar_t CharOf(KeySym sym, const char* latin1, int n) {
+  if ((sym & 0xFF000000) == 0x01000000) return (wchar_t)(sym & 0x00FFFFFF);
+  if (n == 1) return (wchar_t)(BYTE)latin1[0];
+  if (sym >= 0x20 && sym < 0x100) return (wchar_t)sym;
+  return 0;
+}
+
+struct Native {
+  ::Window xid = 0;
+  Window* w = NULL;
+  bool mapped = false;
+  bool managed = true;  // by the window manager, rather than override-redirect
+  int width = 0, height = 0;
+};
+
+struct X11Backend : Backend {
+  XLib x;
+  Display* dpy = NULL;
+  int screen = 0;
+  ::Window root = 0;
+  Visual* visual = NULL;
+  int depth = 24;
+  GC gc = NULL;
+  int wakePipe[2] = {-1, -1};
+  Atom wmDelete = 0, wmProtocols = 0, motifHints = 0, netName = 0, utf8 = 0, netType = 0, typeNormal = 0,
+       typeDialog = 0, typeMenu = 0, typeTooltip = 0, typeCombo = 0;
+  std::map<::Window, Native*> byXid;
+  std::recursive_mutex lock;  // the X connection and the map
+  Cursor arrow = 0;
+  XcursorLib xcursor;
+  bool haveXcursor = false;
+  Cursor cursor = 0;          // the one the windows show
+  bool cursorOwned = false;   // made for a program's cursor, freed when replaced
+  std::map<unsigned, Cursor> fontCursors;
+  // The clipboard: an unmapped window owns it and is sent its requests.
+  ::Window clipWin = 0;
+  Atom clipboard = 0, targets = 0, textPlain = 0, clipProp = 0, incr = 0;
+  std::string clipText;  // UTF-8, what this program offers
+  int fixesEvent = -1;   // XFixesSelectionNotify, when the server has XFixes
+  DWORD clipGeneration = 0;
+  bool notified = false;  // a SelectionNotify came through the event loop
+  XSelectionEvent notifyEvent = {};
+  bool moving = false;  // a ConfigureNotify is moving one of ours
+  DWORD lastPress = 0;
+
+  bool Start() {
+    if (!x.Load()) return false;
+    x.XInitThreads();
+    dpy = x.XOpenDisplay(NULL);
+    if (!dpy) return false;
+    screen = DefaultScreen(dpy);
+    root = RootWindow(dpy, screen);
+    visual = DefaultVisual(dpy, screen);
+    depth = DefaultDepth(dpy, screen);
+    if (depth < 24) {
+      fprintf(stderr, "winport: the X display needs 24-bit color\n");
+      x.XCloseDisplay(dpy);
+      dpy = NULL;
+      return false;
+    }
+    gc = x.XCreateGC(dpy, root, 0, NULL);
+    if (pipe(wakePipe) == 0) {
+      fcntl(wakePipe[0], F_SETFL, O_NONBLOCK);
+      fcntl(wakePipe[1], F_SETFL, O_NONBLOCK);
+    }
+    wmDelete = x.XInternAtom(dpy, "WM_DELETE_WINDOW", False);
+    wmProtocols = x.XInternAtom(dpy, "WM_PROTOCOLS", False);
+    motifHints = x.XInternAtom(dpy, "_MOTIF_WM_HINTS", False);
+    netName = x.XInternAtom(dpy, "_NET_WM_NAME", False);
+    utf8 = x.XInternAtom(dpy, "UTF8_STRING", False);
+    netType = x.XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
+    typeNormal = x.XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_NORMAL", False);
+    typeDialog = x.XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DIALOG", False);
+    typeMenu = x.XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_POPUP_MENU", False);
+    typeTooltip = x.XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_TOOLTIP", False);
+    typeCombo = x.XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_COMBO", False);
+    arrow = x.XCreateFontCursor(dpy, XC_left_ptr);
+    cursor = arrow;
+    haveXcursor = xcursor.Load();
+    clipboard = x.XInternAtom(dpy, "CLIPBOARD", False);
+    targets = x.XInternAtom(dpy, "TARGETS", False);
+    textPlain = x.XInternAtom(dpy, "text/plain;charset=utf-8", False);
+    clipProp = x.XInternAtom(dpy, "WINPORT_CLIPBOARD", False);
+    incr = x.XInternAtom(dpy, "INCR", False);
+    XSetWindowAttributes ca = {};
+    clipWin = x.XCreateWindow(dpy, root, -10, -10, 1, 1, 0, 0, InputOnly, CopyFromParent, 0, &ca);
+    XfixesLib fixes;
+    int errorBase;
+    if (fixes.Load() && fixes.XFixesQueryExtension(dpy, &fixesEvent, &errorBase))
+      fixes.XFixesSelectSelectionInput(dpy, clipWin, clipboard, 1 /* XFixesSetSelectionOwnerNotifyMask */);
+    else
+      fixesEvent = -1;
+    return true;
+  }
+
+  const char* Name() override { return "x11"; }
+
+  SIZE ScreenSize() override {
+    if (!dpy) return SIZE{1024, 768};
+    return SIZE{DisplayWidth(dpy, screen), DisplayHeight(dpy, screen)};
+  }
+
+  Native* NativeOf(Window* w) { return (Native*)w->native; }
+
+  // Windows with a caption, or owned by nothing, are the window manager's;
+  // captionless popups such as menus and drop-downs are placed directly.
+  bool Managed(Window* w) {
+    if ((w->style & WS_CAPTION) == WS_CAPTION) return true;
+    if (w->exStyle & WS_EX_APPWINDOW) return true;
+    if (!(w->style & WS_POPUP)) return true;
+    return false;
+  }
+
+  Atom TypeOf(Window* w) {
+    if (w->cls && w->cls->name == L"#32768") return typeMenu;
+    if (w->cls && (w->cls->name == L"ComboLBox")) return typeCombo;
+    if (w->cls && w->cls->name == L"tooltips_class32") return typeTooltip;
+    if (w->owner) return typeDialog;
+    return typeNormal;
+  }
+
+  void SetTitle(Native* n) {
+    std::string t = Narrow(n->w->text.c_str());
+    std::wstring wt = n->w->text;
+    std::string u8;
+    for (wchar_t c : wt) {
+      unsigned v = (unsigned)c;
+      if (v < 0x80) {
+        u8 += (char)v;
+      } else if (v < 0x800) {
+        u8 += (char)(0xC0 | (v >> 6));
+        u8 += (char)(0x80 | (v & 0x3F));
+      } else if (v < 0x10000) {
+        u8 += (char)(0xE0 | (v >> 12));
+        u8 += (char)(0x80 | ((v >> 6) & 0x3F));
+        u8 += (char)(0x80 | (v & 0x3F));
+      } else {
+        u8 += (char)(0xF0 | (v >> 18));
+        u8 += (char)(0x80 | ((v >> 12) & 0x3F));
+        u8 += (char)(0x80 | ((v >> 6) & 0x3F));
+        u8 += (char)(0x80 | (v & 0x3F));
+      }
+    }
+    x.XStoreName(dpy, n->xid, t.c_str());
+    x.XChangeProperty(dpy, n->xid, netName, utf8, 8, PropModeReplace, (const unsigned char*)u8.data(),
+                      (int)u8.size());
+  }
+
+  void SetSizeHints(Native* n) {
+    XSizeHints hints = {};
+    Window* w = n->w;
+    hints.flags = PPosition | USPosition | PSize;
+    hints.x = w->rect.left;
+    hints.y = w->rect.top;
+    hints.width = n->width;
+    hints.height = n->height;
+    if (!(w->style & WS_THICKFRAME)) {
+      hints.flags |= PMinSize | PMaxSize;
+      hints.min_width = hints.max_width = n->width;
+      hints.min_height = hints.max_height = n->height;
+    }
+    x.XSetWMNormalHints(dpy, n->xid, &hints);
+  }
+
+  Native* Create(Window* w) {
+    Native* n = new Native;
+    n->w = w;
+    n->managed = Managed(w);
+    n->width = std::max(1, (int)(w->rect.right - w->rect.left));
+    n->height = std::max(1, (int)(w->rect.bottom - w->rect.top));
+    XSetWindowAttributes a = {};
+    a.background_pixel = 0;
+    a.override_redirect = n->managed ? False : True;
+    a.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
+                   PointerMotionMask | StructureNotifyMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask;
+    a.cursor = cursor;
+    n->xid = x.XCreateWindow(dpy, root, w->rect.left, w->rect.top, n->width, n->height, 0, CopyFromParent,
+                             InputOutput, CopyFromParent, CWBackPixel | CWOverrideRedirect | CWEventMask | CWCursor,
+                             &a);
+    if (n->managed) {
+      // No frame from the window manager: the window draws its own.
+      long motif[5] = {2 /* decorations */, 0, 0, 0, 0};
+      x.XChangeProperty(dpy, n->xid, motifHints, motifHints, 32, PropModeReplace, (const unsigned char*)motif, 5);
+      x.XSetWMProtocols(dpy, n->xid, &wmDelete, 1);
+      XWMHints wmh = {};
+      wmh.flags = InputHint | StateHint;
+      wmh.input = True;
+      wmh.initial_state = NormalState;
+      x.XSetWMHints(dpy, n->xid, &wmh);
+      SetSizeHints(n);
+      if (w->owner) {
+        Window* o = w->owner->TopLevel();
+        if (o->native) x.XSetTransientForHint(dpy, n->xid, NativeOf(o)->xid);
+      }
+    }
+    Atom type = TypeOf(w);
+    x.XChangeProperty(dpy, n->xid, netType, XA_ATOM, 32, PropModeReplace, (const unsigned char*)&type, 1);
+    SetTitle(n);
+    byXid[n->xid] = n;
+    w->native = n;
+    return n;
+  }
+
+  void Show(Window* w, bool show) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!dpy) return;
+    Native* n = NativeOf(w);
+    if (!n) {
+      if (!show) return;
+      n = Create(w);
+    }
+    if (show) {
+      x.XMapRaised(dpy, n->xid);
+      n->mapped = true;
+      if (n->managed && !(w->style & WS_DISABLED)) x.XSetInputFocus(dpy, n->xid, RevertToParent, CurrentTime);
+    } else {
+      x.XUnmapWindow(dpy, n->xid);
+      n->mapped = false;
+    }
+    x.XFlush(dpy);
+  }
+
+  void Destroy(Window* w) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    Native* n = NativeOf(w);
+    if (!n) return;
+    byXid.erase(n->xid);
+    if (dpy) {
+      x.XDestroyWindow(dpy, n->xid);
+      x.XFlush(dpy);
+    }
+    w->native = NULL;
+    delete n;
+  }
+
+  void Moved(Window* w) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    Native* n = NativeOf(w);
+    if (!n || !dpy || moving) return;
+    n->width = std::max(1, (int)(w->rect.right - w->rect.left));
+    n->height = std::max(1, (int)(w->rect.bottom - w->rect.top));
+    if (n->managed) SetSizeHints(n);
+    x.XMoveResizeWindow(dpy, n->xid, w->rect.left, w->rect.top, n->width, n->height);
+    x.XFlush(dpy);
+  }
+
+  void TitleChanged(Window* w) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    Native* n = NativeOf(w);
+    if (!n || !dpy) return;
+    SetTitle(n);
+    x.XFlush(dpy);
+  }
+
+  void Put(Native* n, RECT r) {
+    Surface* s = n->w->surface;
+    if (!s || s->width <= 0 || s->height <= 0) return;
+    RECT all = {0, 0, s->width, s->height};
+    if (!IntersectRect(&r, &r, &all)) return;
+    XImage img = {};
+    img.width = s->width;
+    img.height = s->height;
+    img.format = ZPixmap;
+    img.data = (char*)s->pixels.data();
+    img.byte_order = LSBFirst;
+    img.bitmap_unit = 32;
+    img.bitmap_bit_order = LSBFirst;
+    img.bitmap_pad = 32;
+    img.depth = depth;
+    img.bytes_per_line = s->width * 4;
+    img.bits_per_pixel = 32;
+    img.red_mask = 0xFF0000;
+    img.green_mask = 0x00FF00;
+    img.blue_mask = 0x0000FF;
+    if (!x.XInitImage(&img)) return;
+    x.XPutImage(dpy, n->xid, gc, &img, r.left, r.top, r.left, r.top, r.right - r.left, r.bottom - r.top);
+  }
+
+  void Present(Window* w, const RECT& r) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    Native* n = NativeOf(w);
+    if (!n || !dpy || !n->mapped) return;
+    Put(n, r);
+    x.XFlush(dpy);
+  }
+
+  // A cursor in color, or with no font cursor like it, from its picture.
+  Cursor MakeCursor(const CursorPicture& p) {
+    if (!haveXcursor || p.width <= 0 || p.height <= 0) return 0;
+    XcursorImageRec* img = xcursor.XcursorImageCreate(p.width, p.height);
+    if (!img) return 0;
+    img->xhot = std::min<int>(std::max<int>(p.hotspot.x, 0), p.width - 1);
+    img->yhot = std::min<int>(std::max<int>(p.hotspot.y, 0), p.height - 1);
+    memcpy(img->pixels, p.argb.data(), p.argb.size() * 4);
+    Cursor c = xcursor.XcursorImageLoadCursor(dpy, img);
+    xcursor.XcursorImageDestroy(img);
+    return c;
+  }
+
+  void SetCursor(HCURSOR h) override {
+    CursorPicture p;
+    bool have = h && CursorImage(h, &p);
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!dpy) return;
+    Cursor c = 0;
+    bool owned = false;
+    if (!h) {
+      // Hidden: a cursor with nothing in it.
+      CursorPicture blank;
+      blank.width = blank.height = 1;
+      blank.argb.assign(1, 0);
+      c = MakeCursor(blank);
+      owned = c != 0;
+    } else if (have && p.systemId == 0) {
+      c = MakeCursor(p);
+      owned = c != 0;
+    }
+    if (!c) {
+      unsigned shape = FontCursorFor(have ? p.systemId : 0);
+      auto it = fontCursors.find(shape);
+      if (it == fontCursors.end()) it = fontCursors.emplace(shape, x.XCreateFontCursor(dpy, shape)).first;
+      c = it->second;
+    }
+    for (auto& e : byXid) x.XDefineCursor(dpy, e.first, c);
+    if (cursorOwned && cursor != c) x.XFreeCursor(dpy, cursor);
+    cursor = c;
+    cursorOwned = owned;
+    x.XFlush(dpy);
+  }
+
+  // ---------------------------------------------------------------
+  // The clipboard
+
+  bool ClipboardForeign(DWORD* generation) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!dpy) return false;
+    ::Window owner = x.XGetSelectionOwner(dpy, clipboard);
+    if (owner == None || owner == clipWin) return false;
+    if (fixesEvent >= 0) {
+      XEvent e;
+      while (x.XCheckTypedEvent(dpy, fixesEvent, &e)) clipGeneration++;
+      *generation = clipGeneration ^ (DWORD)owner;
+    } else {
+      // Without XFixes there is no telling: look again every two seconds.
+      *generation = (DWORD)owner ^ (GetTickCount() / 2000);
+    }
+    return true;
+  }
+
+  // Waits for the owner's answer to a request for the clipboard.
+  bool AwaitNotify(XSelectionEvent* out) {
+    DWORD start = GetTickCount();
+    for (;;) {
+      XEvent e;
+      if (x.XCheckTypedWindowEvent(dpy, clipWin, SelectionNotify, &e)) {
+        *out = e.xselection;
+        return true;
+      }
+      if (notified) {
+        notified = false;
+        *out = notifyEvent;
+        return true;
+      }
+      if (GetTickCount() - start > 1000) return false;
+      pollfd fd = {ConnectionNumber(dpy), POLLIN, 0};
+      poll(&fd, 1, 20);
+    }
+  }
+
+  bool ClipboardFetch(std::wstring* text) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!dpy) return false;
+    for (Atom type : {utf8, (Atom)XA_STRING}) {
+      notified = false;
+      x.XConvertSelection(dpy, clipboard, type, clipProp, clipWin, CurrentTime);
+      x.XFlush(dpy);
+      XSelectionEvent ev;
+      if (!AwaitNotify(&ev)) return false;
+      if (ev.property == None) continue;
+      Atom got;
+      int format;
+      unsigned long n, after;
+      unsigned char* data = NULL;
+      if (x.XGetWindowProperty(dpy, clipWin, clipProp, 0, 0x1000000, True, AnyPropertyType, &got, &format, &n, &after,
+                               &data) != Success)
+        return false;
+      bool ok = false;
+      if (data && got != incr && format == 8) {
+        std::string bytes((const char*)data, n);
+        if (got == XA_STRING) {
+          text->clear();
+          for (unsigned char c : bytes) *text += (wchar_t)c;
+        } else {
+          *text = Widen(bytes.c_str(), (int)bytes.size());
+        }
+        ok = true;
+      }
+      if (data) x.XFree(data);
+      return ok;
+    }
+    return false;
+  }
+
+  void ClipboardOwn(const std::wstring& text) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!dpy) return;
+    clipText = Narrow(text.c_str(), (int)text.size());
+    x.XSetSelectionOwner(dpy, clipboard, clipWin, CurrentTime);
+    x.XFlush(dpy);
+  }
+
+  // Another program asks for the clipboard.
+  void Request(const XSelectionRequestEvent& r) {
+    XEvent reply = {};
+    reply.xselection.type = SelectionNotify;
+    reply.xselection.display = r.display;
+    reply.xselection.requestor = r.requestor;
+    reply.xselection.selection = r.selection;
+    reply.xselection.target = r.target;
+    reply.xselection.time = r.time;
+    Atom prop = r.property != None ? r.property : r.target;
+    reply.xselection.property = prop;
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (r.target == targets) {
+      Atom list[] = {targets, utf8, textPlain, XA_STRING};
+      x.XChangeProperty(dpy, r.requestor, prop, XA_ATOM, 32, PropModeReplace, (const unsigned char*)list, 4);
+    } else if (r.target == utf8 || r.target == textPlain) {
+      x.XChangeProperty(dpy, r.requestor, prop, r.target, 8, PropModeReplace, (const unsigned char*)clipText.data(),
+                        (int)clipText.size());
+    } else if (r.target == XA_STRING) {
+      std::wstring w = Widen(clipText.c_str(), (int)clipText.size());
+      std::string latin1;
+      for (wchar_t c : w) latin1 += c < 0x100 ? (char)c : '?';
+      x.XChangeProperty(dpy, r.requestor, prop, XA_STRING, 8, PropModeReplace, (const unsigned char*)latin1.data(),
+                        (int)latin1.size());
+    } else {
+      reply.xselection.property = None;
+    }
+    x.XSendEvent(dpy, r.requestor, False, 0, &reply);
+    x.XFlush(dpy);
+  }
+
+  // ---------------------------------------------------------------
+  // Input
+
+  WPARAM Keys(unsigned state) {
+    WPARAM k = 0;
+    if (state & Button1Mask) k |= MK_LBUTTON;
+    if (state & Button2Mask) k |= MK_MBUTTON;
+    if (state & Button3Mask) k |= MK_RBUTTON;
+    if (state & ShiftMask) k |= MK_SHIFT;
+    if (state & ControlMask) k |= MK_CONTROL;
+    return k;
+  }
+
+  // Where the pointer is in the window's surface. The window may not be
+  // where we put it, so this goes by the root position.
+  POINT At(Native* n, int rootX, int rootY) {
+    return POINT{rootX - n->w->rect.left, rootY - n->w->rect.top};
+  }
+
+  void Handle(XEvent& e) {
+    if (e.xany.window == clipWin && clipWin) {
+      if (e.type == SelectionRequest) {
+        Request(e.xselectionrequest);
+      } else if (e.type == SelectionNotify) {
+        std::lock_guard<std::recursive_mutex> g(lock);
+        notifyEvent = e.xselection;
+        notified = true;
+      } else if (fixesEvent >= 0 && e.type == fixesEvent) {
+        std::lock_guard<std::recursive_mutex> g(lock);
+        clipGeneration++;
+      }
+      return;
+    }
+    Native* n;
+    {
+      std::lock_guard<std::recursive_mutex> g(lock);
+      auto it = byXid.find(e.xany.window);
+      if (it == byXid.end()) return;
+      n = it->second;
+    }
+    Window* w = n->w;
+    switch (e.type) {
+      case Expose: {
+        std::lock_guard<std::recursive_mutex> g(lock);
+        RECT r = {e.xexpose.x, e.xexpose.y, e.xexpose.x + e.xexpose.width, e.xexpose.y + e.xexpose.height};
+        UserGuard ug(UserLock());
+        if (GetWindow(w->hwnd)) Put(n, r);
+        if (e.xexpose.count == 0) x.XFlush(dpy);
+        break;
+      }
+      case MapNotify: n->mapped = true; break;
+      case UnmapNotify: n->mapped = false; break;
+      case ConfigureNotify: {
+        int cw = e.xconfigure.width, ch = e.xconfigure.height;
+        // The window manager may have placed or sized the window itself.
+        int rx = e.xconfigure.x, ry = e.xconfigure.y;
+        if (!e.xconfigure.send_event && n->managed) {
+          ::Window child;
+          {
+            std::lock_guard<std::recursive_mutex> g(lock);
+            x.XTranslateCoordinates(dpy, n->xid, root, 0, 0, &rx, &ry, &child);
+          }
+        }
+        RECT r = w->rect;
+        if (cw != r.right - r.left || ch != r.bottom - r.top) {
+          n->width = cw;
+          n->height = ch;
+          ResizeRequested(w, cw, ch);
+        }
+        if (n->managed && (rx != w->rect.left || ry != w->rect.top)) {
+          moving = true;
+          SetWindowPos(w->hwnd, NULL, rx, ry, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+          moving = false;
+        }
+        break;
+      }
+      case ClientMessage:
+        if (e.xclient.message_type == wmProtocols && (Atom)e.xclient.data.l[0] == wmDelete) CloseRequested(w);
+        break;
+      case FocusIn:
+        if (n->managed && e.xfocus.mode == NotifyNormal && GetActiveWindow() != w->hwnd && IsWindowEnabled(w->hwnd))
+          SetActiveWindow(w->hwnd);
+        break;
+      case ButtonPress:
+      case ButtonRelease: {
+        POINT p = At(n, e.xbutton.x_root, e.xbutton.y_root);
+        WPARAM keys = Keys(e.xbutton.state);
+        bool down = e.type == ButtonPress;
+        UINT msg = 0;
+        switch (e.xbutton.button) {
+          case Button1: msg = down ? WM_LBUTTONDOWN : WM_LBUTTONUP; break;
+          case Button2: msg = down ? WM_MBUTTONDOWN : WM_MBUTTONUP; break;
+          case Button3: msg = down ? WM_RBUTTONDOWN : WM_RBUTTONUP; break;
+          case Button4:
+          case Button5:
+            if (down) MouseInput(w, WM_MOUSEWHEEL, p.x, p.y, MAKEWPARAM(keys, e.xbutton.button == Button4 ? WHEEL_DELTA : -WHEEL_DELTA));
+            return;
+          case 6:
+          case 7:
+            if (down) MouseInput(w, WM_MOUSEHWHEEL, p.x, p.y, MAKEWPARAM(keys, e.xbutton.button == 7 ? WHEEL_DELTA : -WHEEL_DELTA));
+            return;
+          default: return;
+        }
+        MouseInput(w, msg, p.x, p.y, keys);
+        break;
+      }
+      case MotionNotify: {
+        POINT p = At(n, e.xmotion.x_root, e.xmotion.y_root);
+        MouseInput(w, WM_MOUSEMOVE, p.x, p.y, Keys(e.xmotion.state));
+        break;
+      }
+      case KeyPress:
+      case KeyRelease: {
+        char buf[16];
+        KeySym sym = 0;
+        int len;
+        {
+          std::lock_guard<std::recursive_mutex> g(lock);
+          len = x.XLookupString(&e.xkey, buf, sizeof buf, &sym, NULL);
+        }
+        KeySym base = x.XLookupKeysym(&e.xkey, 0);
+        bool ext;
+        UINT vk = VkOf(base, &ext);
+        if (!vk) vk = VkOf(sym, &ext);
+        UINT scan = e.xkey.keycode >= 8 ? e.xkey.keycode - 8 : 0;
+        LPARAM lp = 1 | ((LPARAM)(scan & 0xFF) << 16) | (ext ? (1 << 24) : 0);
+        bool down = e.type == KeyPress;
+        wchar_t ch = 0;
+        if (down) {
+          ch = CharOf(sym, buf, len);
+          if (sym == XK_Return || sym == XK_KP_Enter) ch = L'\r';
+          if (sym == XK_BackSpace) ch = L'\b';
+          if (sym == XK_Tab || sym == XK_ISO_Left_Tab) ch = L'\t';
+          if (sym == XK_Escape) ch = 0x1B;
+          if (ch == 0x7F) ch = 0;  // Delete is a key, not text
+        }
+        // The key's text comes from X, with its layout, rather than from
+        // TranslateMessage (bit 25 tells it so).
+        if (ch) lp |= 0x02000000;
+        if (vk) KeyInput(w, down ? WM_KEYDOWN : WM_KEYUP, vk, lp);
+        if (ch) CharInput(w, ch);
+        break;
+      }
+    }
+  }
+
+  void Drain() {
+    for (;;) {
+      XEvent e;
+      {
+        std::lock_guard<std::recursive_mutex> g(lock);
+        if (!dpy || !x.XPending(dpy)) return;
+        x.XNextEvent(dpy, &e);
+      }
+      Handle(e);
+    }
+  }
+
+  void Wait(DWORD timeout) override {
+    if (!dpy) return;
+    Drain();
+    pollfd fds[2];
+    fds[0].fd = ConnectionNumber(dpy);
+    fds[0].events = POLLIN;
+    fds[1].fd = wakePipe[0];
+    fds[1].events = POLLIN;
+    int ms = timeout == INFINITE ? -1 : (int)std::min<DWORD>(timeout, 0x7FFFFFFF);
+    {
+      std::lock_guard<std::recursive_mutex> g(lock);
+      x.XFlush(dpy);
+    }
+    int r = poll(fds, 2, ms);
+    if (r > 0 && (fds[1].revents & POLLIN)) {
+      char b[64];
+      while (read(wakePipe[0], b, sizeof b) > 0) {
+      }
+    }
+    Drain();
+  }
+
+  void Wake() override {
+    if (wakePipe[1] >= 0) {
+      char c = 1;
+      ssize_t ignored = write(wakePipe[1], &c, 1);
+      (void)ignored;
+    }
+  }
+};
+
+}  // namespace
+
+Backend* NewX11Backend() {
+  X11Backend* b = new X11Backend;
+  if (b->Start()) return b;
+  delete b;
+  return NULL;
+}
+
+}  // namespace winport
+
+#else
+
+namespace winport {
+Backend* NewX11Backend() { return NULL; }
+}  // namespace winport
+
+#endif

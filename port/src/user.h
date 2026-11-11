@@ -55,6 +55,7 @@ struct Window {
   Class* cls = NULL;
   WNDPROC proc = NULL;
   bool unicode = true;  // the procedure takes W messages
+  bool ansiCreate = false;  // made with CreateWindowExA: an edit control's buffer is ANSI
   DWORD style = 0, exStyle = 0;
   Window* parent = NULL;  // NULL for a top-level window
   Window* owner = NULL;
@@ -62,6 +63,7 @@ struct Window {
   RECT rect = {0, 0, 0, 0};       // in the parent's client area (the screen for a top-level)
   RECT client = {0, 0, 0, 0};     // the client area, from the window's top left
   HMENU menu = NULL;              // a child window's ID, or a top-level's menu bar
+  HMENU sysMenu = NULL;           // GetSystemMenu's copy for the window
   std::wstring text;
   HINSTANCE instance = NULL;
   std::vector<BYTE> extra;
@@ -83,6 +85,7 @@ struct Window {
   void* native = NULL;
   RECT normalRect = {0, 0, 0, 0};  // where the window goes when restored
   HDC ownDC = NULL;                // a CS_OWNDC window's DC
+  bool ncActive = false;           // an MDI child's caption is drawn active
 
   bool Visible() const { return (style & WS_VISIBLE) != 0; }
   bool Child() const { return (style & WS_CHILD) != 0 && parent != NULL; }
@@ -113,6 +116,7 @@ Region VisibleRegion(Window* w, bool client);
 Class* FindClass(const wchar_t* name, HINSTANCE inst);
 Class* FindClassAtom(ATOM atom);
 void RegisterSystemClasses();
+ATOM RegisterSystemClass(LPCWSTR name, WNDPROC proc, UINT style, int extra, HBRUSH brush, LPCWSTR cursor);
 
 // Messages
 struct SentMessage {
@@ -189,6 +193,28 @@ void FreeWindowDC(HDC dc);
 // Frame metrics: the non-client border widths for a style.
 RECT FrameInsets(DWORD style, DWORD exStyle, bool menu);
 void DrawFrame(Window* w);
+// Where the menu bar and the system menu's box lie, in window coordinates.
+RECT MenuBarRect(Window* w);
+RECT SysMenuRect(Window* w);
+// Scroll bars, for windows' own and the ScrollBar control: drawing one
+// at r, and a click on one at r (in w's window coordinates), which sends
+// WM_HSCROLL or WM_VSCROLL to notify with ctl as lParam.
+void PaintScrollBar(HDC dc, const RECT& r, bool vertical, const ScrollBar* sb);
+void ClickScrollBar(Window* w, ScrollBar* sb, RECT r, bool vertical, POINT screen, HWND notify, HWND ctl);
+
+// Menus (user_menu.cpp): the menu window's class, drawing the menu bar,
+// SC_KEYMENU and SC_MOUSEMENU, and a window's menus when it goes.
+void RegisterMenuClass();
+void RegisterDialogClass();  // user_dialog.cpp
+size_t DialogTemplateSize(const void* tmpl);  // the bytes a dialog template takes
+void RegisterButtonClasses();  // user_button.cpp: Button, Static, ScrollBar
+void RegisterEditClass();  // user_edit.cpp
+void RegisterListClasses();  // user_listbox.cpp: ListBox, ComboLBox, ComboBox
+void RegisterMdiClass();  // user_mdi.cpp: MDIClient
+void RegisterCommonControls();  // comctl_misc.cpp: the common control classes
+void DrawMenuBarIn(Window* w, HDC dc, const RECT& bar);
+void MenuCommand(Window* w, WPARAM wParam, LPARAM lParam);
+void MenusOnDestroy(Window* w);
 
 // Focus and activation
 void ActivateWindow(Window* w, bool byMouse);
@@ -201,6 +227,16 @@ void CharInput(Window* top, wchar_t ch);
 void CloseRequested(Window* top);
 void ResizeRequested(Window* top, int width, int height);
 
+// A cursor's picture for a backend: ARGB pixels, not premultiplied, top
+// row first, and its IDC_ number when it is one of the system's.
+struct CursorPicture {
+  int systemId = 0;
+  POINT hotspot = {0, 0};
+  int width = 0, height = 0;
+  std::vector<DWORD> argb;
+};
+bool CursorImage(HCURSOR c, CursorPicture* out);
+
 // The backend: how top-level windows are shown.
 struct Backend {
   virtual ~Backend() {}
@@ -211,6 +247,18 @@ struct Backend {
   virtual void Moved(Window* /*w*/) {}  // position or size
   virtual void TitleChanged(Window* /*w*/) {}
   virtual void Present(Window* /*w*/, const RECT& /*r*/) {}
+  // Moving or sizing a top-level window with the mouse, for displays
+  // where only the compositor can; hit is HTCAPTION or a frame edge.
+  virtual bool BeginMoveSize(Window* /*w*/, LRESULT /*hit*/) { return false; }
+  // The pointer's shape over the program's windows; NULL hides it.
+  virtual void SetCursor(HCURSOR /*c*/) {}
+  // The system's clipboard. ClipboardForeign says whether another
+  // program holds it, with a number that changes when it puts something
+  // new there; ClipboardFetch gets its text. ClipboardOwn takes it for
+  // this program, with the text to give others (empty for none).
+  virtual bool ClipboardForeign(DWORD* /*generation*/) { return false; }
+  virtual bool ClipboardFetch(std::wstring* /*text*/) { return false; }
+  virtual void ClipboardOwn(const std::wstring& /*text*/) {}
   // Waits up to timeout ms for input, handing what comes to the input
   // functions above; returns early when WakeBackend is called. Called
   // without the lock.
@@ -221,6 +269,9 @@ Backend* GetBackend();
 // The mouse position on the screen.
 POINT& CursorPos();
 Backend* NewHeadlessBackend();
+Backend* NewX11Backend();  // NULL when there is no X display
+Backend* NewWaylandBackend();  // NULL when there is no Wayland compositor
+Backend* NewCocoaBackend();  // NULL except on macOS
 
 }  // namespace winport
 

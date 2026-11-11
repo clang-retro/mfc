@@ -3,14 +3,21 @@
 // sending and posting, the message loop, timers, messages between
 // threads, hooks, ANSI and Unicode window procedures, focus, painting,
 // device contexts, bitmaps and DIBs, raster operations, regions,
-// clipping, mapping modes and scrolling; and a CWnd with a message map
+// clipping, mapping modes and scrolling, lines, shapes, paths and
+// text, icons, accelerators and menus, dialogs and the standard
+// controls, MDI, image lists, the common controls, the list view, the
+// tree view and property sheets;
+// and a CWnd with a message map
 // on top.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include <afxwin.h>
+#include <commctrl.h>
+#include <prsht.h>
 #include <stdio.h>
 #include <string.h>
+#include <string>
 #include <vector>
 
 static int g_failures = 0;
@@ -564,6 +571,903 @@ static void TestRegionsAndClipping() {
 }
 
 // ---------------------------------------------------------------------
+// Lines, shapes, paths and text
+
+// A 32-bit top-down DIB section in a memory DC, filled white.
+struct Canvas {
+  HDC dc;
+  HBITMAP bm;
+  HGDIOBJ old;
+  DWORD* bits;
+  int w, h;
+  Canvas(int cx, int cy) : w(cx), h(cy) {
+    dc = ::CreateCompatibleDC(NULL);
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+    bi.bmiHeader.biWidth = cx;
+    bi.bmiHeader.biHeight = -cy;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    void* p = NULL;
+    bm = ::CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &p, NULL, 0);
+    bits = (DWORD*)p;
+    old = ::SelectObject(dc, bm);
+    RECT all = {0, 0, cx, cy};
+    ::FillRect(dc, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  }
+  ~Canvas() {
+    ::SelectObject(dc, old);
+    ::DeleteObject(bm);
+    ::DeleteDC(dc);
+  }
+  DWORD At(int x, int y) {
+    ::GdiFlush();
+    return bits[y * w + x] & 0xFFFFFF;
+  }
+  // Whether any pixel in the rectangle differs from white.
+  bool Inked(int l, int t, int r, int b) {
+    ::GdiFlush();
+    for (int y = t; y < b; y++)
+      for (int x = l; x < r; x++)
+        if (x >= 0 && y >= 0 && x < w && y < h && (bits[y * w + x] & 0xFFFFFF) != 0xFFFFFF) return true;
+    return false;
+  }
+};
+
+static void TestShapes() {
+  Canvas c(120, 100);
+  const DWORD kWhite = 0xFFFFFF, kBlack = 0, kRed = 0xFF0000;
+  HBRUSH red = ::CreateSolidBrush(RGB(255, 0, 0));
+  HGDIOBJ oldBrush = ::SelectObject(c.dc, red);
+  // A rectangle leaves out its right and bottom edges; the pen draws the
+  // border and the brush the inside.
+  CHECK(::Rectangle(c.dc, 0, 0, 10, 10));
+  CHECK(c.At(0, 0) == kBlack && c.At(9, 9) == kBlack && c.At(9, 0) == kBlack);
+  CHECK(c.At(5, 5) == kRed && c.At(10, 10) == kWhite && c.At(10, 5) == kWhite);
+  // With no pen the filled area is a pixel smaller each way.
+  HGDIOBJ oldPen = ::SelectObject(c.dc, ::GetStockObject(NULL_PEN));
+  ::Rectangle(c.dc, 20, 0, 30, 10);
+  CHECK(c.At(20, 0) == kRed && c.At(28, 8) == kRed && c.At(29, 9) == kWhite);
+  ::SelectObject(c.dc, ::GetStockObject(BLACK_PEN));
+  // An ellipse: filled in the middle, not in the corners of its box.
+  ::Ellipse(c.dc, 40, 0, 60, 20);
+  CHECK(c.At(50, 10) == kRed && c.At(40, 0) == kWhite && c.At(59, 19) == kWhite);
+  CHECK(c.At(40, 10) == kBlack || c.At(40, 9) == kBlack);
+  // LineTo leaves out the last pixel and moves the current position.
+  ::MoveToEx(c.dc, 0, 30, NULL);
+  CHECK(::LineTo(c.dc, 10, 30));
+  CHECK(c.At(0, 30) == kBlack && c.At(9, 30) == kBlack && c.At(10, 30) == kWhite);
+  POINT cur;
+  CHECK(::GetCurrentPositionEx(c.dc, &cur) && cur.x == 10 && cur.y == 30);
+  // Drawn twice with XOR, a line leaves nothing.
+  int oldRop = ::SetROP2(c.dc, R2_XORPEN);
+  HPEN white = ::CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
+  ::SelectObject(c.dc, white);
+  ::MoveToEx(c.dc, 0, 35, NULL);
+  ::LineTo(c.dc, 20, 45);
+  CHECK(c.At(0, 35) == kBlack);
+  ::MoveToEx(c.dc, 0, 35, NULL);
+  ::LineTo(c.dc, 20, 45);
+  CHECK(!c.Inked(0, 34, 21, 46));
+  ::SetROP2(c.dc, oldRop);
+  // A wide pen is centered on the line.
+  HPEN wide = ::CreatePen(PS_SOLID, 5, RGB(0, 0, 0));
+  ::SelectObject(c.dc, wide);
+  ::MoveToEx(c.dc, 0, 55, NULL);
+  ::LineTo(c.dc, 30, 55);
+  CHECK(c.At(15, 53) == kBlack && c.At(15, 57) == kBlack && c.At(15, 50) == kWhite && c.At(15, 60) == kWhite);
+  ::SelectObject(c.dc, ::GetStockObject(BLACK_PEN));
+  // The fill mode decides whether a star's middle is filled.
+  POINT star[] = {{80, 30}, {92, 70}, {60, 45}, {100, 45}, {68, 70}};
+  ::SetPolyFillMode(c.dc, ALTERNATE);
+  ::Polygon(c.dc, star, 5);
+  CHECK(c.At(80, 52) == kWhite && c.At(80, 40) == kRed);
+  ::SetPolyFillMode(c.dc, WINDING);
+  ::Polygon(c.dc, star, 5);
+  CHECK(c.At(80, 52) == kRed);
+  // Flood fill stops at the border color.
+  ::SelectObject(c.dc, ::GetStockObject(NULL_BRUSH));
+  ::Rectangle(c.dc, 0, 70, 20, 90);
+  HBRUSH blue = ::CreateSolidBrush(RGB(0, 0, 255));
+  ::SelectObject(c.dc, blue);
+  CHECK(::FloodFill(c.dc, 10, 80, RGB(0, 0, 0)));
+  CHECK(c.At(10, 80) == 0x0000FF && c.At(1, 71) == 0x0000FF && c.At(0, 70) == kBlack && c.At(25, 80) == kWhite);
+  ::SelectObject(c.dc, oldBrush);
+  ::SelectObject(c.dc, oldPen);
+  ::DeleteObject(red);
+  ::DeleteObject(blue);
+  ::DeleteObject(white);
+  ::DeleteObject(wide);
+
+  // Paths
+  Canvas p(60, 60);
+  CHECK(::BeginPath(p.dc));
+  ::MoveToEx(p.dc, 10, 10, NULL);
+  ::LineTo(p.dc, 40, 10);
+  ::LineTo(p.dc, 40, 40);
+  CHECK(::CloseFigure(p.dc));
+  CHECK(::EndPath(p.dc));
+  CHECK(!p.Inked(0, 0, 60, 60));
+  int n = ::GetPath(p.dc, NULL, NULL, 0);
+  CHECK(n == 3);
+  POINT pts[3];
+  BYTE types[3];
+  CHECK(::GetPath(p.dc, pts, types, 3) == 3);
+  CHECK(types[0] == PT_MOVETO && types[1] == PT_LINETO && types[2] == (PT_LINETO | PT_CLOSEFIGURE));
+  CHECK(pts[2].x == 40 && pts[2].y == 40);
+  HRGN rgn = ::PathToRegion(p.dc);
+  CHECK(rgn != NULL);
+  RECT box;
+  CHECK(::GetRgnBox(rgn, &box) != ERROR && box.left >= 10 && box.right <= 41 && box.top >= 10 && box.bottom <= 41);
+  CHECK(::PtInRegion(rgn, 35, 15) && !::PtInRegion(rgn, 15, 35));
+  ::DeleteObject(rgn);
+  CHECK(::GetPath(p.dc, NULL, NULL, 0) == -1);  // PathToRegion used the path up
+  ::BeginPath(p.dc);
+  ::Rectangle(p.dc, 5, 5, 25, 25);
+  ::EndPath(p.dc);
+  ::SelectObject(p.dc, ::GetStockObject(BLACK_BRUSH));
+  CHECK(::FillPath(p.dc));
+  CHECK(p.At(15, 15) == kBlack && p.At(30, 30) == kWhite);
+}
+
+static void TestText() {
+  Canvas c(300, 120);
+  HFONT font = ::CreateFontW(-13, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, 0, L"Arial");
+  HGDIOBJ oldFont = ::SelectObject(c.dc, font);
+  TEXTMETRICW tm;
+  CHECK(::GetTextMetricsW(c.dc, &tm));
+  CHECK(tm.tmHeight > 8 && tm.tmHeight < 30 && tm.tmAscent + tm.tmDescent == tm.tmHeight);
+  CHECK(tm.tmAveCharWidth > 0 && tm.tmMaxCharWidth >= tm.tmAveCharWidth);
+  TEXTMETRICA tma;
+  CHECK(::GetTextMetricsA(c.dc, &tma) && tma.tmHeight == tm.tmHeight);
+  wchar_t face[LF_FACESIZE];
+  CHECK(::GetTextFaceW(c.dc, LF_FACESIZE, face) > 0);
+
+  SIZE sz;
+  CHECK(::GetTextExtentPoint32W(c.dc, L"Hello", 5, &sz));
+  CHECK(sz.cx > 10 && sz.cy == tm.tmHeight);
+  SIZE sza;
+  CHECK(::GetTextExtentPoint32A(c.dc, "Hello", 5, &sza) && sza.cx == sz.cx);
+  SIZE wide, narrow;
+  ::GetTextExtentPoint32W(c.dc, L"WWWW", 4, &wide);
+  ::GetTextExtentPoint32W(c.dc, L"iiii", 4, &narrow);
+  CHECK(wide.cx >= narrow.cx);
+  int widths[5];
+  CHECK(::GetCharWidth32W(c.dc, 'a', 'e', widths) && widths[0] > 0);
+  int fit = 0, dx[5];
+  SIZE ext5;
+  CHECK(::GetTextExtentExPointW(c.dc, L"Hello", 5, sz.cx - 1, &fit, dx, &ext5));
+  CHECK(fit == 4 && dx[4] == sz.cx && dx[0] > 0 && dx[0] < dx[4]);
+
+  // Text draws inside its box, from the top-left by default.
+  CHECK(::TextOutW(c.dc, 10, 10, L"Hello", 5));
+  CHECK(c.Inked(10, 10, 10 + sz.cx, 10 + sz.cy));
+  CHECK(!c.Inked(0, 0, 300, 9) && !c.Inked(12 + sz.cx, 0, 300, 120) && !c.Inked(0, 11 + sz.cy, 300, 120));
+  // TA_UPDATECP moves the current position past the text.
+  ::SetTextAlign(c.dc, TA_UPDATECP);
+  ::MoveToEx(c.dc, 100, 10, NULL);
+  ::TextOutW(c.dc, 0, 0, L"Hello", 5);
+  POINT cur;
+  ::GetCurrentPositionEx(c.dc, &cur);
+  CHECK(cur.x == 100 + sz.cx && cur.y == 10);
+  ::SetTextAlign(c.dc, TA_LEFT | TA_TOP);
+  // An opaque background fills the text's box in the background color.
+  ::SetBkColor(c.dc, RGB(0, 255, 0));
+  ::SetBkMode(c.dc, OPAQUE);
+  ::TextOutW(c.dc, 200, 10, L" ", 1);
+  CHECK(c.At(200, 10) == 0x00FF00);
+  ::SetBkMode(c.dc, TRANSPARENT);
+
+  // DrawText measures one line, or breaks words to fit a width.
+  RECT r = {0, 0, 0, 0};
+  int h = ::DrawTextW(c.dc, L"Hello", -1, &r, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+  CHECK(h == tm.tmHeight && r.right == sz.cx && r.bottom == tm.tmHeight);
+  RECT wrap = {0, 0, sz.cx + 5, 0};
+  h = ::DrawTextW(c.dc, L"Hello Hello Hello", -1, &wrap, DT_CALCRECT | DT_WORDBREAK);
+  CHECK(h == 3 * tm.tmHeight && wrap.bottom == h && wrap.right <= sz.cx + 5);
+  // A prefix character is not drawn.
+  RECT pr = {0, 0, 0, 0};
+  ::DrawTextW(c.dc, L"&Hello", -1, &pr, DT_CALCRECT | DT_SINGLELINE);
+  CHECK(pr.right == sz.cx);
+  // Centered in a box, vertically too.
+  RECT box = {0, 50, 300, 110};
+  ::DrawTextW(c.dc, L"Hello", -1, &box, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+  CHECK(c.Inked(140 - sz.cx / 2, 50, 160 + sz.cx / 2, 110) && !c.Inked(0, 50, 145 - sz.cx / 2, 110));
+  // An ellipsis replaces what does not fit, and DT_MODIFYSTRING says so.
+  wchar_t buf[64] = L"Hello Hello Hello";
+  RECT el = {0, 0, sz.cx, 20};
+  ::DrawTextExW(c.dc, buf, -1, &el, DT_SINGLELINE | DT_END_ELLIPSIS | DT_MODIFYSTRING, NULL);
+  size_t len = wcslen(buf);
+  CHECK(len < 17 && len >= 3 && wcscmp(buf + len - 3, L"...") == 0);
+  // Tabs
+  DWORD ext = ::GetTabbedTextExtentW(c.dc, L"a\tb", 3, 0, NULL);
+  CHECK(HIWORD(ext) == tm.tmHeight && LOWORD(ext) >= 8 * tm.tmAveCharWidth);
+
+  // There is at least one font family to enumerate.
+  struct Counter {
+    static int CALLBACK Proc(const LOGFONTW* lf, const TEXTMETRICW*, DWORD, LPARAM n) {
+      if (lf->lfFaceName[0]) ++*(int*)n;
+      return 1;
+    }
+  };
+  int families = 0;
+  LOGFONTW want = {};
+  want.lfCharSet = DEFAULT_CHARSET;
+  ::EnumFontFamiliesExW(c.dc, &want, Counter::Proc, (LPARAM)&families, 0);
+  CHECK(families > 0);
+  ::SelectObject(c.dc, oldFont);
+  ::DeleteObject(font);
+}
+
+// ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+// Icons, cursors and accelerators
+
+static WPARAM g_lastCommand = 0;
+static std::vector<UINT> g_menuMsgs;
+static int g_clickItem = -1;  // a popup item to click at the next WM_ENTERIDLE
+static HMENU g_clickMenu = NULL;
+
+static LRESULT CALLBACK MenuProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  switch (msg) {
+    case WM_ENTERMENULOOP:
+    case WM_EXITMENULOOP:
+    case WM_INITMENU:
+    case WM_INITMENUPOPUP:
+    case WM_UNINITMENUPOPUP:
+    case WM_MENUSELECT:
+      g_menuMsgs.push_back(msg);
+      break;
+    case WM_ENTERIDLE:
+      if (wp == MSGF_MENU && g_clickItem >= 0) {
+        RECT r;
+        if (::GetMenuItemRect(h, g_clickMenu, g_clickItem, &r)) {
+          POINT p = {(r.left + r.right) / 2, (r.top + r.bottom) / 2};
+          ::ScreenToClient(h, &p);
+          ::PostMessageW(h, WM_MOUSEMOVE, 0, MAKELPARAM(p.x, p.y));
+          ::PostMessageW(h, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(p.x, p.y));
+          ::PostMessageW(h, WM_LBUTTONUP, 0, MAKELPARAM(p.x, p.y));
+        }
+        g_clickItem = -1;
+      }
+      return 0;
+    case WM_COMMAND:
+      g_lastCommand = wp;
+      return 0;
+  }
+  return ::DefWindowProcW(h, msg, wp, lp);
+}
+
+static HWND NewMenuWindow(HMENU menu) {
+  static ATOM atom = 0;
+  if (!atom) {
+    WNDCLASSW wc = {};
+    wc.lpfnWndProc = MenuProc;
+    wc.hInstance = ::GetModuleHandleW(NULL);
+    wc.lpszClassName = L"WinTestMenu";
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    atom = ::RegisterClassW(&wc);
+  }
+  return ::CreateWindowExW(0, L"WinTestMenu", L"Menus", WS_OVERLAPPEDWINDOW, 20, 20, 320, 240, NULL, menu,
+                           ::GetModuleHandleW(NULL), NULL);
+}
+
+static void TestIconsAndAccelerators() {
+  HICON app = ::LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
+  CHECK(app != NULL);
+  ICONINFO ii;
+  CHECK(::GetIconInfo(app, &ii) && ii.fIcon && ii.hbmMask != NULL);
+  if (ii.hbmMask) ::DeleteObject(ii.hbmMask);
+  if (ii.hbmColor) ::DeleteObject(ii.hbmColor);
+  CHECK(::LoadCursorW(NULL, (LPCWSTR)IDC_ARROW) != NULL);
+
+  // An icon made from two bitmaps draws its color where the mask is clear.
+  HDC screen = ::GetDC(NULL);
+  HBITMAP color = ::CreateCompatibleBitmap(screen, 16, 16);
+  HBITMAP mask = ::CreateBitmap(16, 16, 1, 1, NULL);
+  HDC mem = ::CreateCompatibleDC(screen);
+  HGDIOBJ old = ::SelectObject(mem, color);
+  RECT all = {0, 0, 16, 16};
+  HBRUSH red = ::CreateSolidBrush(RGB(255, 0, 0));
+  ::FillRect(mem, &all, red);
+  ::SelectObject(mem, mask);
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(BLACK_BRUSH));
+  ::SelectObject(mem, old);
+  ICONINFO make = {TRUE, 0, 0, mask, color};
+  HICON icon = ::CreateIconIndirect(&make);
+  CHECK(icon != NULL);
+  HBITMAP target = ::CreateCompatibleBitmap(screen, 16, 16);
+  old = ::SelectObject(mem, target);
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  CHECK(::DrawIconEx(mem, 0, 0, icon, 16, 16, 0, NULL, DI_NORMAL));
+  CHECK(::GetPixel(mem, 8, 8) == RGB(255, 0, 0));
+  ::SelectObject(mem, old);
+  CHECK(::DestroyIcon(icon));
+  ::DeleteObject(target);
+  ::DeleteObject(color);
+  ::DeleteObject(mask);
+  ::DeleteObject(red);
+  ::DeleteDC(mem);
+  ::ReleaseDC(NULL, screen);
+
+  ACCEL keys[2] = {{FVIRTKEY | FCONTROL, 'O', 100}, {FVIRTKEY, VK_F5, 101}};
+  HACCEL accel = ::CreateAcceleratorTableW(keys, 2);
+  CHECK(accel != NULL && ::CopyAcceleratorTableW(accel, NULL, 0) == 2);
+  HWND h = NewMenuWindow(NULL);
+  g_lastCommand = 0;
+  MSG m = {h, WM_KEYDOWN, VK_F5, 1};
+  CHECK(::TranslateAcceleratorW(h, accel, &m));
+  CHECK(LOWORD(g_lastCommand) == 101 && HIWORD(g_lastCommand) == 1);
+  m.wParam = 'O';
+  CHECK(!::TranslateAcceleratorW(h, accel, &m));  // Ctrl is not down
+  CHECK(::DestroyAcceleratorTable(accel));
+  ::DestroyWindow(h);
+}
+
+// ---------------------------------------------------------------------
+// Menus
+
+static void TestMenus() {
+  HMENU bar = ::CreateMenu();
+  HMENU file = ::CreatePopupMenu();
+  CHECK(::IsMenu(bar) && ::IsMenu(file) && !::IsMenu(NULL));
+  CHECK(::AppendMenuW(file, MF_STRING, 100, L"&Open\tCtrl+O"));
+  CHECK(::AppendMenuW(file, MF_SEPARATOR, 0, NULL));
+  CHECK(::AppendMenuA(file, MF_STRING | MF_GRAYED, 101, "E&xit"));
+  CHECK(::AppendMenuW(bar, MF_POPUP, (UINT_PTR)file, L"&File"));
+  CHECK(::GetMenuItemCount(bar) == 1 && ::GetMenuItemCount(file) == 3);
+  CHECK(::GetSubMenu(bar, 0) == file);
+  CHECK(::GetMenuItemID(bar, 0) == (UINT)-1 && ::GetMenuItemID(file, 2) == 101);
+  CHECK(::GetMenuState(file, 1, MF_BYPOSITION) & MF_SEPARATOR);
+  // A search by command looks into submenus.
+  CHECK(::GetMenuState(bar, 101, MF_BYCOMMAND) & MF_GRAYED);
+  CHECK((::GetMenuState(bar, 0, MF_BYPOSITION) >> 8) == 3);
+  CHECK(::GetMenuState(bar, 999, MF_BYCOMMAND) == (UINT)-1);
+  wchar_t buf[64];
+  CHECK(::GetMenuStringW(bar, 100, buf, 64, MF_BYCOMMAND) == 12 && wcscmp(buf, L"&Open\tCtrl+O") == 0);
+  CHECK(::GetMenuStringW(file, 100, NULL, 0, MF_BYCOMMAND) == 12);
+  char abuf[8];
+  CHECK(::GetMenuStringA(file, 101, abuf, sizeof abuf, MF_BYCOMMAND) == 5 && strcmp(abuf, "E&xit") == 0);
+  CHECK(::EnableMenuItem(bar, 101, MF_BYCOMMAND | MF_ENABLED) == MF_GRAYED);
+  CHECK(::CheckMenuItem(file, 100, MF_BYCOMMAND | MF_CHECKED) == MF_UNCHECKED);
+  CHECK(::CheckMenuItem(file, 100, MF_BYCOMMAND | MF_UNCHECKED) == MF_CHECKED);
+  CHECK(::CheckMenuItem(file, 999, MF_BYCOMMAND) == (DWORD)-1);
+  CHECK(::ModifyMenuW(file, 100, MF_BYCOMMAND | MF_STRING, 102, L"&New"));
+  CHECK(::GetMenuItemID(file, 0) == 102);
+  CHECK(::InsertMenuW(file, 0, MF_BYPOSITION | MF_STRING, 103, L"First"));
+  CHECK(::GetMenuItemID(file, 0) == 103 && ::GetMenuItemCount(file) == 4);
+  CHECK(::DeleteMenu(file, 103, MF_BYCOMMAND) && ::GetMenuItemCount(file) == 3);
+  CHECK(!::RemoveMenu(file, 999, MF_BYCOMMAND));
+
+  MENUITEMINFOW mi = {sizeof mi};
+  mi.fMask = MIIM_STRING | MIIM_ID;
+  mi.dwTypeData = buf;
+  mi.cch = 64;
+  CHECK(::GetMenuItemInfoW(file, 0, TRUE, &mi));
+  CHECK(mi.wID == 102 && mi.cch == 4 && wcscmp(buf, L"&New") == 0);
+  mi.fMask = MIIM_DATA | MIIM_STATE;
+  mi.dwItemData = 1234;
+  mi.fState = MFS_CHECKED | MFS_DEFAULT;
+  CHECK(::SetMenuItemInfoW(file, 102, FALSE, &mi));
+  CHECK(::GetMenuDefaultItem(file, FALSE, 0) == 102 && ::GetMenuDefaultItem(file, TRUE, 0) == 0);
+  memset(&mi, 0, sizeof mi);
+  mi.cbSize = sizeof mi;
+  mi.fMask = MIIM_DATA | MIIM_STATE;
+  CHECK(::GetMenuItemInfoW(file, 102, FALSE, &mi) && mi.dwItemData == 1234 && (mi.fState & MFS_CHECKED));
+  ::CheckMenuItem(file, 102, MF_BYCOMMAND | MF_UNCHECKED);
+
+  HMENU view = ::CreatePopupMenu();
+  for (UINT i = 0; i < 3; i++) ::AppendMenuW(view, MF_STRING, 200 + i, L"Mode");
+  CHECK(::CheckMenuRadioItem(view, 200, 202, 201, MF_BYCOMMAND));
+  CHECK(!(::GetMenuState(view, 200, MF_BYCOMMAND) & MF_CHECKED));
+  CHECK(::GetMenuState(view, 201, MF_BYCOMMAND) & MF_CHECKED);
+  MENUITEMINFOW ri = {sizeof ri};
+  ri.fMask = MIIM_FTYPE;
+  CHECK(::GetMenuItemInfoW(view, 201, FALSE, &ri) && (ri.fType & MFT_RADIOCHECK));
+  CHECK(::InsertMenuW(bar, (UINT)-1, MF_BYPOSITION | MF_POPUP, (UINT_PTR)view, L"&View"));
+  CHECK(::GetMenuItemCount(bar) == 2);
+  MENUINFO info = {sizeof info};
+  info.fMask = MIM_MENUDATA;
+  info.dwMenuData = 77;
+  CHECK(::SetMenuInfo(view, &info));
+  info.dwMenuData = 0;
+  CHECK(::GetMenuInfo(view, &info) && info.dwMenuData == 77);
+
+  // Templates: the standard form and the extended one.
+  static const WORD tmpl[] = {0, 0, MF_POPUP | MF_END, '&', 'F', 0, 0, 1, 'A', 0, MF_END, 2, 'B', 0};
+  HMENU loaded = ::LoadMenuIndirectW(tmpl);
+  CHECK(loaded && ::GetMenuItemCount(loaded) == 1);
+  HMENU sub = ::GetSubMenu(loaded, 0);
+  CHECK(sub && ::GetMenuItemCount(sub) == 2 && ::GetMenuItemID(sub, 1) == 2);
+  CHECK(::DestroyMenu(loaded) && !::IsMenu(sub));
+  BYTE ex[56] = {};
+  auto put16 = [&](int at, WORD v) { memcpy(ex + at, &v, 2); };
+  auto put32 = [&](int at, DWORD v) { memcpy(ex + at, &v, 4); };
+  // The header: version 1, then the offset past its help ID.
+  put16(0, 1);
+  put16(2, 4);
+  // A popup that is the last item: type, state, ID, flags, text, padding
+  // to a DWORD, and the submenu's help ID.
+  put16(20, 0x81);
+  put16(22, 'F');
+  // Its one item, checked, with ID 5.
+  put32(36, MFS_CHECKED);
+  put32(40, 5);
+  put16(44, 0x80);
+  put16(46, 'X');
+  loaded = ::LoadMenuIndirectW(ex);
+  CHECK(loaded && ::GetMenuItemCount(loaded) == 1);
+  sub = loaded ? ::GetSubMenu(loaded, 0) : NULL;
+  CHECK(sub && ::GetMenuItemID(sub, 0) == 5 && (::GetMenuState(sub, 0, MF_BYPOSITION) & MF_CHECKED));
+  if (loaded) ::DestroyMenu(loaded);
+
+  // A window's menu bar takes room from the client area.
+  HWND h = NewMenuWindow(bar);
+  CHECK(h && ::GetMenu(h) == bar);
+  RECT withBar, without;
+  ::GetClientRect(h, &withBar);
+  CHECK(::SetMenu(h, NULL) && ::GetMenu(h) == NULL);
+  ::GetClientRect(h, &without);
+  CHECK(without.bottom - withBar.bottom == ::GetSystemMetrics(SM_CYMENU));
+  CHECK(::SetMenu(h, bar));
+  RECT item, wr;
+  ::GetWindowRect(h, &wr);
+  CHECK(::GetMenuItemRect(h, bar, 0, &item));
+  CHECK(item.left >= wr.left && item.top > wr.top && item.bottom < wr.bottom && item.right > item.left);
+  POINT mid = {(item.left + item.right) / 2, (item.top + item.bottom) / 2};
+  CHECK(::MenuItemFromPoint(h, bar, mid) == 0);
+
+  HMENU sys = ::GetSystemMenu(h, FALSE);
+  CHECK(sys && ::GetMenuItemCount(sys) >= 5);
+  CHECK(::GetMenuState(sys, SC_CLOSE, MF_BYCOMMAND) != (UINT)-1);
+  CHECK(::GetSystemMenu(h, TRUE) == NULL);
+
+#ifdef _WINPORT
+  // Tracking, driven by posted input.
+  ::ShowWindow(h, SW_SHOW);
+  Pump();
+  g_menuMsgs.clear();
+  ::PostMessageW(h, WM_KEYDOWN, VK_DOWN, 0);
+  ::PostMessageW(h, WM_KEYDOWN, VK_RETURN, 0);
+  CHECK(::TrackPopupMenu(file, TPM_RETURNCMD, 50, 50, 0, h, NULL) == 102);
+  CHECK(!g_menuMsgs.empty() && g_menuMsgs.front() == WM_ENTERMENULOOP && g_menuMsgs.back() == WM_EXITMENULOOP);
+  bool init = false, select = false;
+  for (UINT msg : g_menuMsgs) {
+    init |= msg == WM_INITMENUPOPUP;
+    select |= msg == WM_MENUSELECT;
+  }
+  CHECK(init && select);
+  ::PostMessageW(h, WM_KEYDOWN, VK_ESCAPE, 0);
+  CHECK(::TrackPopupMenu(file, TPM_RETURNCMD, 50, 50, 0, h, NULL) == 0);
+  // A mnemonic chooses its item, and the command is posted.
+  g_lastCommand = 0;
+  ::PostMessageW(h, WM_CHAR, 'x', 0);
+  CHECK(::TrackPopupMenu(file, 0, 50, 50, 0, h, NULL));
+  Pump();
+  CHECK(LOWORD(g_lastCommand) == 101);
+  // The mouse: a click on an item.
+  g_clickMenu = file;
+  g_clickItem = 0;
+  CHECK(::TrackPopupMenu(file, TPM_RETURNCMD, 50, 50, 0, h, NULL) == 102);
+  // The menu bar from the keyboard, as Alt+V then Down twice and Enter.
+  g_lastCommand = 0;
+  ::PostMessageW(h, WM_KEYDOWN, VK_DOWN, 0);
+  ::PostMessageW(h, WM_KEYDOWN, VK_DOWN, 0);
+  ::PostMessageW(h, WM_KEYDOWN, VK_RETURN, 0);
+  ::SendMessageW(h, WM_SYSCOMMAND, SC_KEYMENU, 'v');
+  Pump();
+  CHECK(LOWORD(g_lastCommand) == 202);
+  // The bar is drawn in the menu color past its items.
+  HDC dc = ::GetWindowDC(h);
+  RECT last;
+  ::GetMenuItemRect(h, bar, 1, &last);
+  CHECK(::GetPixel(dc, last.right - wr.left + 8, (last.top + last.bottom) / 2 - wr.top) == ::GetSysColor(COLOR_MENU));
+  ::ReleaseDC(h, dc);
+#endif
+
+  // The window's menu goes with it.
+  ::DestroyWindow(h);
+  CHECK(!::IsMenu(bar) && !::IsMenu(file) && !::IsMenu(view));
+}
+
+// ---------------------------------------------------------------------
+// Dialogs from an in-memory template, and the standard controls in them.
+
+// Builds a DLGTEMPLATE with its items, in UTF-16 words.
+struct DlgBuilder {
+  std::vector<WORD> w;
+  WORD* count = NULL;
+  void Dword(DWORD v) {
+    w.push_back(LOWORD(v));
+    w.push_back(HIWORD(v));
+  }
+  void Str(const char* s) {
+    while (*s) w.push_back((WORD)*s++);
+    w.push_back(0);
+  }
+  void Align() {
+    if (w.size() % 2) w.push_back(0);
+  }
+  DlgBuilder(DWORD style, short cx, short cy, const char* title) {
+    Dword(style | DS_SETFONT);
+    Dword(0);
+    w.push_back(0);  // the item count, filled in by Item
+    for (short v : {(short)10, (short)10, cx, cy}) w.push_back((WORD)v);
+    w.push_back(0);  // no menu
+    w.push_back(0);  // the dialog class
+    Str(title);
+    w.push_back(8);
+    Str("MS Shell Dlg");
+  }
+  void Item(WORD cls, DWORD style, short x, short y, short cx, short cy, WORD id, const char* text) {
+    Align();
+    w[4]++;
+    Dword(style | WS_CHILD | WS_VISIBLE);
+    Dword(0);
+    for (short v : {x, y, cx, cy}) w.push_back((WORD)v);
+    w.push_back(id);
+    w.push_back(0xFFFF);
+    w.push_back(cls);
+    Str(text);
+    w.push_back(0);  // no creation data
+  }
+  LPCDLGTEMPLATEW Get() { return (LPCDLGTEMPLATEW)w.data(); }
+};
+
+static LPARAM g_initParam = 0;
+static std::vector<WPARAM> g_dlgCommands;
+
+static INT_PTR CALLBACK TestDlgProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  switch (msg) {
+    case WM_INITDIALOG:
+      g_initParam = lp;
+      if (lp == 2) ::PostMessageW(h, WM_COMMAND, IDOK, 0);
+      return TRUE;
+    case WM_COMMAND:
+      g_dlgCommands.push_back(wp);
+      if (LOWORD(wp) == IDOK && g_initParam == 2) ::EndDialog(h, 7);
+      return TRUE;
+  }
+  return FALSE;
+}
+
+static bool SawCommand(WORD id, WORD code) {
+  for (WPARAM wp : g_dlgCommands)
+    if (LOWORD(wp) == id && HIWORD(wp) == code) return true;
+  return false;
+}
+
+static std::wstring DlgText(HWND dlg, int id) {
+  wchar_t buf[128] = {0};
+  ::GetDlgItemTextW(dlg, id, buf, 128);
+  return buf;
+}
+
+static void TestDialogsAndControls() {
+  DlgBuilder b(WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME, 220, 140, "Dialog");
+  b.Item(0x0080, BS_DEFPUSHBUTTON | WS_TABSTOP | WS_GROUP, 160, 5, 50, 14, IDOK, "OK");
+  b.Item(0x0082, SS_LEFT, 5, 5, 30, 8, 16, "&Name:");
+  b.Item(0x0081, ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP | WS_GROUP, 40, 5, 100, 12, 10, "");
+  b.Item(0x0080, BS_AUTOCHECKBOX | WS_TABSTOP | WS_GROUP, 5, 22, 60, 10, 11, "&Check");
+  b.Item(0x0080, BS_AUTORADIOBUTTON | WS_TABSTOP | WS_GROUP, 5, 34, 60, 10, 12, "One");
+  b.Item(0x0080, BS_AUTORADIOBUTTON, 5, 46, 60, 10, 13, "Two");
+  b.Item(0x0083, LBS_STANDARD | WS_TABSTOP | WS_GROUP, 80, 22, 60, 50, 14, "");
+  b.Item(0x0085, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 150, 22, 60, 60, 15, "");
+
+  g_dlgCommands.clear();
+  HWND dlg = ::CreateDialogIndirectParamW(::GetModuleHandleW(NULL), b.Get(), NULL, TestDlgProc, 1);
+  CHECK(dlg && g_initParam == 1);
+  wchar_t cls[32];
+  ::GetClassNameW(dlg, cls, 32);
+  CHECK(wcscmp(cls, L"#32770") == 0);
+  HWND edit = ::GetDlgItem(dlg, 10);
+  CHECK(edit && ::GetDlgCtrlID(edit) == 10);
+  ::GetClassNameW(edit, cls, 32);
+  CHECK(_wcsicmp(cls, L"Edit") == 0);
+  CHECK(LOWORD(::SendMessageW(dlg, DM_GETDEFID, 0, 0)) == IDOK);
+  RECT units = {0, 0, 4, 8};
+  CHECK(::MapDialogRect(dlg, &units) && units.right > 0 && units.bottom > 0);
+
+  // Text and numbers through the dialog helpers.
+  CHECK(::SetDlgItemTextW(dlg, 10, L"hello world"));
+  CHECK(DlgText(dlg, 10) == L"hello world");
+  CHECK(::SetDlgItemInt(dlg, 10, (UINT)-42, TRUE));
+  BOOL ok = FALSE;
+  CHECK((int)::GetDlgItemInt(dlg, 10, &ok, TRUE) == -42 && ok);
+  ::SetDlgItemTextW(dlg, 10, L"abc");
+  ::GetDlgItemInt(dlg, 10, &ok, TRUE);
+  CHECK(!ok);
+
+  // The edit control: selection, replacement and undo.
+  ::SetWindowTextW(edit, L"hello world");
+  ::SendMessageW(edit, EM_SETSEL, 0, 5);
+  DWORD s0 = 0, s1 = 0;
+  ::SendMessageW(edit, EM_GETSEL, (WPARAM)&s0, (LPARAM)&s1);
+  CHECK(s0 == 0 && s1 == 5);
+  ::SendMessageW(edit, EM_REPLACESEL, TRUE, (LPARAM)L"HELLO");
+  CHECK(DlgText(dlg, 10) == L"HELLO world");
+  CHECK(::SendMessageW(edit, EM_CANUNDO, 0, 0));
+  ::SendMessageW(edit, EM_UNDO, 0, 0);
+  CHECK(DlgText(dlg, 10) == L"hello world");
+  ::SendMessageW(edit, EM_LIMITTEXT, 5, 0);
+  ::SendMessageW(edit, EM_SETSEL, 0, -1);
+  ::SendMessageW(edit, EM_REPLACESEL, FALSE, (LPARAM)L"123456789");
+  CHECK(DlgText(dlg, 10) == L"12345");
+  ::SendMessageW(edit, EM_LIMITTEXT, 0, 0);
+  CHECK(SawCommand(10, EN_CHANGE));
+
+  // Copy and paste through the clipboard, which converts text.
+  ::SetWindowTextW(edit, L"copy me");
+  ::SendMessageW(edit, EM_SETSEL, 0, 4);
+  ::SendMessageW(edit, WM_COPY, 0, 0);
+  CHECK(::IsClipboardFormatAvailable(CF_UNICODETEXT) && ::IsClipboardFormatAvailable(CF_TEXT));
+  if (::OpenClipboard(dlg)) {
+    HANDLE ht = ::GetClipboardData(CF_TEXT);
+    const char* a = ht ? (const char*)::GlobalLock(ht) : NULL;
+    CHECK(a && strcmp(a, "copy") == 0);
+    if (a) ::GlobalUnlock(ht);
+    ::CloseClipboard();
+  }
+  ::SendMessageW(edit, EM_SETSEL, 7, 7);
+  ::SendMessageW(edit, WM_PASTE, 0, 0);
+  CHECK(DlgText(dlg, 10) == L"copy mecopy");
+
+  // Buttons: check boxes and a radio group.
+  CHECK(::IsDlgButtonChecked(dlg, 11) == BST_UNCHECKED);
+  ::SendDlgItemMessageW(dlg, 11, BM_CLICK, 0, 0);
+  CHECK(::IsDlgButtonChecked(dlg, 11) == BST_CHECKED);
+  CHECK(SawCommand(11, BN_CLICKED));
+  CHECK(::CheckDlgButton(dlg, 11, BST_UNCHECKED) && !::IsDlgButtonChecked(dlg, 11));
+  CHECK(::CheckRadioButton(dlg, 12, 13, 12));
+  CHECK(::IsDlgButtonChecked(dlg, 12) && !::IsDlgButtonChecked(dlg, 13));
+  ::SendDlgItemMessageW(dlg, 13, BM_CLICK, 0, 0);
+  CHECK(!::IsDlgButtonChecked(dlg, 12) && ::IsDlgButtonChecked(dlg, 13));
+  CHECK(::GetNextDlgGroupItem(dlg, ::GetDlgItem(dlg, 12), FALSE) == ::GetDlgItem(dlg, 13));
+
+  // The list box, sorted.
+  HWND list = ::GetDlgItem(dlg, 14);
+  for (const wchar_t* s : {L"pear", L"apple", L"fig"}) ::SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)s);
+  CHECK(::SendMessageW(list, LB_GETCOUNT, 0, 0) == 3);
+  wchar_t buf[64];
+  ::SendMessageW(list, LB_GETTEXT, 0, (LPARAM)buf);
+  CHECK(wcscmp(buf, L"apple") == 0);
+  CHECK(::SendMessageW(list, LB_FINDSTRING, (WPARAM)-1, (LPARAM)L"pe") == 2);
+  CHECK(::SendMessageW(list, LB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)L"pe") == LB_ERR);
+  ::SendMessageW(list, LB_SETCURSEL, 1, 0);
+  CHECK(::SendMessageW(list, LB_GETCURSEL, 0, 0) == 1);
+  ::SendMessageW(list, LB_SETITEMDATA, 1, 1234);
+  CHECK(::SendMessageW(list, LB_GETITEMDATA, 1, 0) == 1234);
+  CHECK(::SendMessageW(list, LB_DELETESTRING, 0, 0) == 2);
+  CHECK(::SendMessageW(list, LB_GETCURSEL, 0, 0) == 0);
+
+  // The drop-down list combo box.
+  HWND combo = ::GetDlgItem(dlg, 15);
+  for (const wchar_t* s : {L"red", L"green", L"blue"}) ::SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)s);
+  CHECK(::SendMessageW(combo, CB_GETCOUNT, 0, 0) == 3);
+  ::SendMessageW(combo, CB_SETCURSEL, 1, 0);
+  CHECK(::SendMessageW(combo, CB_GETCURSEL, 0, 0) == 1);
+  CHECK(DlgText(dlg, 15) == L"green");
+  CHECK(::SendMessageW(combo, CB_SELECTSTRING, (WPARAM)-1, (LPARAM)L"bl") == 2);
+  CHECK(DlgText(dlg, 15) == L"blue");
+  COMBOBOXINFO ci = {sizeof ci};
+  CHECK(::GetComboBoxInfo(combo, &ci) && ci.hwndList && ci.hwndCombo == combo);
+  CHECK(!::SendMessageW(combo, CB_GETDROPPEDSTATE, 0, 0));
+
+  // Keyboard navigation through IsDialogMessage.
+  ::ShowWindow(dlg, SW_SHOW);
+  ::SetFocus(edit);
+  MSG m = {};
+  m.hwnd = edit;
+  m.message = WM_KEYDOWN;
+  m.wParam = VK_TAB;
+  CHECK(::IsDialogMessageW(dlg, &m));
+  CHECK(::GetFocus() == ::GetDlgItem(dlg, 11));
+  CHECK(::GetNextDlgTabItem(dlg, edit, FALSE) == ::GetDlgItem(dlg, 11));
+  CHECK(::GetNextDlgTabItem(dlg, edit, TRUE) == ::GetDlgItem(dlg, IDOK));
+  m.hwnd = ::GetFocus();
+  m.wParam = VK_RETURN;
+  g_dlgCommands.clear();
+  CHECK(::IsDialogMessageW(dlg, &m));
+  Pump();
+  CHECK(SawCommand(IDOK, BN_CLICKED));
+  ::DestroyWindow(dlg);
+  CHECK(!::IsWindow(dlg) && !::IsWindow(edit));
+
+  // A modal dialog, ended from its own procedure.
+  CHECK(::DialogBoxIndirectParamW(::GetModuleHandleW(NULL), b.Get(), NULL, TestDlgProc, 2) == 7);
+  CHECK(g_initParam == 2);
+}
+
+// ---------------------------------------------------------------------
+// MDI: a frame, its client and children, and the window menu.
+
+static HWND g_mdiClient = NULL;
+
+static LRESULT CALLBACK MdiFrameProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  return ::DefFrameProcW(h, g_mdiClient, msg, wp, lp);
+}
+
+static int g_mdiActivations = 0;
+static LRESULT CALLBACK MdiChildProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_MDIACTIVATE && (HWND)lp == h) g_mdiActivations++;
+  return ::DefMDIChildProcW(h, msg, wp, lp);
+}
+
+static void TestMdi() {
+  HINSTANCE inst = ::GetModuleHandleW(NULL);
+  WNDCLASSW wc = {};
+  wc.lpfnWndProc = MdiFrameProc;
+  wc.hInstance = inst;
+  wc.lpszClassName = L"MdiFrame";
+  ::RegisterClassW(&wc);
+  wc.lpfnWndProc = MdiChildProc;
+  wc.lpszClassName = L"MdiChild";
+  ::RegisterClassW(&wc);
+
+  HMENU bar = ::CreateMenu(), win = ::CreatePopupMenu();
+  ::AppendMenuW(win, MF_STRING, 300, L"&Cascade");
+  ::AppendMenuW(bar, MF_POPUP, (UINT_PTR)win, L"&Window");
+  HWND frame = ::CreateWindowExW(0, L"MdiFrame", L"Frame", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 600, 400,
+                                 NULL, bar, inst, NULL);
+  CLIENTCREATESTRUCT ccs = {win, 0xFF00};
+  g_mdiClient = ::CreateWindowExW(0, L"MDICLIENT", NULL, WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN, 0, 0, 0, 0, frame,
+                                  NULL, inst, &ccs);
+  CHECK(g_mdiClient != NULL);
+  RECT fc, cc;
+  ::GetClientRect(frame, &fc);
+  ::SendMessageW(frame, WM_SIZE, SIZE_RESTORED, MAKELPARAM(fc.right, fc.bottom));
+  ::GetClientRect(g_mdiClient, &cc);
+  CHECK(cc.right == fc.right && cc.bottom == fc.bottom);
+
+  MDICREATESTRUCTW mcs = {L"MdiChild", L"One", inst, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                          WS_VISIBLE, 0};
+  HWND one = (HWND)::SendMessageW(g_mdiClient, WM_MDICREATE, 0, (LPARAM)&mcs);
+  mcs.szTitle = L"Two";
+  HWND two = (HWND)::SendMessageW(g_mdiClient, WM_MDICREATE, 0, (LPARAM)&mcs);
+  CHECK(one && two && ::GetParent(one) == g_mdiClient);
+  CHECK(::GetWindowLongW(one, GWL_EXSTYLE) & WS_EX_MDICHILD);
+  BOOL maxed = TRUE;
+  CHECK((HWND)::SendMessageW(g_mdiClient, WM_MDIGETACTIVE, 0, (LPARAM)&maxed) == two && !maxed);
+  CHECK(g_mdiActivations == 2);
+  // The window menu lists the children, the active one checked.
+  CHECK(::GetMenuItemCount(win) == 4);
+  CHECK(::GetMenuState(win, 0xFF01, MF_BYCOMMAND) & MF_CHECKED);
+  wchar_t text[64];
+  ::GetMenuStringW(win, 0xFF00, text, 64, MF_BYCOMMAND);
+  CHECK(wcscmp(text, L"&1 One") == 0);
+  // Choosing one from the menu activates it.
+  ::SendMessageW(frame, WM_COMMAND, 0xFF00, 0);
+  CHECK((HWND)::SendMessageW(g_mdiClient, WM_MDIGETACTIVE, 0, 0) == one);
+  ::SendMessageW(g_mdiClient, WM_MDINEXT, 0, 0);
+  CHECK((HWND)::SendMessageW(g_mdiClient, WM_MDIGETACTIVE, 0, 0) == two);
+
+  // Maximized: the caption goes, the buttons and title go to the frame.
+  int items = ::GetMenuItemCount(bar);
+  ::SendMessageW(g_mdiClient, WM_MDIMAXIMIZE, (WPARAM)two, 0);
+  CHECK(::IsZoomed(two));
+  CHECK((HWND)::SendMessageW(g_mdiClient, WM_MDIGETACTIVE, 0, (LPARAM)&maxed) == two && maxed);
+  CHECK(::GetMenuItemCount(bar) == items + 4);
+  ::GetWindowTextW(frame, text, 64);
+  CHECK(wcscmp(text, L"Frame - [Two]") == 0);
+  RECT kc;
+  ::GetClientRect(two, &kc);
+  CHECK(kc.right == cc.right && kc.bottom == cc.bottom);
+  // Activating another keeps the maximized state.
+  ::SendMessageW(g_mdiClient, WM_MDIACTIVATE, (WPARAM)one, 0);
+  CHECK(::IsZoomed(one) && !::IsZoomed(two));
+  ::GetWindowTextW(frame, text, 64);
+  CHECK(wcscmp(text, L"Frame - [One]") == 0);
+  // The restore button, through the frame.
+  ::SendMessageW(frame, WM_COMMAND, SC_RESTORE, 0);
+  CHECK(!::IsZoomed(one) && ::GetMenuItemCount(bar) == items);
+  ::GetWindowTextW(frame, text, 64);
+  CHECK(wcscmp(text, L"Frame") == 0);
+
+  // Tiling side by side.
+  ::SendMessageW(g_mdiClient, WM_MDITILE, MDITILE_VERTICAL, 0);
+  RECT r1, r2;
+  ::GetWindowRect(one, &r1);
+  ::GetWindowRect(two, &r2);
+  CHECK(r1.top == r2.top && (r1.right == r2.left || r2.right == r1.left));
+
+  // Closing the active one activates the other and renumbers it.
+  ::SendMessageW(one, WM_CLOSE, 0, 0);
+  CHECK(!::IsWindow(one));
+  CHECK((HWND)::SendMessageW(g_mdiClient, WM_MDIGETACTIVE, 0, 0) == two);
+  CHECK(::GetDlgCtrlID(two) == 0xFF00 && ::GetMenuItemCount(win) == 3);
+  ::SendMessageW(g_mdiClient, WM_MDIDESTROY, (WPARAM)two, 0);
+  CHECK(!::IsWindow(two) && ::SendMessageW(g_mdiClient, WM_MDIGETACTIVE, 0, 0) == 0);
+  CHECK(::GetMenuItemCount(win) == 1);
+  ::DestroyWindow(frame);
+  g_mdiClient = NULL;
+}
+
+// ---------------------------------------------------------------------
+// Image lists.
+
+static void TestImageLists() {
+  HDC screen = ::GetDC(NULL);
+  HDC mem = ::CreateCompatibleDC(screen);
+  // Two 8x8 images: a red square and a blue one, each on magenta with a
+  // 2-pixel border.
+  HBITMAP strip = ::CreateCompatibleBitmap(screen, 16, 8);
+  HGDIOBJ old = ::SelectObject(mem, strip);
+  RECT r = {0, 0, 16, 8};
+  HBRUSH magenta = ::CreateSolidBrush(RGB(255, 0, 255)), red = ::CreateSolidBrush(RGB(255, 0, 0)),
+         blue = ::CreateSolidBrush(RGB(0, 0, 255));
+  ::FillRect(mem, &r, magenta);
+  RECT a = {2, 2, 6, 6}, b = {10, 2, 14, 6};
+  ::FillRect(mem, &a, red);
+  ::FillRect(mem, &b, blue);
+  ::SelectObject(mem, old);
+
+  HIMAGELIST il = ImageList_Create(8, 8, ILC_MASK | ILC_COLOR24, 2, 2);
+  CHECK(il && ImageList_GetImageCount(il) == 0);
+  CHECK(ImageList_AddMasked(il, strip, RGB(255, 0, 255)) == 0);
+  CHECK(ImageList_GetImageCount(il) == 2);
+  int cx = 0, cy = 0;
+  CHECK(ImageList_GetIconSize(il, &cx, &cy) && cx == 8 && cy == 8);
+
+  // Drawn transparently on white, and over a background color.
+  HBITMAP canvas = ::CreateCompatibleBitmap(screen, 32, 8);
+  old = ::SelectObject(mem, canvas);
+  RECT all = {0, 0, 32, 8};
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  CHECK(ImageList_Draw(il, 0, mem, 0, 0, ILD_TRANSPARENT));
+  CHECK(::GetPixel(mem, 3, 3) == RGB(255, 0, 0) && ::GetPixel(mem, 0, 0) == RGB(255, 255, 255));
+  CHECK(ImageList_DrawEx(il, 1, mem, 8, 0, 0, 0, RGB(0, 255, 0), CLR_NONE, ILD_NORMAL));
+  CHECK(::GetPixel(mem, 11, 3) == RGB(0, 0, 255) && ::GetPixel(mem, 8, 0) == RGB(0, 255, 0));
+  // The mask alone, and a blend toward the highlight color.
+  CHECK(ImageList_Draw(il, 0, mem, 16, 0, ILD_MASK));
+  CHECK(::GetPixel(mem, 19, 3) == RGB(0, 0, 0) && ::GetPixel(mem, 16, 0) == RGB(255, 255, 255));
+  // Windows may dither the blend rather than mix each pixel, so a 2x2
+  // block is averaged.
+  ImageList_DrawEx(il, 0, mem, 24, 0, 0, 0, CLR_NONE, RGB(0, 0, 255), ILD_BLEND50);
+  int rsum = 0, bsum = 0;
+  for (int y = 2; y < 4; y++)
+    for (int x = 26; x < 28; x++) {
+      rsum += GetRValue(::GetPixel(mem, x, y));
+      bsum += GetBValue(::GetPixel(mem, x, y));
+    }
+  CHECK(rsum / 4 > 100 && rsum / 4 < 155 && bsum / 4 > 100);
+  // An overlay drawn on top.
+  CHECK(ImageList_SetOverlayImage(il, 1, 1));
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  ImageList_Draw(il, 0, mem, 0, 0, ILD_TRANSPARENT | INDEXTOOVERLAYMASK(1));
+  CHECK(::GetPixel(mem, 3, 3) == RGB(0, 0, 255));
+  ::SelectObject(mem, old);
+
+  // Icons in and out.
+  HICON icon = ImageList_GetIcon(il, 0, ILD_NORMAL);
+  CHECK(icon != NULL);
+  CHECK(ImageList_AddIcon(il, icon) == 2);
+  ::SelectObject(mem, canvas);
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  ImageList_Draw(il, 2, mem, 0, 0, ILD_TRANSPARENT);
+  CHECK(::GetPixel(mem, 3, 3) == RGB(255, 0, 0) && ::GetPixel(mem, 0, 0) == RGB(255, 255, 255));
+  ::SelectObject(mem, old);
+  ::DestroyIcon(icon);
+
+  IMAGEINFO info;
+  CHECK(ImageList_GetImageInfo(il, 1, &info) && info.hbmImage && info.hbmMask && info.rcImage.left == 8);
+  HIMAGELIST copy = ImageList_Duplicate(il);
+  CHECK(ImageList_GetImageCount(copy) == 3);
+  HIMAGELIST merged = ImageList_Merge(il, 0, il, 1, 4, 0);
+  CHECK(merged && ImageList_GetIconSize(merged, &cx, &cy) && cx == 12 && cy == 8);
+  CHECK(ImageList_Remove(il, 0) && ImageList_GetImageCount(il) == 2);
+  CHECK(ImageList_RemoveAll(il) && ImageList_GetImageCount(il) == 0);
+  CHECK(ImageList_Destroy(il) && ImageList_Destroy(copy) && ImageList_Destroy(merged));
+  CHECK(!ImageList_Destroy(il));
+
+  ::DeleteObject(strip);
+  ::DeleteObject(canvas);
+  ::DeleteObject(magenta);
+  ::DeleteObject(red);
+  ::DeleteObject(blue);
+  ::DeleteDC(mem);
+  ::ReleaseDC(NULL, screen);
+}
+
 // A CWnd with a message map
 
 class CTestWnd : public CWnd {
@@ -599,6 +1503,578 @@ BEGIN_MESSAGE_MAP(CTestWnd, CWnd)
   ON_WM_TIMER()
   ON_MESSAGE(WM_APP + 5, OnApp)
 END_MESSAGE_MAP()
+
+// A parent that records what its common controls tell it.
+static std::vector<UINT> g_notifies;
+static int g_hscrolls = 0, g_vscrolls = 0;
+static LRESULT CALLBACK CtlHostProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_NOTIFY) g_notifies.push_back(((NMHDR*)lp)->code);
+  if (msg == WM_HSCROLL) g_hscrolls++;
+  if (msg == WM_VSCROLL) g_vscrolls++;
+  return ::DefWindowProcW(h, msg, wp, lp);
+}
+
+static bool Notified(UINT code) {
+  for (UINT c : g_notifies)
+    if (c == code) return true;
+  return false;
+}
+
+static void TestCommonControls() {
+  INITCOMMONCONTROLSEX icc = {sizeof icc, ICC_WIN95_CLASSES | ICC_BAR_CLASSES};
+  CHECK(::InitCommonControlsEx(&icc));
+  WNDCLASSW wc = {};
+  wc.lpfnWndProc = CtlHostProc;
+  wc.hInstance = ::GetModuleHandleW(NULL);
+  wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+  wc.lpszClassName = L"CtlHost";
+  ::RegisterClassW(&wc);
+  HWND host = ::CreateWindowW(L"CtlHost", L"Controls", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, 0, 0, 420, 320,
+                              NULL, NULL, wc.hInstance, NULL);
+  CHECK(host != NULL);
+  HINSTANCE inst = wc.hInstance;
+  DWORD child = WS_CHILD | WS_VISIBLE;
+
+  // Status bar with parts.
+  HWND status = ::CreateWindowW(STATUSCLASSNAMEW, L"Ready", child | SBARS_SIZEGRIP, 0, 0, 0, 0, host,
+                                (HMENU)1, inst, NULL);
+  CHECK(status != NULL);
+  int parts[] = {200, 300, -1};
+  CHECK(::SendMessageW(status, SB_SETPARTS, 3, (LPARAM)parts));
+  CHECK(::SendMessageW(status, SB_GETPARTS, 0, 0) == 3);
+  ::SendMessageW(status, SB_SETTEXTW, 1, (LPARAM)L"NUM");
+  wchar_t buf[64] = L"";
+  CHECK(LOWORD(::SendMessageW(status, SB_GETTEXTW, 1, (LPARAM)buf)) == 3 && wcscmp(buf, L"NUM") == 0);
+
+  // Progress.
+  HWND prog = ::CreateWindowW(PROGRESS_CLASSW, L"", child, 10, 10, 180, 16, host, (HMENU)2, inst, NULL);
+  CHECK(prog != NULL);
+  ::SendMessageW(prog, PBM_SETRANGE32, 0, 200);
+  CHECK(::SendMessageW(prog, PBM_GETRANGE, FALSE, 0) == 200);
+  ::SendMessageW(prog, PBM_SETPOS, 50, 0);
+  CHECK(::SendMessageW(prog, PBM_DELTAPOS, 25, 0) == 50);
+  CHECK(::SendMessageW(prog, PBM_GETPOS, 0, 0) == 75);
+  ::SendMessageW(prog, PBM_SETPOS, 500, 0);
+  CHECK(::SendMessageW(prog, PBM_GETPOS, 0, 0) == 200);
+  ::SendMessageW(prog, PBM_SETPOS, 100, 0);
+
+  // Trackbar: range, position clamping, keys scroll the parent.
+  HWND track = ::CreateWindowW(TRACKBAR_CLASSW, L"", child | WS_TABSTOP | TBS_AUTOTICKS, 10, 34, 180, 30, host,
+                               (HMENU)3, inst, NULL);
+  CHECK(track != NULL);
+  ::SendMessageW(track, TBM_SETRANGE, TRUE, MAKELONG(0, 10));
+  CHECK(::SendMessageW(track, TBM_GETRANGEMIN, 0, 0) == 0 && ::SendMessageW(track, TBM_GETRANGEMAX, 0, 0) == 10);
+  ::SendMessageW(track, TBM_SETPOS, TRUE, 4);
+  CHECK(::SendMessageW(track, TBM_GETPOS, 0, 0) == 4);
+  ::SendMessageW(track, TBM_SETPOS, TRUE, 99);
+  CHECK(::SendMessageW(track, TBM_GETPOS, 0, 0) == 10);
+  ::SendMessageW(track, TBM_SETPOS, TRUE, 4);
+  g_hscrolls = 0;
+  ::SendMessageW(track, WM_KEYDOWN, VK_RIGHT, 0);
+  CHECK(::SendMessageW(track, TBM_GETPOS, 0, 0) == 5 && g_hscrolls > 0);
+  RECT thumb = {}, chan = {};
+  ::SendMessageW(track, TBM_GETTHUMBRECT, 0, (LPARAM)&thumb);
+  ::SendMessageW(track, TBM_GETCHANNELRECT, 0, (LPARAM)&chan);
+  CHECK(thumb.right > thumb.left && chan.right > chan.left);
+
+  // Up-down with an edit buddy.
+  HWND edit = ::CreateWindowExW(WS_EX_CLIENTEDGE, L"Edit", L"", child | ES_NUMBER, 200, 10, 60, 20, host,
+                                (HMENU)4, inst, NULL);
+  HWND spin = ::CreateWindowW(UPDOWN_CLASSW, L"", child | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS, 0, 0,
+                              0, 0, host, (HMENU)5, inst, NULL);
+  CHECK(spin != NULL);
+  ::SendMessageW(spin, UDM_SETBUDDY, (WPARAM)edit, 0);
+  CHECK((HWND)::SendMessageW(spin, UDM_GETBUDDY, 0, 0) == edit);
+  ::SendMessageW(spin, UDM_SETRANGE32, 0, 20);
+  ::SendMessageW(spin, UDM_SETPOS32, 0, 7);
+  CHECK(::SendMessageW(spin, UDM_GETPOS32, 0, NULL) == 7);
+  ::GetWindowTextW(edit, buf, 64);
+  CHECK(wcscmp(buf, L"7") == 0);
+  g_notifies.clear();
+  g_vscrolls = 0;
+  ::SendMessageW(edit, WM_KEYDOWN, VK_UP, 0);
+  CHECK(::SendMessageW(spin, UDM_GETPOS32, 0, NULL) == 8 && Notified(UDN_DELTAPOS) && g_vscrolls > 0);
+  ::GetWindowTextW(edit, buf, 64);
+  CHECK(wcscmp(buf, L"8") == 0);
+
+  // Header: items, text, layout and hit testing.
+  HWND header = ::CreateWindowW(WC_HEADERW, L"", child | HDS_BUTTONS, 10, 70, 300, 20, host, (HMENU)6, inst, NULL);
+  CHECK(header != NULL);
+  HDITEMW hi = {};
+  hi.mask = HDI_TEXT | HDI_WIDTH | HDI_FORMAT;
+  hi.fmt = HDF_LEFT | HDF_STRING;
+  hi.cxy = 100;
+  hi.pszText = (LPWSTR)L"Name";
+  CHECK(::SendMessageW(header, HDM_INSERTITEMW, 0, (LPARAM)&hi) == 0);
+  hi.pszText = (LPWSTR)L"Size";
+  hi.cxy = 60;
+  CHECK(::SendMessageW(header, HDM_INSERTITEMW, 1, (LPARAM)&hi) == 1);
+  CHECK(::SendMessageW(header, HDM_GETITEMCOUNT, 0, 0) == 2);
+  RECT ir = {};
+  CHECK(::SendMessageW(header, HDM_GETITEMRECT, 1, (LPARAM)&ir) && ir.left == 100 && ir.right == 160);
+  HDITEMW got = {};
+  got.mask = HDI_TEXT | HDI_WIDTH;
+  got.pszText = buf;
+  got.cchTextMax = 64;
+  CHECK(::SendMessageW(header, HDM_GETITEMW, 1, (LPARAM)&got) && wcscmp(buf, L"Size") == 0 && got.cxy == 60);
+  HDHITTESTINFO ht = {};
+  ht.pt.x = 120;
+  ht.pt.y = 5;
+  CHECK(::SendMessageW(header, HDM_HITTEST, 0, (LPARAM)&ht) == 1 && (ht.flags & HHT_ONHEADER));
+  int order[2] = {};
+  CHECK(::SendMessageW(header, HDM_GETORDERARRAY, 2, (LPARAM)order) && order[0] == 0 && order[1] == 1);
+
+  // Tabs: items, selection by mouse notifies the parent.
+  HWND tabs = ::CreateWindowW(WC_TABCONTROLW, L"", child | WS_CLIPSIBLINGS, 10, 100, 300, 120, host, (HMENU)7,
+                              inst, NULL);
+  CHECK(tabs != NULL);
+  TCITEMW ti = {};
+  ti.mask = TCIF_TEXT | TCIF_PARAM;
+  ti.pszText = (LPWSTR)L"General";
+  ti.lParam = 11;
+  CHECK(::SendMessageW(tabs, TCM_INSERTITEMW, 0, (LPARAM)&ti) == 0);
+  ti.pszText = (LPWSTR)L"Advanced";
+  ti.lParam = 22;
+  CHECK(::SendMessageW(tabs, TCM_INSERTITEMW, 1, (LPARAM)&ti) == 1);
+  CHECK(::SendMessageW(tabs, TCM_GETITEMCOUNT, 0, 0) == 2 && ::SendMessageW(tabs, TCM_GETCURSEL, 0, 0) == 0);
+  TCITEMW tg = {};
+  tg.mask = TCIF_TEXT | TCIF_PARAM;
+  tg.pszText = buf;
+  tg.cchTextMax = 64;
+  CHECK(::SendMessageW(tabs, TCM_GETITEMW, 1, (LPARAM)&tg) && wcscmp(buf, L"Advanced") == 0 && tg.lParam == 22);
+  RECT tr = {};
+  CHECK(::SendMessageW(tabs, TCM_GETITEMRECT, 1, (LPARAM)&tr) && tr.right > tr.left);
+  g_notifies.clear();
+  ::SendMessageW(tabs, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM((tr.left + tr.right) / 2, (tr.top + tr.bottom) / 2));
+  ::SendMessageW(tabs, WM_LBUTTONUP, 0, MAKELPARAM((tr.left + tr.right) / 2, (tr.top + tr.bottom) / 2));
+  CHECK(::SendMessageW(tabs, TCM_GETCURSEL, 0, 0) == 1 && Notified(TCN_SELCHANGING) && Notified(TCN_SELCHANGE));
+  RECT page = {0, 0, 300, 120};
+  ::SendMessageW(tabs, TCM_ADJUSTRECT, FALSE, (LPARAM)&page);
+  CHECK(page.top > 0 && page.bottom < 120 && page.left > 0);
+
+  // Hotkey.
+  HWND hot = ::CreateWindowW(HOTKEY_CLASSW, L"", child | WS_BORDER, 200, 34, 120, 20, host, (HMENU)8, inst, NULL);
+  CHECK(hot != NULL);
+  ::SendMessageW(hot, HKM_SETHOTKEY, MAKEWORD('K', HOTKEYF_CONTROL), 0);
+  CHECK(::SendMessageW(hot, HKM_GETHOTKEY, 0, 0) == MAKEWORD('K', HOTKEYF_CONTROL));
+
+  ::ShowWindow(host, SW_SHOW);
+  ::UpdateWindow(host);
+  Pump();
+  ::DestroyWindow(host);
+}
+
+static int CALLBACK CompareDown(LPARAM a, LPARAM b, LPARAM) { return (int)(b - a); }
+
+static void TestListView() {
+  HINSTANCE inst = ::GetModuleHandleW(NULL);
+  HWND host = ::CreateWindowW(L"CtlHost", L"List", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, 0, 0, 420, 320, NULL,
+                              NULL, inst, NULL);
+  HWND lv = ::CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"", WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_EDITLABELS,
+                              10, 10, 380, 250, host, (HMENU)20, inst, NULL);
+  CHECK(lv != NULL);
+  HWND header = (HWND)::SendMessageW(lv, LVM_GETHEADER, 0, 0);
+  CHECK(header != NULL);
+
+  // Columns go to the header.
+  LVCOLUMNW col = {};
+  col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
+  col.fmt = LVCFMT_LEFT;
+  col.cx = 150;
+  col.pszText = (LPWSTR)L"Name";
+  CHECK(::SendMessageW(lv, LVM_INSERTCOLUMNW, 0, (LPARAM)&col) == 0);
+  col.fmt = LVCFMT_RIGHT;
+  col.cx = 80;
+  col.pszText = (LPWSTR)L"Size";
+  CHECK(::SendMessageW(lv, LVM_INSERTCOLUMNW, 1, (LPARAM)&col) == 1);
+  CHECK(::SendMessageW(header, HDM_GETITEMCOUNT, 0, 0) == 2);
+  CHECK(::SendMessageW(lv, LVM_GETCOLUMNWIDTH, 1, 0) == 80);
+  wchar_t buf[64] = L"";
+  LVCOLUMNW gc = {};
+  gc.mask = LVCF_TEXT | LVCF_FMT;
+  gc.pszText = buf;
+  gc.cchTextMax = 64;
+  CHECK(::SendMessageW(lv, LVM_GETCOLUMNW, 1, (LPARAM)&gc) && wcscmp(buf, L"Size") == 0 && gc.fmt == LVCFMT_RIGHT);
+
+  // Items and subitems.
+  g_notifies.clear();
+  const wchar_t* names[] = {L"apple", L"banana", L"cherry", L"date"};
+  for (int i = 0; i < 4; i++) {
+    LVITEMW it = {};
+    it.mask = LVIF_TEXT | LVIF_PARAM;
+    it.iItem = i;
+    it.pszText = (LPWSTR)names[i];
+    it.lParam = i * 10;
+    CHECK(::SendMessageW(lv, LVM_INSERTITEMW, 0, (LPARAM)&it) == i);
+    wchar_t size[16];
+    swprintf(size, 16, L"%d KB", (i + 1) * 3);
+    it.mask = LVIF_TEXT;
+    it.iSubItem = 1;
+    it.pszText = size;
+    CHECK(::SendMessageW(lv, LVM_SETITEMTEXTW, i, (LPARAM)&it));
+  }
+  CHECK(Notified(LVN_INSERTITEM));
+  CHECK(::SendMessageW(lv, LVM_GETITEMCOUNT, 0, 0) == 4);
+  LVITEMW get = {};
+  get.iSubItem = 1;
+  get.pszText = buf;
+  get.cchTextMax = 64;
+  CHECK(::SendMessageW(lv, LVM_GETITEMTEXTW, 2, (LPARAM)&get) == 4 && wcscmp(buf, L"9 KB") == 0);
+  get.mask = LVIF_TEXT | LVIF_PARAM;
+  get.iItem = 1;
+  get.iSubItem = 0;
+  CHECK(::SendMessageW(lv, LVM_GETITEMW, 0, (LPARAM)&get) && wcscmp(buf, L"banana") == 0 && get.lParam == 10);
+  LVFINDINFOW fi = {};
+  fi.flags = LVFI_STRING;
+  fi.psz = L"Cherry";
+  CHECK(::SendMessageW(lv, LVM_FINDITEMW, (WPARAM)-1, (LPARAM)&fi) == 2);
+  fi.flags = LVFI_PARAM;
+  fi.lParam = 30;
+  CHECK(::SendMessageW(lv, LVM_FINDITEMW, (WPARAM)-1, (LPARAM)&fi) == 3);
+
+  // Selection through state, with notifications.
+  g_notifies.clear();
+  LVITEMW st = {};
+  st.stateMask = LVIS_SELECTED | LVIS_FOCUSED;
+  st.state = LVIS_SELECTED | LVIS_FOCUSED;
+  CHECK(::SendMessageW(lv, LVM_SETITEMSTATE, 1, (LPARAM)&st));
+  CHECK(Notified(LVN_ITEMCHANGING) && Notified(LVN_ITEMCHANGED));
+  CHECK(::SendMessageW(lv, LVM_GETSELECTEDCOUNT, 0, 0) == 1);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_SELECTED) == 1);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_FOCUSED) == 1);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, 1, LVNI_BELOW) == 2);
+
+  // Geometry and hit testing.
+  RECT ir = {LVIR_BOUNDS};
+  CHECK(::SendMessageW(lv, LVM_GETITEMRECT, 2, (LPARAM)&ir) && ir.right - ir.left == 230 && ir.bottom > ir.top);
+  LVHITTESTINFO ht = {};
+  ht.pt.x = ir.left + 20;
+  ht.pt.y = (ir.top + ir.bottom) / 2;
+  CHECK(::SendMessageW(lv, LVM_HITTEST, 0, (LPARAM)&ht) == 2 && (ht.flags & LVHT_ONITEM));
+  ht.pt.x = ir.left + 190;
+  CHECK(::SendMessageW(lv, LVM_SUBITEMHITTEST, 0, (LPARAM)&ht) == 2 && ht.iSubItem == 1);
+
+  // The keyboard moves the selection; a click selects and notifies.
+  ::SetFocus(lv);
+  ::SendMessageW(lv, WM_KEYDOWN, VK_DOWN, 0);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_SELECTED) == 2);
+  CHECK(::SendMessageW(lv, LVM_GETSELECTEDCOUNT, 0, 0) == 1);
+  g_notifies.clear();
+  RECT r0 = {LVIR_LABEL};
+  ::SendMessageW(lv, LVM_GETITEMRECT, 0, (LPARAM)&r0);
+  LPARAM at = MAKELPARAM(r0.left + 5, (r0.top + r0.bottom) / 2);
+  ::SendMessageW(lv, WM_LBUTTONDOWN, MK_LBUTTON, at);
+  ::SendMessageW(lv, WM_LBUTTONUP, 0, at);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_SELECTED) == 0 && Notified(NM_CLICK));
+  ::SendMessageW(lv, WM_KEYDOWN, VK_END, 0);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_FOCUSED) == 3);
+  g_notifies.clear();
+  ::SendMessageW(lv, WM_CHAR, 'b', 1);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_FOCUSED) == 1);
+
+  // Label editing ends with the parent's say.
+  HWND edit = (HWND)::SendMessageW(lv, LVM_EDITLABELW, 1, 0);
+  CHECK(edit != NULL && Notified(LVN_BEGINLABELEDITW));
+  if (edit) {
+    ::SetWindowTextW(edit, L"blueberry");
+    ::SendMessageW(edit, WM_KEYDOWN, VK_RETURN, 0);
+    CHECK(Notified(LVN_ENDLABELEDITW) && ::SendMessageW(lv, LVM_GETEDITCONTROL, 0, 0) == 0);
+  }
+
+  // Sorting by lParam, descending.
+  CHECK(::SendMessageW(lv, LVM_SORTITEMS, 0, (LPARAM)CompareDown));
+  get.mask = LVIF_PARAM;
+  get.iItem = 0;
+  CHECK(::SendMessageW(lv, LVM_GETITEMW, 0, (LPARAM)&get) && get.lParam == 30);
+  CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_FOCUSED) == 2);
+
+  // Check boxes are state images 1 and 2.
+  ::SendMessageW(lv, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT,
+                 LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+  CHECK(::SendMessageW(lv, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0) == (LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT));
+  CHECK((::SendMessageW(lv, LVM_GETITEMSTATE, 0, LVIS_STATEIMAGEMASK) >> 12) == 1);
+  st.stateMask = LVIS_STATEIMAGEMASK;
+  st.state = INDEXTOSTATEIMAGEMASK(2);
+  ::SendMessageW(lv, LVM_SETITEMSTATE, 0, (LPARAM)&st);
+  CHECK((::SendMessageW(lv, LVM_GETITEMSTATE, 0, LVIS_STATEIMAGEMASK) >> 12) == 2);
+
+  // Deleting.
+  g_notifies.clear();
+  CHECK(::SendMessageW(lv, LVM_DELETEITEM, 3, 0) && Notified(LVN_DELETEITEM));
+  CHECK(::SendMessageW(lv, LVM_GETITEMCOUNT, 0, 0) == 3);
+
+  // The other views lay the items out on their own.
+  ::SetWindowLongW(lv, GWL_STYLE, (::GetWindowLongW(lv, GWL_STYLE) & ~LVS_TYPEMASK) | LVS_ICON);
+  RECT a = {LVIR_BOUNDS}, b = {LVIR_BOUNDS};
+  ::SendMessageW(lv, LVM_GETITEMRECT, 0, (LPARAM)&a);
+  ::SendMessageW(lv, LVM_GETITEMRECT, 1, (LPARAM)&b);
+  CHECK(b.left > a.left && b.top == a.top && !(::GetWindowLongW(header, GWL_STYLE) & WS_VISIBLE));
+  ::SetWindowLongW(lv, GWL_STYLE, (::GetWindowLongW(lv, GWL_STYLE) & ~LVS_TYPEMASK) | LVS_LIST);
+  ::SendMessageW(lv, LVM_GETITEMRECT, 0, (LPARAM)&a);
+  // A row of text each (Wine keeps the second item's icon place).
+  CHECK(a.left == 0 && a.top == 0 && a.bottom - a.top < 30);
+  ::SetWindowLongW(lv, GWL_STYLE, (::GetWindowLongW(lv, GWL_STYLE) & ~LVS_TYPEMASK) | LVS_REPORT);
+  CHECK(::GetWindowLongW(header, GWL_STYLE) & WS_VISIBLE);
+
+  // Owner data: the list view keeps only the count and the states.
+  HWND od = ::CreateWindowW(WC_LISTVIEWW, L"", WS_CHILD | LVS_REPORT | LVS_OWNERDATA, 0, 0, 100, 100, host,
+                            (HMENU)21, inst, NULL);
+  ::SendMessageW(od, LVM_SETITEMCOUNT, 1000, 0);
+  CHECK(::SendMessageW(od, LVM_GETITEMCOUNT, 0, 0) == 1000);
+  st.stateMask = LVIS_SELECTED;
+  st.state = LVIS_SELECTED;
+  ::SendMessageW(od, LVM_SETITEMSTATE, 500, (LPARAM)&st);
+  CHECK(::SendMessageW(od, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_SELECTED) == 500);
+
+  g_notifies.clear();
+  CHECK(::SendMessageW(lv, LVM_DELETEALLITEMS, 0, 0) && Notified(LVN_DELETEALLITEMS));
+  CHECK(::SendMessageW(lv, LVM_GETITEMCOUNT, 0, 0) == 0);
+  ::DestroyWindow(host);
+}
+
+static HTREEITEM TreeAdd(HWND tv, HTREEITEM parent, const wchar_t* text, LPARAM data,
+                         HTREEITEM after = TVI_LAST) {
+  TVINSERTSTRUCTW ins = {};
+  ins.hParent = parent;
+  ins.hInsertAfter = after;
+  ins.item.mask = TVIF_TEXT | TVIF_PARAM;
+  ins.item.pszText = (LPWSTR)text;
+  ins.item.lParam = data;
+  return (HTREEITEM)::SendMessageW(tv, TVM_INSERTITEMW, 0, (LPARAM)&ins);
+}
+
+static HTREEITEM TreeNext(HWND tv, HTREEITEM h, UINT code) {
+  return (HTREEITEM)::SendMessageW(tv, TVM_GETNEXTITEM, code, (LPARAM)h);
+}
+
+static std::wstring TreeText(HWND tv, HTREEITEM h) {
+  wchar_t buf[64] = L"";
+  TVITEMW it = {};
+  it.mask = TVIF_TEXT;
+  it.hItem = h;
+  it.pszText = buf;
+  it.cchTextMax = 64;
+  ::SendMessageW(tv, TVM_GETITEMW, 0, (LPARAM)&it);
+  return buf;
+}
+
+static int CALLBACK CompareParamDown(LPARAM a, LPARAM b, LPARAM) { return (int)(b - a); }
+
+static void TestTreeView() {
+  HINSTANCE inst = ::GetModuleHandleW(NULL);
+  HWND host = ::CreateWindowW(L"CtlHost", L"Tree", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, 0, 0, 300, 320, NULL,
+                              NULL, inst, NULL);
+  HWND tv = ::CreateWindowExW(WS_EX_CLIENTEDGE, WC_TREEVIEWW, L"",
+                              WS_CHILD | WS_VISIBLE | TVS_HASLINES | TVS_HASBUTTONS | TVS_LINESATROOT |
+                                  TVS_EDITLABELS | TVS_SHOWSELALWAYS,
+                              10, 10, 260, 260, host, (HMENU)30, inst, NULL);
+  CHECK(tv != NULL);
+
+  HTREEITEM fruit = TreeAdd(tv, TVI_ROOT, L"Fruit", 1);
+  HTREEITEM veg = TreeAdd(tv, TVI_ROOT, L"Vegetables", 2);
+  HTREEITEM pear = TreeAdd(tv, fruit, L"Pear", 13);
+  HTREEITEM apple = TreeAdd(tv, fruit, L"Apple", 11, TVI_FIRST);
+  HTREEITEM fig = TreeAdd(tv, fruit, L"Fig", 12, TVI_SORT);
+  HTREEITEM leek = TreeAdd(tv, veg, L"Leek", 21);
+  CHECK(fruit && veg && pear && apple && fig && leek);
+  CHECK(::SendMessageW(tv, TVM_GETCOUNT, 0, 0) == 6);
+  CHECK(TreeNext(tv, NULL, TVGN_ROOT) == fruit && TreeNext(tv, fruit, TVGN_NEXT) == veg);
+  CHECK(TreeNext(tv, fruit, TVGN_CHILD) == apple && TreeNext(tv, apple, TVGN_NEXT) == fig &&
+        TreeNext(tv, fig, TVGN_NEXT) == pear);
+  CHECK(TreeNext(tv, pear, TVGN_PARENT) == fruit && TreeNext(tv, fruit, TVGN_PARENT) == NULL);
+  CHECK(TreeText(tv, fig) == L"Fig");
+
+  // Closed parents hide their children.
+  CHECK(TreeNext(tv, fruit, TVGN_NEXTVISIBLE) == veg);
+  RECT r;
+  *(HTREEITEM*)&r = apple;
+  CHECK(!::SendMessageW(tv, TVM_GETITEMRECT, TRUE, (LPARAM)&r));
+  g_notifies.clear();
+  CHECK(::SendMessageW(tv, TVM_EXPAND, TVE_EXPAND, (LPARAM)fruit));
+  CHECK(Notified(TVN_ITEMEXPANDINGW) && Notified(TVN_ITEMEXPANDEDW));
+  CHECK(::SendMessageW(tv, TVM_GETITEMSTATE, (WPARAM)fruit, TVIS_EXPANDED) == TVIS_EXPANDED);
+  CHECK(TreeNext(tv, fruit, TVGN_NEXTVISIBLE) == apple);
+  *(HTREEITEM*)&r = apple;
+  CHECK(::SendMessageW(tv, TVM_GETITEMRECT, TRUE, (LPARAM)&r) && r.right > r.left);
+  // Only the first TVM_EXPAND tells the parent.
+  ::SendMessageW(tv, TVM_EXPAND, TVE_COLLAPSE, (LPARAM)fruit);
+  g_notifies.clear();
+  ::SendMessageW(tv, TVM_EXPAND, TVE_EXPAND, (LPARAM)fruit);
+  CHECK(!Notified(TVN_ITEMEXPANDINGW));
+
+  // Selection.
+  g_notifies.clear();
+  CHECK(::SendMessageW(tv, TVM_SELECTITEM, TVGN_CARET, (LPARAM)fig));
+  CHECK(Notified(TVN_SELCHANGINGW) && Notified(TVN_SELCHANGEDW));
+  CHECK(TreeNext(tv, NULL, TVGN_CARET) == fig);
+  CHECK(::SendMessageW(tv, TVM_GETITEMSTATE, (WPARAM)fig, TVIS_SELECTED) == TVIS_SELECTED);
+  // Selecting a hidden item opens its parent.
+  ::SendMessageW(tv, TVM_SELECTITEM, TVGN_CARET, (LPARAM)leek);
+  CHECK(::SendMessageW(tv, TVM_GETITEMSTATE, (WPARAM)veg, TVIS_EXPANDED) == TVIS_EXPANDED);
+
+  // The keyboard.
+  ::SetFocus(tv);
+  ::SendMessageW(tv, WM_KEYDOWN, VK_UP, 0);
+  CHECK(TreeNext(tv, NULL, TVGN_CARET) == veg);
+  ::SendMessageW(tv, WM_KEYDOWN, VK_LEFT, 0);
+  CHECK(::SendMessageW(tv, TVM_GETITEMSTATE, (WPARAM)veg, TVIS_EXPANDED) == 0);
+  ::SendMessageW(tv, WM_KEYDOWN, VK_HOME, 0);
+  CHECK(TreeNext(tv, NULL, TVGN_CARET) == fruit);
+  ::SendMessageW(tv, WM_KEYDOWN, VK_RIGHT, 0);
+  ::SendMessageW(tv, WM_KEYDOWN, VK_RIGHT, 0);
+  CHECK(TreeNext(tv, NULL, TVGN_CARET) == apple);
+  ::SendMessageW(tv, WM_CHAR, 'p', 1);
+  CHECK(TreeNext(tv, NULL, TVGN_CARET) == pear);
+
+  // Hit testing and a click on the button.
+  *(HTREEITEM*)&r = veg;
+  ::SendMessageW(tv, TVM_GETITEMRECT, TRUE, (LPARAM)&r);
+  TVHITTESTINFO ht = {};
+  ht.pt.x = r.left + 3;
+  ht.pt.y = (r.top + r.bottom) / 2;
+  CHECK((HTREEITEM)::SendMessageW(tv, TVM_HITTEST, 0, (LPARAM)&ht) == veg && (ht.flags & TVHT_ONITEMLABEL));
+  ht.pt.x = r.left - 10;
+  CHECK((HTREEITEM)::SendMessageW(tv, TVM_HITTEST, 0, (LPARAM)&ht) == veg && (ht.flags & TVHT_ONITEMBUTTON));
+  ::SendMessageW(tv, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(ht.pt.x, ht.pt.y));
+  ::SendMessageW(tv, WM_LBUTTONUP, 0, MAKELPARAM(ht.pt.x, ht.pt.y));
+  CHECK(::SendMessageW(tv, TVM_GETITEMSTATE, (WPARAM)veg, TVIS_EXPANDED) == TVIS_EXPANDED);
+  g_notifies.clear();
+  // The release is waiting in the queue: Windows watches for a drag
+  // until it comes.
+  ::PostMessageW(tv, WM_LBUTTONUP, 0, MAKELPARAM(r.left + 3, ht.pt.y));
+  ::SendMessageW(tv, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(r.left + 3, ht.pt.y));
+  Pump();
+  CHECK(TreeNext(tv, NULL, TVGN_CARET) == veg && Notified(NM_CLICK));
+
+  // Editing a label.
+  g_notifies.clear();
+  HWND edit = (HWND)::SendMessageW(tv, TVM_EDITLABELW, 0, (LPARAM)leek);
+  CHECK(edit && Notified(TVN_BEGINLABELEDITW));
+  if (edit) {
+    ::SetWindowTextW(edit, L"Onion");
+    CHECK(::SendMessageW(tv, TVM_ENDEDITLABELNOW, FALSE, 0));
+    CHECK(Notified(TVN_ENDLABELEDITW) && ::SendMessageW(tv, TVM_GETEDITCONTROL, 0, 0) == 0);
+  }
+
+  // Sorting.
+  TVSORTCB sort = {fruit, CompareParamDown, 0};
+  CHECK(::SendMessageW(tv, TVM_SORTCHILDRENCB, 0, (LPARAM)&sort));
+  CHECK(TreeNext(tv, fruit, TVGN_CHILD) == pear && TreeNext(tv, pear, TVGN_NEXT) == fig);
+  CHECK(::SendMessageW(tv, TVM_SORTCHILDREN, 0, (LPARAM)fruit));
+  CHECK(TreeNext(tv, fruit, TVGN_CHILD) == apple);
+
+  // Deleting a branch with the caret in it moves the caret.
+  ::SendMessageW(tv, TVM_SELECTITEM, TVGN_CARET, (LPARAM)fig);
+  g_notifies.clear();
+  CHECK(::SendMessageW(tv, TVM_DELETEITEM, 0, (LPARAM)fruit));
+  CHECK(Notified(TVN_DELETEITEMW) && ::SendMessageW(tv, TVM_GETCOUNT, 0, 0) == 2);
+  CHECK(TreeNext(tv, NULL, TVGN_CARET) == veg);
+  CHECK(::SendMessageW(tv, TVM_DELETEITEM, 0, (LPARAM)TVI_ROOT) && ::SendMessageW(tv, TVM_GETCOUNT, 0, 0) == 0);
+  ::DestroyWindow(host);
+}
+
+// A wizard page that records what the sheet tells it and can refuse to
+// be left.
+static std::vector<UINT> g_pageCodes;
+static bool g_pageRefuses = false;
+static INT_PTR CALLBACK WizPageProc(HWND h, UINT msg, WPARAM, LPARAM lp) {
+  if (msg == WM_NOTIFY) {
+    NMHDR* nm = (NMHDR*)lp;
+    g_pageCodes.push_back(nm->code);
+    LRESULT r = 0;
+    if (nm->code == PSN_SETACTIVE) ::PostMessageW(::GetParent(h), PSM_SETWIZBUTTONS, 0, PSWIZB_BACK | PSWIZB_NEXT);
+    if (nm->code == PSN_KILLACTIVE && g_pageRefuses) r = TRUE;
+    ::SetWindowLongPtrW(h, DWLP_MSGRESULT, r);
+    return TRUE;
+  }
+  return FALSE;
+}
+
+static bool PageCode(UINT code) {
+  for (UINT c : g_pageCodes)
+    if (c == code) return true;
+  return false;
+}
+
+static void TestPropertySheets() {
+  DlgBuilder one(WS_CHILD | WS_CAPTION, 180, 80, "One");
+  one.Item(0x0081, ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 7, 7, 100, 12, 100, "");
+  DlgBuilder two(WS_CHILD | WS_CAPTION, 200, 90, "Two");
+  two.Item(0x0080, BS_AUTOCHECKBOX | WS_TABSTOP, 7, 7, 80, 10, 101, "Check");
+  PROPSHEETPAGEW pages[2] = {};
+  for (int i = 0; i < 2; i++) {
+    pages[i].dwSize = sizeof(PROPSHEETPAGEW);
+    pages[i].dwFlags = PSP_DLGINDIRECT;
+    pages[i].pResource = (LPCDLGTEMPLATE)(i ? two.Get() : one.Get());
+    pages[i].pfnDlgProc = WizPageProc;
+  }
+  HPROPSHEETPAGE extra = ::CreatePropertySheetPageW(&pages[1]);
+  CHECK(extra != NULL);
+
+  // A modeless property sheet: tabs, pages and the Apply button.
+  PROPSHEETHEADERW psh = {};
+  psh.dwSize = sizeof psh;
+  psh.dwFlags = PSH_PROPSHEETPAGE | PSH_MODELESS;
+  psh.hInstance = ::GetModuleHandleW(NULL);
+  psh.pszCaption = L"Sheet";
+  psh.nPages = 2;
+  psh.ppsp = pages;
+  g_pageCodes.clear();
+  HWND sheet = (HWND)::PropertySheetW(&psh);
+  CHECK(sheet != NULL && ::IsWindow(sheet));
+  wchar_t title[64] = L"";
+  ::GetWindowTextW(sheet, title, 64);
+  CHECK(wcscmp(title, L"Sheet") == 0);
+  HWND tab = (HWND)::SendMessageW(sheet, PSM_GETTABCONTROL, 0, 0);
+  CHECK(tab && ::SendMessageW(tab, TCM_GETITEMCOUNT, 0, 0) == 2);
+  HWND page0 = (HWND)::SendMessageW(sheet, PSM_GETCURRENTPAGEHWND, 0, 0);
+  CHECK(page0 && ::GetParent(page0) == sheet && ::GetDlgItem(page0, 100) && PageCode(PSN_SETACTIVE));
+  CHECK(::GetWindowLongW(page0, GWL_STYLE) & WS_CHILD);
+  HWND apply = ::GetDlgItem(sheet, 0x3021);
+  CHECK(apply && !::IsWindowEnabled(apply));
+  ::SendMessageW(sheet, PSM_CHANGED, (WPARAM)page0, 0);
+  CHECK(::IsWindowEnabled(apply));
+  // A page can keep the focus.
+  g_pageRefuses = true;
+  CHECK(!::SendMessageW(sheet, PSM_SETCURSEL, 1, 0));
+  g_pageRefuses = false;
+  g_pageCodes.clear();
+  CHECK(::SendMessageW(sheet, PSM_SETCURSEL, 1, 0));
+  CHECK(PageCode(PSN_KILLACTIVE) && PageCode(PSN_SETACTIVE));
+  CHECK(::SendMessageW(tab, TCM_GETCURSEL, 0, 0) == 1);
+  CHECK(::SendMessageW(sheet, PSM_ADDPAGE, 0, (LPARAM)extra) && ::SendMessageW(tab, TCM_GETITEMCOUNT, 0, 0) == 3);
+  CHECK(::SendMessageW(sheet, PSM_INDEXTOPAGE, 2, 0) == (LRESULT)extra);
+  g_pageCodes.clear();
+  ::SendMessageW(sheet, PSM_PRESSBUTTON, PSBTN_APPLYNOW, 0);
+  CHECK(PageCode(PSN_APPLY) && !::IsWindowEnabled(apply));
+  g_pageCodes.clear();
+  ::SendMessageW(sheet, PSM_PRESSBUTTON, PSBTN_OK, 0);
+  CHECK(PageCode(PSN_APPLY) && ::SendMessageW(sheet, PSM_GETCURRENTPAGEHWND, 0, 0) == 0);
+  ::DestroyWindow(sheet);
+
+  // A wizard: Next and Back move through the pages.
+  psh.dwFlags = PSH_PROPSHEETPAGE | PSH_MODELESS | PSH_WIZARD;
+  g_pageCodes.clear();
+  sheet = (HWND)::PropertySheetW(&psh);
+  CHECK(sheet != NULL);
+  Pump();
+  HWND next = ::GetDlgItem(sheet, 0x3024), back = ::GetDlgItem(sheet, 0x3023), fin = ::GetDlgItem(sheet, 0x3025);
+  CHECK(next && back && fin && ::IsWindowEnabled(next) && !(::GetWindowLongW(fin, GWL_STYLE) & WS_VISIBLE));
+  ::SendMessageW(sheet, PSM_PRESSBUTTON, PSBTN_NEXT, 0);
+  CHECK(PageCode(PSN_WIZNEXT));
+  HWND page1 = (HWND)::SendMessageW(sheet, PSM_GETCURRENTPAGEHWND, 0, 0);
+  CHECK(page1 && ::GetDlgItem(page1, 101) && ::SendMessageW(sheet, PSM_HWNDTOINDEX, (WPARAM)page1, 0) == 1);
+  ::SendMessageW(sheet, PSM_SETWIZBUTTONS, 0, PSWIZB_BACK | PSWIZB_FINISH);
+  CHECK((::GetWindowLongW(fin, GWL_STYLE) & WS_VISIBLE) && !(::GetWindowLongW(next, GWL_STYLE) & WS_VISIBLE));
+  ::SendMessageW(sheet, PSM_PRESSBUTTON, PSBTN_BACK, 0);
+  HWND cur = (HWND)::SendMessageW(sheet, PSM_GETCURRENTPAGEHWND, 0, 0);
+  CHECK(PageCode(PSN_WIZBACK) && ::SendMessageW(sheet, PSM_HWNDTOINDEX, (WPARAM)cur, 0) == 0);
+  ::SendMessageW(sheet, PSM_SETWIZBUTTONS, 0, PSWIZB_FINISH);
+  g_pageCodes.clear();
+  ::SendMessageW(sheet, PSM_PRESSBUTTON, PSBTN_FINISH, 0);
+  CHECK(PageCode(PSN_WIZFINISH) && ::SendMessageW(sheet, PSM_GETCURRENTPAGEHWND, 0, 0) == 0);
+  ::DestroyWindow(sheet);
+}
 
 static void TestCWnd() {
   CTestWnd wnd;
@@ -640,6 +2116,17 @@ int main() {
   TestMemoryDC();
   TestDIBSections();
   TestRegionsAndClipping();
+  TestShapes();
+  TestText();
+  TestIconsAndAccelerators();
+  TestMenus();
+  TestDialogsAndControls();
+  TestMdi();
+  TestImageLists();
+  TestCommonControls();
+  TestListView();
+  TestTreeView();
+  TestPropertySheets();
   TestCWnd();
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;

@@ -189,7 +189,7 @@ public:
         CHECK(pDrawView->GetTotalSize() == CSize(800, 600));
         pDrawView->ScrollToPosition(CPoint(100, 50));
         CPoint pt = pDrawView->GetScrollPosition();
-        TestLog("scroll position %ld,%ld", pt.x, pt.y);
+        TestLog("scroll position %d,%d", pt.x, pt.y);
         CHECK(pt == CPoint(100, 50));
         pDrawView->ScrollToPosition(CPoint(0, 0));
 
@@ -205,7 +205,7 @@ public:
         CRect rcForm, rcDraw;
         pForm->GetWindowRect(&rcForm);
         pDraw->GetWindowRect(&rcDraw);
-        TestLog("form %ld,%ld-%ld,%ld draw %ld,%ld-%ld,%ld", rcForm.left, rcForm.top,
+        TestLog("form %d,%d-%d,%d draw %d,%d-%d,%d", rcForm.left, rcForm.top,
                 rcForm.right, rcForm.bottom, rcDraw.left, rcDraw.top, rcDraw.right,
                 rcDraw.bottom);
         // The column size is the pane's inside; the pane's edge is around it.

@@ -248,7 +248,7 @@ public:
         if (!AfxGetApp()->CreatePrinterDC(dc)) dc.CreateDC(_T("DISPLAY"), NULL, NULL, NULL);
         pView->OnPrinterChanged(dc);
         CSize sizePaper = pView->GetPaperSize();
-        TestLog("paper %ld x %ld twips", sizePaper.cx, sizePaper.cy);
+        TestLog("paper %d x %d twips", sizePaper.cx, sizePaper.cy);
         CHECK(sizePaper.cx > 0 && sizePaper.cy > 0);
         CRect rectPrint = pView->GetPrintRect();
         CHECK(rectPrint.Width() == sizePaper.cx - 3600);
@@ -313,7 +313,7 @@ public:
         IRichEditOle* pReOle = ctrl.GetIRichEditOle();
         CHECK(pReOle != NULL);
         if (pReOle != NULL) {
-          TestLog("objects %ld", pReOle->GetObjectCount());
+          TestLog("objects %d", pReOle->GetObjectCount());
           CHECK(pReOle->GetObjectCount() == 1);
           pReOle->Release();
         }
@@ -341,7 +341,7 @@ public:
         CHECK(Doc()->OnOpenDocument(strRtf));
         pReOle = ctrl.GetIRichEditOle();
         if (pReOle != NULL) {
-          TestLog("objects after loading %ld", pReOle->GetObjectCount());
+          TestLog("objects after loading %d", pReOle->GetObjectCount());
           CHECK(pReOle->GetObjectCount() == 1);
           pReOle->Release();
         }

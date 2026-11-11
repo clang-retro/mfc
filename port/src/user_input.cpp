@@ -433,6 +433,153 @@ BOOL WINAPI SetKeyboardState(LPBYTE keys) {
   return TRUE;
 }
 
+// The keyboard layout: US English, PC scan codes. ext marks the keys that
+// share a scan code with the keypad and arrive with the extended bit.
+namespace {
+struct KeyInfo {
+  BYTE vk, scan, ext;
+  const char* name;
+};
+const KeyInfo kKeys[] = {
+    {VK_ESCAPE, 0x01, 0, "Esc"},      {'1', 0x02, 0, "1"},
+    {'2', 0x03, 0, "2"},              {'3', 0x04, 0, "3"},
+    {'4', 0x05, 0, "4"},              {'5', 0x06, 0, "5"},
+    {'6', 0x07, 0, "6"},              {'7', 0x08, 0, "7"},
+    {'8', 0x09, 0, "8"},              {'9', 0x0A, 0, "9"},
+    {'0', 0x0B, 0, "0"},              {VK_OEM_MINUS, 0x0C, 0, "-"},
+    {VK_OEM_PLUS, 0x0D, 0, "="},      {VK_BACK, 0x0E, 0, "Backspace"},
+    {VK_TAB, 0x0F, 0, "Tab"},         {'Q', 0x10, 0, "Q"},
+    {'W', 0x11, 0, "W"},              {'E', 0x12, 0, "E"},
+    {'R', 0x13, 0, "R"},              {'T', 0x14, 0, "T"},
+    {'Y', 0x15, 0, "Y"},              {'U', 0x16, 0, "U"},
+    {'I', 0x17, 0, "I"},              {'O', 0x18, 0, "O"},
+    {'P', 0x19, 0, "P"},              {VK_OEM_4, 0x1A, 0, "["},
+    {VK_OEM_6, 0x1B, 0, "]"},         {VK_RETURN, 0x1C, 0, "Enter"},
+    {VK_CONTROL, 0x1D, 0, "Ctrl"},    {'A', 0x1E, 0, "A"},
+    {'S', 0x1F, 0, "S"},              {'D', 0x20, 0, "D"},
+    {'F', 0x21, 0, "F"},              {'G', 0x22, 0, "G"},
+    {'H', 0x23, 0, "H"},              {'J', 0x24, 0, "J"},
+    {'K', 0x25, 0, "K"},              {'L', 0x26, 0, "L"},
+    {VK_OEM_1, 0x27, 0, ";"},         {VK_OEM_7, 0x28, 0, "'"},
+    {VK_OEM_3, 0x29, 0, "`"},         {VK_SHIFT, 0x2A, 0, "Shift"},
+    {VK_OEM_5, 0x2B, 0, "\\"},        {'Z', 0x2C, 0, "Z"},
+    {'X', 0x2D, 0, "X"},              {'C', 0x2E, 0, "C"},
+    {'V', 0x2F, 0, "V"},              {'B', 0x30, 0, "B"},
+    {'N', 0x31, 0, "N"},              {'M', 0x32, 0, "M"},
+    {VK_OEM_COMMA, 0x33, 0, ","},     {VK_OEM_PERIOD, 0x34, 0, "."},
+    {VK_OEM_2, 0x35, 0, "/"},         {VK_RSHIFT, 0x36, 0, "Right Shift"},
+    {VK_MULTIPLY, 0x37, 0, "Num *"},  {VK_MENU, 0x38, 0, "Alt"},
+    {VK_SPACE, 0x39, 0, "Space"},     {VK_CAPITAL, 0x3A, 0, "Caps Lock"},
+    {VK_F1, 0x3B, 0, "F1"},           {VK_F2, 0x3C, 0, "F2"},
+    {VK_F3, 0x3D, 0, "F3"},           {VK_F4, 0x3E, 0, "F4"},
+    {VK_F5, 0x3F, 0, "F5"},           {VK_F6, 0x40, 0, "F6"},
+    {VK_F7, 0x41, 0, "F7"},           {VK_F8, 0x42, 0, "F8"},
+    {VK_F9, 0x43, 0, "F9"},           {VK_F10, 0x44, 0, "F10"},
+    {VK_PAUSE, 0x45, 0, "Pause"},     {VK_SCROLL, 0x46, 0, "Scroll Lock"},
+    {VK_NUMPAD7, 0x47, 0, "Num 7"},   {VK_NUMPAD8, 0x48, 0, "Num 8"},
+    {VK_NUMPAD9, 0x49, 0, "Num 9"},   {VK_SUBTRACT, 0x4A, 0, "Num -"},
+    {VK_NUMPAD4, 0x4B, 0, "Num 4"},   {VK_NUMPAD5, 0x4C, 0, "Num 5"},
+    {VK_NUMPAD6, 0x4D, 0, "Num 6"},   {VK_ADD, 0x4E, 0, "Num +"},
+    {VK_NUMPAD1, 0x4F, 0, "Num 1"},   {VK_NUMPAD2, 0x50, 0, "Num 2"},
+    {VK_NUMPAD3, 0x51, 0, "Num 3"},   {VK_NUMPAD0, 0x52, 0, "Num 0"},
+    {VK_DECIMAL, 0x53, 0, "Num Del"}, {VK_F11, 0x57, 0, "F11"},
+    {VK_F12, 0x58, 0, "F12"},         {VK_HOME, 0x47, 1, "Home"},
+    {VK_UP, 0x48, 1, "Up"},           {VK_PRIOR, 0x49, 1, "Page Up"},
+    {VK_LEFT, 0x4B, 1, "Left"},       {VK_RIGHT, 0x4D, 1, "Right"},
+    {VK_END, 0x4F, 1, "End"},         {VK_DOWN, 0x50, 1, "Down"},
+    {VK_NEXT, 0x51, 1, "Page Down"},  {VK_INSERT, 0x52, 1, "Insert"},
+    {VK_DELETE, 0x53, 1, "Delete"},   {VK_DIVIDE, 0x35, 1, "Num /"},
+    {VK_NUMLOCK, 0x45, 1, "Num Lock"}, {VK_LWIN, 0x5B, 1, "Left Windows"},
+    {VK_RWIN, 0x5C, 1, "Right Windows"}, {VK_APPS, 0x5D, 1, "Application"},
+    {VK_LSHIFT, 0x2A, 0, "Shift"},    {VK_LCONTROL, 0x1D, 0, "Ctrl"},
+    {VK_RCONTROL, 0x1D, 1, "Right Ctrl"}, {VK_LMENU, 0x38, 0, "Alt"},
+    {VK_RMENU, 0x38, 1, "Right Alt"},
+};
+
+const KeyInfo* KeyByVk(UINT vk) {
+  for (const KeyInfo& k : kKeys)
+    if (k.vk == vk) return &k;
+  return NULL;
+}
+
+// The first entry for a scan code is the plain key; ext picks the
+// extended twin when there is one.
+const KeyInfo* KeyByScan(UINT scan, bool ext) {
+  const KeyInfo* plain = NULL;
+  for (const KeyInfo& k : kKeys) {
+    if (k.scan != scan) continue;
+    if ((k.ext != 0) == ext) return &k;
+    if (!plain) plain = &k;
+  }
+  return ext ? NULL : plain;
+}
+}  // namespace
+
+UINT WINAPI MapVirtualKeyW(UINT code, UINT type) {
+  const KeyInfo* k;
+  switch (type) {
+    case MAPVK_VK_TO_VSC:
+    case MAPVK_VK_TO_VSC_EX:
+      k = KeyByVk(code);
+      if (!k) return 0;
+      return type == MAPVK_VK_TO_VSC_EX && k->ext ? 0xE000 | k->scan : k->scan;
+    case MAPVK_VSC_TO_VK:
+    case MAPVK_VSC_TO_VK_EX: {
+      bool ext = (code & 0xFF00) == 0xE000;
+      k = KeyByScan(code & 0xFF, ext);
+      if (!k) return 0;
+      UINT vk = k->vk;
+      if (type == MAPVK_VSC_TO_VK) {
+        if (vk == VK_RSHIFT) vk = VK_SHIFT;
+      } else if (vk == VK_SHIFT) {
+        vk = VK_LSHIFT;
+      } else if (vk == VK_CONTROL) {
+        vk = ext ? VK_RCONTROL : VK_LCONTROL;
+      } else if (vk == VK_MENU) {
+        vk = ext ? VK_RMENU : VK_LMENU;
+      }
+      return vk;
+    }
+    case MAPVK_VK_TO_CHAR:
+      if ((code >= '0' && code <= '9') || (code >= 'A' && code <= 'Z')) return code;
+      if (code >= VK_NUMPAD0 && code <= VK_NUMPAD9) return '0' + (code - VK_NUMPAD0);
+      k = KeyByVk(code);
+      if (k && k->name[0] && !k->name[1]) return (BYTE)k->name[0];
+      if (code == VK_SPACE) return ' ';
+      if (code == VK_RETURN) return '\r';
+      if (code == VK_TAB) return '\t';
+      if (code == VK_BACK) return '\b';
+      if (code == VK_ESCAPE) return 0x1B;
+      return 0;
+  }
+  return 0;
+}
+
+UINT WINAPI MapVirtualKeyA(UINT code, UINT type) { return MapVirtualKeyW(code, type); }
+
+int WINAPI GetKeyNameTextW(LONG lp, LPWSTR buf, int max) {
+  if (!buf || max <= 0) return 0;
+  const KeyInfo* k = KeyByScan((lp >> 16) & 0xFF, (lp & (1 << 24)) != 0);
+  if (!k) {
+    buf[0] = 0;
+    return 0;
+  }
+  int n = 0;
+  for (; k->name[n] && n < max - 1; n++) buf[n] = (wchar_t)(BYTE)k->name[n];
+  buf[n] = 0;
+  return n;
+}
+
+int WINAPI GetKeyNameTextA(LONG lp, LPSTR buf, int max) {
+  if (!buf || max <= 0) return 0;
+  wchar_t w[64];
+  int n = GetKeyNameTextW(lp, w, 64);
+  if (n >= max) n = max - 1;
+  for (int i = 0; i < n; i++) buf[i] = (char)w[i];
+  buf[n] = 0;
+  return n;
+}
+
 // The mouse and the cursor
 
 BOOL WINAPI GetCursorPos(LPPOINT p) {
@@ -450,10 +597,16 @@ BOOL WINAPI SetCursorPos(int x, int y) {
 HCURSOR WINAPI SetCursor(HCURSOR c) {
   HCURSOR old = g_cursor;
   g_cursor = c;
+  if (c != old) GetBackend()->SetCursor(g_cursorShown >= 0 ? c : NULL);
   return old;
 }
 HCURSOR WINAPI GetCursor(void) { return g_cursor; }
-int WINAPI ShowCursor(BOOL show) { return show ? ++g_cursorShown : --g_cursorShown; }
+int WINAPI ShowCursor(BOOL show) {
+  int n = show ? ++g_cursorShown : --g_cursorShown;
+  if (n == 0 && show) GetBackend()->SetCursor(g_cursor);
+  if (n == -1 && !show) GetBackend()->SetCursor(NULL);
+  return n;
+}
 
 BOOL WINAPI ClipCursor(const RECT* r) {
   g_clipCursor = r ? *r : MakeRect(0, 0, 0, 0);

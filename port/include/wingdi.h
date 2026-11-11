@@ -149,6 +149,7 @@ extern "C" {
 #define ETO_OPAQUE 0x0002
 #define ETO_CLIPPED 0x0004
 #define ETO_GLYPH_INDEX 0x0010
+#define ETO_PDY 0x2000
 #define ETO_RTLREADING 0x0080
 #define ETO_IGNORELANGUAGE 0x1000
 
@@ -558,19 +559,84 @@ typedef struct tagTEXTMETRICW {
   BYTE tmCharSet;
 } TEXTMETRICW, *PTEXTMETRICW, *NPTEXTMETRICW, *LPTEXTMETRICW;
 typedef struct tagNEWTEXTMETRICA {
-  TEXTMETRICA tm_;
+  LONG tmHeight;
+  LONG tmAscent;
+  LONG tmDescent;
+  LONG tmInternalLeading;
+  LONG tmExternalLeading;
+  LONG tmAveCharWidth;
+  LONG tmMaxCharWidth;
+  LONG tmWeight;
+  LONG tmOverhang;
+  LONG tmDigitizedAspectX;
+  LONG tmDigitizedAspectY;
+  BYTE tmFirstChar;
+  BYTE tmLastChar;
+  BYTE tmDefaultChar;
+  BYTE tmBreakChar;
+  BYTE tmItalic;
+  BYTE tmUnderlined;
+  BYTE tmStruckOut;
+  BYTE tmPitchAndFamily;
+  BYTE tmCharSet;
   DWORD ntmFlags;
   UINT ntmSizeEM;
   UINT ntmCellHeight;
   UINT ntmAvgWidth;
-} NEWTEXTMETRICA;
+} NEWTEXTMETRICA, *PNEWTEXTMETRICA, *LPNEWTEXTMETRICA;
 typedef struct tagNEWTEXTMETRICW {
-  TEXTMETRICW tm_;
+  LONG tmHeight;
+  LONG tmAscent;
+  LONG tmDescent;
+  LONG tmInternalLeading;
+  LONG tmExternalLeading;
+  LONG tmAveCharWidth;
+  LONG tmMaxCharWidth;
+  LONG tmWeight;
+  LONG tmOverhang;
+  LONG tmDigitizedAspectX;
+  LONG tmDigitizedAspectY;
+  WCHAR tmFirstChar;
+  WCHAR tmLastChar;
+  WCHAR tmDefaultChar;
+  WCHAR tmBreakChar;
+  BYTE tmItalic;
+  BYTE tmUnderlined;
+  BYTE tmStruckOut;
+  BYTE tmPitchAndFamily;
+  BYTE tmCharSet;
   DWORD ntmFlags;
   UINT ntmSizeEM;
   UINT ntmCellHeight;
   UINT ntmAvgWidth;
-} NEWTEXTMETRICW;
+} NEWTEXTMETRICW, *PNEWTEXTMETRICW, *LPNEWTEXTMETRICW;
+typedef struct tagFONTSIGNATURE {
+  DWORD fsUsb[4];
+  DWORD fsCsb[2];
+} FONTSIGNATURE, *PFONTSIGNATURE, *LPFONTSIGNATURE;
+typedef struct tagNEWTEXTMETRICEXA {
+  NEWTEXTMETRICA ntmTm;
+  FONTSIGNATURE ntmFontSig;
+} NEWTEXTMETRICEXA;
+typedef struct tagNEWTEXTMETRICEXW {
+  NEWTEXTMETRICW ntmTm;
+  FONTSIGNATURE ntmFontSig;
+} NEWTEXTMETRICEXW;
+typedef struct tagENUMLOGFONTEXA {
+  LOGFONTA elfLogFont;
+  BYTE elfFullName[LF_FULLFACESIZE];
+  BYTE elfStyle[LF_FACESIZE];
+  BYTE elfScript[LF_FACESIZE];
+} ENUMLOGFONTEXA, *LPENUMLOGFONTEXA;
+typedef struct tagENUMLOGFONTEXW {
+  LOGFONTW elfLogFont;
+  WCHAR elfFullName[LF_FULLFACESIZE];
+  WCHAR elfStyle[LF_FACESIZE];
+  WCHAR elfScript[LF_FACESIZE];
+} ENUMLOGFONTEXW, *LPENUMLOGFONTEXW;
+#define NTM_ITALIC 0x00000001
+#define NTM_BOLD 0x00000020
+#define NTM_REGULAR 0x00000040
 typedef struct tagPANOSE {
   BYTE bFamilyType, bSerifStyle, bWeight, bProportion, bContrast, bStrokeVariation, bArmStyle,
       bLetterform, bMidline, bXHeight;
@@ -1328,6 +1394,11 @@ int WINAPI ExtEscape(HDC, int, int, LPCSTR, int, LPSTR);
 #define LPTEXTMETRIC __WINPORT_AW(LPTEXTMETRIC)
 #define NPTEXTMETRIC __WINPORT_AW(NPTEXTMETRIC)
 #define NEWTEXTMETRIC __WINPORT_AW(NEWTEXTMETRIC)
+#define PNEWTEXTMETRIC __WINPORT_AW(PNEWTEXTMETRIC)
+#define LPNEWTEXTMETRIC __WINPORT_AW(LPNEWTEXTMETRIC)
+#define NEWTEXTMETRICEX __WINPORT_AW(NEWTEXTMETRICEX)
+#define ENUMLOGFONTEX __WINPORT_AW(ENUMLOGFONTEX)
+#define LPENUMLOGFONTEX __WINPORT_AW(LPENUMLOGFONTEX)
 #define OUTLINETEXTMETRIC __WINPORT_AW(OUTLINETEXTMETRIC)
 #define LPOUTLINETEXTMETRIC __WINPORT_AW(LPOUTLINETEXTMETRIC)
 #define FONTENUMPROC __WINPORT_AW(FONTENUMPROC)

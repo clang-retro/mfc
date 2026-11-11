@@ -156,7 +156,7 @@ public:
     CRect rPane = ClientRectOf(&m_wndPane, this);
     CRect rClient;
     GetClientRect(&rClient);
-    TestLog("rebar %ld,%ld-%ld,%ld pane %ld,%ld-%ld,%ld", rBar.left, rBar.top, rBar.right,
+    TestLog("rebar %d,%d-%d,%d pane %d,%d-%d,%d", rBar.left, rBar.top, rBar.right,
             rBar.bottom, rPane.left, rPane.top, rPane.right, rPane.bottom);
     CHECK(rBar.top == 0 && rBar.left == 0 && rBar.right == rClient.right);
     CHECK(rBar.Height() > 0);
@@ -208,7 +208,7 @@ public:
     CHECK(rebar.GetBandCount() == 3);
     CRect rBar = ClientRectOf(&m_wndReBar, this);
     CRect rPane = ClientRectOf(&m_wndPane, this);
-    TestLog("rows %d -> %u, height %d -> %ld", m_nRows, rebar.GetRowCount(), m_cyBar,
+    TestLog("rows %d -> %u, height %d -> %d", m_nRows, rebar.GetRowCount(), m_cyBar,
             rBar.Height());
     CHECK((int)rebar.GetRowCount() == m_nRows + 1);
     CHECK(rBar.Height() > m_cyBar);
@@ -217,7 +217,7 @@ public:
     CHECK(rebar.ShowBand(2, FALSE));
     rBar = ClientRectOf(&m_wndReBar, this);
     rPane = ClientRectOf(&m_wndPane, this);
-    TestLog("hidden: height %ld", rBar.Height());
+    TestLog("hidden: height %d", rBar.Height());
     CHECK(rBar.Height() == m_cyBar);
     CHECK(rPane.top == rBar.bottom);
     rebar.ShowBand(2, TRUE);

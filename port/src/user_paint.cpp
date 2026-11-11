@@ -130,6 +130,18 @@ bool PaintFrameAndBackground(Window* w, HDC dc, bool erase) {
 void PaintNow(Window* w, bool children) {
   HWND h = w->hwnd;
   if (!ReallyVisible(w)) return;
+  // A parent without WS_CLIPCHILDREN draws over its children, so one with
+  // painting due goes first, and paints this window after itself.
+  Window* first = NULL;
+  {
+    UserGuard g(UserLock());
+    for (Window* c = w; c->parent && !(c->parent->style & WS_CLIPCHILDREN); c = c->parent)
+      if (!c->parent->update.Empty()) first = c->parent;
+  }
+  if (first) {
+    PaintNow(first, true);
+    if (!GetWindow(h)) return;
+  }
   bool needs;
   {
     UserGuard g(UserLock());

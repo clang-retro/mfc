@@ -520,6 +520,11 @@ typedef int(CALLBACK* EDITWORDBREAKPROCW)(LPWSTR, int, int, int);
 #define DWLP_MSGRESULT 0
 #define DWLP_DLGPROC (DWLP_MSGRESULT + sizeof(LRESULT))
 #define DWLP_USER (DWLP_DLGPROC + sizeof(DLGPROC))
+#if defined(_WIN64) || defined(__LP64__)
+#define DLGWINDOWEXTRA 48
+#else
+#define DLGWINDOWEXTRA 30
+#endif
 #define GCL_MENUNAME (-8)
 #define GCL_HBRBACKGROUND (-10)
 #define GCL_HCURSOR (-12)
@@ -1384,6 +1389,12 @@ typedef struct tagINPUT {
 #define MIM_MENUDATA 0x00000008
 #define MIM_STYLE 0x00000010
 #define MIM_APPLYTOSUBMENUS 0x80000000L
+#define MNS_NOCHECK 0x80000000L
+#define MNS_MODELESS 0x40000000L
+#define MNS_DRAGDROP 0x20000000L
+#define MNS_AUTODISMISS 0x10000000L
+#define MNS_NOTIFYBYPOS 0x08000000L
+#define MNS_CHECKORBMP 0x04000000L
 #define HBMMENU_CALLBACK ((HBITMAP)-1)
 #define HBMMENU_SYSTEM ((HBITMAP)1)
 #define HBMMENU_MBAR_RESTORE ((HBITMAP)2)
@@ -1972,6 +1983,20 @@ typedef struct tagMSGBOXPARAMSW {
 #define CB_SETDROPPEDWIDTH 0x0160
 #define CB_INITSTORAGE 0x0161
 #define CB_GETCOMBOBOXINFO 0x0164
+#define LB_GETLISTBOXINFO 0x01B2
+#define STATE_SYSTEM_INVISIBLE 0x00008000
+#define STATE_SYSTEM_PRESSED 0x00000008
+typedef struct tagCOMBOBOXINFO {
+  DWORD cbSize;
+  RECT rcItem;
+  RECT rcButton;
+  DWORD stateButton;
+  HWND hwndCombo;
+  HWND hwndItem;
+  HWND hwndList;
+} COMBOBOXINFO, *PCOMBOBOXINFO, *LPCOMBOBOXINFO;
+BOOL WINAPI GetComboBoxInfo(HWND, PCOMBOBOXINFO);
+DWORD WINAPI GetListBoxInfo(HWND);
 
 // Draw text, frame controls, edges
 #define DT_TOP 0x00000000
@@ -2368,6 +2393,8 @@ BOOL WINAPI TranslateMDISysAccel(HWND, LPMSG);
 UINT WINAPI ArrangeIconicWindows(HWND);
 WORD WINAPI CascadeWindows(HWND, UINT, const RECT*, UINT, const HWND*);
 WORD WINAPI TileWindows(HWND, UINT, const RECT*, UINT, const HWND*);
+HWND WINAPI CreateMDIWindowA(LPCSTR, LPCSTR, DWORD, int, int, int, int, HWND, HINSTANCE, LPARAM);
+HWND WINAPI CreateMDIWindowW(LPCWSTR, LPCWSTR, DWORD, int, int, int, int, HWND, HINSTANCE, LPARAM);
 LRESULT WINAPI SendMessageA(HWND, UINT, WPARAM, LPARAM);
 LRESULT WINAPI SendMessageW(HWND, UINT, WPARAM, LPARAM);
 LRESULT WINAPI SendMessageTimeoutA(HWND, UINT, WPARAM, LPARAM, UINT, UINT, PDWORD_PTR);
@@ -2491,6 +2518,11 @@ BOOL WINAPI GetKeyboardState(PBYTE);
 BOOL WINAPI SetKeyboardState(LPBYTE);
 int WINAPI GetKeyNameTextA(LONG, LPSTR, int);
 int WINAPI GetKeyNameTextW(LONG, LPWSTR, int);
+#define MAPVK_VK_TO_VSC 0
+#define MAPVK_VSC_TO_VK 1
+#define MAPVK_VK_TO_CHAR 2
+#define MAPVK_VSC_TO_VK_EX 3
+#define MAPVK_VK_TO_VSC_EX 4
 UINT WINAPI MapVirtualKeyA(UINT, UINT);
 UINT WINAPI MapVirtualKeyW(UINT, UINT);
 SHORT WINAPI VkKeyScanA(CHAR);
@@ -2818,6 +2850,7 @@ int WINAPI wvsprintfW(LPWSTR, LPCWSTR, va_list);
 #define DefWindowProc __WINPORT_AW(DefWindowProc)
 #define CallWindowProc __WINPORT_AW(CallWindowProc)
 #define DefFrameProc __WINPORT_AW(DefFrameProc)
+#define CreateMDIWindow __WINPORT_AW(CreateMDIWindow)
 #define DefMDIChildProc __WINPORT_AW(DefMDIChildProc)
 #define SendMessage __WINPORT_AW(SendMessage)
 #define SendMessageTimeout __WINPORT_AW(SendMessageTimeout)

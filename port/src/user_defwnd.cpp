@@ -12,6 +12,7 @@
 #include "user.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 using namespace winport;
 
@@ -82,6 +83,8 @@ Frame Layout(Window* w) {
 bool In(const RECT& r, POINT p) { return p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom; }
 
 bool IsActive(Window* w) {
+  // An MDI child is never the active window; its frame tells it with WM_NCACTIVATE.
+  if (w->exStyle & WS_EX_MDICHILD) return w->ncActive;
   Window* t = w->TopLevel();
   return QueueFor(t->tid)->active == t->hwnd;
 }
@@ -134,9 +137,12 @@ void DrawArrowBox(HDC dc, RECT r, int dir, bool enabled) {
   }
 }
 
-void DrawScrollBar(Window* w, HDC dc, const RECT& r, bool vertical) {
+}  // namespace
+
+namespace winport {
+
+void PaintScrollBar(HDC dc, const RECT& r, bool vertical, const ScrollBar* sb) {
   if (RectEmpty(r)) return;
-  ScrollBar* sb = BarOf(w, vertical ? SB_VERT : SB_HORZ);
   int a = vertical ? r.right - r.left : r.bottom - r.top;  // arrow box size
   int length = vertical ? r.bottom - r.top : r.right - r.left;
   if (a * 2 > length) a = length / 2;
@@ -155,6 +161,14 @@ void DrawScrollBar(Window* w, HDC dc, const RECT& r, bool vertical) {
                           : MakeRect(trough.left + pos, r.top, trough.left + pos + len, r.bottom);
     DrawEdge(dc, &thumb, EDGE_RAISED, BF_RECT | BF_MIDDLE);
   }
+}
+
+}  // namespace winport
+
+namespace {
+
+void DrawScrollBar(Window* w, HDC dc, const RECT& r, bool vertical) {
+  PaintScrollBar(dc, r, vertical, BarOf(w, vertical ? SB_VERT : SB_HORZ));
 }
 
 // Carets: one at a time, as on Windows.
@@ -196,19 +210,22 @@ void StopCaretTimer() {
 
 // Tracking a click on a window scroll bar: the part clicked, and the
 // scroll code it sends.
-void ScrollBarClick(Window* w, int bar, POINT screen) {
+}  // namespace
+
+namespace winport {
+
+// A click on a scroll bar at r, in w's window coordinates: sends the
+// scroll messages to notify, with ctl as lParam, and drags the thumb.
+void ClickScrollBar(Window* w, ScrollBar* sb, RECT r, bool vertical, POINT screen, HWND notify, HWND ctl) {
   RECT wr = ScreenRect(w);
-  Frame f = Layout(w);
-  RECT r = bar == SB_VERT ? f.vscroll : f.hscroll;
-  bool vertical = bar == SB_VERT;
   POINT p = {screen.x - wr.left, screen.y - wr.top};
   int a = vertical ? r.right - r.left : r.bottom - r.top;
   int length = vertical ? r.bottom - r.top : r.right - r.left;
   if (a * 2 > length) a = length / 2;
   int along = vertical ? p.y - r.top : p.x - r.left;
   UINT msg = vertical ? WM_VSCROLL : WM_HSCROLL;
-  ScrollBar* sb = BarOf(w, bar);
   if (!sb->enabled) return;
+  auto send = [&](WPARAM wp) { SendMessageW(notify, msg, wp, (LPARAM)ctl); };
   int code;
   if (along < a) {
     code = SB_LINEUP;
@@ -242,7 +259,7 @@ void ScrollBarClick(Window* w, int bar, POINT screen) {
           if (track > MaxPos(sb->info)) track = MaxPos(sb->info);
           sb->info.nTrackPos = track;
           if (m.message == WM_LBUTTONUP) break;
-          SendTo(w, msg, MAKEWPARAM(SB_THUMBTRACK, track), 0);
+          send(MAKEWPARAM(SB_THUMBTRACK, track));
           continue;
         }
         if (m.message == WM_KEYDOWN && m.wParam == VK_ESCAPE) break;
@@ -252,13 +269,22 @@ void ScrollBarClick(Window* w, int bar, POINT screen) {
       }
       ReleaseCapture();
       if (!IsWindow(h)) return;
-      SendTo(w, msg, MAKEWPARAM(SB_THUMBPOSITION, track), 0);
-      SendTo(w, msg, SB_ENDSCROLL, 0);
+      send(MAKEWPARAM(SB_THUMBPOSITION, track));
+      if (IsWindow(notify)) send(SB_ENDSCROLL);
       return;
     }
   }
-  SendTo(w, msg, code, 0);
-  if (IsWindow(w->hwnd)) SendTo(w, msg, SB_ENDSCROLL, 0);
+  send(code);
+  if (IsWindow(notify)) send(SB_ENDSCROLL);
+}
+
+}  // namespace winport
+
+namespace {
+
+void ScrollBarClick(Window* w, int bar, POINT screen) {
+  Frame f = Layout(w);
+  ClickScrollBar(w, BarOf(w, bar), bar == SB_VERT ? f.vscroll : f.hscroll, bar == SB_VERT, screen, w->hwnd, NULL);
 }
 
 // Shows or hides a window scroll bar by its style; the frame changes.
@@ -362,6 +388,9 @@ RECT FrameInsets(DWORD style, DWORD exStyle, bool menu) {
   return r;
 }
 
+RECT MenuBarRect(Window* w) { return Layout(w).menu; }
+RECT SysMenuRect(Window* w) { return Layout(w).sysmenu; }
+
 void DrawFrame(Window* w) {
   if (!ReallyVisible(w)) return;
   HWND h = w->hwnd;
@@ -406,9 +435,7 @@ void DrawFrame(Window* w) {
     if (!RectEmpty(f.max)) DrawCaptionBox(dc, f.max, (w->style & WS_MAXIMIZE) ? 2 : 1);
     if (!RectEmpty(f.min)) DrawCaptionBox(dc, f.min, 3);
   }
-  if (!RectEmpty(f.menu)) {
-    Fill(dc, f.menu.left, f.menu.top, f.menu.right, f.menu.bottom, COLOR_MENU);
-  }
+  if (!RectEmpty(f.menu)) DrawMenuBarIn(w, dc, f.menu);
   int e = EdgeWidth(w->exStyle);
   if (e) {
     RECT c = f.client;
@@ -424,6 +451,84 @@ void DrawFrame(Window* w) {
 }
 
 }  // namespace winport
+
+
+// Moving and sizing a window with the mouse: SC_MOVE and SC_SIZE. The
+// window follows the pointer until the button comes up; Escape puts it
+// back. hit is the part of the frame grabbed, an HT value.
+static void MoveSizeLoop(Window* w, bool unicode, LRESULT hit) {
+  HWND h = w->hwnd;
+  if (!(GetKeyState(VK_LBUTTON) & 0x8000)) return;
+  bool move = hit == HTCAPTION;
+  if (!move && !(w->style & WS_THICKFRAME)) return;
+  if (w->style & (WS_MAXIMIZE | WS_MINIMIZE) && !(move && (w->style & WS_MINIMIZE))) return;
+  // Some displays move and size windows themselves.
+  if (!w->parent && GetBackend()->BeginMoveSize(w, hit)) return;
+  HWND parent = w->parent ? w->parent->hwnd : NULL;
+  RECT start;
+  GetWindowRect(h, &start);
+  if (parent) MapWindowPoints(NULL, parent, (LPPOINT)&start, 2);
+  POINT from;
+  GetCursorPos(&from);
+  SendTo(w, WM_ENTERSIZEMOVE, 0, 0, unicode);
+  SetCapture(h);
+  RECT cur = start;
+  bool cancelled = false;
+  MSG m;
+  while (GetCapture() == h) {
+    if (!GetMessageW(&m, NULL, 0, 0)) {
+      PostQuitMessage((int)m.wParam);
+      break;
+    }
+    if (m.message == WM_KEYDOWN && m.wParam == VK_ESCAPE) {
+      cancelled = true;
+      break;
+    }
+    if (m.message == WM_LBUTTONUP || m.message == WM_NCLBUTTONUP) break;
+    if (m.message != WM_MOUSEMOVE && m.message != WM_NCMOUSEMOVE) {
+      if (m.message >= WM_KEYFIRST && m.message <= WM_KEYLAST) continue;
+      TranslateMessage(&m);
+      DispatchMessageW(&m);
+      continue;
+    }
+    POINT p;
+    GetCursorPos(&p);
+    int dx = p.x - from.x, dy = p.y - from.y;
+    RECT r = start;
+    if (move) {
+      OffsetRect(&r, dx, dy);
+    } else {
+      if (hit == HTLEFT || hit == HTTOPLEFT || hit == HTBOTTOMLEFT) r.left += dx;
+      if (hit == HTRIGHT || hit == HTTOPRIGHT || hit == HTBOTTOMRIGHT) r.right += dx;
+      if (hit == HTTOP || hit == HTTOPLEFT || hit == HTTOPRIGHT) r.top += dy;
+      if (hit == HTBOTTOM || hit == HTBOTTOMLEFT || hit == HTBOTTOMRIGHT) r.bottom += dy;
+      int edge = 0;
+      switch (hit) {
+        case HTLEFT: edge = WMSZ_LEFT; break;
+        case HTRIGHT: edge = WMSZ_RIGHT; break;
+        case HTTOP: edge = WMSZ_TOP; break;
+        case HTTOPLEFT: edge = WMSZ_TOPLEFT; break;
+        case HTTOPRIGHT: edge = WMSZ_TOPRIGHT; break;
+        case HTBOTTOM: edge = WMSZ_BOTTOM; break;
+        case HTBOTTOMLEFT: edge = WMSZ_BOTTOMLEFT; break;
+        case HTBOTTOMRIGHT: edge = WMSZ_BOTTOMRIGHT; break;
+      }
+      SendTo(w, WM_SIZING, edge, (LPARAM)&r, unicode);
+    }
+    if (move) SendTo(w, WM_MOVING, 0, (LPARAM)&r, unicode);
+    if (EqualRect(&r, &cur)) continue;
+    cur = r;
+    SetWindowPos(h, NULL, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE | (move ? SWP_NOSIZE : 0));
+  }
+  if (GetCapture() == h) ReleaseCapture();
+  if (cancelled)
+    SetWindowPos(h, NULL, start.left, start.top, start.right - start.left, start.bottom - start.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+  if (GetWindow(h)) SendTo(w, WM_EXITSIZEMOVE, 0, 0, unicode);
+}
+
+static bool g_altAlone;
 
 static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
   Window* w = GetWindow(h);
@@ -457,6 +562,7 @@ static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
     case WM_NCHITTEST: return HitTest(w, POINT{(SHORT)LOWORD(lp), (SHORT)HIWORD(lp)});
     case WM_NCPAINT: DrawFrame(w); return 0;
     case WM_NCACTIVATE:
+      w->ncActive = wp != 0;
       if (ReallyVisible(w) && HasCaption(w->style)) DrawFrame(w);
       return TRUE;
     case WM_PAINT: {
@@ -513,11 +619,18 @@ static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
           return 0;
         case SC_KEYMENU:
         case SC_MOUSEMENU:
-          // The menu bar's keyboard and mouse modes come with menus.
+          MenuCommand(w, wp, lp);
           return 0;
-        case SC_CONTEXTHELP:
         case SC_MOVE:
-        case SC_SIZE:
+          MoveSizeLoop(w, unicode, HTCAPTION);
+          return 0;
+        case SC_SIZE: {
+          // The low bits say which edge: WMSZ_ values, as HTLEFT onwards.
+          int edge = (int)(wp & 0x0F);
+          if (edge >= WMSZ_LEFT && edge <= WMSZ_BOTTOMRIGHT) MoveSizeLoop(w, unicode, HTLEFT + edge - WMSZ_LEFT);
+          return 0;
+        }
+        case SC_CONTEXTHELP:
         default:
           return 0;
       }
@@ -525,8 +638,23 @@ static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
     case WM_NCLBUTTONDOWN:
       switch (wp) {
         case HTCAPTION:
+          SetActiveWindow(w->TopLevel()->hwnd);
+          if (!(w->style & WS_MAXIMIZE)) SendTo(w, WM_SYSCOMMAND, SC_MOVE + HTCAPTION, lp, unicode);
+          return 0;
+        case HTLEFT:
+        case HTRIGHT:
+        case HTTOP:
+        case HTTOPLEFT:
+        case HTTOPRIGHT:
+        case HTBOTTOM:
+        case HTBOTTOMLEFT:
+        case HTBOTTOMRIGHT:
+          SetActiveWindow(w->TopLevel()->hwnd);
+          SendTo(w, WM_SYSCOMMAND, SC_SIZE + (wp - HTLEFT + WMSZ_LEFT), lp, unicode);
+          return 0;
         case HTSYSMENU:
           SetActiveWindow(w->TopLevel()->hwnd);
+          if (w->style & WS_SYSMENU) SendTo(w, WM_SYSCOMMAND, SC_MOUSEMENU + HTSYSMENU, lp, unicode);
           return 0;
         case HTCLOSE: PostMessageW(h, WM_SYSCOMMAND, SC_CLOSE, lp); return 0;
         case HTMINBUTTON: PostMessageW(h, WM_SYSCOMMAND, SC_MINIMIZE, lp); return 0;
@@ -569,18 +697,28 @@ static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
         if (r) return r;
       }
       return MA_ACTIVATE;
-    case WM_SETCURSOR:
+    case WM_SETCURSOR: {
       if (w->Child() && w->parent && SendTo(w->parent, msg, wp, lp, unicode)) return TRUE;
-      if (LOWORD(lp) == HTCLIENT) {
-        HCURSOR c = w->cls ? w->cls->wc.hCursor : NULL;
-        if (c) {
-          SetCursor(c);
-          return TRUE;
+      // A parent asked about a child leaves the child its own cursor.
+      if ((HWND)wp != h) return FALSE;
+      LPCWSTR shape = (LPCWSTR)IDC_ARROW;
+      switch ((short)LOWORD(lp)) {
+        case HTCLIENT: {
+          HCURSOR c = w->cls ? w->cls->wc.hCursor : NULL;
+          if (c) {
+            SetCursor(c);
+            return TRUE;
+          }
+          return FALSE;
         }
-        return FALSE;
+        case HTLEFT: case HTRIGHT: shape = (LPCWSTR)IDC_SIZEWE; break;
+        case HTTOP: case HTBOTTOM: shape = (LPCWSTR)IDC_SIZENS; break;
+        case HTTOPLEFT: case HTBOTTOMRIGHT: shape = (LPCWSTR)IDC_SIZENWSE; break;
+        case HTTOPRIGHT: case HTBOTTOMLEFT: shape = (LPCWSTR)IDC_SIZENESW; break;
       }
-      SetCursor(LoadCursorW(NULL, (LPCWSTR)IDC_ARROW));
+      SetCursor(LoadCursorW(NULL, shape));
       return FALSE;
+    }
     case WM_ACTIVATE:
       if (LOWORD(wp) != WA_INACTIVE && !(w->style & WS_MINIMIZE)) SetFocus(h);
       return 0;
@@ -639,9 +777,20 @@ static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
       return (LRESULT)GetSysColorBrush(window ? COLOR_WINDOW : COLOR_BTNFACE);
     }
     case WM_KEYDOWN:
+      g_altAlone = false;
       if (wp == VK_F10) PostMessageW(h, WM_SYSCOMMAND, SC_KEYMENU, 0);
       return 0;
+    case WM_SYSKEYUP:
+      // Alt pressed and let go with no key between enters the menu bar.
+      if (wp == VK_MENU && g_altAlone) PostMessageW(w->TopLevel()->hwnd, WM_SYSCOMMAND, SC_KEYMENU, 0);
+      g_altAlone = false;
+      return 0;
     case WM_SYSKEYDOWN:
+      g_altAlone = wp == VK_MENU && !(HIWORD(lp) & KF_REPEAT);
+      if (wp == VK_F10) {
+        PostMessageW(w->TopLevel()->hwnd, WM_SYSCOMMAND, SC_KEYMENU, 0);
+        return 0;
+      }
       if (wp == VK_F4 && (HIWORD(lp) & KF_ALTDOWN)) {
         PostMessageW(w->TopLevel()->hwnd, WM_SYSCOMMAND, SC_CLOSE, 0);
         return 0;
@@ -661,6 +810,7 @@ static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
     case WM_SHOWWINDOW:
       return 0;
     case WM_CANCELMODE:
+      EndMenu();
       if (GetCapture() == h) ReleaseCapture();
       return 0;
     case WM_VKEYTOITEM:
@@ -774,6 +924,247 @@ BOOL WINAPI DrawFocusRect(HDC hdc, const RECT* r) {
   }
   ds.Dirty(d);
   return TRUE;
+}
+
+// ---------------------------------------------------------------------
+// Frame controls: the parts of buttons, captions, scroll bars and menus
+
+namespace {
+
+// Draws a glyph given as rows of pixels, centered in a box.
+void DrawRows(HDC dc, const RECT& box, const char* const* rows, int n, COLORREF color) {
+  int w = (int)strlen(rows[0]);
+  int x0 = (box.left + box.right - w) / 2, y0 = (box.top + box.bottom - n) / 2;
+  HBRUSH br = CreateSolidBrush(color);
+  for (int y = 0; y < n; y++)
+    for (int x = 0; x < w;) {
+      if (rows[y][x] != 'X') {
+        x++;
+        continue;
+      }
+      int e = x;
+      while (e < w && rows[y][e] == 'X') e++;
+      RECT r = MakeRect(x0 + x, y0 + y, x0 + e, y0 + y + 1);
+      FillRect(dc, &r, br);
+      x = e;
+    }
+  DeleteObject(br);
+}
+
+const char* const kCheckRows[] = {"......X", ".....XX", "X...XXX", "XX.XXX.", "XXXXX..", ".XXX...", "..X...."};
+const char* const kBulletRows[] = {".XXXX.", "XXXXXX", "XXXXXX", "XXXXXX", "XXXXXX", ".XXXX."};
+const char* const kArrowRows[] = {"X...", "XX..", "XXX.", "XXXX", "XXX.", "XX..", "X..."};
+
+// A square as large as fits, centered.
+RECT Square(const RECT& r) {
+  int w = r.right - r.left, h = r.bottom - r.top, s = w < h ? w : h;
+  int x = r.left + (w - s) / 2, y = r.top + (h - s) / 2;
+  return MakeRect(x, y, x + s, y + s);
+}
+
+void DrawCheckBox(HDC dc, RECT r, UINT state) {
+  r = Square(r);
+  if (state & DFCS_FLAT) {
+    FrameRect(dc, &r, GetSysColorBrush(COLOR_BTNSHADOW));
+    InflateRect(&r, -1, -1);
+  } else if (state & DFCS_MONO) {
+    FrameRect(dc, &r, GetSysColorBrush(COLOR_WINDOWFRAME));
+    InflateRect(&r, -1, -1);
+  } else {
+    DrawEdge(dc, &r, EDGE_SUNKEN, BF_RECT | BF_ADJUST);
+  }
+  bool third = (state & DFCS_BUTTON3STATE) && (state & DFCS_CHECKED);
+  int face = (state & (DFCS_PUSHED | DFCS_INACTIVE)) || third ? COLOR_BTNFACE : COLOR_WINDOW;
+  FillRect(dc, &r, GetSysColorBrush(face));
+  if (state & DFCS_CHECKED)
+    DrawRows(dc, r, kCheckRows, 7, GetSysColor(third || (state & DFCS_INACTIVE) ? COLOR_BTNSHADOW : COLOR_WINDOWTEXT));
+}
+
+void DrawRadio(HDC dc, RECT r, UINT state) {
+  r = Square(r);
+  if ((state & 0xFF) == DFCS_BUTTONRADIOMASK) {
+    // A black disc on white: the mask for drawing an image of the button.
+    FillRect(dc, &r, (HBRUSH)GetStockObject(WHITE_BRUSH));
+    HGDIOBJ op = SelectObject(dc, GetStockObject(BLACK_PEN)), ob = SelectObject(dc, GetStockObject(BLACK_BRUSH));
+    Ellipse(dc, r.left, r.top, r.right, r.bottom);
+    SelectObject(dc, op);
+    SelectObject(dc, ob);
+    return;
+  }
+  // Two rings, dark at the top left and light at the bottom right, like
+  // a sunken edge, around a white disc.
+  auto ring = [&](RECT b, int tl, int br) {
+    HPEN p1 = CreatePen(PS_SOLID, 1, GetSysColor(tl)), p2 = CreatePen(PS_SOLID, 1, GetSysColor(br));
+    HGDIOBJ old = SelectObject(dc, p1);
+    Arc(dc, b.left, b.top, b.right, b.bottom, b.right, b.top, b.left, b.bottom);
+    SelectObject(dc, p2);
+    Arc(dc, b.left, b.top, b.right, b.bottom, b.left, b.bottom, b.right, b.top);
+    SelectObject(dc, old);
+    DeleteObject(p1);
+    DeleteObject(p2);
+  };
+  int face = state & (DFCS_PUSHED | DFCS_INACTIVE) ? COLOR_BTNFACE : COLOR_WINDOW;
+  HGDIOBJ op = SelectObject(dc, GetStockObject(NULL_PEN)), ob = SelectObject(dc, GetSysColorBrush(face));
+  Ellipse(dc, r.left + 1, r.top + 1, r.right, r.bottom);
+  SelectObject(dc, op);
+  SelectObject(dc, ob);
+  if (state & DFCS_FLAT) {
+    ring(r, COLOR_BTNSHADOW, COLOR_BTNSHADOW);
+  } else {
+    ring(r, COLOR_BTNSHADOW, COLOR_BTNHIGHLIGHT);
+    RECT in = r;
+    InflateRect(&in, -1, -1);
+    ring(in, COLOR_3DDKSHADOW, COLOR_3DLIGHT);
+  }
+  if (state & DFCS_CHECKED) {
+    RECT dot = r;
+    int d = (r.right - r.left) / 3;
+    InflateRect(&dot, -d, -d);
+    COLORREF c = GetSysColor(state & DFCS_INACTIVE ? COLOR_BTNSHADOW : COLOR_WINDOWTEXT);
+    HBRUSH br = CreateSolidBrush(c);
+    HPEN pen = CreatePen(PS_SOLID, 1, c);
+    op = SelectObject(dc, pen);
+    ob = SelectObject(dc, br);
+    Ellipse(dc, dot.left, dot.top, dot.right, dot.bottom);
+    SelectObject(dc, op);
+    SelectObject(dc, ob);
+    DeleteObject(br);
+    DeleteObject(pen);
+  }
+}
+
+void DrawButtonFace(HDC dc, RECT* r, UINT state) {
+  UINT edge = (state & (DFCS_PUSHED | DFCS_CHECKED)) ? EDGE_SUNKEN : EDGE_RAISED;
+  UINT flags = BF_RECT | BF_MIDDLE | BF_ADJUST;
+  if (state & DFCS_FLAT) flags |= BF_FLAT;
+  if (state & DFCS_MONO) flags |= BF_MONO;
+  if ((state & DFCS_PUSHED) && !(state & DFCS_CHECKED) && !(state & (DFCS_FLAT | DFCS_MONO))) {
+    // A pushed button is a dark frame around a shadow line.
+    FrameRect(dc, r, GetSysColorBrush(COLOR_3DDKSHADOW));
+    InflateRect(r, -1, -1);
+    FrameRect(dc, r, GetSysColorBrush(COLOR_BTNSHADOW));
+    InflateRect(r, -1, -1);
+    FillRect(dc, r, GetSysColorBrush(COLOR_BTNFACE));
+    return;
+  }
+  DrawEdge(dc, r, edge, flags);
+}
+
+}  // namespace
+
+BOOL WINAPI DrawFrameControl(HDC dc, LPRECT rc, UINT type, UINT state) {
+  if (!rc) return FALSE;
+  RECT r = *rc;
+  switch (type) {
+    case DFC_BUTTON: {
+      UINT kind = state & 0xFF;
+      if (kind & DFCS_BUTTONPUSH) {
+        DrawButtonFace(dc, &r, state);
+        if (state & DFCS_ADJUSTRECT) *rc = r;
+      } else if (kind & (DFCS_BUTTONRADIO | DFCS_BUTTONRADIOIMAGE | DFCS_BUTTONRADIOMASK)) {
+        DrawRadio(dc, r, (state & DFCS_BUTTONRADIOMASK) ? (state & ~0xFF) | DFCS_BUTTONRADIOMASK : state);
+      } else {
+        DrawCheckBox(dc, r, state);
+      }
+      return TRUE;
+    }
+    case DFC_CAPTION: {
+      UINT edge = (state & DFCS_PUSHED) ? EDGE_SUNKEN : EDGE_RAISED;
+      RECT box = r;
+      DrawEdge(dc, &box, edge, BF_RECT | BF_MIDDLE | BF_ADJUST | ((state & DFCS_FLAT) ? BF_FLAT : 0));
+      int glyph;
+      switch (state & 0xFF) {
+        case DFCS_CAPTIONCLOSE: glyph = 0; break;
+        case DFCS_CAPTIONMAX: glyph = 1; break;
+        case DFCS_CAPTIONRESTORE: glyph = 2; break;
+        case DFCS_CAPTIONMIN: glyph = 3; break;
+        default: glyph = 4; break;
+      }
+      if (state & DFCS_PUSHED) OffsetRect(&box, 1, 1);
+      COLORREF c = GetSysColor((state & DFCS_INACTIVE) ? COLOR_GRAYTEXT : COLOR_BTNTEXT);
+      if (glyph == 4) {
+        // Help: a question mark.
+        static const char* const q[] = {".XXX.", "XX.XX", "...XX", "..XX.", "..XX.", ".....", "..XX."};
+        DrawRows(dc, box, q, 7, c);
+      } else {
+        // The caption buttons' glyphs, drawn the way the frame draws them.
+        int mode = glyph;
+        HBRUSH br = CreateSolidBrush(c);
+        int cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+        if (mode == 0) {
+          for (int i = -3; i <= 3; i++) {
+            RECT a = MakeRect(cx + i - 1, cy + i, cx + i + 1, cy + i + 1);
+            RECT b = MakeRect(cx - i - 1, cy + i, cx - i + 1, cy + i + 1);
+            FillRect(dc, &a, br);
+            FillRect(dc, &b, br);
+          }
+        } else if (mode == 1) {
+          RECT o = MakeRect(cx - 4, cy - 4, cx + 5, cy + 4);
+          FrameRect(dc, &o, br);
+          RECT t = MakeRect(o.left, o.top + 1, o.right, o.top + 2);
+          FillRect(dc, &t, br);
+        } else if (mode == 2) {
+          RECT a = MakeRect(cx - 2, cy - 5, cx + 5, cy + 1);
+          RECT b = MakeRect(cx - 5, cy - 2, cx + 2, cy + 4);
+          FrameRect(dc, &a, br);
+          FillRect(dc, &b, GetSysColorBrush(COLOR_BTNFACE));
+          FrameRect(dc, &b, br);
+        } else {
+          RECT a = MakeRect(cx - 4, cy + 2, cx + 3, cy + 4);
+          FillRect(dc, &a, br);
+        }
+        DeleteObject(br);
+      }
+      return TRUE;
+    }
+    case DFC_SCROLL: {
+      UINT kind = state & 0xFF;
+      if (kind == DFCS_SCROLLSIZEGRIP || kind == DFCS_SCROLLSIZEGRIPRIGHT) {
+        FillRect(dc, &r, GetSysColorBrush(COLOR_BTNFACE));
+        // Diagonal lines in the bottom right corner.
+        int size = (r.right - r.left) < (r.bottom - r.top) ? r.right - r.left : r.bottom - r.top;
+        for (int i = 2; i < size; i += 4) {
+          for (int k = 0; k < 2; k++) {
+            HPEN p = CreatePen(PS_SOLID, 1, GetSysColor(k == 0 ? COLOR_BTNHIGHLIGHT : COLOR_BTNSHADOW));
+            HGDIOBJ old = SelectObject(dc, p);
+            MoveToEx(dc, r.right - 1, r.bottom - i - k - 1, NULL);
+            LineTo(dc, r.right - i - k - 1, r.bottom - 1);
+            SelectObject(dc, old);
+            DeleteObject(p);
+          }
+        }
+        return TRUE;
+      }
+      DrawButtonFace(dc, &r, state & ~DFCS_CHECKED);
+      if (state & DFCS_PUSHED) OffsetRect(&r, 1, 1);
+      int dir = kind == DFCS_SCROLLUP ? 0 : kind == DFCS_SCROLLLEFT ? 2 : kind == DFCS_SCROLLRIGHT ? 3 : 1;
+      HBRUSH br = GetSysColorBrush((state & DFCS_INACTIVE) ? COLOR_GRAYTEXT : COLOR_BTNTEXT);
+      int cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+      for (int i = 0; i < 4; i++) {
+        RECT line;
+        switch (dir) {
+          case 0: line = MakeRect(cx - i, cy - 2 + i, cx + i + 1, cy - 1 + i); break;
+          case 1: line = MakeRect(cx - 3 + i, cy - 1 + i, cx + 4 - i, cy + i); break;
+          case 2: line = MakeRect(cx - 2 + i, cy - i, cx - 1 + i, cy + i + 1); break;
+          default: line = MakeRect(cx - 1 + i, cy - 3 + i, cx + i, cy + 4 - i); break;
+        }
+        FillRect(dc, &line, br);
+      }
+      return TRUE;
+    }
+    case DFC_MENU:
+    case DFC_POPUPMENU: {
+      // Black on white, as Windows draws them, for use as a mask.
+      FillRect(dc, &r, (HBRUSH)GetStockObject(WHITE_BRUSH));
+      switch (state & 0xFF) {
+        case DFCS_MENUCHECK: DrawRows(dc, r, kCheckRows, 7, RGB(0, 0, 0)); break;
+        case DFCS_MENUBULLET: DrawRows(dc, r, kBulletRows, 6, RGB(0, 0, 0)); break;
+        default: DrawRows(dc, r, kArrowRows, 7, RGB(0, 0, 0)); break;
+      }
+      return TRUE;
+    }
+  }
+  return FALSE;
 }
 
 // ---------------------------------------------------------------------
