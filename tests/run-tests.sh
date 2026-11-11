@@ -41,6 +41,11 @@ if [ $NATIVE = 1 ]; then
   CXXFLAGS="--target=$TARGET ${SYSROOT:+--sysroot=$SYSROOT} ${STDLIB--stdlib=libc++} -std=c++17"
   CXXFLAGS="$CXXFLAGS -Wall -Wno-unused-function -Wno-overloaded-virtual -Wno-missing-exception-spec"
   CXXFLAGS="$CXXFLAGS -Iport/include -Iinclude -Itests"
+  # What libwinport needs from the system: Cocoa on macOS.
+  case $TARGET in
+    *apple* | *darwin*) SYSLIBS="-framework Cocoa -lpthread" ;;
+    *) SYSLIBS="-ldl -lpthread" ;;
+  esac
   nfail=0
   npass=0
   # macOS has no timeout(1) unless coreutils is installed.
@@ -62,7 +67,7 @@ if [ $NATIVE = 1 ]; then
         srcs="$srcs $T/$name-res.cpp"
       fi
       # shellcheck disable=SC2086
-      "$CXX" $CXXFLAGS $flags $srcs -L"$OUT" $LDFLAGS $lib -lwinport -ldl -lpthread -o "$exe" \
+      "$CXX" $CXXFLAGS $flags $srcs -L"$OUT" $LDFLAGS $lib -lwinport $SYSLIBS -o "$exe" \
         2>"$T/$name-$v-build.log" || {
         echo "FAIL   $name-$v (build)"; cat "$T/$name-$v-build.log"; nfail=$((nfail + 1)); continue; }
       if MFC_TEST_OUT="$T/$v" WINPORT_BACKEND=${WINPORT_BACKEND:-headless} WINPORT_REGISTRY="$T/$v/registry.reg" $TIMEOUT "$exe" > "$T/$v/$name.log" 2>&1; then

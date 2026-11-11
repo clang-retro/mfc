@@ -252,6 +252,7 @@ POINT& CursorPos();
 Backend* NewHeadlessBackend();
 Backend* NewX11Backend();  // NULL when there is no X display
 Backend* NewWaylandBackend();  // NULL when there is no Wayland compositor
+Backend* NewCocoaBackend();  // NULL except on macOS
 
 }  // namespace winport
 

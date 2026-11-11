@@ -91,6 +91,9 @@ clang++ -std=c++17 -Ipath/to/mfc/port/include -Ipath/to/mfc/include app.cpp \
   -Lpath/to/build/x86_64-linux-gnu -lmfc -lwinport -ldl -lpthread -o app
 ```
 
+On macOS the system libraries are `-framework Cocoa -lpthread` instead
+of `-ldl -lpthread`.
+
 A program's resources go in as C++: `port/tools/res2cpp.py` compiles the
 `.rc` file with `llvm-rc` and writes the result as a source file that
 registers it when the program starts (it needs Python 3, `llvm-rc` and
@@ -106,10 +109,11 @@ and COM within one process work, and so does the window manager: window
 classes and windows, messages and the message loop, timers, hooks,
 focus, painting, and drawing in software with device contexts, bitmaps,
 DIBs, regions, fills and blits, lines, curves, shapes and paths, and
-text. Windows stay in memory for now (`WINPORT_BACKEND=headless`); the
-standard and common controls, dialogs and menus come next, then X11,
-Wayland and Cocoa backends to show the windows (the Cocoa one for Mac OS
-X 10.4 and later, PowerPC and Intel). The functions not written yet are
+text. Windows show on Wayland, on X11 or with Cocoa on macOS (Mac OS X
+10.4 and later, PowerPC and Intel); `WINPORT_BACKEND` picks one
+(`wayland`, `x11`, `cocoa`, or `headless` to keep windows in memory, as
+the tests do). Wayland, X11 and xkbcommon are loaded when a program
+starts, so it runs without them. The functions not written yet are
 listed in `port/src/stubs.txt` and fail with `ERROR_CALL_NOT_IMPLEMENTED`;
 `WINPORT_DEBUG=1` names each one the first time a program calls it.
 

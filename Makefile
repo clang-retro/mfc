@@ -54,6 +54,10 @@ SRCS = $(wildcard src/*.cpp)
 ifeq ($(PORTABLE),1)
 PORT_SRCS = $(wildcard port/src/*.cpp)
 PORT_OBJS = $(patsubst port/src/%.cpp,$(OUT)/port/%.o,$(PORT_SRCS))
+# macOS adds the AppKit half of the Cocoa backend, in Objective-C++.
+ifneq ($(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
+PORT_OBJS += $(patsubst port/src/%.mm,$(OUT)/port/%.mm.o,$(wildcard port/src/*.mm))
+endif
 ALL_CXXFLAGS += -Iport/include -fPIC
 PORT_LIB = $(OUT)/libwinport.a
 endif
@@ -94,6 +98,10 @@ $(PORT_LIB): $(PORT_OBJS)
 $(OUT)/port/%.o: port/src/%.cpp $(HDRS)
 	@mkdir -p $(dir $@)
 	$(CXX) $(ALL_CXXFLAGS) -Iport/src -c $< -o $@
+
+$(OUT)/port/%.mm.o: port/src/%.mm port/src/cocoa.h
+	@mkdir -p $(dir $@)
+	$(CXX) $(TARGET_FLAGS) $(STDLIB) -x objective-c++ -fno-objc-arc -std=c++17 -Wall $(CXXFLAGS) -fPIC -c $< -o $@
 
 $(OUT)/libmfc.a: $(OBJS_A)
 	rm -f $@
