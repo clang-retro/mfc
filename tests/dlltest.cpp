@@ -12,6 +12,8 @@
 //     window;
 //   - once the last control is gone, DllCanUnloadNow lets COM unload the
 //     DLL, whose ExitInstance runs and whose window classes go.
+//   Built with _AFXDLL, the program and the DLL share mfc.dll, and the
+//   DLL keeps its own module state there (AFX_MANAGE_STATE).
 #include <afxwin.h>
 #include <afxdisp.h>
 #include <afxocc.h>
@@ -189,7 +191,9 @@ void CMainFrame::RunTests() {
     TCHAR szText[64];
     ::GetDlgItemText(hDlg, IDC_DLLTEXT, szText, _countof(szText));
     CHECK(lstrcmp(szText, _T("From the DLL")) == 0);
-    // The program's library does not know the DLL's window objects.
+    CHECK(::SendMessage(hDlg, WM_DLLTEST_STATE, 0, 0) == 1);
+    CHECK(!AfxGetApp()->IsKindOf(RUNTIME_CLASS(COleControlModule)));
+    // The program does not know the DLL's window objects.
     CHECK(CWnd::FromHandlePermanent(hDlg) == NULL);
   }
   PumpMessages();

@@ -49,6 +49,7 @@ extern const _AFX_OCC_HOOKS* _afxOccHooks;
 // a control's bound property changed, a site goes, and a data source
 // control's cursor changed.
 class COleControlSite;
+class COleObjectFactory;
 struct _AFX_OCC_BIND_HOOKS {
   void(AFXAPI* pfnChanged)(COleControlSite* pSite, DISPID dispid);
   void(AFXAPI* pfnRelease)(COleControlSite* pSite);
@@ -87,7 +88,24 @@ public:
   int m_nHandles;    // CDC holds two handles
 };
 
+// A thread's handle maps (CWnd::FromHandle and the like). Each module
+// state has its own, so that a program and a regular DLL each find their
+// own object for a window both have one for (an ActiveX control's window
+// and the container's CWnd for it).
+struct _AFX_HANDLE_MAPS {
+  CHandleMap* m_pmapHWND;
+  CHandleMap* m_pmapHMENU;
+  CHandleMap* m_pmapHDC;
+  CHandleMap* m_pmapHGDIOBJ;
+  CHandleMap* m_pmapHIMAGELIST;  // made by afxcmn's CImageList
+};
+struct _AFX_DLL_MAPS : _AFX_HANDLE_MAPS {  // those of a regular DLL (_AFXDLL)
+  AFX_MODULE_STATE* m_pModuleState;
+  _AFX_DLL_MAPS* m_pNext;
+};
+
 struct AFX_THREAD_STATE {
+  AFX_MODULE_STATE* m_pModuleState;  // set by AFX_MANAGE_STATE; NULL: the program's
   CWinThread* m_pCurrentWinThread;
   CWnd* m_pWndInit;          // window being created (see AfxHookWindowCreate)
   CWnd* m_pAlternateWndInit;
@@ -100,11 +118,8 @@ struct AFX_THREAD_STATE {
   TCHAR m_szTempClassName[96];
   BOOL m_bInMsgFilter;
   int m_nTempMapLock;
-  CHandleMap* m_pmapHWND;
-  CHandleMap* m_pmapHMENU;
-  CHandleMap* m_pmapHDC;
-  CHandleMap* m_pmapHGDIOBJ;
-  CHandleMap* m_pmapHIMAGELIST;  // made by afxcmn's CImageList
+  _AFX_HANDLE_MAPS m_maps;      // the program's
+  _AFX_DLL_MAPS* m_pDllMaps;    // regular DLLs'
   CView* m_pRoutingView;
   CFrameWnd* m_pRoutingFrame;
   CPoint m_ptCursorLast;
@@ -117,10 +132,15 @@ struct AFX_THREAD_STATE {
 
 AFX_THREAD_STATE* AFXAPI AfxGetThreadState();
 void AFXAPI AfxTermThreadState();
+// The current module's handle maps on this thread.
+_AFX_HANDLE_MAPS* AFXAPI _AfxGetHandleMaps();
+// Frees a regular DLL's handle maps on this thread as the DLL unloads.
+void AFXAPI _AfxTermModuleMaps(AFX_MODULE_STATE* pModuleState);
 
-// Process-wide state. There is exactly one: the library is linked
-// statically into one module, or it is the shared mfc.dll that the
-// program and its extension DLLs use together.
+// The state of one module. With the static library there is one, in
+// each module that links it. With mfc.dll the program and its extension
+// DLLs share one, and each regular DLL has its own (dllmodul.cpp), which
+// AFX_MANAGE_STATE makes the current one while the DLL's code runs.
 struct AFX_MODULE_STATE {
   CWinApp* m_pCurrentWinApp;
   HINSTANCE m_hCurrentInstanceHandle;
@@ -131,6 +151,9 @@ struct AFX_MODULE_STATE {
   BOOL m_bInitialized;
   BOOL m_bDLL;  // the library is in a DLL (DllMain ran)
   CDynLinkLibrary* m_pFirstDLL;  // the extension DLLs, searched for resources
+  COleObjectFactory* m_pFirstFactory;  // the module's OLE class factories
+  WNDPROC m_pfnAfxWndProc;             // a regular DLL's: AfxWndProc in its state
+  LONG m_nObjectCount;                 // AfxOleLockApp's count
 };
 
 // Takes the classes in [pStart, pEnd), the image of a module being

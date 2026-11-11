@@ -51,7 +51,7 @@ HDRS = $(wildcard include/*.h) $(wildcard src/*.h) src/wnd_handlers.inc
 
 # The shared library: every source, built with _AFXDLL; the files that
 # each module keeps for itself are empty there and make up libmfcs.a.
-STUB_SRCS = src/appmain.cpp src/appmainc.cpp src/dllstub.cpp src/pseudoreloc.cpp
+STUB_SRCS = src/appmain.cpp src/appmainc.cpp src/dllmodul.cpp src/dllstub.cpp src/pseudoreloc.cpp
 OBJS_DA = $(patsubst src/%.cpp,$(OUT)/da/%.o,$(SRCS))
 OBJS_DU = $(patsubst src/%.cpp,$(OUT)/du/%.o,$(SRCS))
 OBJS_SA = $(patsubst src/%.cpp,$(OUT)/sa/%.o,$(STUB_SRCS))

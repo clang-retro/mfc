@@ -156,6 +156,16 @@ public:
     return TRUE;
   }
   virtual void PostNcDestroy() { delete this; }
+  // Asked from the program: the dialog's messages run in the DLL's state.
+  virtual LRESULT WindowProc(UINT nMsg, WPARAM wParam, LPARAM lParam) {
+    if (nMsg == WM_DLLTEST_STATE) {
+      CString str;
+      str.LoadString(IDS_FROMDLL);
+      return AfxGetApp() == &theApp && str == _T("From the DLL") &&
+             CWnd::FromHandlePermanent(m_hWnd) == this;
+    }
+    return CDialog::WindowProc(nMsg, wParam, lParam);
+  }
 };
 
 extern "C" HWND WINAPI DllTestDialog(HWND hWndParent) {

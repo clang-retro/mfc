@@ -42,6 +42,8 @@ static DWORD WINAPI _AfxThreadEntry(LPVOID pParam) {
   CWinThread* pThread = (CWinThread*)pParam;
   AFX_THREAD_STATE* pState = AfxGetThreadState();
   pState->m_pCurrentWinThread = pThread;
+  // A thread a regular DLL starts runs in the DLL's state.
+  AfxSetModuleState(pThread->m_pModuleState);
 
   UINT nResult;
   if (pThread->m_pfnThreadProc != NULL) {

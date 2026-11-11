@@ -19,7 +19,7 @@ BIN=${BIN:-}
 CXX=${BIN:+$BIN/}clang++
 RC=${RC:-${BIN:+$BIN/}llvm-windres}
 LDFLAGS=${LDFLAGS:-}
-SHARED_TESTS=${SHARED_TESTS-"exttest core sditest dlgtest"}
+SHARED_TESTS=${SHARED_TESTS-"exttest core sditest dlgtest dlltest"}
 TESTS=${TESTS:-"core memtest disptest isapitest daotest socktest inettest dlgtest sditest mditest docktest splittest richtest dbtest rvtest dvtest autotest conntest dragtest oletest srvtest linktest richsrvtest iptest docobtest occtest htmltest ctltest cmntest wltest bindtest dlltest"}
 
 if [ -z "${DISPLAY:-}" ] && [ -z "${MFC_TEST_NO_XVFB:-}" ] && command -v xvfb-run >/dev/null 2>&1; then
@@ -98,8 +98,7 @@ run_test() {  # name exe outdir label
 }
 
 # Builds and runs one test. With shared=1 the test uses the shared
-# library (_AFXDLL), and its DLL, if it has one, is an extension DLL that
-# the program links with.
+# library (_AFXDLL), as does its DLL, if it has one.
 build_and_run() {  # name label exe outdir shared ldflags
   name=$1 label=$2 exe=$3 outdir=$4 shared=$5 ldflags=$6
   srcs=tests/$name.cpp
@@ -116,13 +115,19 @@ build_and_run() {  # name label exe outdir shared ldflags
         echo "FAIL   $label-$v (DLL resources)"; cat "$T/$name-dll-rc.log"; nfail=$((nfail + 1)); return; }
       dllsrcs="$dllsrcs $T/$name-dll-res.o"
     fi
-    implib=
-    [ $shared = 1 ] && implib="-Wl,--out-implib,$T/lib$name-dll-$v.a"
+    # A DLL with a .def is a regular DLL, which the program loads itself;
+    # the others are extension DLLs, which it links with.
+    implib= usrdll=
+    if [ $shared = 1 ] && [ -f tests/$name-dll.def ]; then
+      usrdll=-D_USRDLL
+    elif [ $shared = 1 ]; then
+      implib="-Wl,--out-implib,$T/lib$name-dll-$v.a"
+    fi
     # shellcheck disable=SC2086
-    "$CXX" $CXXFLAGS $flags $dllflags -shared $dllsrcs -L"$OUT" $ldflags $implib -o "$T/$name-dll-$v.dll" \
+    "$CXX" $CXXFLAGS $flags $dllflags $usrdll -shared $dllsrcs -L"$OUT" $ldflags $implib -o "$T/$name-dll-$v.dll" \
       2>"$T/$name-dll-$v-build.log" || {
       echo "FAIL   $label-$v (DLL build)"; cat "$T/$name-dll-$v-build.log"; nfail=$((nfail + 1)); return; }
-    [ $shared = 1 ] && srcs="$srcs $T/lib$name-dll-$v.a"
+    [ -n "$implib" ] && srcs="$srcs $T/lib$name-dll-$v.a"
   fi
   if [ -f tests/$name.rc ]; then
     "$RC" $RCFLAGS tests/$name.rc -o "$T/$name-res.o" 2>"$T/$name-rc.log" || {
