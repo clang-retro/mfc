@@ -2518,6 +2518,11 @@ BOOL WINAPI GetKeyboardState(PBYTE);
 BOOL WINAPI SetKeyboardState(LPBYTE);
 int WINAPI GetKeyNameTextA(LONG, LPSTR, int);
 int WINAPI GetKeyNameTextW(LONG, LPWSTR, int);
+#define MAPVK_VK_TO_VSC 0
+#define MAPVK_VSC_TO_VK 1
+#define MAPVK_VK_TO_CHAR 2
+#define MAPVK_VSC_TO_VK_EX 3
+#define MAPVK_VK_TO_VSC_EX 4
 UINT WINAPI MapVirtualKeyA(UINT, UINT);
 UINT WINAPI MapVirtualKeyW(UINT, UINT);
 SHORT WINAPI VkKeyScanA(CHAR);

@@ -25,8 +25,9 @@ int TextHeight(HDC dc) {
   return tm.tmHeight;
 }
 
-// Places a bar along its parent's top or bottom edge, as the CCS_ styles say.
-void AlignToParent(HWND h, int height) {
+// Places a bar along its parent's top or bottom edge, as the CCS_ styles
+// say. A status bar without CCS_TOP goes to the bottom.
+void AlignToParent(HWND h, int height, bool bottomByDefault = false) {
   DWORD style = GetWindowLongW(h, GWL_STYLE);
   if (style & CCS_NORESIZE) return;
   // Moving the bar sends it WM_SIZE, which would align it again.
@@ -44,7 +45,7 @@ void AlignToParent(HWND h, int height) {
   GetWindowRect(h, &wr);
   MapWindowPoints(NULL, parent, (LPPOINT)&wr, 2);
   int x = 0, y, cx = pr.right;
-  bool bottom = (style & CCS_BOTTOM) == CCS_BOTTOM;
+  bool bottom = (style & CCS_BOTTOM) == CCS_BOTTOM || (bottomByDefault && !(style & CCS_TOP));
   y = bottom ? pr.bottom - height : 0;
   if (style & CCS_NOPARENTALIGN) {
     x = wr.left;
@@ -854,7 +855,7 @@ LRESULT CALLBACK StatusProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_CREATE: {
       CREATESTRUCTW* cs = (CREATESTRUCTW*)lp;
       if (cs && cs->lpszName && !IS_INTRESOURCE(cs->lpszName)) s->parts[0].text = cs->lpszName;
-      AlignToParent(h, StatusHeight(s));
+      AlignToParent(h, StatusHeight(s), true);
       return 0;
     }
     case WM_NCDESTROY:
@@ -863,7 +864,7 @@ LRESULT CALLBACK StatusProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       return DefWindowProcW(h, msg, wp, lp);
     case WM_SIZE:
       // The parent passes its own WM_SIZE on.
-      if (!(GetWindowLongW(h, GWL_STYLE) & CCS_NORESIZE)) AlignToParent(h, StatusHeight(s));
+      if (!(GetWindowLongW(h, GWL_STYLE) & CCS_NORESIZE)) AlignToParent(h, StatusHeight(s), true);
       InvalidateRect(h, NULL, TRUE);
       return 0;
     case WM_ERASEBKGND:

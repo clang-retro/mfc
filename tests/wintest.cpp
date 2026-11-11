@@ -5,7 +5,7 @@
 // device contexts, bitmaps and DIBs, raster operations, regions,
 // clipping, mapping modes and scrolling, lines, shapes, paths and
 // text, icons, accelerators and menus, dialogs and the standard
-// controls, MDI, image lists; and a CWnd with a message map
+// controls, MDI, image lists, the common controls; and a CWnd with a message map
 // on top.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
@@ -1494,6 +1494,166 @@ BEGIN_MESSAGE_MAP(CTestWnd, CWnd)
   ON_MESSAGE(WM_APP + 5, OnApp)
 END_MESSAGE_MAP()
 
+// A parent that records what its common controls tell it.
+static std::vector<UINT> g_notifies;
+static int g_hscrolls = 0, g_vscrolls = 0;
+static LRESULT CALLBACK CtlHostProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_NOTIFY) g_notifies.push_back(((NMHDR*)lp)->code);
+  if (msg == WM_HSCROLL) g_hscrolls++;
+  if (msg == WM_VSCROLL) g_vscrolls++;
+  return ::DefWindowProcW(h, msg, wp, lp);
+}
+
+static bool Notified(UINT code) {
+  for (UINT c : g_notifies)
+    if (c == code) return true;
+  return false;
+}
+
+static void TestCommonControls() {
+  INITCOMMONCONTROLSEX icc = {sizeof icc, ICC_WIN95_CLASSES | ICC_BAR_CLASSES};
+  CHECK(::InitCommonControlsEx(&icc));
+  WNDCLASSW wc = {};
+  wc.lpfnWndProc = CtlHostProc;
+  wc.hInstance = ::GetModuleHandleW(NULL);
+  wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+  wc.lpszClassName = L"CtlHost";
+  ::RegisterClassW(&wc);
+  HWND host = ::CreateWindowW(L"CtlHost", L"Controls", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, 0, 0, 420, 320,
+                              NULL, NULL, wc.hInstance, NULL);
+  CHECK(host != NULL);
+  HINSTANCE inst = wc.hInstance;
+  DWORD child = WS_CHILD | WS_VISIBLE;
+
+  // Status bar with parts.
+  HWND status = ::CreateWindowW(STATUSCLASSNAMEW, L"Ready", child | SBARS_SIZEGRIP, 0, 0, 0, 0, host,
+                                (HMENU)1, inst, NULL);
+  CHECK(status != NULL);
+  int parts[] = {200, 300, -1};
+  CHECK(::SendMessageW(status, SB_SETPARTS, 3, (LPARAM)parts));
+  CHECK(::SendMessageW(status, SB_GETPARTS, 0, 0) == 3);
+  ::SendMessageW(status, SB_SETTEXTW, 1, (LPARAM)L"NUM");
+  wchar_t buf[64] = L"";
+  CHECK(LOWORD(::SendMessageW(status, SB_GETTEXTW, 1, (LPARAM)buf)) == 3 && wcscmp(buf, L"NUM") == 0);
+
+  // Progress.
+  HWND prog = ::CreateWindowW(PROGRESS_CLASSW, L"", child, 10, 10, 180, 16, host, (HMENU)2, inst, NULL);
+  CHECK(prog != NULL);
+  ::SendMessageW(prog, PBM_SETRANGE32, 0, 200);
+  CHECK(::SendMessageW(prog, PBM_GETRANGE, FALSE, 0) == 200);
+  ::SendMessageW(prog, PBM_SETPOS, 50, 0);
+  CHECK(::SendMessageW(prog, PBM_DELTAPOS, 25, 0) == 50);
+  CHECK(::SendMessageW(prog, PBM_GETPOS, 0, 0) == 75);
+  ::SendMessageW(prog, PBM_SETPOS, 500, 0);
+  CHECK(::SendMessageW(prog, PBM_GETPOS, 0, 0) == 200);
+  ::SendMessageW(prog, PBM_SETPOS, 100, 0);
+
+  // Trackbar: range, position clamping, keys scroll the parent.
+  HWND track = ::CreateWindowW(TRACKBAR_CLASSW, L"", child | WS_TABSTOP | TBS_AUTOTICKS, 10, 34, 180, 30, host,
+                               (HMENU)3, inst, NULL);
+  CHECK(track != NULL);
+  ::SendMessageW(track, TBM_SETRANGE, TRUE, MAKELONG(0, 10));
+  CHECK(::SendMessageW(track, TBM_GETRANGEMIN, 0, 0) == 0 && ::SendMessageW(track, TBM_GETRANGEMAX, 0, 0) == 10);
+  ::SendMessageW(track, TBM_SETPOS, TRUE, 4);
+  CHECK(::SendMessageW(track, TBM_GETPOS, 0, 0) == 4);
+  ::SendMessageW(track, TBM_SETPOS, TRUE, 99);
+  CHECK(::SendMessageW(track, TBM_GETPOS, 0, 0) == 10);
+  ::SendMessageW(track, TBM_SETPOS, TRUE, 4);
+  g_hscrolls = 0;
+  ::SendMessageW(track, WM_KEYDOWN, VK_RIGHT, 0);
+  CHECK(::SendMessageW(track, TBM_GETPOS, 0, 0) == 5 && g_hscrolls > 0);
+  RECT thumb = {}, chan = {};
+  ::SendMessageW(track, TBM_GETTHUMBRECT, 0, (LPARAM)&thumb);
+  ::SendMessageW(track, TBM_GETCHANNELRECT, 0, (LPARAM)&chan);
+  CHECK(thumb.right > thumb.left && chan.right > chan.left);
+
+  // Up-down with an edit buddy.
+  HWND edit = ::CreateWindowExW(WS_EX_CLIENTEDGE, L"Edit", L"", child | ES_NUMBER, 200, 10, 60, 20, host,
+                                (HMENU)4, inst, NULL);
+  HWND spin = ::CreateWindowW(UPDOWN_CLASSW, L"", child | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS, 0, 0,
+                              0, 0, host, (HMENU)5, inst, NULL);
+  CHECK(spin != NULL);
+  ::SendMessageW(spin, UDM_SETBUDDY, (WPARAM)edit, 0);
+  CHECK((HWND)::SendMessageW(spin, UDM_GETBUDDY, 0, 0) == edit);
+  ::SendMessageW(spin, UDM_SETRANGE32, 0, 20);
+  ::SendMessageW(spin, UDM_SETPOS32, 0, 7);
+  CHECK(::SendMessageW(spin, UDM_GETPOS32, 0, NULL) == 7);
+  ::GetWindowTextW(edit, buf, 64);
+  CHECK(wcscmp(buf, L"7") == 0);
+  g_notifies.clear();
+  g_vscrolls = 0;
+  ::SendMessageW(edit, WM_KEYDOWN, VK_UP, 0);
+  CHECK(::SendMessageW(spin, UDM_GETPOS32, 0, NULL) == 8 && Notified(UDN_DELTAPOS) && g_vscrolls > 0);
+  ::GetWindowTextW(edit, buf, 64);
+  CHECK(wcscmp(buf, L"8") == 0);
+
+  // Header: items, text, layout and hit testing.
+  HWND header = ::CreateWindowW(WC_HEADERW, L"", child | HDS_BUTTONS, 10, 70, 300, 20, host, (HMENU)6, inst, NULL);
+  CHECK(header != NULL);
+  HDITEMW hi = {};
+  hi.mask = HDI_TEXT | HDI_WIDTH | HDI_FORMAT;
+  hi.fmt = HDF_LEFT | HDF_STRING;
+  hi.cxy = 100;
+  hi.pszText = (LPWSTR)L"Name";
+  CHECK(::SendMessageW(header, HDM_INSERTITEMW, 0, (LPARAM)&hi) == 0);
+  hi.pszText = (LPWSTR)L"Size";
+  hi.cxy = 60;
+  CHECK(::SendMessageW(header, HDM_INSERTITEMW, 1, (LPARAM)&hi) == 1);
+  CHECK(::SendMessageW(header, HDM_GETITEMCOUNT, 0, 0) == 2);
+  RECT ir = {};
+  CHECK(::SendMessageW(header, HDM_GETITEMRECT, 1, (LPARAM)&ir) && ir.left == 100 && ir.right == 160);
+  HDITEMW got = {};
+  got.mask = HDI_TEXT | HDI_WIDTH;
+  got.pszText = buf;
+  got.cchTextMax = 64;
+  CHECK(::SendMessageW(header, HDM_GETITEMW, 1, (LPARAM)&got) && wcscmp(buf, L"Size") == 0 && got.cxy == 60);
+  HDHITTESTINFO ht = {};
+  ht.pt.x = 120;
+  ht.pt.y = 5;
+  CHECK(::SendMessageW(header, HDM_HITTEST, 0, (LPARAM)&ht) == 1 && (ht.flags & HHT_ONHEADER));
+  int order[2] = {};
+  CHECK(::SendMessageW(header, HDM_GETORDERARRAY, 2, (LPARAM)order) && order[0] == 0 && order[1] == 1);
+
+  // Tabs: items, selection by mouse notifies the parent.
+  HWND tabs = ::CreateWindowW(WC_TABCONTROLW, L"", child | WS_CLIPSIBLINGS, 10, 100, 300, 120, host, (HMENU)7,
+                              inst, NULL);
+  CHECK(tabs != NULL);
+  TCITEMW ti = {};
+  ti.mask = TCIF_TEXT | TCIF_PARAM;
+  ti.pszText = (LPWSTR)L"General";
+  ti.lParam = 11;
+  CHECK(::SendMessageW(tabs, TCM_INSERTITEMW, 0, (LPARAM)&ti) == 0);
+  ti.pszText = (LPWSTR)L"Advanced";
+  ti.lParam = 22;
+  CHECK(::SendMessageW(tabs, TCM_INSERTITEMW, 1, (LPARAM)&ti) == 1);
+  CHECK(::SendMessageW(tabs, TCM_GETITEMCOUNT, 0, 0) == 2 && ::SendMessageW(tabs, TCM_GETCURSEL, 0, 0) == 0);
+  TCITEMW tg = {};
+  tg.mask = TCIF_TEXT | TCIF_PARAM;
+  tg.pszText = buf;
+  tg.cchTextMax = 64;
+  CHECK(::SendMessageW(tabs, TCM_GETITEMW, 1, (LPARAM)&tg) && wcscmp(buf, L"Advanced") == 0 && tg.lParam == 22);
+  RECT tr = {};
+  CHECK(::SendMessageW(tabs, TCM_GETITEMRECT, 1, (LPARAM)&tr) && tr.right > tr.left);
+  g_notifies.clear();
+  ::SendMessageW(tabs, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM((tr.left + tr.right) / 2, (tr.top + tr.bottom) / 2));
+  ::SendMessageW(tabs, WM_LBUTTONUP, 0, MAKELPARAM((tr.left + tr.right) / 2, (tr.top + tr.bottom) / 2));
+  CHECK(::SendMessageW(tabs, TCM_GETCURSEL, 0, 0) == 1 && Notified(TCN_SELCHANGING) && Notified(TCN_SELCHANGE));
+  RECT page = {0, 0, 300, 120};
+  ::SendMessageW(tabs, TCM_ADJUSTRECT, FALSE, (LPARAM)&page);
+  CHECK(page.top > 0 && page.bottom < 120 && page.left > 0);
+
+  // Hotkey.
+  HWND hot = ::CreateWindowW(HOTKEY_CLASSW, L"", child | WS_BORDER, 200, 34, 120, 20, host, (HMENU)8, inst, NULL);
+  CHECK(hot != NULL);
+  ::SendMessageW(hot, HKM_SETHOTKEY, MAKEWORD('K', HOTKEYF_CONTROL), 0);
+  CHECK(::SendMessageW(hot, HKM_GETHOTKEY, 0, 0) == MAKEWORD('K', HOTKEYF_CONTROL));
+
+  ::ShowWindow(host, SW_SHOW);
+  ::UpdateWindow(host);
+  Pump();
+  ::DestroyWindow(host);
+}
+
 static void TestCWnd() {
   CTestWnd wnd;
   CString cls = AfxRegisterWndClass(CS_HREDRAW | CS_VREDRAW, NULL, (HBRUSH)(COLOR_WINDOW + 1));
@@ -1541,6 +1701,7 @@ int main() {
   TestDialogsAndControls();
   TestMdi();
   TestImageLists();
+  TestCommonControls();
   TestCWnd();
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;
