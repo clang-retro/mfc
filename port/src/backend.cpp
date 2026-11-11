@@ -65,6 +65,6 @@ Backend* GetBackend() {
 }
 
 // The standard control classes register here as they are written.
-void RegisterSystemClasses() {}
+void RegisterSystemClasses() { RegisterMenuClass(); }
 
 }  // namespace winport

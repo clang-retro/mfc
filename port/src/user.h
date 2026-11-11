@@ -62,6 +62,7 @@ struct Window {
   RECT rect = {0, 0, 0, 0};       // in the parent's client area (the screen for a top-level)
   RECT client = {0, 0, 0, 0};     // the client area, from the window's top left
   HMENU menu = NULL;              // a child window's ID, or a top-level's menu bar
+  HMENU sysMenu = NULL;           // GetSystemMenu's copy for the window
   std::wstring text;
   HINSTANCE instance = NULL;
   std::vector<BYTE> extra;
@@ -113,6 +114,7 @@ Region VisibleRegion(Window* w, bool client);
 Class* FindClass(const wchar_t* name, HINSTANCE inst);
 Class* FindClassAtom(ATOM atom);
 void RegisterSystemClasses();
+ATOM RegisterSystemClass(LPCWSTR name, WNDPROC proc, UINT style, int extra, HBRUSH brush, LPCWSTR cursor);
 
 // Messages
 struct SentMessage {
@@ -189,6 +191,16 @@ void FreeWindowDC(HDC dc);
 // Frame metrics: the non-client border widths for a style.
 RECT FrameInsets(DWORD style, DWORD exStyle, bool menu);
 void DrawFrame(Window* w);
+// Where the menu bar and the system menu's box lie, in window coordinates.
+RECT MenuBarRect(Window* w);
+RECT SysMenuRect(Window* w);
+
+// Menus (user_menu.cpp): the menu window's class, drawing the menu bar,
+// SC_KEYMENU and SC_MOUSEMENU, and a window's menus when it goes.
+void RegisterMenuClass();
+void DrawMenuBarIn(Window* w, HDC dc, const RECT& bar);
+void MenuCommand(Window* w, WPARAM wParam, LPARAM lParam);
+void MenusOnDestroy(Window* w);
 
 // Focus and activation
 void ActivateWindow(Window* w, bool byMouse);

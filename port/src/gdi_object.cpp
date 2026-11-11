@@ -1231,6 +1231,10 @@ DWORD WINAPI GetRegionData(HRGN h, DWORD size, LPRGNDATA out) {
 BOOL WINAPI DeleteObject(HGDIOBJ h) {
   GdiObject* o = GdiObj(h);
   if (!o) return FALSE;
+  if (IsUserObject(o->type)) {
+    SetLastError(ERROR_INVALID_HANDLE);
+    return FALSE;
+  }
   if (o->stock) return TRUE;
   if (o->type == OBJ_DC || o->type == OBJ_MEMDC) return FALSE;
   if (o->type == OBJ_BITMAP && ((BitmapObj*)o)->selectedIn) return FALSE;
@@ -1244,7 +1248,7 @@ BOOL WINAPI DeleteObject(HGDIOBJ h) {
 
 DWORD WINAPI GetObjectType(HGDIOBJ h) {
   GdiObject* o = GdiObj(h);
-  return o ? o->type : 0;
+  return o && !IsUserObject(o->type) ? o->type : 0;
 }
 
 int WINAPI GetObjectW(HGDIOBJ h, int size, LPVOID out) {

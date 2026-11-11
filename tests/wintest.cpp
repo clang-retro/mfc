@@ -794,6 +794,276 @@ static void TestText() {
 }
 
 // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+// Icons, cursors and accelerators
+
+static WPARAM g_lastCommand = 0;
+static std::vector<UINT> g_menuMsgs;
+static int g_clickItem = -1;  // a popup item to click at the next WM_ENTERIDLE
+static HMENU g_clickMenu = NULL;
+
+static LRESULT CALLBACK MenuProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  switch (msg) {
+    case WM_ENTERMENULOOP:
+    case WM_EXITMENULOOP:
+    case WM_INITMENU:
+    case WM_INITMENUPOPUP:
+    case WM_UNINITMENUPOPUP:
+    case WM_MENUSELECT:
+      g_menuMsgs.push_back(msg);
+      break;
+    case WM_ENTERIDLE:
+      if (wp == MSGF_MENU && g_clickItem >= 0) {
+        RECT r;
+        if (::GetMenuItemRect(h, g_clickMenu, g_clickItem, &r)) {
+          POINT p = {(r.left + r.right) / 2, (r.top + r.bottom) / 2};
+          ::ScreenToClient(h, &p);
+          ::PostMessageW(h, WM_MOUSEMOVE, 0, MAKELPARAM(p.x, p.y));
+          ::PostMessageW(h, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(p.x, p.y));
+          ::PostMessageW(h, WM_LBUTTONUP, 0, MAKELPARAM(p.x, p.y));
+        }
+        g_clickItem = -1;
+      }
+      return 0;
+    case WM_COMMAND:
+      g_lastCommand = wp;
+      return 0;
+  }
+  return ::DefWindowProcW(h, msg, wp, lp);
+}
+
+static HWND NewMenuWindow(HMENU menu) {
+  static ATOM atom = 0;
+  if (!atom) {
+    WNDCLASSW wc = {};
+    wc.lpfnWndProc = MenuProc;
+    wc.hInstance = ::GetModuleHandleW(NULL);
+    wc.lpszClassName = L"WinTestMenu";
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    atom = ::RegisterClassW(&wc);
+  }
+  return ::CreateWindowExW(0, L"WinTestMenu", L"Menus", WS_OVERLAPPEDWINDOW, 20, 20, 320, 240, NULL, menu,
+                           ::GetModuleHandleW(NULL), NULL);
+}
+
+static void TestIconsAndAccelerators() {
+  HICON app = ::LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
+  CHECK(app != NULL);
+  ICONINFO ii;
+  CHECK(::GetIconInfo(app, &ii) && ii.fIcon && ii.hbmMask != NULL);
+  if (ii.hbmMask) ::DeleteObject(ii.hbmMask);
+  if (ii.hbmColor) ::DeleteObject(ii.hbmColor);
+  CHECK(::LoadCursorW(NULL, (LPCWSTR)IDC_ARROW) != NULL);
+
+  // An icon made from two bitmaps draws its color where the mask is clear.
+  HDC screen = ::GetDC(NULL);
+  HBITMAP color = ::CreateCompatibleBitmap(screen, 16, 16);
+  HBITMAP mask = ::CreateBitmap(16, 16, 1, 1, NULL);
+  HDC mem = ::CreateCompatibleDC(screen);
+  HGDIOBJ old = ::SelectObject(mem, color);
+  RECT all = {0, 0, 16, 16};
+  HBRUSH red = ::CreateSolidBrush(RGB(255, 0, 0));
+  ::FillRect(mem, &all, red);
+  ::SelectObject(mem, mask);
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(BLACK_BRUSH));
+  ::SelectObject(mem, old);
+  ICONINFO make = {TRUE, 0, 0, mask, color};
+  HICON icon = ::CreateIconIndirect(&make);
+  CHECK(icon != NULL);
+  HBITMAP target = ::CreateCompatibleBitmap(screen, 16, 16);
+  old = ::SelectObject(mem, target);
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  CHECK(::DrawIconEx(mem, 0, 0, icon, 16, 16, 0, NULL, DI_NORMAL));
+  CHECK(::GetPixel(mem, 8, 8) == RGB(255, 0, 0));
+  ::SelectObject(mem, old);
+  CHECK(::DestroyIcon(icon));
+  ::DeleteObject(target);
+  ::DeleteObject(color);
+  ::DeleteObject(mask);
+  ::DeleteObject(red);
+  ::DeleteDC(mem);
+  ::ReleaseDC(NULL, screen);
+
+  ACCEL keys[2] = {{FVIRTKEY | FCONTROL, 'O', 100}, {FVIRTKEY, VK_F5, 101}};
+  HACCEL accel = ::CreateAcceleratorTableW(keys, 2);
+  CHECK(accel != NULL && ::CopyAcceleratorTableW(accel, NULL, 0) == 2);
+  HWND h = NewMenuWindow(NULL);
+  g_lastCommand = 0;
+  MSG m = {h, WM_KEYDOWN, VK_F5, 1};
+  CHECK(::TranslateAcceleratorW(h, accel, &m));
+  CHECK(LOWORD(g_lastCommand) == 101 && HIWORD(g_lastCommand) == 1);
+  m.wParam = 'O';
+  CHECK(!::TranslateAcceleratorW(h, accel, &m));  // Ctrl is not down
+  CHECK(::DestroyAcceleratorTable(accel));
+  ::DestroyWindow(h);
+}
+
+// ---------------------------------------------------------------------
+// Menus
+
+static void TestMenus() {
+  HMENU bar = ::CreateMenu();
+  HMENU file = ::CreatePopupMenu();
+  CHECK(::IsMenu(bar) && ::IsMenu(file) && !::IsMenu(NULL));
+  CHECK(::AppendMenuW(file, MF_STRING, 100, L"&Open\tCtrl+O"));
+  CHECK(::AppendMenuW(file, MF_SEPARATOR, 0, NULL));
+  CHECK(::AppendMenuA(file, MF_STRING | MF_GRAYED, 101, "E&xit"));
+  CHECK(::AppendMenuW(bar, MF_POPUP, (UINT_PTR)file, L"&File"));
+  CHECK(::GetMenuItemCount(bar) == 1 && ::GetMenuItemCount(file) == 3);
+  CHECK(::GetSubMenu(bar, 0) == file);
+  CHECK(::GetMenuItemID(bar, 0) == (UINT)-1 && ::GetMenuItemID(file, 2) == 101);
+  CHECK(::GetMenuState(file, 1, MF_BYPOSITION) & MF_SEPARATOR);
+  // A search by command looks into submenus.
+  CHECK(::GetMenuState(bar, 101, MF_BYCOMMAND) & MF_GRAYED);
+  CHECK((::GetMenuState(bar, 0, MF_BYPOSITION) >> 8) == 3);
+  CHECK(::GetMenuState(bar, 999, MF_BYCOMMAND) == (UINT)-1);
+  wchar_t buf[64];
+  CHECK(::GetMenuStringW(bar, 100, buf, 64, MF_BYCOMMAND) == 12 && wcscmp(buf, L"&Open\tCtrl+O") == 0);
+  CHECK(::GetMenuStringW(file, 100, NULL, 0, MF_BYCOMMAND) == 12);
+  char abuf[8];
+  CHECK(::GetMenuStringA(file, 101, abuf, sizeof abuf, MF_BYCOMMAND) == 5 && strcmp(abuf, "E&xit") == 0);
+  CHECK(::EnableMenuItem(bar, 101, MF_BYCOMMAND | MF_ENABLED) == MF_GRAYED);
+  CHECK(::CheckMenuItem(file, 100, MF_BYCOMMAND | MF_CHECKED) == MF_UNCHECKED);
+  CHECK(::CheckMenuItem(file, 100, MF_BYCOMMAND | MF_UNCHECKED) == MF_CHECKED);
+  CHECK(::CheckMenuItem(file, 999, MF_BYCOMMAND) == (DWORD)-1);
+  CHECK(::ModifyMenuW(file, 100, MF_BYCOMMAND | MF_STRING, 102, L"&New"));
+  CHECK(::GetMenuItemID(file, 0) == 102);
+  CHECK(::InsertMenuW(file, 0, MF_BYPOSITION | MF_STRING, 103, L"First"));
+  CHECK(::GetMenuItemID(file, 0) == 103 && ::GetMenuItemCount(file) == 4);
+  CHECK(::DeleteMenu(file, 103, MF_BYCOMMAND) && ::GetMenuItemCount(file) == 3);
+  CHECK(!::RemoveMenu(file, 999, MF_BYCOMMAND));
+
+  MENUITEMINFOW mi = {sizeof mi};
+  mi.fMask = MIIM_STRING | MIIM_ID;
+  mi.dwTypeData = buf;
+  mi.cch = 64;
+  CHECK(::GetMenuItemInfoW(file, 0, TRUE, &mi));
+  CHECK(mi.wID == 102 && mi.cch == 4 && wcscmp(buf, L"&New") == 0);
+  mi.fMask = MIIM_DATA | MIIM_STATE;
+  mi.dwItemData = 1234;
+  mi.fState = MFS_CHECKED | MFS_DEFAULT;
+  CHECK(::SetMenuItemInfoW(file, 102, FALSE, &mi));
+  CHECK(::GetMenuDefaultItem(file, FALSE, 0) == 102 && ::GetMenuDefaultItem(file, TRUE, 0) == 0);
+  memset(&mi, 0, sizeof mi);
+  mi.cbSize = sizeof mi;
+  mi.fMask = MIIM_DATA | MIIM_STATE;
+  CHECK(::GetMenuItemInfoW(file, 102, FALSE, &mi) && mi.dwItemData == 1234 && (mi.fState & MFS_CHECKED));
+  ::CheckMenuItem(file, 102, MF_BYCOMMAND | MF_UNCHECKED);
+
+  HMENU view = ::CreatePopupMenu();
+  for (UINT i = 0; i < 3; i++) ::AppendMenuW(view, MF_STRING, 200 + i, L"Mode");
+  CHECK(::CheckMenuRadioItem(view, 200, 202, 201, MF_BYCOMMAND));
+  CHECK(!(::GetMenuState(view, 200, MF_BYCOMMAND) & MF_CHECKED));
+  CHECK(::GetMenuState(view, 201, MF_BYCOMMAND) & MF_CHECKED);
+  MENUITEMINFOW ri = {sizeof ri};
+  ri.fMask = MIIM_FTYPE;
+  CHECK(::GetMenuItemInfoW(view, 201, FALSE, &ri) && (ri.fType & MFT_RADIOCHECK));
+  CHECK(::InsertMenuW(bar, (UINT)-1, MF_BYPOSITION | MF_POPUP, (UINT_PTR)view, L"&View"));
+  CHECK(::GetMenuItemCount(bar) == 2);
+  MENUINFO info = {sizeof info};
+  info.fMask = MIM_MENUDATA;
+  info.dwMenuData = 77;
+  CHECK(::SetMenuInfo(view, &info));
+  info.dwMenuData = 0;
+  CHECK(::GetMenuInfo(view, &info) && info.dwMenuData == 77);
+
+  // Templates: the standard form and the extended one.
+  static const WORD tmpl[] = {0, 0, MF_POPUP | MF_END, '&', 'F', 0, 0, 1, 'A', 0, MF_END, 2, 'B', 0};
+  HMENU loaded = ::LoadMenuIndirectW(tmpl);
+  CHECK(loaded && ::GetMenuItemCount(loaded) == 1);
+  HMENU sub = ::GetSubMenu(loaded, 0);
+  CHECK(sub && ::GetMenuItemCount(sub) == 2 && ::GetMenuItemID(sub, 1) == 2);
+  CHECK(::DestroyMenu(loaded) && !::IsMenu(sub));
+  BYTE ex[56] = {};
+  auto put16 = [&](int at, WORD v) { memcpy(ex + at, &v, 2); };
+  auto put32 = [&](int at, DWORD v) { memcpy(ex + at, &v, 4); };
+  // The header: version 1, then the offset past its help ID.
+  put16(0, 1);
+  put16(2, 4);
+  // A popup that is the last item: type, state, ID, flags, text, padding
+  // to a DWORD, and the submenu's help ID.
+  put16(20, 0x81);
+  put16(22, 'F');
+  // Its one item, checked, with ID 5.
+  put32(36, MFS_CHECKED);
+  put32(40, 5);
+  put16(44, 0x80);
+  put16(46, 'X');
+  loaded = ::LoadMenuIndirectW(ex);
+  CHECK(loaded && ::GetMenuItemCount(loaded) == 1);
+  sub = loaded ? ::GetSubMenu(loaded, 0) : NULL;
+  CHECK(sub && ::GetMenuItemID(sub, 0) == 5 && (::GetMenuState(sub, 0, MF_BYPOSITION) & MF_CHECKED));
+  if (loaded) ::DestroyMenu(loaded);
+
+  // A window's menu bar takes room from the client area.
+  HWND h = NewMenuWindow(bar);
+  CHECK(h && ::GetMenu(h) == bar);
+  RECT withBar, without;
+  ::GetClientRect(h, &withBar);
+  CHECK(::SetMenu(h, NULL) && ::GetMenu(h) == NULL);
+  ::GetClientRect(h, &without);
+  CHECK(without.bottom - withBar.bottom == ::GetSystemMetrics(SM_CYMENU));
+  CHECK(::SetMenu(h, bar));
+  RECT item, wr;
+  ::GetWindowRect(h, &wr);
+  CHECK(::GetMenuItemRect(h, bar, 0, &item));
+  CHECK(item.left >= wr.left && item.top > wr.top && item.bottom < wr.bottom && item.right > item.left);
+  POINT mid = {(item.left + item.right) / 2, (item.top + item.bottom) / 2};
+  CHECK(::MenuItemFromPoint(h, bar, mid) == 0);
+
+  HMENU sys = ::GetSystemMenu(h, FALSE);
+  CHECK(sys && ::GetMenuItemCount(sys) >= 5);
+  CHECK(::GetMenuState(sys, SC_CLOSE, MF_BYCOMMAND) != (UINT)-1);
+  CHECK(::GetSystemMenu(h, TRUE) == NULL);
+
+#ifdef _WINPORT
+  // Tracking, driven by posted input.
+  ::ShowWindow(h, SW_SHOW);
+  Pump();
+  g_menuMsgs.clear();
+  ::PostMessageW(h, WM_KEYDOWN, VK_DOWN, 0);
+  ::PostMessageW(h, WM_KEYDOWN, VK_RETURN, 0);
+  CHECK(::TrackPopupMenu(file, TPM_RETURNCMD, 50, 50, 0, h, NULL) == 102);
+  CHECK(!g_menuMsgs.empty() && g_menuMsgs.front() == WM_ENTERMENULOOP && g_menuMsgs.back() == WM_EXITMENULOOP);
+  bool init = false, select = false;
+  for (UINT msg : g_menuMsgs) {
+    init |= msg == WM_INITMENUPOPUP;
+    select |= msg == WM_MENUSELECT;
+  }
+  CHECK(init && select);
+  ::PostMessageW(h, WM_KEYDOWN, VK_ESCAPE, 0);
+  CHECK(::TrackPopupMenu(file, TPM_RETURNCMD, 50, 50, 0, h, NULL) == 0);
+  // A mnemonic chooses its item, and the command is posted.
+  g_lastCommand = 0;
+  ::PostMessageW(h, WM_CHAR, 'x', 0);
+  CHECK(::TrackPopupMenu(file, 0, 50, 50, 0, h, NULL));
+  Pump();
+  CHECK(LOWORD(g_lastCommand) == 101);
+  // The mouse: a click on an item.
+  g_clickMenu = file;
+  g_clickItem = 0;
+  CHECK(::TrackPopupMenu(file, TPM_RETURNCMD, 50, 50, 0, h, NULL) == 102);
+  // The menu bar from the keyboard, as Alt+V then Down twice and Enter.
+  g_lastCommand = 0;
+  ::PostMessageW(h, WM_KEYDOWN, VK_DOWN, 0);
+  ::PostMessageW(h, WM_KEYDOWN, VK_DOWN, 0);
+  ::PostMessageW(h, WM_KEYDOWN, VK_RETURN, 0);
+  ::SendMessageW(h, WM_SYSCOMMAND, SC_KEYMENU, 'v');
+  Pump();
+  CHECK(LOWORD(g_lastCommand) == 202);
+  // The bar is drawn in the menu color past its items.
+  HDC dc = ::GetWindowDC(h);
+  RECT last;
+  ::GetMenuItemRect(h, bar, 1, &last);
+  CHECK(::GetPixel(dc, last.right - wr.left + 8, (last.top + last.bottom) / 2 - wr.top) == ::GetSysColor(COLOR_MENU));
+  ::ReleaseDC(h, dc);
+#endif
+
+  // The window's menu goes with it.
+  ::DestroyWindow(h);
+  CHECK(!::IsMenu(bar) && !::IsMenu(file) && !::IsMenu(view));
+}
+
 // A CWnd with a message map
 
 class CTestWnd : public CWnd {
@@ -872,6 +1142,8 @@ int main() {
   TestRegionsAndClipping();
   TestShapes();
   TestText();
+  TestIconsAndAccelerators();
+  TestMenus();
   TestCWnd();
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;

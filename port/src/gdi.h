@@ -103,6 +103,25 @@ struct FontObj : GdiObject {
   LOGFONTW lf = {};
 };
 
+// Window manager objects that share the handle table: they are not GDI
+// objects to GetObjectType or DeleteObject.
+enum { kObjIcon = 0x101, kObjAccel = 0x102, kObjMenu = 0x103 };
+inline bool IsUserObject(DWORD type) { return type >= 0x100; }
+
+// An icon or cursor: an AND mask and a color image (see user_icon.cpp).
+struct IconObj : GdiObject {
+  IconObj() : GdiObject(kObjIcon) {}
+  ~IconObj();
+  bool isIcon = true;
+  POINT hotspot = {0, 0};
+  HBITMAP mask = NULL, color = NULL;
+  bool alpha = false;
+  int width = 0, height = 0;
+  int systemId = 0;     // an IDC_ or IDI_ number for the system's own
+  bool shared = false;  // LR_SHARED: DestroyIcon leaves it
+};
+IconObj* IconOf(HICON h);
+
 struct RegionObj : GdiObject {
   RegionObj() : GdiObject(OBJ_REGION) {}
   Region rgn;

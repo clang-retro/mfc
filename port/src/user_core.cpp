@@ -667,6 +667,7 @@ static void FreeTree(Window* w) {
   std::vector<Window*> kids = w->children;
   for (Window* c : kids) FreeTree(c);
   SendTo(w, WM_NCDESTROY, 0, 0);
+  MenusOnDestroy(w);
   UserGuard g(UserLock());
   WindowDestroyed(w);
   Unlink(w);
