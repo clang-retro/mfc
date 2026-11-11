@@ -1,10 +1,10 @@
 // user_basic.cpp - the parts of user32 that need no windows: rectangles,
 // string resources, registered messages and formats, system colors and
-// metrics, hooks, and message boxes before the window system is up.
+// metrics, and message boxes before the window system is up.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
-#include "winport.h"
+#include "user.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -242,13 +242,13 @@ DWORD WINAPI GetSysColor(int index) {
   return colors[index];
 }
 
-// A 1024x768 screen with the classic metrics, until a display backend
-// reports its own.
+// The classic metrics, on the screen the backend reports.
 int WINAPI GetSystemMetrics(int index) {
   switch (index) {
-    case SM_CXSCREEN: case SM_CXFULLSCREEN: case SM_CXVIRTUALSCREEN: case SM_CXMAXIMIZED: return 1024;
-    case SM_CYSCREEN: case SM_CYVIRTUALSCREEN: case SM_CYMAXIMIZED: return 768;
-    case SM_CYFULLSCREEN: return 768 - 19 - 30;
+    case SM_CXSCREEN: case SM_CXFULLSCREEN: case SM_CXVIRTUALSCREEN: case SM_CXMAXIMIZED:
+      return GetBackend()->ScreenSize().cx;
+    case SM_CYSCREEN: case SM_CYVIRTUALSCREEN: case SM_CYMAXIMIZED: return GetBackend()->ScreenSize().cy;
+    case SM_CYFULLSCREEN: return GetBackend()->ScreenSize().cy - 19 - 30;
     case SM_CXVSCROLL: case SM_CYHSCROLL: case SM_CXHSCROLL: case SM_CYVSCROLL: return 16;
     case SM_CYCAPTION: return 19;
     case SM_CXBORDER: case SM_CYBORDER: return 1;
@@ -277,8 +277,47 @@ int WINAPI GetSystemMetrics(int index) {
   }
 }
 
+// The classic fonts: 8-point MS Sans Serif, bold in captions.
+static LOGFONTW ClassicFont(bool bold) {
+  LOGFONTW lf = {};
+  lf.lfHeight = -11;
+  lf.lfWeight = bold ? FW_BOLD : FW_NORMAL;
+  lf.lfCharSet = DEFAULT_CHARSET;
+  lf.lfPitchAndFamily = VARIABLE_PITCH | FF_SWISS;
+  wcscpy(lf.lfFaceName, L"MS Sans Serif");
+  return lf;
+}
+
+static void FontToA(const LOGFONTW& w, LOGFONTA* a) {
+  memcpy(a, &w, offsetof(LOGFONTA, lfFaceName));
+  memset(a->lfFaceName, 0, sizeof a->lfFaceName);
+  strncpy(a->lfFaceName, Narrow(w.lfFaceName).c_str(), LF_FACESIZE - 1);
+}
+
 BOOL WINAPI SystemParametersInfoW(UINT action, UINT uiParam, PVOID pv, UINT) {
   switch (action) {
+    case SPI_GETNONCLIENTMETRICS: {
+      NONCLIENTMETRICSW* m = (NONCLIENTMETRICSW*)pv;
+      if (!m) return FALSE;
+      UINT size = m->cbSize ? m->cbSize : sizeof *m;
+      memset(m, 0, sizeof *m);
+      m->cbSize = size;
+      m->iBorderWidth = 1;
+      m->iScrollWidth = m->iScrollHeight = GetSystemMetrics(SM_CXVSCROLL);
+      m->iCaptionWidth = m->iCaptionHeight = GetSystemMetrics(SM_CYCAPTION) - 1;
+      m->lfCaptionFont = ClassicFont(true);
+      m->iSmCaptionWidth = m->iSmCaptionHeight = GetSystemMetrics(SM_CYSMCAPTION) - 1;
+      m->lfSmCaptionFont = ClassicFont(true);
+      m->iMenuWidth = m->iMenuHeight = GetSystemMetrics(SM_CYMENU) - 1;
+      m->lfMenuFont = ClassicFont(false);
+      m->lfStatusFont = ClassicFont(false);
+      m->lfMessageFont = ClassicFont(false);
+      return TRUE;
+    }
+    case SPI_GETICONTITLELOGFONT:
+      if (pv == NULL) return FALSE;
+      *(LOGFONTW*)pv = ClassicFont(false);
+      return TRUE;
     case SPI_GETWORKAREA:
       if (pv == NULL) return FALSE;
       SetRect((LPRECT)pv, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
@@ -300,62 +339,36 @@ BOOL WINAPI SystemParametersInfoW(UINT action, UINT uiParam, PVOID pv, UINT) {
   }
 }
 BOOL WINAPI SystemParametersInfoA(UINT action, UINT uiParam, PVOID pv, UINT winIni) {
-  // The actions answered here carry no text.
+  if (action == SPI_GETNONCLIENTMETRICS) {
+    NONCLIENTMETRICSA* a = (NONCLIENTMETRICSA*)pv;
+    NONCLIENTMETRICSW w = {sizeof w};
+    if (!a || !SystemParametersInfoW(action, sizeof w, &w, winIni)) return FALSE;
+    UINT size = a->cbSize ? a->cbSize : sizeof *a;
+    a->cbSize = size;
+    a->iBorderWidth = w.iBorderWidth;
+    a->iScrollWidth = w.iScrollWidth;
+    a->iScrollHeight = w.iScrollHeight;
+    a->iCaptionWidth = w.iCaptionWidth;
+    a->iCaptionHeight = w.iCaptionHeight;
+    FontToA(w.lfCaptionFont, &a->lfCaptionFont);
+    a->iSmCaptionWidth = w.iSmCaptionWidth;
+    a->iSmCaptionHeight = w.iSmCaptionHeight;
+    FontToA(w.lfSmCaptionFont, &a->lfSmCaptionFont);
+    a->iMenuWidth = w.iMenuWidth;
+    a->iMenuHeight = w.iMenuHeight;
+    FontToA(w.lfMenuFont, &a->lfMenuFont);
+    FontToA(w.lfStatusFont, &a->lfStatusFont);
+    FontToA(w.lfMessageFont, &a->lfMessageFont);
+    return TRUE;
+  }
+  if (action == SPI_GETICONTITLELOGFONT) {
+    LOGFONTW w;
+    if (!pv || !SystemParametersInfoW(action, uiParam, &w, winIni)) return FALSE;
+    FontToA(w, (LOGFONTA*)pv);
+    return TRUE;
+  }
+  // The other actions answered here carry no text.
   return SystemParametersInfoW(action, uiParam, pv, winIni);
-}
-
-// Hooks. The window system calls them; for now they are only recorded.
-struct Hook {
-  int idHook;
-  HOOKPROC proc;
-  DWORD tid;
-};
-static std::mutex g_hookLock;
-static std::vector<Hook*> g_hooks;
-
-HHOOK WINAPI SetWindowsHookExW(int idHook, HOOKPROC proc, HINSTANCE, DWORD tid) {
-  if (proc == NULL) {
-    SetLastError(ERROR_INVALID_PARAMETER);
-    return NULL;
-  }
-  Hook* h = new Hook{idHook, proc, tid ? tid : GetCurrentThreadId()};
-  std::lock_guard<std::mutex> g(g_hookLock);
-  g_hooks.push_back(h);
-  return (HHOOK)h;
-}
-HHOOK WINAPI SetWindowsHookExA(int idHook, HOOKPROC proc, HINSTANCE hmod, DWORD tid) {
-  return SetWindowsHookExW(idHook, proc, hmod, tid);
-}
-BOOL WINAPI UnhookWindowsHookEx(HHOOK hh) {
-  std::lock_guard<std::mutex> g(g_hookLock);
-  for (size_t i = 0; i < g_hooks.size(); i++) {
-    if ((HHOOK)g_hooks[i] == hh) {
-      delete g_hooks[i];
-      g_hooks.erase(g_hooks.begin() + i);
-      return TRUE;
-    }
-  }
-  SetLastError(ERROR_INVALID_HOOK_HANDLE);
-  return FALSE;
-}
-// Calls the next hook of the same kind on the thread, after hh.
-LRESULT WINAPI CallNextHookEx(HHOOK hh, int code, WPARAM wParam, LPARAM lParam) {
-  HOOKPROC next = NULL;
-  {
-    std::lock_guard<std::mutex> g(g_hookLock);
-    DWORD tid = GetCurrentThreadId();
-    // Hooks run newest first, so the next one is the newest older one.
-    bool found = false;
-    for (size_t i = g_hooks.size(); i-- > 0;) {
-      Hook* h = g_hooks[i];
-      if (found && h->tid == tid && h->idHook == ((Hook*)hh)->idHook) {
-        next = h->proc;
-        break;
-      }
-      if ((HHOOK)h == hh) found = true;
-    }
-  }
-  return next != NULL ? next(code, wParam, lParam) : 0;
 }
 
 // Message boxes, until the window system can show one: the text goes to
