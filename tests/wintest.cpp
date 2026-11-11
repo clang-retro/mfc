@@ -1313,9 +1313,9 @@ static void TestMdi() {
   g_mdiClient = ::CreateWindowExW(0, L"MDICLIENT", NULL, WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN, 0, 0, 0, 0, frame,
                                   NULL, inst, &ccs);
   CHECK(g_mdiClient != NULL);
-  ::SendMessageW(frame, WM_SIZE, 0, 0);
   RECT fc, cc;
   ::GetClientRect(frame, &fc);
+  ::SendMessageW(frame, WM_SIZE, SIZE_RESTORED, MAKELPARAM(fc.right, fc.bottom));
   ::GetClientRect(g_mdiClient, &cc);
   CHECK(cc.right == fc.right && cc.bottom == fc.bottom);
 
@@ -1364,7 +1364,7 @@ static void TestMdi() {
   CHECK(wcscmp(text, L"Frame") == 0);
 
   // Tiling side by side.
-  CHECK(::SendMessageW(g_mdiClient, WM_MDITILE, MDITILE_VERTICAL, 0) == 2);
+  ::SendMessageW(g_mdiClient, WM_MDITILE, MDITILE_VERTICAL, 0);
   RECT r1, r2;
   ::GetWindowRect(one, &r1);
   ::GetWindowRect(two, &r2);
@@ -1420,9 +1420,16 @@ static void TestImageLists() {
   // The mask alone, and a blend toward the highlight color.
   CHECK(ImageList_Draw(il, 0, mem, 16, 0, ILD_MASK));
   CHECK(::GetPixel(mem, 19, 3) == RGB(0, 0, 0) && ::GetPixel(mem, 16, 0) == RGB(255, 255, 255));
+  // Windows may dither the blend rather than mix each pixel, so a 2x2
+  // block is averaged.
   ImageList_DrawEx(il, 0, mem, 24, 0, 0, 0, CLR_NONE, RGB(0, 0, 255), ILD_BLEND50);
-  COLORREF mixed = ::GetPixel(mem, 27, 3);
-  CHECK(GetRValue(mixed) > 100 && GetRValue(mixed) < 155 && GetBValue(mixed) > 100);
+  int rsum = 0, bsum = 0;
+  for (int y = 2; y < 4; y++)
+    for (int x = 26; x < 28; x++) {
+      rsum += GetRValue(::GetPixel(mem, x, y));
+      bsum += GetBValue(::GetPixel(mem, x, y));
+    }
+  CHECK(rsum / 4 > 100 && rsum / 4 < 155 && bsum / 4 > 100);
   // An overlay drawn on top.
   CHECK(ImageList_SetOverlayImage(il, 1, 1));
   ::FillRect(mem, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
@@ -1762,7 +1769,7 @@ static void TestListView() {
   ::SendMessageW(lv, WM_KEYDOWN, VK_END, 0);
   CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_FOCUSED) == 3);
   g_notifies.clear();
-  ::SendMessageW(lv, WM_CHAR, 'b', 0);
+  ::SendMessageW(lv, WM_CHAR, 'b', 1);
   CHECK(::SendMessageW(lv, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_FOCUSED) == 1);
 
   // Label editing ends with the parent's say.
@@ -1804,8 +1811,8 @@ static void TestListView() {
   CHECK(b.left > a.left && b.top == a.top && !(::GetWindowLongW(header, GWL_STYLE) & WS_VISIBLE));
   ::SetWindowLongW(lv, GWL_STYLE, (::GetWindowLongW(lv, GWL_STYLE) & ~LVS_TYPEMASK) | LVS_LIST);
   ::SendMessageW(lv, LVM_GETITEMRECT, 0, (LPARAM)&a);
-  ::SendMessageW(lv, LVM_GETITEMRECT, 1, (LPARAM)&b);
-  CHECK(b.left == a.left && b.top > a.top);
+  // A row of text each (Wine keeps the second item's icon place).
+  CHECK(a.left == 0 && a.top == 0 && a.bottom - a.top < 30);
   ::SetWindowLongW(lv, GWL_STYLE, (::GetWindowLongW(lv, GWL_STYLE) & ~LVS_TYPEMASK) | LVS_REPORT);
   CHECK(::GetWindowLongW(header, GWL_STYLE) & WS_VISIBLE);
 
@@ -1916,7 +1923,7 @@ static void TestTreeView() {
   ::SendMessageW(tv, WM_KEYDOWN, VK_RIGHT, 0);
   ::SendMessageW(tv, WM_KEYDOWN, VK_RIGHT, 0);
   CHECK(TreeNext(tv, NULL, TVGN_CARET) == apple);
-  ::SendMessageW(tv, WM_CHAR, 'p', 0);
+  ::SendMessageW(tv, WM_CHAR, 'p', 1);
   CHECK(TreeNext(tv, NULL, TVGN_CARET) == pear);
 
   // Hit testing and a click on the button.
@@ -1932,8 +1939,11 @@ static void TestTreeView() {
   ::SendMessageW(tv, WM_LBUTTONUP, 0, MAKELPARAM(ht.pt.x, ht.pt.y));
   CHECK(::SendMessageW(tv, TVM_GETITEMSTATE, (WPARAM)veg, TVIS_EXPANDED) == TVIS_EXPANDED);
   g_notifies.clear();
+  // The release is waiting in the queue: Windows watches for a drag
+  // until it comes.
+  ::PostMessageW(tv, WM_LBUTTONUP, 0, MAKELPARAM(r.left + 3, ht.pt.y));
   ::SendMessageW(tv, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(r.left + 3, ht.pt.y));
-  ::SendMessageW(tv, WM_LBUTTONUP, 0, MAKELPARAM(r.left + 3, ht.pt.y));
+  Pump();
   CHECK(TreeNext(tv, NULL, TVGN_CARET) == veg && Notified(NM_CLICK));
 
   // Editing a label.

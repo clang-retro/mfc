@@ -392,9 +392,9 @@ LRESULT CALLBACK ClientProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       if (IsKid(c, (HWND)wp)) ShowWindow((HWND)wp, SW_RESTORE);
       return 0;
     case WM_MDICASCADE:
-      return CascadeWindows(h, (UINT)wp, NULL, 0, NULL);
+      return CascadeWindows(h, (UINT)wp, NULL, 0, NULL) != 0;
     case WM_MDITILE:
-      return TileWindows(h, (UINT)wp, NULL, 0, NULL);
+      return TileWindows(h, (UINT)wp, NULL, 0, NULL) != 0;  // TRUE, not the count
     case WM_MDIICONARRANGE:
       ArrangeIconicWindows(h);
       return 0;

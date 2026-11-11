@@ -14,7 +14,9 @@ static CString TestOutPath(LPCTSTR lpszName) {
   TCHAR szDir[MAX_PATH];
   DWORD n = ::GetEnvironmentVariable(_T("MFC_TEST_OUT"), szDir, MAX_PATH);
   CString strPath = (n > 0 && n < MAX_PATH) ? szDir : _T(".");
-  if (strPath.Right(1) != _T("\\") && strPath.Right(1) != _T("/")) strPath += _T("/");
+  // The directory's own separator: OLE monikers on Windows want '\\'.
+  if (strPath.Right(1) != _T("\\") && strPath.Right(1) != _T("/"))
+    strPath += strPath.Find(_T('\\')) >= 0 ? _T("\\") : _T("/");
   return strPath + lpszName;
 }
 
