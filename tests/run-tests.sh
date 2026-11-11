@@ -65,7 +65,7 @@ if [ $NATIVE = 1 ]; then
       "$CXX" $CXXFLAGS $flags $srcs -L"$OUT" $LDFLAGS $lib -lwinport -ldl -lpthread -o "$exe" \
         2>"$T/$name-$v-build.log" || {
         echo "FAIL   $name-$v (build)"; cat "$T/$name-$v-build.log"; nfail=$((nfail + 1)); continue; }
-      if MFC_TEST_OUT="$T/$v" WINPORT_REGISTRY="$T/$v/registry.reg" $TIMEOUT "$exe" > "$T/$v/$name.log" 2>&1; then
+      if MFC_TEST_OUT="$T/$v" WINPORT_BACKEND=${WINPORT_BACKEND:-headless} WINPORT_REGISTRY="$T/$v/registry.reg" $TIMEOUT "$exe" > "$T/$v/$name.log" 2>&1; then
         echo "PASS   $name-$v"; npass=$((npass + 1))
       else
         echo "FAIL   $name-$v"; sed 's/^/       /' "$T/$v/$name.log"; nfail=$((nfail + 1))

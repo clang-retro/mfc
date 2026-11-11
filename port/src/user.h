@@ -237,6 +237,9 @@ struct Backend {
   virtual void Moved(Window* /*w*/) {}  // position or size
   virtual void TitleChanged(Window* /*w*/) {}
   virtual void Present(Window* /*w*/, const RECT& /*r*/) {}
+  // Moving or sizing a top-level window with the mouse, for displays
+  // where only the compositor can; hit is HTCAPTION or a frame edge.
+  virtual bool BeginMoveSize(Window* /*w*/, LRESULT /*hit*/) { return false; }
   // Waits up to timeout ms for input, handing what comes to the input
   // functions above; returns early when WakeBackend is called. Called
   // without the lock.
@@ -247,6 +250,7 @@ Backend* GetBackend();
 // The mouse position on the screen.
 POINT& CursorPos();
 Backend* NewHeadlessBackend();
+Backend* NewX11Backend();  // NULL when there is no X display
 
 }  // namespace winport
 

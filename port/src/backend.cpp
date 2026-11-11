@@ -1,10 +1,10 @@
 // backend.cpp - choosing the backend that shows top-level windows, and
 // the headless one, which shows nothing.
 //
-// WINPORT_BACKEND names the backend: "headless" keeps every window in
-// memory, which suits tests and programs run without a display. Without
-// it the first backend that can start is used, and headless when none
-// can. WINPORT_SCREEN=WIDTHxHEIGHT sets the headless screen's size.
+// WINPORT_BACKEND names the backend: "x11" shows windows on the X
+// display, and "headless" keeps every window in memory, which suits
+// tests and programs run without a display. Without it the X display is
+// used when DISPLAY names one, and headless otherwise. WINPORT_SCREEN=WIDTHxHEIGHT sets the headless screen's size.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -57,9 +57,18 @@ Backend* NewHeadlessBackend() { return new HeadlessBackend; }
 Backend* GetBackend() {
   static Backend* b = [] {
     const char* name = getenv("WINPORT_BACKEND");
-    if (name && *name && strcmp(name, "headless") != 0)
-      fprintf(stderr, "winport: no backend named %s; windows stay in memory\n", name);
-    return NewHeadlessBackend();
+    Backend* b = NULL;
+    if (name && *name) {
+      if (strcmp(name, "x11") == 0) {
+        b = NewX11Backend();
+        if (!b) fprintf(stderr, "winport: cannot open the X display; windows stay in memory\n");
+      } else if (strcmp(name, "headless") != 0) {
+        fprintf(stderr, "winport: no backend named %s; windows stay in memory\n", name);
+      }
+    } else if (getenv("DISPLAY") && *getenv("DISPLAY")) {
+      b = NewX11Backend();
+    }
+    return b ? b : NewHeadlessBackend();
   }();
   return b;
 }

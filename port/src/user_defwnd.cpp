@@ -452,6 +452,82 @@ void DrawFrame(Window* w) {
 
 }  // namespace winport
 
+
+// Moving and sizing a window with the mouse: SC_MOVE and SC_SIZE. The
+// window follows the pointer until the button comes up; Escape puts it
+// back. hit is the part of the frame grabbed, an HT value.
+static void MoveSizeLoop(Window* w, bool unicode, LRESULT hit) {
+  HWND h = w->hwnd;
+  if (!(GetKeyState(VK_LBUTTON) & 0x8000)) return;
+  bool move = hit == HTCAPTION;
+  if (!move && !(w->style & WS_THICKFRAME)) return;
+  if (w->style & (WS_MAXIMIZE | WS_MINIMIZE) && !(move && (w->style & WS_MINIMIZE))) return;
+  // Some displays move and size windows themselves.
+  if (!w->parent && GetBackend()->BeginMoveSize(w, hit)) return;
+  HWND parent = w->parent ? w->parent->hwnd : NULL;
+  RECT start;
+  GetWindowRect(h, &start);
+  if (parent) MapWindowPoints(NULL, parent, (LPPOINT)&start, 2);
+  POINT from;
+  GetCursorPos(&from);
+  SendTo(w, WM_ENTERSIZEMOVE, 0, 0, unicode);
+  SetCapture(h);
+  RECT cur = start;
+  bool cancelled = false;
+  MSG m;
+  while (GetCapture() == h) {
+    if (!GetMessageW(&m, NULL, 0, 0)) {
+      PostQuitMessage((int)m.wParam);
+      break;
+    }
+    if (m.message == WM_KEYDOWN && m.wParam == VK_ESCAPE) {
+      cancelled = true;
+      break;
+    }
+    if (m.message == WM_LBUTTONUP || m.message == WM_NCLBUTTONUP) break;
+    if (m.message != WM_MOUSEMOVE && m.message != WM_NCMOUSEMOVE) {
+      if (m.message >= WM_KEYFIRST && m.message <= WM_KEYLAST) continue;
+      TranslateMessage(&m);
+      DispatchMessageW(&m);
+      continue;
+    }
+    POINT p;
+    GetCursorPos(&p);
+    int dx = p.x - from.x, dy = p.y - from.y;
+    RECT r = start;
+    if (move) {
+      OffsetRect(&r, dx, dy);
+    } else {
+      if (hit == HTLEFT || hit == HTTOPLEFT || hit == HTBOTTOMLEFT) r.left += dx;
+      if (hit == HTRIGHT || hit == HTTOPRIGHT || hit == HTBOTTOMRIGHT) r.right += dx;
+      if (hit == HTTOP || hit == HTTOPLEFT || hit == HTTOPRIGHT) r.top += dy;
+      if (hit == HTBOTTOM || hit == HTBOTTOMLEFT || hit == HTBOTTOMRIGHT) r.bottom += dy;
+      int edge = 0;
+      switch (hit) {
+        case HTLEFT: edge = WMSZ_LEFT; break;
+        case HTRIGHT: edge = WMSZ_RIGHT; break;
+        case HTTOP: edge = WMSZ_TOP; break;
+        case HTTOPLEFT: edge = WMSZ_TOPLEFT; break;
+        case HTTOPRIGHT: edge = WMSZ_TOPRIGHT; break;
+        case HTBOTTOM: edge = WMSZ_BOTTOM; break;
+        case HTBOTTOMLEFT: edge = WMSZ_BOTTOMLEFT; break;
+        case HTBOTTOMRIGHT: edge = WMSZ_BOTTOMRIGHT; break;
+      }
+      SendTo(w, WM_SIZING, edge, (LPARAM)&r, unicode);
+    }
+    if (move) SendTo(w, WM_MOVING, 0, (LPARAM)&r, unicode);
+    if (EqualRect(&r, &cur)) continue;
+    cur = r;
+    SetWindowPos(h, NULL, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE | (move ? SWP_NOSIZE : 0));
+  }
+  if (GetCapture() == h) ReleaseCapture();
+  if (cancelled)
+    SetWindowPos(h, NULL, start.left, start.top, start.right - start.left, start.bottom - start.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+  if (GetWindow(h)) SendTo(w, WM_EXITSIZEMOVE, 0, 0, unicode);
+}
+
 static bool g_altAlone;
 
 static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
@@ -545,9 +621,16 @@ static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
         case SC_MOUSEMENU:
           MenuCommand(w, wp, lp);
           return 0;
-        case SC_CONTEXTHELP:
         case SC_MOVE:
-        case SC_SIZE:
+          MoveSizeLoop(w, unicode, HTCAPTION);
+          return 0;
+        case SC_SIZE: {
+          // The low bits say which edge: WMSZ_ values, as HTLEFT onwards.
+          int edge = (int)(wp & 0x0F);
+          if (edge >= WMSZ_LEFT && edge <= WMSZ_BOTTOMRIGHT) MoveSizeLoop(w, unicode, HTLEFT + edge - WMSZ_LEFT);
+          return 0;
+        }
+        case SC_CONTEXTHELP:
         default:
           return 0;
       }
@@ -556,6 +639,18 @@ static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
       switch (wp) {
         case HTCAPTION:
           SetActiveWindow(w->TopLevel()->hwnd);
+          if (!(w->style & WS_MAXIMIZE)) SendTo(w, WM_SYSCOMMAND, SC_MOVE + HTCAPTION, lp, unicode);
+          return 0;
+        case HTLEFT:
+        case HTRIGHT:
+        case HTTOP:
+        case HTTOPLEFT:
+        case HTTOPRIGHT:
+        case HTBOTTOM:
+        case HTBOTTOMLEFT:
+        case HTBOTTOMRIGHT:
+          SetActiveWindow(w->TopLevel()->hwnd);
+          SendTo(w, WM_SYSCOMMAND, SC_SIZE + (wp - HTLEFT + WMSZ_LEFT), lp, unicode);
           return 0;
         case HTSYSMENU:
           SetActiveWindow(w->TopLevel()->hwnd);
