@@ -123,4 +123,11 @@ typedef struct _HTTP_FILTER_VERSION {
   DWORD dwFlags;
 } HTTP_FILTER_VERSION, *PHTTP_FILTER_VERSION;
 
+// What a filter DLL exports.
+extern "C" {
+BOOL WINAPI GetFilterVersion(PHTTP_FILTER_VERSION pVer);
+DWORD WINAPI HttpFilterProc(PHTTP_FILTER_CONTEXT pfc, DWORD notificationType, LPVOID pvNotification);
+BOOL WINAPI TerminateFilter(DWORD dwFlags);
+}
+
 #endif

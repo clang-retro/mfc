@@ -82,11 +82,20 @@ clang++ -std=c++17 -Ipath/to/mfc/port/include -Ipath/to/mfc/include app.cpp \
   -Lpath/to/build/x86_64-linux-gnu -lmfc -lwinport -ldl -lpthread -o app
 ```
 
+A program's resources go in as C++: `port/tools/res2cpp.py` compiles the
+`.rc` file with `llvm-rc` and writes the result as a source file that
+registers it when the program starts (it needs Python 3, `llvm-rc` and
+clang):
+
+```sh
+python3 path/to/mfc/port/tools/res2cpp.py -I path/to/mfc/include app.rc -o app-res.cpp
+```
+
 It is a work in progress. So far the non-window classes, automation, the
-registry (kept in `~/.config/winport/registry.reg`), sockets and COM
-within one process work; windows, drawing and resources compiled from
-`.rc` files come next, with X11, Wayland and Cocoa backends (the Cocoa
-one for Mac OS X 10.4 and later, PowerPC and Intel). The functions not
+registry (kept in `~/.config/winport/registry.reg`), resources, sockets
+and COM within one process work; windows and drawing come next, with
+X11, Wayland and Cocoa backends (the Cocoa one for Mac OS X 10.4 and
+later, PowerPC and Intel). The functions not
 written yet are listed in `port/src/stubs.txt` and fail with
 `ERROR_CALL_NOT_IMPLEMENTED`; `WINPORT_DEBUG=1` names each one the first
 time a program calls it.

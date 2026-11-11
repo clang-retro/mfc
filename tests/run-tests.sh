@@ -33,9 +33,11 @@ case "$TARGET" in
   *) NATIVE=0 ;;
 esac
 if [ $NATIVE = 1 ]; then
-  TESTS=${NATIVE_TESTS:-"core disptest"}
+  TESTS=${NATIVE_TESTS:-"core memtest disptest isapitest"}
   T=$OUT/tests
   mkdir -p "$T/a" "$T/u"
+  python3 tests/gen-toolbar-bmp.py "$T/toolbar.bmp" 6 || exit 1
+  RC_NATIVE=${BIN:+$BIN/}llvm-rc
   CXXFLAGS="--target=$TARGET ${SYSROOT:+--sysroot=$SYSROOT} ${STDLIB--stdlib=libc++} -std=c++17"
   CXXFLAGS="$CXXFLAGS -Wall -Wno-unused-function -Wno-overloaded-virtual -Wno-missing-exception-spec"
   CXXFLAGS="$CXXFLAGS -Iport/include -Iinclude -Itests"
@@ -51,8 +53,16 @@ if [ $NATIVE = 1 ]; then
     [ $v = u ] && flags="-DUNICODE -D_UNICODE" && lib=-lmfcu
     for name in $TESTS; do
       exe=$T/$name-$v
+      srcs=tests/$name.cpp
+      # Resources become C++ that registers them as the program starts.
+      if [ -f tests/$name.rc ]; then
+        CXX="$CXX" RC="$RC_NATIVE" python3 port/tools/res2cpp.py -I include -I tests -I "$T" \
+          tests/$name.rc -o "$T/$name-res.cpp" 2>"$T/$name-rc.log" || {
+          echo "FAIL   $name-$v (resources)"; cat "$T/$name-rc.log"; nfail=$((nfail + 1)); continue; }
+        srcs="$srcs $T/$name-res.cpp"
+      fi
       # shellcheck disable=SC2086
-      "$CXX" $CXXFLAGS $flags tests/$name.cpp -L"$OUT" $LDFLAGS $lib -lwinport -ldl -lpthread -o "$exe" \
+      "$CXX" $CXXFLAGS $flags $srcs -L"$OUT" $LDFLAGS $lib -lwinport -ldl -lpthread -o "$exe" \
         2>"$T/$name-$v-build.log" || {
         echo "FAIL   $name-$v (build)"; cat "$T/$name-$v-build.log"; nfail=$((nfail + 1)); continue; }
       if MFC_TEST_OUT="$T/$v" WINPORT_REGISTRY="$T/$v/registry.reg" $TIMEOUT "$exe" > "$T/$v/$name.log" 2>&1; then
