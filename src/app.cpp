@@ -50,7 +50,9 @@ CWinApp::CWinApp(LPCTSTR lpszAppName) {
   m_nThreadID = ::GetCurrentThreadId();
   AFX_MODULE_STATE* pModuleState = AfxGetModuleState();
   pModuleState->m_pCurrentWinApp = this;
-  AfxGetThreadState()->m_pCurrentWinThread = this;
+  // A regular DLL's application object runs in the program's thread,
+  // which stays the program's.
+  if (pModuleState == AfxGetAppModuleState()) AfxGetThreadState()->m_pCurrentWinThread = this;
 }
 
 CWinApp::~CWinApp() {
@@ -70,7 +72,7 @@ CWinApp::~CWinApp() {
   free((void*)m_pszProfileName);
   free((void*)m_pszRegistryKey);
 
-  AFX_MODULE_STATE* pModuleState = AfxGetModuleState();
+  AFX_MODULE_STATE* pModuleState = m_pModuleState;
   if (pModuleState->m_pCurrentWinApp == this) {
     pModuleState->m_pCurrentWinApp = NULL;
     pModuleState->m_lpszCurrentAppName = NULL;
@@ -632,13 +634,14 @@ void CCommandLineInfo::ParseParamFlag(const char* pszParam) {
 // ---------------------------------------------------------------------
 // The OLE object count
 
-static LONG g_nOleObjects = 0;
+// Counted for each module: a regular DLL's objects keep that DLL loaded.
 static BOOL g_bOleUserCtrl = TRUE;
 
-void AFXAPI AfxOleLockApp() { ::InterlockedIncrement(&g_nOleObjects); }
+void AFXAPI AfxOleLockApp() { ::InterlockedIncrement(&AfxGetModuleState()->m_nObjectCount); }
 
 void AFXAPI AfxOleUnlockApp() {
-  if (::InterlockedDecrement(&g_nOleObjects) != 0 || AfxOleGetUserCtrl()) return;
+  if (::InterlockedDecrement(&AfxGetModuleState()->m_nObjectCount) != 0 || AfxOleGetUserCtrl())
+    return;
   // A DLL waits for DllCanUnloadNow; the program it is in goes on.
   if (AfxGetModuleState()->m_bDLL) return;
   CWnd* pMainWnd = AfxGetApp() != NULL ? AfxGetMainWnd() : NULL;
@@ -648,7 +651,7 @@ void AFXAPI AfxOleUnlockApp() {
     AfxPostQuitMessage(0);
 }
 
-BOOL AFXAPI AfxOleCanExitApp() { return g_nOleObjects == 0; }
+BOOL AFXAPI AfxOleCanExitApp() { return AfxGetModuleState()->m_nObjectCount == 0; }
 BOOL AFXAPI AfxOleGetUserCtrl() { return g_bOleUserCtrl; }
 void AFXAPI AfxOleSetUserCtrl(BOOL bUserCtrl) { g_bOleUserCtrl = bUserCtrl; }
 

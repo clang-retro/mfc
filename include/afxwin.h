@@ -1003,13 +1003,18 @@ protected: \
 #define END_INTERFACE_PART_OPTIONAL(localClass) END_INTERFACE_PART(localClass)
 #define END_INTERFACE_PART_STATIC END_INTERFACE_PART
 
-#define METHOD_PROLOGUE(theClass, localClass) \
+// With _AFXDLL, METHOD_PROLOGUE also makes the object's module (a regular
+// DLL, say) the current one, as the object's interfaces are called from
+// other modules; METHOD_PROLOGUE_EX_ does not.
+#define METHOD_PROLOGUE_EX_(theClass, localClass) \
   _AFX_NO_OFFSETOF_WARNING_BEGIN \
   theClass* pThis = (theClass*)((BYTE*)this - offsetof(theClass, m_x##localClass)); \
   _AFX_NO_OFFSETOF_WARNING_END \
   (void)pThis;
+#define METHOD_PROLOGUE(theClass, localClass) \
+  METHOD_PROLOGUE_EX_(theClass, localClass) \
+  AFX_MANAGE_STATE(pThis->m_pModuleState)
 #define METHOD_PROLOGUE_EX(theClass, localClass) METHOD_PROLOGUE(theClass, localClass)
-#define METHOD_PROLOGUE_EX_(theClass, localClass) METHOD_PROLOGUE(theClass, localClass)
 #define METHOD_MANAGE_STATE(theClass, localClass) METHOD_PROLOGUE(theClass, localClass)
 
 #define DECLARE_DISPATCH_MAP() \
@@ -1217,6 +1222,7 @@ public:
 
   LONG m_dwRef;
   LPUNKNOWN m_pOuterUnknown;
+  AFX_MODULE_STATE* m_pModuleState;  // the module the object was made in
   _AfxInnerUnknownImpl m_xInnerUnknown;
   _AfxDispatchImpl m_xDispatch;
   _AfxConnPtContainerImpl m_xConnPtContainer;

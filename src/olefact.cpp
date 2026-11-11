@@ -53,9 +53,10 @@ void AFXAPI AfxOleTerm(BOOL bJustRevoke) {
 // ---------------------------------------------------------------------
 // The list of factories
 
-static COleObjectFactory* g_pFirstFactory = NULL;
-
-COleObjectFactory* PASCAL COleObjectFactory::GetFirstFactory() { return g_pFirstFactory; }
+// Each module (a regular DLL with mfc.dll) has its own.
+COleObjectFactory* PASCAL COleObjectFactory::GetFirstFactory() {
+  return AfxGetModuleState()->m_pFirstFactory;
+}
 
 COleObjectFactory::COleObjectFactory(REFCLSID clsid, CRuntimeClass* pRuntimeClass,
                                      BOOL bMultiInstance, LPCTSTR lpszProgID)
@@ -73,14 +74,14 @@ COleObjectFactory::COleObjectFactory(REFCLSID clsid, CRuntimeClass* pRuntimeClas
       m_bLicenseChecked(FALSE),
       m_bLicenseValid(FALSE) {
   // Keep construction order: the last one goes at the end.
-  COleObjectFactory** pp = &g_pFirstFactory;
+  COleObjectFactory** pp = &m_pModuleState->m_pFirstFactory;
   while (*pp != NULL) pp = &(*pp)->m_pNextFactory;
   *pp = this;
 }
 
 COleObjectFactory::~COleObjectFactory() {
   Revoke();
-  for (COleObjectFactory** pp = &g_pFirstFactory; *pp != NULL; pp = &(*pp)->m_pNextFactory) {
+  for (COleObjectFactory** pp = &m_pModuleState->m_pFirstFactory; *pp != NULL; pp = &(*pp)->m_pNextFactory) {
     if (*pp == this) {
       *pp = m_pNextFactory;
       break;
@@ -112,13 +113,13 @@ void COleObjectFactory::Revoke() {
 
 BOOL PASCAL COleObjectFactory::RegisterAll() {
   BOOL bResult = TRUE;
-  for (COleObjectFactory* p = g_pFirstFactory; p != NULL; p = p->m_pNextFactory)
+  for (COleObjectFactory* p = GetFirstFactory(); p != NULL; p = p->m_pNextFactory)
     if (!p->Register()) bResult = FALSE;
   return bResult;
 }
 
 void PASCAL COleObjectFactory::RevokeAll() {
-  for (COleObjectFactory* p = g_pFirstFactory; p != NULL; p = p->m_pNextFactory) p->Revoke();
+  for (COleObjectFactory* p = GetFirstFactory(); p != NULL; p = p->m_pNextFactory) p->Revoke();
 }
 
 // ---------------------------------------------------------------------
@@ -205,7 +206,7 @@ BOOL COleObjectFactory::Unregister() { return UpdateRegistry(FALSE); }
 
 BOOL PASCAL COleObjectFactory::UpdateRegistryAll(BOOL bRegister) {
   BOOL bResult = TRUE;
-  for (COleObjectFactory* p = g_pFirstFactory; p != NULL; p = p->m_pNextFactory)
+  for (COleObjectFactory* p = GetFirstFactory(); p != NULL; p = p->m_pNextFactory)
     if (!p->UpdateRegistry(bRegister)) bResult = FALSE;
   return bResult;
 }
@@ -350,7 +351,7 @@ STDMETHODIMP COleObjectFactory::XClassFactory::CreateInstanceLic(LPUNKNOWN pUnkO
 HRESULT AFXAPI AfxDllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv) {
   if (ppv == NULL) return E_POINTER;
   *ppv = NULL;
-  for (COleObjectFactory* p = g_pFirstFactory; p != NULL; p = p->m_pNextFactory)
+  for (COleObjectFactory* p = COleObjectFactory::GetFirstFactory(); p != NULL; p = p->m_pNextFactory)
     if (::IsEqualCLSID(p->m_clsid, rclsid))
       return (HRESULT)p->InternalQueryInterface(&riid, ppv);
   return CLASS_E_CLASSNOTAVAILABLE;

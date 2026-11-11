@@ -7,34 +7,52 @@
 // ---------------------------------------------------------------------
 // Process state
 
-static AFX_MODULE_STATE g_moduleState;
+static AFX_MODULE_STATE g_moduleState;  // the program's (and its extension DLLs')
 
-AFX_MODULE_STATE* AFXAPI AfxGetModuleState() { return &g_moduleState; }
+AFX_MODULE_STATE* AFXAPI AfxGetAppModuleState() { return &g_moduleState; }
+
+AFX_MODULE_STATE* AFXAPI AfxGetModuleState() {
+#ifdef _AFX_BUILDING_DLL
+  // A regular DLL's state while its code runs (AFX_MANAGE_STATE).
+  AFX_MODULE_STATE* pState = AfxGetThreadState()->m_pModuleState;
+  if (pState != NULL) return pState;
+#endif
+  return &g_moduleState;
+}
+
+AFX_MODULE_STATE* AFXAPI AfxSetModuleState(AFX_MODULE_STATE* pNewState) {
+  AFX_THREAD_STATE* pThreadState = AfxGetThreadState();
+  AFX_MODULE_STATE* pOldState = pThreadState->m_pModuleState;
+  pThreadState->m_pModuleState = pNewState == &g_moduleState ? NULL : pNewState;
+  return pOldState != NULL ? pOldState : &g_moduleState;
+}
 
 HINSTANCE AFXAPI AfxGetInstanceHandle() {
-  if (g_moduleState.m_hCurrentInstanceHandle == NULL)
-    g_moduleState.m_hCurrentInstanceHandle = ::GetModuleHandle(NULL);
-  return g_moduleState.m_hCurrentInstanceHandle;
+  AFX_MODULE_STATE* pState = AfxGetModuleState();
+  if (pState->m_hCurrentInstanceHandle == NULL)
+    pState->m_hCurrentInstanceHandle = ::GetModuleHandle(NULL);
+  return pState->m_hCurrentInstanceHandle;
 }
 
 HINSTANCE AFXAPI AfxGetResourceHandle() {
-  if (g_moduleState.m_hCurrentResourceHandle == NULL)
-    return AfxGetInstanceHandle();
-  return g_moduleState.m_hCurrentResourceHandle;
+  AFX_MODULE_STATE* pState = AfxGetModuleState();
+  if (pState->m_hCurrentResourceHandle == NULL) return AfxGetInstanceHandle();
+  return pState->m_hCurrentResourceHandle;
 }
 
 void AFXAPI AfxSetResourceHandle(HINSTANCE hInstResource) {
-  g_moduleState.m_hCurrentResourceHandle = hInstResource;
+  AfxGetModuleState()->m_hCurrentResourceHandle = hInstResource;
 }
 
 // The program's resources come first, then those of its extension DLLs
 // (CDynLinkLibrary), then those of the DLLs marked as system DLLs.
 HINSTANCE AFXAPI AfxFindResourceHandle(LPCTSTR lpszName, LPCTSTR lpszType) {
   HINSTANCE hInst = AfxGetResourceHandle();
-  if (g_moduleState.m_pFirstDLL == NULL || ::FindResource(hInst, lpszName, lpszType) != NULL)
+  CDynLinkLibrary* pFirstDLL = AfxGetModuleState()->m_pFirstDLL;
+  if (pFirstDLL == NULL || ::FindResource(hInst, lpszName, lpszType) != NULL)
     return hInst;
   for (int nPass = 0; nPass < 2; nPass++) {
-    for (CDynLinkLibrary* p = g_moduleState.m_pFirstDLL; p != NULL; p = p->m_pNextDLL) {
+    for (CDynLinkLibrary* p = pFirstDLL; p != NULL; p = p->m_pNextDLL) {
       if (p->m_bSystem != (nPass == 1) || p->m_hResource == NULL) continue;
       if (::FindResource(p->m_hResource, lpszName, lpszType) != NULL) return p->m_hResource;
     }
@@ -57,9 +75,10 @@ static BOOL HasString(HINSTANCE hInst, UINT nID) {
 
 HINSTANCE AFXAPI AfxFindStringResourceHandle(UINT nID) {
   HINSTANCE hInst = AfxGetResourceHandle();
-  if (g_moduleState.m_pFirstDLL == NULL || HasString(hInst, nID)) return hInst;
+  CDynLinkLibrary* pFirstDLL = AfxGetModuleState()->m_pFirstDLL;
+  if (pFirstDLL == NULL || HasString(hInst, nID)) return hInst;
   for (int nPass = 0; nPass < 2; nPass++) {
-    for (CDynLinkLibrary* p = g_moduleState.m_pFirstDLL; p != NULL; p = p->m_pNextDLL) {
+    for (CDynLinkLibrary* p = pFirstDLL; p != NULL; p = p->m_pNextDLL) {
       if (p->m_bSystem != (nPass == 1) || p->m_hResource == NULL) continue;
       if (HasString(p->m_hResource, nID)) return p->m_hResource;
     }
@@ -67,9 +86,9 @@ HINSTANCE AFXAPI AfxFindStringResourceHandle(UINT nID) {
   return hInst;
 }
 
-LPCTSTR AFXAPI AfxGetAppName() { return g_moduleState.m_lpszCurrentAppName; }
+LPCTSTR AFXAPI AfxGetAppName() { return AfxGetModuleState()->m_lpszCurrentAppName; }
 
-CWinApp* AFXAPI AfxGetApp() { return g_moduleState.m_pCurrentWinApp; }
+CWinApp* AFXAPI AfxGetApp() { return AfxGetModuleState()->m_pCurrentWinApp; }
 
 // ---------------------------------------------------------------------
 // Thread state
@@ -101,17 +120,21 @@ AFX_THREAD_STATE* AFXAPI AfxGetThreadState() {
   return pState;
 }
 
+static void DeleteMaps(_AFX_HANDLE_MAPS* pMaps);
+
 void AFXAPI AfxTermThreadState() {
   if (g_nGlobalsInit != 2) return;
   AFX_THREAD_STATE* pState = (AFX_THREAD_STATE*)::TlsGetValue(g_tlsIndex);
   if (pState == NULL) return;
   if (pState->m_hHookOldCbtFilter != NULL) ::UnhookWindowsHookEx(pState->m_hHookOldCbtFilter);
   if (pState->m_hHookOldMsgFilter != NULL) ::UnhookWindowsHookEx(pState->m_hHookOldMsgFilter);
-  delete pState->m_pmapHWND;
-  delete pState->m_pmapHMENU;
-  delete pState->m_pmapHDC;
-  delete pState->m_pmapHGDIOBJ;
-  delete pState->m_pmapHIMAGELIST;
+  DeleteMaps(&pState->m_maps);
+  while (pState->m_pDllMaps != NULL) {
+    _AFX_DLL_MAPS* p = pState->m_pDllMaps;
+    pState->m_pDllMaps = p->m_pNext;
+    DeleteMaps(p);
+    ::free(p);
+  }
   if (pState->m_pSockState != NULL) pState->m_pfnSockTerm(pState->m_pSockState);
   ::free(pState);
   ::TlsSetValue(g_tlsIndex, NULL);
@@ -195,48 +218,88 @@ void CHandleMap::DeleteTemp() {
   m_temporaryMap.RemoveAll();
 }
 
-CHandleMap* AFXAPI afxMapHWND(BOOL bCreate) {
+_AFX_HANDLE_MAPS* AFXAPI _AfxGetHandleMaps() {
   AFX_THREAD_STATE* pState = AfxGetThreadState();
-  if (pState->m_pmapHWND == NULL && bCreate)
-    pState->m_pmapHWND = new CHandleMap(RUNTIME_CLASS(CWnd), offsetof(CWnd, m_hWnd));
-  return pState->m_pmapHWND;
+  AFX_MODULE_STATE* pModuleState = pState->m_pModuleState;
+  if (pModuleState == NULL) return &pState->m_maps;
+  for (_AFX_DLL_MAPS* p = pState->m_pDllMaps; p != NULL; p = p->m_pNext)
+    if (p->m_pModuleState == pModuleState) return p;
+  _AFX_DLL_MAPS* p = (_AFX_DLL_MAPS*)::calloc(1, sizeof(_AFX_DLL_MAPS));
+  if (p == NULL) AfxThrowMemoryException();
+  p->m_pModuleState = pModuleState;
+  p->m_pNext = pState->m_pDllMaps;
+  pState->m_pDllMaps = p;
+  return p;
+}
+
+static void DeleteMaps(_AFX_HANDLE_MAPS* pMaps) {
+  delete pMaps->m_pmapHWND;
+  delete pMaps->m_pmapHMENU;
+  delete pMaps->m_pmapHDC;
+  delete pMaps->m_pmapHGDIOBJ;
+  delete pMaps->m_pmapHIMAGELIST;
+}
+
+// Windows first: their destructors may touch the other maps.
+static void DeleteTemps(_AFX_HANDLE_MAPS* pMaps) {
+  if (pMaps->m_pmapHWND != NULL) pMaps->m_pmapHWND->DeleteTemp();
+  if (pMaps->m_pmapHMENU != NULL) pMaps->m_pmapHMENU->DeleteTemp();
+  if (pMaps->m_pmapHDC != NULL) pMaps->m_pmapHDC->DeleteTemp();
+  if (pMaps->m_pmapHGDIOBJ != NULL) pMaps->m_pmapHGDIOBJ->DeleteTemp();
+  if (pMaps->m_pmapHIMAGELIST != NULL) pMaps->m_pmapHIMAGELIST->DeleteTemp();
+}
+
+void AFXAPI _AfxTermModuleMaps(AFX_MODULE_STATE* pModuleState) {
+  if (g_nGlobalsInit != 2) return;
+  AFX_THREAD_STATE* pState = (AFX_THREAD_STATE*)::TlsGetValue(g_tlsIndex);
+  if (pState == NULL) return;
+  for (_AFX_DLL_MAPS** pp = &pState->m_pDllMaps; *pp != NULL; pp = &(*pp)->m_pNext) {
+    _AFX_DLL_MAPS* p = *pp;
+    if (p->m_pModuleState != pModuleState) continue;
+    *pp = p->m_pNext;
+    DeleteTemps(p);
+    DeleteMaps(p);
+    ::free(p);
+    return;
+  }
+}
+
+CHandleMap* AFXAPI afxMapHWND(BOOL bCreate) {
+  _AFX_HANDLE_MAPS* pMaps = _AfxGetHandleMaps();
+  if (pMaps->m_pmapHWND == NULL && bCreate)
+    pMaps->m_pmapHWND = new CHandleMap(RUNTIME_CLASS(CWnd), offsetof(CWnd, m_hWnd));
+  return pMaps->m_pmapHWND;
 }
 
 CHandleMap* AFXAPI afxMapHMENU(BOOL bCreate) {
-  AFX_THREAD_STATE* pState = AfxGetThreadState();
-  if (pState->m_pmapHMENU == NULL && bCreate)
-    pState->m_pmapHMENU = new CHandleMap(RUNTIME_CLASS(CMenu), offsetof(CMenu, m_hMenu));
-  return pState->m_pmapHMENU;
+  _AFX_HANDLE_MAPS* pMaps = _AfxGetHandleMaps();
+  if (pMaps->m_pmapHMENU == NULL && bCreate)
+    pMaps->m_pmapHMENU = new CHandleMap(RUNTIME_CLASS(CMenu), offsetof(CMenu, m_hMenu));
+  return pMaps->m_pmapHMENU;
 }
 
 CHandleMap* AFXAPI afxMapHDC(BOOL bCreate) {
-  AFX_THREAD_STATE* pState = AfxGetThreadState();
-  if (pState->m_pmapHDC == NULL && bCreate)
-    pState->m_pmapHDC = new CHandleMap(RUNTIME_CLASS(CDC), offsetof(CDC, m_hDC), 2);
-  return pState->m_pmapHDC;
+  _AFX_HANDLE_MAPS* pMaps = _AfxGetHandleMaps();
+  if (pMaps->m_pmapHDC == NULL && bCreate)
+    pMaps->m_pmapHDC = new CHandleMap(RUNTIME_CLASS(CDC), offsetof(CDC, m_hDC), 2);
+  return pMaps->m_pmapHDC;
 }
 
 CHandleMap* AFXAPI afxMapHGDIOBJ(BOOL bCreate) {
-  AFX_THREAD_STATE* pState = AfxGetThreadState();
-  if (pState->m_pmapHGDIOBJ == NULL && bCreate)
-    pState->m_pmapHGDIOBJ =
+  _AFX_HANDLE_MAPS* pMaps = _AfxGetHandleMaps();
+  if (pMaps->m_pmapHGDIOBJ == NULL && bCreate)
+    pMaps->m_pmapHGDIOBJ =
         new CHandleMap(RUNTIME_CLASS(CGdiObject), offsetof(CGdiObject, m_hObject));
-  return pState->m_pmapHGDIOBJ;
+  return pMaps->m_pmapHGDIOBJ;
 }
 
 void AFXAPI AfxLockTempMaps() { ++AfxGetThreadState()->m_nTempMapLock; }
 
 BOOL AFXAPI AfxUnlockTempMaps(BOOL bDeleteTemps) {
   AFX_THREAD_STATE* pState = AfxGetThreadState();
-  if (pState->m_nTempMapLock != 0 && --pState->m_nTempMapLock == 0) {
-    if (bDeleteTemps) {
-      // Windows first: their destructors may touch the other maps.
-      if (pState->m_pmapHWND != NULL) pState->m_pmapHWND->DeleteTemp();
-      if (pState->m_pmapHMENU != NULL) pState->m_pmapHMENU->DeleteTemp();
-      if (pState->m_pmapHDC != NULL) pState->m_pmapHDC->DeleteTemp();
-      if (pState->m_pmapHGDIOBJ != NULL) pState->m_pmapHGDIOBJ->DeleteTemp();
-      if (pState->m_pmapHIMAGELIST != NULL) pState->m_pmapHIMAGELIST->DeleteTemp();
-    }
+  if (pState->m_nTempMapLock != 0 && --pState->m_nTempMapLock == 0 && bDeleteTemps) {
+    DeleteTemps(&pState->m_maps);
+    for (_AFX_DLL_MAPS* p = pState->m_pDllMaps; p != NULL; p = p->m_pNext) DeleteTemps(p);
   }
   return pState->m_nTempMapLock != 0;
 }
