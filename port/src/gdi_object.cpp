@@ -398,6 +398,8 @@ void DibRowToPixels(const DibFormat& f, const BYTE* row, DWORD* out, int count) 
         const BYTE* b = row + 4 * x;
         DWORD v = b[0] | ((DWORD)b[1] << 8) | ((DWORD)b[2] << 16) | ((DWORD)b[3] << 24);
         p = ((DWORD)Field(v, f.masks[0]) << 16) | ((DWORD)Field(v, f.masks[1]) << 8) | Field(v, f.masks[2]);
+        // The byte the color masks leave is alpha, and goes along.
+        if (!((f.masks[0] | f.masks[1] | f.masks[2]) & 0xFF000000)) p |= v & 0xFF000000;
         break;
       }
     }
@@ -438,6 +440,7 @@ void PixelsToDibRow(const DibFormat& f, const DWORD* in, BYTE* row, int count) {
         row[2 * x] = (BYTE)v;
         row[2 * x + 1] = (BYTE)(v >> 8);
       } else {
+        if (!((f.masks[0] | f.masks[1] | f.masks[2]) & 0xFF000000)) v |= in[x] & 0xFF000000;
         BYTE* o = row + 4 * x;
         o[0] = (BYTE)v;
         o[1] = (BYTE)(v >> 8);

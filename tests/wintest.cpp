@@ -5,12 +5,13 @@
 // device contexts, bitmaps and DIBs, raster operations, regions,
 // clipping, mapping modes and scrolling, lines, shapes, paths and
 // text, icons, accelerators and menus, dialogs and the standard
-// controls, MDI; and a CWnd with a message map
+// controls, MDI, image lists; and a CWnd with a message map
 // on top.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include <afxwin.h>
+#include <commctrl.h>
 #include <stdio.h>
 #include <string.h>
 #include <string>
@@ -1378,6 +1379,85 @@ static void TestMdi() {
   g_mdiClient = NULL;
 }
 
+// ---------------------------------------------------------------------
+// Image lists.
+
+static void TestImageLists() {
+  HDC screen = ::GetDC(NULL);
+  HDC mem = ::CreateCompatibleDC(screen);
+  // Two 8x8 images: a red square and a blue one, each on magenta with a
+  // 2-pixel border.
+  HBITMAP strip = ::CreateCompatibleBitmap(screen, 16, 8);
+  HGDIOBJ old = ::SelectObject(mem, strip);
+  RECT r = {0, 0, 16, 8};
+  HBRUSH magenta = ::CreateSolidBrush(RGB(255, 0, 255)), red = ::CreateSolidBrush(RGB(255, 0, 0)),
+         blue = ::CreateSolidBrush(RGB(0, 0, 255));
+  ::FillRect(mem, &r, magenta);
+  RECT a = {2, 2, 6, 6}, b = {10, 2, 14, 6};
+  ::FillRect(mem, &a, red);
+  ::FillRect(mem, &b, blue);
+  ::SelectObject(mem, old);
+
+  HIMAGELIST il = ImageList_Create(8, 8, ILC_MASK | ILC_COLOR24, 2, 2);
+  CHECK(il && ImageList_GetImageCount(il) == 0);
+  CHECK(ImageList_AddMasked(il, strip, RGB(255, 0, 255)) == 0);
+  CHECK(ImageList_GetImageCount(il) == 2);
+  int cx = 0, cy = 0;
+  CHECK(ImageList_GetIconSize(il, &cx, &cy) && cx == 8 && cy == 8);
+
+  // Drawn transparently on white, and over a background color.
+  HBITMAP canvas = ::CreateCompatibleBitmap(screen, 32, 8);
+  old = ::SelectObject(mem, canvas);
+  RECT all = {0, 0, 32, 8};
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  CHECK(ImageList_Draw(il, 0, mem, 0, 0, ILD_TRANSPARENT));
+  CHECK(::GetPixel(mem, 3, 3) == RGB(255, 0, 0) && ::GetPixel(mem, 0, 0) == RGB(255, 255, 255));
+  CHECK(ImageList_DrawEx(il, 1, mem, 8, 0, 0, 0, RGB(0, 255, 0), CLR_NONE, ILD_NORMAL));
+  CHECK(::GetPixel(mem, 11, 3) == RGB(0, 0, 255) && ::GetPixel(mem, 8, 0) == RGB(0, 255, 0));
+  // The mask alone, and a blend toward the highlight color.
+  CHECK(ImageList_Draw(il, 0, mem, 16, 0, ILD_MASK));
+  CHECK(::GetPixel(mem, 19, 3) == RGB(0, 0, 0) && ::GetPixel(mem, 16, 0) == RGB(255, 255, 255));
+  ImageList_DrawEx(il, 0, mem, 24, 0, 0, 0, CLR_NONE, RGB(0, 0, 255), ILD_BLEND50);
+  COLORREF mixed = ::GetPixel(mem, 27, 3);
+  CHECK(GetRValue(mixed) > 100 && GetRValue(mixed) < 155 && GetBValue(mixed) > 100);
+  // An overlay drawn on top.
+  CHECK(ImageList_SetOverlayImage(il, 1, 1));
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  ImageList_Draw(il, 0, mem, 0, 0, ILD_TRANSPARENT | INDEXTOOVERLAYMASK(1));
+  CHECK(::GetPixel(mem, 3, 3) == RGB(0, 0, 255));
+  ::SelectObject(mem, old);
+
+  // Icons in and out.
+  HICON icon = ImageList_GetIcon(il, 0, ILD_NORMAL);
+  CHECK(icon != NULL);
+  CHECK(ImageList_AddIcon(il, icon) == 2);
+  ::SelectObject(mem, canvas);
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  ImageList_Draw(il, 2, mem, 0, 0, ILD_TRANSPARENT);
+  CHECK(::GetPixel(mem, 3, 3) == RGB(255, 0, 0) && ::GetPixel(mem, 0, 0) == RGB(255, 255, 255));
+  ::SelectObject(mem, old);
+  ::DestroyIcon(icon);
+
+  IMAGEINFO info;
+  CHECK(ImageList_GetImageInfo(il, 1, &info) && info.hbmImage && info.hbmMask && info.rcImage.left == 8);
+  HIMAGELIST copy = ImageList_Duplicate(il);
+  CHECK(ImageList_GetImageCount(copy) == 3);
+  HIMAGELIST merged = ImageList_Merge(il, 0, il, 1, 4, 0);
+  CHECK(merged && ImageList_GetIconSize(merged, &cx, &cy) && cx == 12 && cy == 8);
+  CHECK(ImageList_Remove(il, 0) && ImageList_GetImageCount(il) == 2);
+  CHECK(ImageList_RemoveAll(il) && ImageList_GetImageCount(il) == 0);
+  CHECK(ImageList_Destroy(il) && ImageList_Destroy(copy) && ImageList_Destroy(merged));
+  CHECK(!ImageList_Destroy(il));
+
+  ::DeleteObject(strip);
+  ::DeleteObject(canvas);
+  ::DeleteObject(magenta);
+  ::DeleteObject(red);
+  ::DeleteObject(blue);
+  ::DeleteDC(mem);
+  ::ReleaseDC(NULL, screen);
+}
+
 // A CWnd with a message map
 
 class CTestWnd : public CWnd {
@@ -1460,6 +1540,7 @@ int main() {
   TestMenus();
   TestDialogsAndControls();
   TestMdi();
+  TestImageLists();
   TestCWnd();
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;

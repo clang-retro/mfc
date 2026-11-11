@@ -61,6 +61,12 @@ HBITMAP CopyBitmap(HBITMAP src) {
     bi.bmiHeader.biBitCount = 32;
     void* bits;
     dst = CreateDIBSection(NULL, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+    // A 32-bit source keeps its alpha, which BitBlt would drop.
+    if (dst && bm.bmBitsPixel == 32 && GetDIBits(sdc, src, 0, bm.bmHeight, bits, &bi, DIB_RGB_COLORS)) {
+      DeleteDC(sdc);
+      DeleteDC(ddc);
+      return dst;
+    }
   }
   HGDIOBJ o1 = SelectObject(sdc, src), o2 = SelectObject(ddc, dst);
   BitBlt(ddc, 0, 0, bm.bmWidth, bm.bmHeight, sdc, 0, 0, SRCCOPY);

@@ -43,14 +43,6 @@ GetOpenFileNameW
 GetRunningObjectTable
 GetSaveFileNameA
 GetSaveFileNameW
-ImageList_Create
-ImageList_Destroy
-ImageList_Duplicate
-ImageList_LoadImageA
-ImageList_LoadImageW
-ImageList_Merge
-ImageList_Read
-ImageList_Write
 InitCommonControls
 LoadTypeLib
 OleCreate
