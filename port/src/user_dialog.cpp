@@ -108,6 +108,7 @@ struct DlgTemplate {
   BYTE italic = 0, charset = DEFAULT_CHARSET;
   std::wstring face;
   std::vector<ItemTemplate> items;
+  size_t size = 0;  // the template's length in bytes
 };
 
 const WORD* ReadSzOrOrd(const WORD* p, std::wstring* s, WORD* ord) {
@@ -209,6 +210,7 @@ DlgTemplate Parse(const void* tmpl) {
     }
     t.items.push_back(it);
   }
+  t.size = (size_t)((const BYTE*)p - (const BYTE*)tmpl);
   return t;
 }
 
@@ -468,6 +470,8 @@ static LRESULT DefDlgCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) 
 }
 
 namespace winport {
+
+size_t DialogTemplateSize(const void* tmpl) { return tmpl ? Parse(tmpl).size : 0; }
 
 void RegisterDialogClass() {
   static bool done = false;

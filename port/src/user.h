@@ -206,6 +206,7 @@ void ClickScrollBar(Window* w, ScrollBar* sb, RECT r, bool vertical, POINT scree
 // SC_KEYMENU and SC_MOUSEMENU, and a window's menus when it goes.
 void RegisterMenuClass();
 void RegisterDialogClass();  // user_dialog.cpp
+size_t DialogTemplateSize(const void* tmpl);  // the bytes a dialog template takes
 void RegisterButtonClasses();  // user_button.cpp: Button, Static, ScrollBar
 void RegisterEditClass();  // user_edit.cpp
 void RegisterListClasses();  // user_listbox.cpp: ListBox, ComboLBox, ComboBox

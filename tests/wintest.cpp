@@ -5,8 +5,8 @@
 // device contexts, bitmaps and DIBs, raster operations, regions,
 // clipping, mapping modes and scrolling, lines, shapes, paths and
 // text, icons, accelerators and menus, dialogs and the standard
-// controls, MDI, image lists, the common controls, the list view and
-// the tree view;
+// controls, MDI, image lists, the common controls, the list view, the
+// tree view and property sheets;
 // and a CWnd with a message map
 // on top.
 //
@@ -14,6 +14,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include <afxwin.h>
 #include <commctrl.h>
+#include <prsht.h>
 #include <stdio.h>
 #include <string.h>
 #include <string>
@@ -1962,6 +1963,109 @@ static void TestTreeView() {
   ::DestroyWindow(host);
 }
 
+// A wizard page that records what the sheet tells it and can refuse to
+// be left.
+static std::vector<UINT> g_pageCodes;
+static bool g_pageRefuses = false;
+static INT_PTR CALLBACK WizPageProc(HWND h, UINT msg, WPARAM, LPARAM lp) {
+  if (msg == WM_NOTIFY) {
+    NMHDR* nm = (NMHDR*)lp;
+    g_pageCodes.push_back(nm->code);
+    LRESULT r = 0;
+    if (nm->code == PSN_SETACTIVE) ::PostMessageW(::GetParent(h), PSM_SETWIZBUTTONS, 0, PSWIZB_BACK | PSWIZB_NEXT);
+    if (nm->code == PSN_KILLACTIVE && g_pageRefuses) r = TRUE;
+    ::SetWindowLongPtrW(h, DWLP_MSGRESULT, r);
+    return TRUE;
+  }
+  return FALSE;
+}
+
+static bool PageCode(UINT code) {
+  for (UINT c : g_pageCodes)
+    if (c == code) return true;
+  return false;
+}
+
+static void TestPropertySheets() {
+  DlgBuilder one(WS_CHILD | WS_CAPTION, 180, 80, "One");
+  one.Item(0x0081, ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 7, 7, 100, 12, 100, "");
+  DlgBuilder two(WS_CHILD | WS_CAPTION, 200, 90, "Two");
+  two.Item(0x0080, BS_AUTOCHECKBOX | WS_TABSTOP, 7, 7, 80, 10, 101, "Check");
+  PROPSHEETPAGEW pages[2] = {};
+  for (int i = 0; i < 2; i++) {
+    pages[i].dwSize = sizeof(PROPSHEETPAGEW);
+    pages[i].dwFlags = PSP_DLGINDIRECT;
+    pages[i].pResource = (LPCDLGTEMPLATE)(i ? two.Get() : one.Get());
+    pages[i].pfnDlgProc = WizPageProc;
+  }
+  HPROPSHEETPAGE extra = ::CreatePropertySheetPageW(&pages[1]);
+  CHECK(extra != NULL);
+
+  // A modeless property sheet: tabs, pages and the Apply button.
+  PROPSHEETHEADERW psh = {};
+  psh.dwSize = sizeof psh;
+  psh.dwFlags = PSH_PROPSHEETPAGE | PSH_MODELESS;
+  psh.hInstance = ::GetModuleHandleW(NULL);
+  psh.pszCaption = L"Sheet";
+  psh.nPages = 2;
+  psh.ppsp = pages;
+  g_pageCodes.clear();
+  HWND sheet = (HWND)::PropertySheetW(&psh);
+  CHECK(sheet != NULL && ::IsWindow(sheet));
+  wchar_t title[64] = L"";
+  ::GetWindowTextW(sheet, title, 64);
+  CHECK(wcscmp(title, L"Sheet") == 0);
+  HWND tab = (HWND)::SendMessageW(sheet, PSM_GETTABCONTROL, 0, 0);
+  CHECK(tab && ::SendMessageW(tab, TCM_GETITEMCOUNT, 0, 0) == 2);
+  HWND page0 = (HWND)::SendMessageW(sheet, PSM_GETCURRENTPAGEHWND, 0, 0);
+  CHECK(page0 && ::GetParent(page0) == sheet && ::GetDlgItem(page0, 100) && PageCode(PSN_SETACTIVE));
+  CHECK(::GetWindowLongW(page0, GWL_STYLE) & WS_CHILD);
+  HWND apply = ::GetDlgItem(sheet, 0x3021);
+  CHECK(apply && !::IsWindowEnabled(apply));
+  ::SendMessageW(sheet, PSM_CHANGED, (WPARAM)page0, 0);
+  CHECK(::IsWindowEnabled(apply));
+  // A page can keep the focus.
+  g_pageRefuses = true;
+  CHECK(!::SendMessageW(sheet, PSM_SETCURSEL, 1, 0));
+  g_pageRefuses = false;
+  g_pageCodes.clear();
+  CHECK(::SendMessageW(sheet, PSM_SETCURSEL, 1, 0));
+  CHECK(PageCode(PSN_KILLACTIVE) && PageCode(PSN_SETACTIVE));
+  CHECK(::SendMessageW(tab, TCM_GETCURSEL, 0, 0) == 1);
+  CHECK(::SendMessageW(sheet, PSM_ADDPAGE, 0, (LPARAM)extra) && ::SendMessageW(tab, TCM_GETITEMCOUNT, 0, 0) == 3);
+  CHECK(::SendMessageW(sheet, PSM_INDEXTOPAGE, 2, 0) == (LRESULT)extra);
+  g_pageCodes.clear();
+  ::SendMessageW(sheet, PSM_PRESSBUTTON, PSBTN_APPLYNOW, 0);
+  CHECK(PageCode(PSN_APPLY) && !::IsWindowEnabled(apply));
+  g_pageCodes.clear();
+  ::SendMessageW(sheet, PSM_PRESSBUTTON, PSBTN_OK, 0);
+  CHECK(PageCode(PSN_APPLY) && ::SendMessageW(sheet, PSM_GETCURRENTPAGEHWND, 0, 0) == 0);
+  ::DestroyWindow(sheet);
+
+  // A wizard: Next and Back move through the pages.
+  psh.dwFlags = PSH_PROPSHEETPAGE | PSH_MODELESS | PSH_WIZARD;
+  g_pageCodes.clear();
+  sheet = (HWND)::PropertySheetW(&psh);
+  CHECK(sheet != NULL);
+  Pump();
+  HWND next = ::GetDlgItem(sheet, 0x3024), back = ::GetDlgItem(sheet, 0x3023), fin = ::GetDlgItem(sheet, 0x3025);
+  CHECK(next && back && fin && ::IsWindowEnabled(next) && !(::GetWindowLongW(fin, GWL_STYLE) & WS_VISIBLE));
+  ::SendMessageW(sheet, PSM_PRESSBUTTON, PSBTN_NEXT, 0);
+  CHECK(PageCode(PSN_WIZNEXT));
+  HWND page1 = (HWND)::SendMessageW(sheet, PSM_GETCURRENTPAGEHWND, 0, 0);
+  CHECK(page1 && ::GetDlgItem(page1, 101) && ::SendMessageW(sheet, PSM_HWNDTOINDEX, (WPARAM)page1, 0) == 1);
+  ::SendMessageW(sheet, PSM_SETWIZBUTTONS, 0, PSWIZB_BACK | PSWIZB_FINISH);
+  CHECK((::GetWindowLongW(fin, GWL_STYLE) & WS_VISIBLE) && !(::GetWindowLongW(next, GWL_STYLE) & WS_VISIBLE));
+  ::SendMessageW(sheet, PSM_PRESSBUTTON, PSBTN_BACK, 0);
+  HWND cur = (HWND)::SendMessageW(sheet, PSM_GETCURRENTPAGEHWND, 0, 0);
+  CHECK(PageCode(PSN_WIZBACK) && ::SendMessageW(sheet, PSM_HWNDTOINDEX, (WPARAM)cur, 0) == 0);
+  ::SendMessageW(sheet, PSM_SETWIZBUTTONS, 0, PSWIZB_FINISH);
+  g_pageCodes.clear();
+  ::SendMessageW(sheet, PSM_PRESSBUTTON, PSBTN_FINISH, 0);
+  CHECK(PageCode(PSN_WIZFINISH) && ::SendMessageW(sheet, PSM_GETCURRENTPAGEHWND, 0, 0) == 0);
+  ::DestroyWindow(sheet);
+}
+
 static void TestCWnd() {
   CTestWnd wnd;
   CString cls = AfxRegisterWndClass(CS_HREDRAW | CS_VREDRAW, NULL, (HBRUSH)(COLOR_WINDOW + 1));
@@ -2012,6 +2116,7 @@ int main() {
   TestCommonControls();
   TestListView();
   TestTreeView();
+  TestPropertySheets();
   TestCWnd();
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;
