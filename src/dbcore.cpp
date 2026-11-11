@@ -346,7 +346,7 @@ CRecordset::CRecordset(CDatabase* pDatabase)
     : m_hstmt(SQL_NULL_HSTMT), m_pDatabase(pDatabase), m_nFields(0), m_nParams(0),
       m_nEditMode(noMode), m_nDefaultType(snapshot), m_nOpenType(snapshot), m_dwOptions(none),
       m_nLockMode(optimistic), m_bBOF(TRUE), m_bEOF(TRUE), m_lRecordCount(0), m_nResultCols(0),
-      m_bDatabaseOwned(FALSE), m_nRowBase(0), m_nCurRow(-1), m_bAllFetched(FALSE),
+      m_bDatabaseOwned(FALSE), m_nRowBase(0), m_nCurRow(-1), m_bAllFetched(FALSE), m_bKeyset(FALSE), m_wRowStatus(0),
       m_pEditBackup(NULL) {}
 
 CRecordset::~CRecordset() {
@@ -520,6 +520,21 @@ void CRecordset::ExecuteQuery() {
   if (!Check(rc)) ThrowDBException(rc);
   m_hstmt = hstmt;
   OnSetOptions(m_hstmt);
+  // A dynaset asks for a keyset-driven cursor; with a driver that has
+  // none, it keeps the rows it read, as a snapshot does.
+  m_bKeyset = FALSE;
+  if (m_nOpenType == dynaset || m_nOpenType == dynamic) {
+    SQLULEN nType = SQL_CURSOR_FORWARD_ONLY;
+    if (SQL_SUCCEEDED(::SQLSetStmtAttr(m_hstmt, SQL_ATTR_CURSOR_TYPE,
+                                       (SQLPOINTER)(ULONG_PTR)SQL_CURSOR_KEYSET_DRIVEN, 0)) &&
+        SQL_SUCCEEDED(::SQLGetStmtAttr(m_hstmt, SQL_ATTR_CURSOR_TYPE, &nType, 0, NULL)) &&
+        (nType == SQL_CURSOR_KEYSET_DRIVEN || nType == SQL_CURSOR_DYNAMIC)) {
+      m_wRowStatus = SQL_ROW_SUCCESS;
+      m_bKeyset = SQL_SUCCEEDED(::SQLSetStmtAttr(m_hstmt, SQL_ATTR_ROW_STATUS_PTR, &m_wRowStatus, 0));
+    }
+    if (!m_bKeyset)
+      ::SQLSetStmtAttr(m_hstmt, SQL_ATTR_CURSOR_TYPE, (SQLPOINTER)(ULONG_PTR)SQL_CURSOR_FORWARD_ONLY, 0);
+  }
   if (m_rgParams.GetSize() > 0) {
     rc = ::SQLPrepare(m_hstmt, (SQLTCHAR*)(LPCTSTR)m_strSQL, SQL_NTS);
     if (!Check(rc)) ThrowDBException(rc, m_hstmt);
@@ -586,12 +601,27 @@ BOOL CRecordset::FetchRow() {
     m_bAllFetched = TRUE;
     return FALSE;
   }
-  RETCODE rc = ::SQLFetch(m_hstmt);
+  RETCODE rc = m_bKeyset ? ::SQLFetchScroll(m_hstmt, SQL_FETCH_ABSOLUTE, m_lRecordCount + 1)
+                         : ::SQLFetch(m_hstmt);
   if (rc == SQL_NO_DATA) {
     m_bAllFetched = TRUE;
     return FALSE;
   }
   if (!Check(rc)) ThrowDBException(rc, m_hstmt);
+  _AFX_DB_ROW* pRow = ReadRow();
+  if (m_bKeyset && m_wRowStatus == SQL_ROW_DELETED) pRow->bDeleted = TRUE;
+  if (m_nOpenType == forwardOnly) {
+    m_nRowBase += (long)m_rgRows.GetSize();
+    ClearRows();
+  }
+  m_rgRows.Add(pRow);
+  m_lRecordCount++;
+  return TRUE;
+}
+
+// Reads the fetched row's columns into the field members and a new row.
+_AFX_DB_ROW* CRecordset::ReadRow() {
+  RETCODE rc;
   INT_PTR nFields = m_rgFields.GetSize();
   for (INT_PTR i = 0; i < nFields; i++)
     _AfxGetFieldData(this, m_hstmt, (SQLUSMALLINT)(i + 1), *(_AFX_RFX_FIELD*)m_rgFields[i]);
@@ -621,13 +651,25 @@ BOOL CRecordset::FetchRow() {
       ThrowDBException(rc, m_hstmt);
     }
   }
-  if (m_nOpenType == forwardOnly) {
-    m_nRowBase += (long)m_rgRows.GetSize();
-    ClearRows();
+  return pRow;
+}
+
+// Reads a record of a keyset-driven cursor again, for the values another
+// user (or another recordset) gave it since, or to find it deleted.
+void CRecordset::RefreshRow(long nRow) {
+  if (!m_bKeyset || nRow < m_nRowBase || nRow - m_nRowBase >= m_rgRows.GetSize()) return;
+  _AFX_DB_ROW*& pOld = (_AFX_DB_ROW*&)m_rgRows.ElementAt(nRow - m_nRowBase);
+  if (pOld->bDeleted) return;
+  RETCODE rc = ::SQLFetchScroll(m_hstmt, SQL_FETCH_ABSOLUTE, nRow + 1);
+  if (rc == SQL_NO_DATA || (SQL_SUCCEEDED(rc) && m_wRowStatus == SQL_ROW_DELETED)) {
+    pOld->bDeleted = TRUE;
+    return;
   }
-  m_rgRows.Add(pRow);
-  m_lRecordCount++;
-  return TRUE;
+  if (!Check(rc)) ThrowDBException(rc, m_hstmt);
+  if (m_wRowStatus == SQL_ROW_ERROR || m_wRowStatus == SQL_ROW_NOROW) return;
+  _AFX_DB_ROW* pNew = ReadRow();
+  delete pOld;
+  pOld = pNew;
 }
 
 void CRecordset::LoadRow(long nRow) { RestoreMembers((_AFX_DB_ROW*)m_rgRows[nRow - m_nRowBase]); }
@@ -751,7 +793,10 @@ void CRecordset::Move(long nRows, WORD wFetchType) {
   if (!IsOpen()) ThrowDBException(AFX_SQL_ERROR_NO_CURRENT_RECORD);
   if (m_nEditMode != noMode) CancelUpdate();
   if (nRows == 0 && wFetchType == SQL_FETCH_RELATIVE) {
-    if (m_nCurRow >= 0 && m_nCurRow < m_lRecordCount) LoadRow(m_nCurRow);
+    if (m_nCurRow >= 0 && m_nCurRow < m_lRecordCount) {
+      RefreshRow(m_nCurRow);
+      LoadRow(m_nCurRow);
+    }
     return;
   }
   long nTarget;
@@ -794,6 +839,7 @@ void CRecordset::Move(long nRows, WORD wFetchType) {
     while (nTarget >= m_lRecordCount && !m_bAllFetched && FetchRow()) {
     }
     if (nTarget < 0 || nTarget >= m_lRecordCount) break;
+    RefreshRow(nTarget);
     if (!(m_dwOptions & skipDeletedRecords) || m_nOpenType == forwardOnly) break;
     if (!((_AFX_DB_ROW*)m_rgRows[nTarget - m_nRowBase])->bDeleted) break;
     nTarget += nStep;

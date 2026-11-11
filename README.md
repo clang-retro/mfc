@@ -257,7 +257,8 @@ when there is no display:
   test with: opening, moving, filters, sorts and parameters, nulls,
   adding, editing and deleting records, stored procedures (a result
   set, a return value, output and input/output parameters), transactions,
-  field info and errors, on the console.
+  field info and errors, and a dynaset seeing another connection's
+  changes and deletions where a snapshot does not, on the console.
 * `rvtest`: a CRecordView over the same driver; the form showing the
   current record, edits written back when moving, nulls shown as empty
   fields and indeterminate check boxes, and the record commands enabled
@@ -693,8 +694,11 @@ request with the stock MinGW-w64 toolchain.
 * CRecordset keeps the rows it has fetched and writes changes with
   UPDATE, INSERT and DELETE statements that match the record by the
   values it read, rather than with positioned cursors, so it works with
-  any driver. A dynaset therefore behaves like a snapshot: it does not
-  see other users' changes until Requery. A stored procedure's output
+  any driver. A dynaset (or dynamic recordset) asks the driver for a
+  keyset-driven cursor and reads each record again as it moves to it,
+  so other users' changes and deletions show; records they add show
+  after Requery, in a dynamic recordset too. With a driver that has no
+  keyset-driven cursors, a dynaset behaves like a snapshot. A stored procedure's output
   and input/output parameters (`outputParam`, `inoutParam`) reach
   their members once FlushResultSet has gone past the last result set,
   or as it opens when the procedure has none.
