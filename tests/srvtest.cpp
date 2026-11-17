@@ -297,6 +297,53 @@ static CString ClsidKey(LPCTSTR lpszSub = NULL) {
   return str;
 }
 
+// AfxOleRegisterServerClass with its own lists of entries, and
+// AfxOleRegisterHelper's substitutions and keeping existing values.
+static void TestRegisterServerClass() {
+  static const CLSID clsid = {0x5e1f0a77, 0x1234, 0x4abc, {0x9d, 0x1e, 0x2f, 0x3a, 0x4b, 0x5c, 0x6d, 0x7e}};
+  LPCTSTR pszClsid = _T("{5E1F0A77-1234-4ABC-9D1E-2F3A4B5C6D7E}");
+  CString strKey = CString(_T("CLSID\\")) + pszClsid;
+  static LPCTSTR rglpszRegister[] = {
+      _T("CLSID\\%1\0%5"),
+      _T("%2\\CLSID\0%1"),
+      _T("CLSID\\%1\\Info\0%4|%6|%7|100%%|%8|%9"),
+      _T("CLSID\\%1\\Kept\0new"),
+      NULL,
+  };
+  static LPCTSTR rglpszOverwrite[] = {
+      _T("CLSID\\%1\\Replaced\0new"),
+      NULL,
+  };
+  // Values already there: Kept stays, Replaced is overwritten.
+  ::RegSetValue(HKEY_CLASSES_ROOT, strKey + _T("\\Kept"), REG_SZ, _T("old"), 3);
+  ::RegSetValue(HKEY_CLASSES_ROOT, strKey + _T("\\Replaced"), REG_SZ, _T("old"), 3);
+  CHECK(AfxOleRegisterServerClass(clsid, _T("SrvTest.Other"), _T("Other"), _T("SrvTest Other"),
+                                  OAT_SERVER, rglpszRegister, rglpszOverwrite, 3,
+                                  _T("Other Files"), _T(".oth")));
+  CHECK(RegValue(strKey) == _T("SrvTest Other"));
+  CHECK(RegValue(_T("SrvTest.Other\\CLSID")) == pszClsid);
+  TestLog("Info: %s", (const char*)CStringA(RegValue(strKey + _T("\\Info"))));
+  CHECK(RegValue(strKey + _T("\\Info")) ==
+        CString(_T("Other|")) + AfxGetAppName() + _T("|3|100%|Other Files|.oth"));
+  CHECK(RegValue(strKey + _T("\\Kept")) == _T("old"));
+  CHECK(RegValue(strKey + _T("\\Replaced")) == _T("new"));
+  CHECK(RegValue(strKey + _T("\\LocalServer32")) == _T("<none>"));  // not in the list
+  CHECK(AfxOleUnregisterServerClass(clsid, _T("SrvTest.Other"), NULL, NULL));
+  CHECK(RegValue(strKey) == _T("<none>"));
+  CHECK(RegValue(_T("SrvTest.Other")) == _T("<none>"));
+
+  // The defaults for an automation object.
+  CHECK(AfxOleRegisterServerClass(clsid, _T("SrvTest.Auto"), NULL, _T("SrvTest Auto"),
+                                  OAT_DISPATCH_OBJECT));
+  CHECK(RegValue(_T("SrvTest.Auto\\CLSID")) == pszClsid);
+  CHECK(RegValue(strKey + _T("\\ProgID")) == _T("SrvTest.Auto"));
+  CHECK(RegValue(strKey + _T("\\LocalServer32")).Find(_T(" /Automation")) > 0);
+  CHECK(RegValue(strKey + _T("\\InprocHandler32")) == _T("<none>"));
+  CHECK(RegValue(_T("SrvTest.Auto\\Insertable")) == _T("<none>"));
+  CHECK(AfxOleUnregisterServerClass(clsid, _T("SrvTest.Auto"), NULL, NULL, OAT_DISPATCH_OBJECT));
+  CHECK(RegValue(strKey) == _T("<none>"));
+}
+
 // What the item draws at the middle of a 40 by 20 pixel picture.
 static COLORREF ItemColor(COleClientItem* pItem) {
   CClientDC dcScreen(NULL);
@@ -442,6 +489,7 @@ public:
         CHECK(RegValue(ClsidKey(_T("verb\\0"))) == _T("&Edit,0,2"));
         CHECK(RegValue(ClsidKey(_T("verb\\1"))) == _T("&Open,0,2"));
         CHECK(RegValue(ClsidKey(_T("Insertable"))) != _T("<none>"));
+        TestRegisterServerClass();
 
         // A new object: COM starts the server.
         m_pDoc = new CCntrDoc;

@@ -496,6 +496,8 @@ request with the stock MinGW-w64 toolchain.
   the running object table and IOleItemContainer, Link Source data on
   the clipboard, and links to the objects a container embeds),
   COleTemplateServer (registration, one object per process for SDI),
+  AfxOleRegisterServerClass, AfxOleUnregisterServerClass and
+  AfxOleRegisterHelper (registry entries with %1 to %9 substitutions),
   CWinApp::RegisterShellFileTypes, and the embedded menus of SetServerInfo, with
   `afxolesv.rc` for the Update and Exit menu text. In-place activation
   on both sides: the container's frame takes the object's toolbars and
