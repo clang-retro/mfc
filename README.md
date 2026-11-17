@@ -431,6 +431,14 @@ shared libraries (`SHARED_TESTS`), and runs them directly; `NATIVE_TESTS` names 
   singleton class factory, unloading through DllCanUnloadNow and
   unregistration; and the client's own CComObject, CComObjectStack and
   CComEnum.
+* `atlwintest`: ATL's windows without MFC: a CWindowImpl frame with its
+  own window class and traits, its message map (MESSAGE_, COMMAND_ and
+  NOTIFY_ handlers, a range, bHandled set to FALSE, a chained map,
+  GetCurrentMessage) and OnFinalMessage; a CContainedWindow edit control
+  on an alternate map of its parent; a superclassed button whose
+  notifications its parent reflects; SubclassWindow and
+  UnsubclassWindow; CWindow's wrappers; CDialogImpl, modal and
+  modeless, and CSimpleDialog.
 * `ctltest`: writing a control with COleControl, the test being both
   its server and its container: stock and custom properties, a method,
   stock and custom events, verbs from its message map (ON_OLEVERB,
@@ -646,6 +654,15 @@ request with the stock MinGW-w64 toolchain.
   CComDynamicUnkArray and CComUnkArray; CComEnum and CComEnumOnSTL with
   the _Copy policies; IObjectWithSiteImpl and IObjectSafetyImpl.
   `atlimpl.cpp` is there, empty, for the ATL 3 programs that include it.
+* ATL's windows (`atlwin.h`): CWindow and its wrappers; message maps
+  (BEGIN_MSG_MAP, ALT_MSG_MAP, the MESSAGE_, COMMAND_ and NOTIFY_
+  handlers and their ranges, CHAIN_MSG_MAP and its forms, the
+  REFLECTED_ handlers, REFLECT_NOTIFICATIONS, FORWARD_NOTIFICATIONS,
+  DEFAULT_REFLECTION_HANDLER); CWindowImpl over its own window class
+  (DECLARE_WND_CLASS, DECLARE_WND_CLASS_EX) or a superclass
+  (DECLARE_WND_SUPERCLASS), with the window procedure thunks of x86 and
+  x86-64, SubclassWindow and OnFinalMessage; the CWinTraits styles;
+  CContainedWindow; CDialogImpl and CSimpleDialog.
 
 ## Differences from Visual C++ MFC
 
