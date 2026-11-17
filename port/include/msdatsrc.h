@@ -22,8 +22,8 @@ interface DataSourceListener : public IUnknown {
 
 interface DataSource : public IUnknown {
   STDMETHOD(getDataMember)(DataMember bstrDM, REFIID riid, IUnknown** ppunk) = 0;
-  STDMETHOD(getDataMemberName)(LONG lIndex, DataMember* pbstrDM) = 0;
-  STDMETHOD(getDataMemberCount)(LONG* plCount) = 0;
+  STDMETHOD(getDataMemberName)(long lIndex, DataMember* pbstrDM) = 0;
+  STDMETHOD(getDataMemberCount)(long* plCount) = 0;
   STDMETHOD(addDataSourceListener)(DataSourceListener* pDSL) = 0;
   STDMETHOD(removeDataSourceListener)(DataSourceListener* pDSL) = 0;
 };

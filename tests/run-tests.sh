@@ -33,7 +33,7 @@ case "$TARGET" in
   *) NATIVE=0 ;;
 esac
 if [ $NATIVE = 1 ]; then
-  TESTS=${NATIVE_TESTS:-"core memtest wintest disptest isapitest dlgtest sditest mditest cmntest splittest docktest dbtest rvtest socktest occtest dlltest inettest"}
+  TESTS=${NATIVE_TESTS:-"core memtest wintest disptest isapitest dlgtest sditest mditest cmntest splittest docktest dbtest rvtest socktest occtest dlltest inettest oletest iptest docobtest linktest bindtest"}
   T=$OUT/tests
   mkdir -p "$T/a" "$T/u"
   python3 tests/gen-toolbar-bmp.py "$T/toolbar.bmp" 6 || exit 1
@@ -166,7 +166,7 @@ if [ $NATIVE = 1 ]; then
     # The tests that close their own message boxes want them as windows.
     box=
     case $name in rvtest) box=window ;; esac
-    export WINPORT_MESSAGEBOX=$box MFC_TEST_OUT="$outdir" WINPORT_BACKEND=${WINPORT_BACKEND:-headless}
+    export WINPORT_MESSAGEBOX=$box MFC_TEST_OUT="$(cd "$outdir" && pwd)" WINPORT_BACKEND=${WINPORT_BACKEND:-headless}
     export WINPORT_REGISTRY="$outdir/registry.reg"
     if run_limited "$outdir/$name.log" "$exe"; then
       echo "PASS   $label-$v"; npass=$((npass + 1))
