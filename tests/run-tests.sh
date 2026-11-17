@@ -37,7 +37,15 @@ if [ $NATIVE = 1 ]; then
   T=$OUT/tests
   mkdir -p "$T/a" "$T/u"
   python3 tests/gen-toolbar-bmp.py "$T/toolbar.bmp" 6 || exit 1
+  # llvm-rc compiles the tests' resources. Without BIN, the one on the
+  # PATH, or else one that came with an LLVM installed beside the system
+  # compiler (Debian's /usr/lib/llvm-N, Homebrew's llvm).
   RC_NATIVE=${BIN:+$BIN/}llvm-rc
+  if [ -z "$BIN" ] && ! command -v llvm-rc >/dev/null 2>&1; then
+    for rc in /usr/lib/llvm-*/bin/llvm-rc /opt/homebrew/opt/llvm*/bin/llvm-rc /usr/local/opt/llvm*/bin/llvm-rc; do
+      [ -x "$rc" ] && RC_NATIVE=$rc
+    done
+  fi
   CXXFLAGS="--target=$TARGET ${SYSROOT:+--sysroot=$SYSROOT} ${STDLIB--stdlib=libc++} -std=c++17"
   CXXFLAGS="$CXXFLAGS -Wall -Wno-unused-function -Wno-overloaded-virtual -Wno-missing-exception-spec"
   CXXFLAGS="$CXXFLAGS -Iport/include -Iinclude -Itests"
