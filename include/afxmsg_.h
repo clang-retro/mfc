@@ -96,10 +96,15 @@ protected: \
 
 // Handler names. Visual C++ 6 code writes them as plain names
 // (OnAppAbout, CWinApp::OnFileNew); Visual C++ 2005 and later code writes
-// member pointers (&CMyApp::OnAppAbout). Standard C++ has no single
-// expression that accepts both, so the second form needs
-// _AFX_MSGMAP_MEMBER_POINTERS defined before afxwin.h is included.
-#ifdef _AFX_MSGMAP_MEMBER_POINTERS
+// member pointers (&CMyApp::OnAppAbout). clang-retro's compiler takes
+// both (see _AFX_PMF in afx.h). Other compilers take plain names, or,
+// with _AFX_MSGMAP_MEMBER_POINTERS defined before afxwin.h, member
+// pointers.
+#if defined(__starts_with_ampersand) && !defined(_AFX_MSGMAP_MEMBER_POINTERS)
+#define _AFX_CALL(memberFxn) _AFX_PMF_CAT(_AFX_CALL_, __starts_with_ampersand(memberFxn))(memberFxn)
+#define _AFX_CALL_0(memberFxn) _AFX_THIS->memberFxn
+#define _AFX_CALL_1(memberFxn) (_AFX_THIS->*memberFxn)
+#elif defined(_AFX_MSGMAP_MEMBER_POINTERS)
 #define _AFX_CALL(memberFxn) (_AFX_THIS->*memberFxn)
 #else
 #define _AFX_CALL(memberFxn) _AFX_THIS->memberFxn

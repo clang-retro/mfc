@@ -319,7 +319,7 @@ public:                               \
   }
 
 #define _AFX_DHTML_HANDLER(memberFxn) \
-  static_cast<DHEVTFUNC>(static_cast<HRESULT (theClass::*)(IHTMLElement*)>(&theClass::memberFxn))
+  static_cast<DHEVTFUNC>(static_cast<HRESULT (theClass::*)(IHTMLElement*)>(_AFX_PMF(theClass, memberFxn)))
 #define DHTML_EVENT(dispid, elemName, memberFxn) \
   {DHTMLEVENTMAPENTRY_NAME, (DISPID)(dispid), elemName, _AFX_DHTML_HANDLER(memberFxn)},
 #define DHTML_EVENT_CLASS(dispid, elemName, memberFxn) \
@@ -333,7 +333,7 @@ public:                               \
 // VARIANT_BOOL* to write back...), and may be __stdcall.
 #define DHTML_EVENT_AXCONTROL(dispid, controlName, memberFxn)                  \
   {DHTMLEVENTMAPENTRY_CONTROL, (DISPID)(dispid), controlName, (DHEVTFUNC)NULL, \
-   &_AfxDHtmlAx<&theClass::memberFxn>::Invoke},
+   &_AfxDHtmlAx<_AFX_PMF(theClass, memberFxn)>::Invoke},
 
 // The events by name; an element of NULL is the document.
 #define DHTML_EVENT_ONHELP(elemName, memberFxn) DHTML_EVENT(DISPID_HTMLELEMENTEVENTS2_ONHELP, elemName, memberFxn)
@@ -1044,10 +1044,10 @@ public:                                         \
   {(UINT)(cmdID), (long)(dhtmlcmdID), (UINT)(elemType), (AFX_DHTMLEDITCMDFUNC)NULL},
 #define DHTMLEDITING_CMD_ENTRY_FUNC(cmdID, dhtmlcmdID, member_func) \
   {(UINT)(cmdID), (long)(dhtmlcmdID), AFX_UI_ELEMTYPE_NORMAL,         \
-   &_AfxDHtmlEditCmd<&theClass::member_func>::Call},
+   &_AfxDHtmlEditCmd<_AFX_PMF(theClass, member_func)>::Call},
 #define DHTMLEDITING_CMD_ENTRY_FUNC_TYPE(cmdID, dhtmlcmdID, member_func, elemType) \
   {(UINT)(cmdID), (long)(dhtmlcmdID), (UINT)(elemType),                            \
-   &_AfxDHtmlEditCmd<&theClass::member_func>::Call},
+   &_AfxDHtmlEditCmd<_AFX_PMF(theClass, member_func)>::Call},
 #define END_DHTMLEDITING_CMDMAP()                         \
   {0, 0, 0, (AFX_DHTMLEDITCMDFUNC)NULL}};                 \
   return _dhtmlEditingEntries;                            \

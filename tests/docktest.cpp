@@ -352,9 +352,18 @@ IMPLEMENT_DYNCREATE(CMainFrame, CFrameWnd)
 BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
   ON_WM_CREATE()
   ON_WM_TIMER()
+#ifdef __starts_with_ampersand
+  // clang-retro's compiler takes handlers named either way: as member
+  // pointers, as Visual C++ 2005 and later code writes them, and as
+  // plain names, as Visual C++ 6 code does.
+  ON_COMMAND(ID_TOOL_A, &CMainFrame::OnToolA)
+  ON_UPDATE_COMMAND_UI(ID_TOOL_B, OnUpdateToolB)
+  ON_COMMAND_RANGE(ID_TOOL_C, ID_TOOL_F, &CMainFrame::OnTool)
+#else
   ON_COMMAND(ID_TOOL_A, OnToolA)
   ON_UPDATE_COMMAND_UI(ID_TOOL_B, OnUpdateToolB)
   ON_COMMAND_RANGE(ID_TOOL_C, ID_TOOL_F, OnTool)
+#endif
 END_MESSAGE_MAP()
 
 class CDockApp : public CWinApp {

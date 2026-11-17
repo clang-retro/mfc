@@ -102,7 +102,11 @@ BEGIN_DISPATCH_MAP(CCalc, CCmdTarget)
   DISP_PROPERTY_EX(CCalc, "Total", GetTotal, SetTotal, VT_R8)
   DISP_PROPERTY_PARAM(CCalc, "Item", GetItem, SetItem, VT_R8, VTS_I2)
   DISP_FUNCTION(CCalc, "Add", Add, VT_I4, VTS_I4 VTS_I4)
+#ifdef __starts_with_ampersand  // either form of the name (see docktest)
+  DISP_FUNCTION(CCalc, "Concat", &CCalc::Concat, VT_BSTR, VTS_BSTR VTS_BSTR)
+#else
   DISP_FUNCTION(CCalc, "Concat", Concat, VT_BSTR, VTS_BSTR VTS_BSTR)
+#endif
   DISP_FUNCTION(CCalc, "Scale", Scale, VT_R8, VTS_R8 VTS_I2)
   DISP_FUNCTION(CCalc, "Not", Not, VT_BOOL, VTS_BOOL)
   DISP_FUNCTION(CCalc, "Swap", Swap, VT_EMPTY, VTS_PI4 VTS_PI4)

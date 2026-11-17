@@ -84,6 +84,15 @@ struct Table {
   std::string name;
   std::vector<Column> cols;
   std::vector<std::vector<Value>> rows;
+  // Each row's identity, which a keyset cursor keeps (rows a test puts
+  // in the table directly get theirs when a statement first uses it).
+  std::vector<long> ids;
+  long nextId = 1;
+  void SyncIds() {
+    if (ids.size() == rows.size()) return;
+    ids.clear();
+    for (size_t i = 0; i < rows.size(); i++) ids.push_back(nextId++);
+  }
   int Find(const std::string& col) const {
     for (size_t i = 0; i < cols.size(); i++)
       if (strcasecmp(cols[i].name.c_str(), col.c_str()) == 0) return (int)i;
@@ -97,6 +106,7 @@ struct State {
   std::vector<Table> saved;      // the tables when a transaction began
   bool inTransaction = false;
   bool readOnly = false;
+  bool noKeyset = false;         // the driver has only forward-only and static cursors
   int nOpenStatements = 0;
   Table* Find(const std::string& name) {
     for (auto& t : tables)
@@ -159,6 +169,13 @@ struct Stmt {
   std::vector<Column> resultCols;
   std::vector<std::vector<Value>> result;
   long cur = -1;
+  // A keyset-driven cursor: the identities of the result's rows, their
+  // table and columns, read again by SQLFetchScroll.
+  SQLULEN cursorType = SQL_CURSOR_FORWARD_ONLY;
+  SQLUSMALLINT* rowStatus = nullptr;
+  std::string keyTable;
+  std::vector<long> keys;
+  std::vector<int> keyCols;
   int lastCol = 0;
   size_t offset = 0;
   SQLLEN rowCount = -1;
@@ -384,6 +401,7 @@ struct Parser {
     std::string name = Name();
     Table* table = G().Find(name);
     if (!table) throw Error{"42S02", "Unknown table " + name};
+    table->SyncIds();
     return table;
   }
   void End() {
@@ -480,20 +498,25 @@ struct Parser {
         if (IsWord("DESC")) { desc = true; pos++; } else if (IsWord("ASC")) pos++;
       }
       End();
-      std::vector<std::vector<Value>> rows;
-      for (auto& r : table->rows) if (Match(r, conds)) rows.push_back(r);
+      std::vector<size_t> rows;
+      for (size_t i = 0; i < table->rows.size(); i++)
+        if (Match(table->rows[i], conds)) rows.push_back(i);
       if (sortCol >= 0)
-        std::stable_sort(rows.begin(), rows.end(), [&](const std::vector<Value>& a, const std::vector<Value>& b) {
-          int c = Compare(a[sortCol], b[sortCol]);
+        std::stable_sort(rows.begin(), rows.end(), [&](size_t a, size_t b) {
+          int c = Compare(table->rows[a][sortCol], table->rows[b][sortCol]);
           return desc ? c > 0 : c < 0;
         });
       stmt->resultCols.clear();
       stmt->result.clear();
+      stmt->keys.clear();
+      stmt->keyTable = table->name;
+      stmt->keyCols = cols;
       for (int c : cols) stmt->resultCols.push_back(table->cols[c]);
-      for (auto& r : rows) {
+      for (size_t r : rows) {
         std::vector<Value> out;
-        for (int c : cols) out.push_back(r[c]);
+        for (int c : cols) out.push_back(table->rows[r][c]);
         stmt->result.push_back(out);
+        stmt->keys.push_back(table->ids[r]);
       }
       stmt->rowCount = -1;
       return;
@@ -525,6 +548,7 @@ struct Parser {
       for (size_t c = 0; c < row.size(); c++)
         if (table->cols[c].notNull && row[c].kind == kNull) throw Error{"23000", "Column " + table->cols[c].name + " cannot be null"};
       table->rows.push_back(row);
+      table->ids.push_back(table->nextId++);
       stmt->rowCount = 1;
       return;
     }
@@ -557,9 +581,11 @@ struct Parser {
       std::vector<Cond> conds = Where(table);
       End();
       size_t before = table->rows.size();
-      table->rows.erase(std::remove_if(table->rows.begin(), table->rows.end(),
-                                       [&](const std::vector<Value>& r) { return Match(r, conds); }),
-                        table->rows.end());
+      for (size_t i = table->rows.size(); i-- > 0;) {
+        if (!Match(table->rows[i], conds)) continue;
+        table->rows.erase(table->rows.begin() + (long)i);
+        table->ids.erase(table->ids.begin() + (long)i);
+      }
       stmt->rowCount = (SQLLEN)(before - table->rows.size());
       return;
     }
@@ -667,7 +693,31 @@ SQLRETURN SQL_API SQLEndTran(SQLSMALLINT, SQLHANDLE, SQLSMALLINT CompletionType)
   return SQL_SUCCESS;
 }
 
-SQLRETURN SQL_API SQLSetStmtAttr(SQLHSTMT, SQLINTEGER, SQLPOINTER, SQLINTEGER) { return SQL_SUCCESS; }
+SQLRETURN SQL_API SQLSetStmtAttr(SQLHSTMT hstmt, SQLINTEGER Attribute, SQLPOINTER Value, SQLINTEGER) {
+  mock::Stmt* stmt = (mock::Stmt*)hstmt;
+  if (Attribute == SQL_ATTR_CURSOR_TYPE) {
+    SQLULEN type = (SQLULEN)Value;
+    // A driver changes a cursor type it does not have to the nearest one.
+    if (type == SQL_CURSOR_DYNAMIC) type = SQL_CURSOR_KEYSET_DRIVEN;
+    if (type == SQL_CURSOR_KEYSET_DRIVEN && mock::G().noKeyset) type = SQL_CURSOR_STATIC;
+    stmt->cursorType = type;
+    if (type != (SQLULEN)Value) {
+      stmt->diag.Set("01S02", "Option value changed");
+      return SQL_SUCCESS_WITH_INFO;
+    }
+  } else if (Attribute == SQL_ATTR_ROW_STATUS_PTR) {
+    stmt->rowStatus = (SQLUSMALLINT*)Value;
+  }
+  return SQL_SUCCESS;
+}
+
+SQLRETURN SQL_API SQLGetStmtAttr(SQLHSTMT hstmt, SQLINTEGER Attribute, SQLPOINTER Value, SQLINTEGER,
+                                 SQLINTEGER*) {
+  mock::Stmt* stmt = (mock::Stmt*)hstmt;
+  if (Attribute != SQL_ATTR_CURSOR_TYPE) return SQL_ERROR;
+  *(SQLULEN*)Value = stmt->cursorType;
+  return SQL_SUCCESS;
+}
 
 SQLRETURN SQL_API SQLDriverConnect(SQLHDBC hdbc, SQLHWND, SQLTCHAR* szConnStrIn, SQLSMALLINT cbConnStrIn,
                                    SQLTCHAR* szConnStrOut, SQLSMALLINT cbConnStrOutMax,
@@ -778,6 +828,48 @@ SQLRETURN SQL_API SQLFetch(SQLHSTMT hstmt) {
     return SQL_NO_DATA;
   }
   stmt->cur++;
+  return SQL_SUCCESS;
+}
+
+// Scrolls a static or keyset-driven cursor. A keyset-driven one reads the
+// row again: its current values, or SQL_ROW_DELETED once it is gone.
+SQLRETURN SQL_API SQLFetchScroll(SQLHSTMT hstmt, SQLSMALLINT FetchOrientation, SQLLEN FetchOffset) {
+  mock::Stmt* stmt = (mock::Stmt*)hstmt;
+  if (FetchOrientation == SQL_FETCH_NEXT) return SQLFetch(hstmt);
+  if (stmt->cursorType == SQL_CURSOR_FORWARD_ONLY) {
+    stmt->diag.Set("HY106", "Fetch type out of range");
+    return SQL_ERROR;
+  }
+  if (FetchOrientation != SQL_FETCH_ABSOLUTE) {
+    stmt->diag.Set("HYC00", "Optional feature not implemented");
+    return SQL_ERROR;
+  }
+  stmt->lastCol = 0;
+  stmt->offset = 0;
+  if (FetchOffset < 1 || FetchOffset > (SQLLEN)stmt->result.size()) {
+    stmt->cur = FetchOffset < 1 ? -1 : (long)stmt->result.size();
+    return SQL_NO_DATA;
+  }
+  stmt->cur = (long)FetchOffset - 1;
+  SQLUSMALLINT status = SQL_ROW_SUCCESS;
+  if (stmt->cursorType == SQL_CURSOR_KEYSET_DRIVEN && stmt->cur < (long)stmt->keys.size()) {
+    mock::Table* table = mock::G().Find(stmt->keyTable);
+    status = SQL_ROW_DELETED;
+    if (table) {
+      table->SyncIds();
+      for (size_t i = 0; i < table->ids.size(); i++) {
+        if (table->ids[i] != stmt->keys[stmt->cur]) continue;
+        std::vector<mock::Value>& out = stmt->result[stmt->cur];
+        for (size_t c = 0; c < stmt->keyCols.size(); c++) {
+          if (!mock::Equal(out[c], table->rows[i][stmt->keyCols[c]])) status = SQL_ROW_UPDATED;
+          out[c] = table->rows[i][stmt->keyCols[c]];
+        }
+        if (status == SQL_ROW_DELETED) status = SQL_ROW_SUCCESS;
+        break;
+      }
+    }
+  }
+  if (stmt->rowStatus) *stmt->rowStatus = status;
   return SQL_SUCCESS;
 }
 

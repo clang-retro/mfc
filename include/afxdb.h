@@ -435,11 +435,17 @@ protected:
   CDWordArray m_rgColCType;  // the C type each result column is kept as
   BOOL m_bAllFetched;
   _AFX_DB_ROW* m_pEditBackup;
+  // A dynaset's keyset-driven cursor, when the driver has one: moving to
+  // a record reads it again, so other users' changes show.
+  BOOL m_bKeyset;
+  SQLUSMALLINT m_wRowStatus;
 
   void BuildSQL(LPCTSTR lpszSQL);
   void ExecuteQuery();
   void PrepareFields();
   BOOL FetchRow();
+  _AFX_DB_ROW* ReadRow();
+  void RefreshRow(long nRow);
   void LoadRow(long nRow);
   void ClearRows();
   void FreeFields();

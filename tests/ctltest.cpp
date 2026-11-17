@@ -42,6 +42,11 @@ class CTestCtrl : public COleControl {
 public:
   static int s_nAlive;
   static CTestCtrl* s_pLast;
+  // For the drawing and mouse tests: flags added to GetControlFlags's
+  // and taken from them, a drawing past the bounds, and what was seen.
+  static DWORD s_dwAddFlags, s_dwClearFlags;
+  static BOOL s_bDrawOutside, s_bOptimizedSeen;
+  static int s_nInactiveMoves;
 
   long m_nValue;
   CString m_strLabel;
@@ -63,8 +68,22 @@ public:
     s_nAlive--;
   }
 
+  virtual DWORD GetControlFlags() {
+    return (COleControl::GetControlFlags() | s_dwAddFlags) & ~s_dwClearFlags;
+  }
+  virtual DWORD GetActivationPolicy() { return POINTERINACTIVE_ACTIVATEONENTRY; }
+  virtual void OnInactiveMouseMove(LPCRECT, long, long, DWORD) { s_nInactiveMoves++; }
+  virtual BOOL OnInactiveSetCursor(LPCRECT, long, long, DWORD, BOOL) { return TRUE; }
+
   virtual void OnDraw(CDC* pDC, const CRect& rcBounds, const CRect&) {
     m_nDraws++;
+    if (s_bDrawOutside) {
+      s_bOptimizedSeen = IsOptimizedDraw();
+      CRect rc(rcBounds);
+      rc.InflateRect(10, 10);
+      pDC->FillSolidRect(rc, RGB(255, 0, 0));
+      return;
+    }
     CBrush brush(TranslateColor(GetBackColor()));
     pDC->FillRect(rcBounds, &brush);
     CFont* pOld = SelectStockFont(pDC);
@@ -170,6 +189,11 @@ public:
 
 int CTestCtrl::s_nAlive = 0;
 CTestCtrl* CTestCtrl::s_pLast = NULL;
+DWORD CTestCtrl::s_dwAddFlags = 0;
+DWORD CTestCtrl::s_dwClearFlags = 0;
+BOOL CTestCtrl::s_bDrawOutside = FALSE;
+BOOL CTestCtrl::s_bOptimizedSeen = FALSE;
+int CTestCtrl::s_nInactiveMoves = 0;
 
 IMPLEMENT_DYNCREATE(CTestCtrl, COleControl)
 
@@ -321,6 +345,52 @@ protected:
   virtual void OnStopBinding(HRESULT hr, LPCTSTR) {
     m_hrStop = hr;
     m_bStopped = TRUE;
+  }
+};
+
+// An object that aggregates a file's bind status callback, as an override
+// of CreateBindStatusCallback that adds interfaces of its own would.
+class COuterBSC : public IUnknown {
+public:
+  LONG m_cRef;
+  IUnknown* m_pInner;
+  int m_nBSCQueries;
+  BOOL* m_pbFreed;
+  explicit COuterBSC(BOOL* pbFreed) : m_cRef(1), m_pInner(NULL), m_nBSCQueries(0), m_pbFreed(pbFreed) {}
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (::IsEqualIID(iid, IID_IUnknown)) {
+      *ppv = this;
+      AddRef();
+      return S_OK;
+    }
+    if (::IsEqualIID(iid, IID_IBindStatusCallback)) m_nBSCQueries++;
+    if (m_pInner != NULL) return m_pInner->QueryInterface(iid, ppv);
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return (ULONG)++m_cRef; }
+  STDMETHOD_(ULONG, Release)() {
+    LONG n = --m_cRef;
+    if (n == 0) {
+      if (m_pInner != NULL) m_pInner->Release();
+      *m_pbFreed = TRUE;
+      delete this;
+    }
+    return (ULONG)n;
+  }
+};
+
+class CAggAsyncFile : public CTestAsyncFile {
+public:
+  COuterBSC* m_pOuter;
+  BOOL m_bOuterFreed;
+  CAggAsyncFile() : m_pOuter(NULL), m_bOuterFreed(FALSE) {}
+
+protected:
+  virtual IUnknown* CreateBindStatusCallback(IUnknown*) {
+    m_pOuter = new COuterBSC(&m_bOuterFreed);
+    m_pOuter->m_pInner = CAsyncMonikerFile::CreateBindStatusCallback(m_pOuter);
+    return m_pOuter;
   }
 };
 
@@ -591,6 +661,7 @@ public:
   void TestRegistry();
   void TestPropertyPage();
   void TestPropertyFrame();
+  void TestViewAndPointer();
   void TestPictureHolder();
   void TestStockPages();
   void TestBrowsingAndQuickActivate();
@@ -1402,7 +1473,102 @@ void CMainFrame::TestPropertyFrame() {
     pObj->Release();
   }
   CHECK(CTestPropPage::s_nAlive == 0);
+  // The container's own frame, which the verb also used.
+  s_nFrameTicks = 0;
+  s_bFrameSeen = FALSE;
+  s_nFrameTabs = 0;
+  ::SetTimer(NULL, 0, 100, FrameTimer);
+  CHECK(m_ctl.m_pCtrlSite != NULL && m_ctl.m_pCtrlSite->ShowPropertyFrame());
+  CHECK(s_bFrameSeen && s_nFrameTabs == 2);
+  CHECK(CTestPropPage::s_nAlive == 0);
   m_ctl.DestroyWindow();
+  CHECK(CTestCtrl::s_nAlive == 0);
+}
+
+// IViewObjectEx, the drawing flags and IPointerInactive.
+void CMainFrame::TestViewAndPointer() {
+  TestLog("view and pointer");
+  CTestCtrl* pCtl = NULL;
+  LPUNKNOWN pUnk = NewControl(&pCtl);
+  if (pUnk == NULL || pCtl == NULL) return;
+  LPPERSISTSTREAMINIT pInit = NULL;
+  pUnk->QueryInterface(IID_IPersistStreamInit, (void**)&pInit);
+  if (pInit != NULL) {
+    pInit->InitNew();
+    pInit->Release();
+  }
+  IViewObjectEx* pView = NULL;
+  CHECK(pUnk->QueryInterface(IID_IViewObjectEx, (void**)&pView) == S_OK);
+  if (pView != NULL) {
+    DWORD dwStatus = 0;
+    CHECK(pView->GetViewStatus(&dwStatus) == S_OK && (dwStatus & VIEWSTATUS_OPAQUE));
+    RECT rcBounds = {10, 10, 50, 30};
+    DWORD dwHit = 0;
+    POINT ptIn = {20, 20}, ptOut = {60, 20};
+    CHECK(pView->QueryHitPoint(DVASPECT_CONTENT, &rcBounds, ptIn, 0, &dwHit) == S_OK &&
+          dwHit == HITRESULT_HIT);
+    CHECK(pView->QueryHitPoint(DVASPECT_CONTENT, &rcBounds, ptOut, 0, &dwHit) == S_OK &&
+          dwHit == HITRESULT_OUTSIDE);
+    RECT rcLoc = {45, 25, 70, 40};
+    CHECK(pView->QueryHitRect(DVASPECT_CONTENT, &rcBounds, &rcLoc, 0, &dwHit) == S_OK &&
+          dwHit == HITRESULT_HIT);
+    RECTL rcl = {0, 0, 0, 0};
+    SIZEL size = {0, 0};
+    pView->GetExtent(DVASPECT_CONTENT, -1, NULL, &size);
+    CHECK(pView->GetRect(DVASPECT_CONTENT, &rcl) == S_OK && rcl.right == size.cx &&
+          rcl.bottom == size.cy);
+
+    // Drawing is kept inside the bounds (clipPaintDC), unless the
+    // control says it never draws outside; and it may leave the DC as it
+    // is when the container allows it (canOptimizeDraw).
+    CClientDC dcScreen(this);
+    CDC dc;
+    dc.CreateCompatibleDC(&dcScreen);
+    CBitmap bitmap;
+    bitmap.CreateCompatibleBitmap(&dcScreen, 80, 60);
+    CBitmap* pOldBitmap = dc.SelectObject(&bitmap);
+    RECTL rclDraw = {20, 20, 60, 40};
+    DVASPECTINFO info = {sizeof(DVASPECTINFO), DVASPECTINFOFLAG_CANOPTIMIZE};
+    CTestCtrl::s_bDrawOutside = TRUE;
+    dc.FillSolidRect(0, 0, 80, 60, RGB(0, 0, 255));
+    CTestCtrl::s_bOptimizedSeen = TRUE;
+    CHECK(pView->Draw(DVASPECT_CONTENT, -1, &info, NULL, NULL, dc.m_hDC, &rclDraw, NULL, NULL, 0) ==
+          S_OK);
+    CHECK(dc.GetPixel(15, 15) == RGB(0, 0, 255) && dc.GetPixel(30, 30) == RGB(255, 0, 0));
+    CHECK(!CTestCtrl::s_bOptimizedSeen);  // the control did not ask
+    CTestCtrl::s_dwClearFlags = COleControl::clipPaintDC;
+    CTestCtrl::s_dwAddFlags = COleControl::canOptimizeDraw;
+    CHECK(pView->Draw(DVASPECT_CONTENT, -1, &info, NULL, NULL, dc.m_hDC, &rclDraw, NULL, NULL, 0) ==
+          S_OK);
+    CHECK(dc.GetPixel(15, 15) == RGB(255, 0, 0));
+    CHECK(CTestCtrl::s_bOptimizedSeen);
+    CHECK(pView->Draw(DVASPECT_CONTENT, -1, NULL, NULL, NULL, dc.m_hDC, &rclDraw, NULL, NULL, 0) ==
+          S_OK);
+    CHECK(!CTestCtrl::s_bOptimizedSeen);  // the container did not allow it
+    CTestCtrl::s_bDrawOutside = FALSE;
+    CTestCtrl::s_dwAddFlags = CTestCtrl::s_dwClearFlags = 0;
+    dc.SelectObject(pOldBitmap);
+    pView->Release();
+  }
+
+  // IPointerInactive, only for a control that asks for it.
+  IPointerInactive* pInactive = NULL;
+  CHECK(pUnk->QueryInterface(IID_IPointerInactive, (void**)&pInactive) == E_NOINTERFACE);
+  CTestCtrl::s_dwAddFlags = COleControl::pointerInactive;
+  CHECK(pUnk->QueryInterface(IID_IPointerInactive, (void**)&pInactive) == S_OK);
+  if (pInactive != NULL) {
+    DWORD dwPolicy = 0;
+    CHECK(pInactive->GetActivationPolicy(&dwPolicy) == S_OK &&
+          dwPolicy == POINTERINACTIVE_ACTIVATEONENTRY);
+    RECT rc = {0, 0, 40, 20};
+    CTestCtrl::s_nInactiveMoves = 0;
+    CHECK(pInactive->OnInactiveMouseMove(&rc, 5, 5, 0) == S_OK);
+    CHECK(CTestCtrl::s_nInactiveMoves == 1);
+    CHECK(pInactive->OnInactiveSetCursor(&rc, 5, 5, WM_MOUSEMOVE, FALSE) == S_OK);
+    pInactive->Release();
+  }
+  CTestCtrl::s_dwAddFlags = 0;
+  pUnk->Release();
   CHECK(CTestCtrl::s_nAlive == 0);
 }
 
@@ -1679,6 +1845,25 @@ void CMainFrame::TestDataPath() {
     CHECK(af.GetFormatEtc() != NULL);
     CHECK(af.GetBinding() == NULL);  // let go when the binding stopped
     af.Close();
+  }
+  {
+    // The callback aggregated in an object of the file's: urlmon gets the
+    // callback through that object, which it sees as the callback's own.
+    CAggAsyncFile af;
+    CHECK(af.Open(strURL));
+    CHECK(af.m_pOuter != NULL && af.m_pBSC != NULL);
+    if (af.m_pBSC != NULL) {
+      IUnknown* pUnk = NULL;
+      af.m_pBSC->QueryInterface(IID_IUnknown, (void**)&pUnk);
+      CHECK(pUnk == static_cast<IUnknown*>(af.m_pOuter));
+      if (pUnk != NULL) pUnk->Release();
+    }
+    CHECK(PumpUntil(&af.m_bStopped));
+    CHECK(af.m_hrStop == S_OK && af.m_strData == strData);
+    CHECK(af.m_pOuter->m_nBSCQueries > 0);
+    af.Close();
+    PumpMessages();
+    CHECK(af.m_bOuterFreed);  // and with it the callback
   }
   {
     // Once closed, nothing more is reported. (A local file can come in
@@ -1976,6 +2161,7 @@ void CMainFrame::RunTests() {
   TestHosted();
   TestPropertyPage();
   TestPropertyFrame();
+  TestViewAndPointer();
   TestPictureHolder();
   TestStockPages();
   TestBrowsingAndQuickActivate();

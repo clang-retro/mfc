@@ -188,6 +188,20 @@ inline bool _AfxIsNullPtr(const void* p) {
 #ifndef AFX_DEPRECATED
 #define AFX_DEPRECATED(x)
 #endif
+// A member function as code of any age names it in a map: a plain name
+// (OnAbout, CWinApp::OnFileNew) or a pointer to member
+// (&CMyApp::OnAbout). clang-retro's compiler tells the two apart
+// (__starts_with_ampersand); other compilers take plain names only.
+#ifdef __starts_with_ampersand
+#define _AFX_PMF(theClass, f) _AFX_PMF_CAT(_AFX_PMF_, __starts_with_ampersand(f))(theClass, f)
+#define _AFX_PMF_CAT(a, b) _AFX_PMF_CAT2(a, b)
+#define _AFX_PMF_CAT2(a, b) a##b
+#define _AFX_PMF_0(theClass, f) &theClass::f
+#define _AFX_PMF_1(theClass, f) f
+#else
+#define _AFX_PMF(theClass, f) &theClass::f
+#endif
+
 // Module state. A regular DLL built with _AFXDLL has a state of its own
 // (its CWinApp, instance and resource handles, window classes, OLE
 // factories), and each function it exports starts with

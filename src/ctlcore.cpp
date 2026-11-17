@@ -60,6 +60,7 @@ BEGIN_INTERFACE_MAP(COleControl, CWnd)
   INTERFACE_PART(COleControl, IID_IOleControl, OleControl)
   INTERFACE_PART(COleControl, IID_IViewObject, ViewObject)
   INTERFACE_PART(COleControl, IID_IViewObject2, ViewObject)
+  INTERFACE_PART(COleControl, IID_IViewObjectEx, ViewObject)
   INTERFACE_PART(COleControl, IID_IPersistStreamInit, PersistStreamInit)
   INTERFACE_PART(COleControl, IID_IPersistStorage, PersistStorage)
   INTERFACE_PART(COleControl, IID_IPersistPropertyBag, PersistPropertyBag)
@@ -91,6 +92,7 @@ COleControl::COleControl()
       m_bUIActive(FALSE),
       m_bInPlaceSiteEx(FALSE),
       m_bInPlaceSiteWndless(FALSE),
+      m_bOptimizedDraw(FALSE),
       m_pInPlaceSiteWndless(NULL),
       m_nFreezeEvents(0),
       m_bPendingUIActivation(FALSE),
@@ -333,6 +335,7 @@ void COleControl::OnPaint() {
     CWnd::DefWindowProc(WM_PAINT, (WPARAM)dc.m_hDC, 0);
     return;
   }
+  if (GetControlFlags() & clipPaintDC) dc.IntersectClipRect(rcClient);
   OnDraw(&dc, rcClient, CRect(dc.m_ps.rcPaint));
 }
 
@@ -1041,6 +1044,7 @@ HRESULT COleControl::OnActivateInPlace(BOOL bUIActivate, LPMSG) {
   if (m_bInPlaceActive && (!bUIActivate || m_bUIActive)) return S_OK;
   if (m_pClientSite == NULL) return E_UNEXPECTED;
   if (!m_bInPlaceActive) {
+    BOOL bRedraw = TRUE;
     LPOLEINPLACESITE pSite = NULL;
     if (FAILED(m_pClientSite->QueryInterface(IID_IOleInPlaceSite, (void**)&pSite)))
       return E_NOINTERFACE;
@@ -1069,6 +1073,9 @@ HRESULT COleControl::OnActivateInPlace(BOOL bUIActivate, LPMSG) {
       BOOL bNoRedraw = FALSE;
       pSiteEx->OnInPlaceActivateEx(&bNoRedraw, m_bInPlaceSiteWndless ? ACTIVATE_WINDOWLESS : 0);
       pSiteEx->Release();
+      // The container keeps what it drew of the inactive control, which
+      // looks the same (noFlickerActivate), when it says so.
+      bRedraw = !(bNoRedraw && (GetControlFlags() & noFlickerActivate));
     } else {
       m_pInPlaceSite->OnInPlaceActivate();
     }
@@ -1085,6 +1092,7 @@ HRESULT COleControl::OnActivateInPlace(BOOL bUIActivate, LPMSG) {
     m_rcPos = rcPos;
     m_rcClip = rcClip;
     if (m_bInPlaceSiteWndless) {
+      if (bRedraw) m_pInPlaceSiteWndless->InvalidateRect(&m_rcPos, FALSE);
       // No window: the container's is the control's.
       SIZEL sizeHm;
       _AfxCtlPixelsToHimetric(m_rcPos.Width(), m_rcPos.Height(), &sizeHm);
@@ -1156,7 +1164,9 @@ void COleControl::InPlaceDeactivate() {
     LPOLEINPLACESITEEX pSiteEx = NULL;
     if (m_bInPlaceSiteEx &&
         SUCCEEDED(pSite->QueryInterface(IID_IOleInPlaceSiteEx, (void**)&pSiteEx))) {
-      pSiteEx->OnInPlaceDeactivateEx(TRUE);
+      // The container need not draw the control again when it looks the
+      // same inactive (noFlickerActivate).
+      pSiteEx->OnInPlaceDeactivateEx((GetControlFlags() & noFlickerActivate) != 0);
       pSiteEx->Release();
     } else {
       pSite->OnInPlaceDeactivate();
@@ -1170,6 +1180,37 @@ void COleControl::InPlaceDeactivate() {
 // Windowless activation
 
 DWORD COleControl::GetControlFlags() { return fastBeginPaint | clipPaintDC; }
+
+// ---------------------------------------------------------------------
+// The mouse while inactive (IPointerInactive, with pointerInactive)
+
+DWORD COleControl::GetActivationPolicy() { return 0; }
+void COleControl::OnInactiveMouseMove(LPCRECT, long, long, DWORD) {}
+BOOL COleControl::OnInactiveSetCursor(LPCRECT, long, long, DWORD, BOOL) { return FALSE; }
+
+// ---------------------------------------------------------------------
+// The view (IViewObjectEx)
+
+DWORD COleControl::GetViewStatus() { return VIEWSTATUS_OPAQUE; }
+
+BOOL COleControl::OnQueryHitPoint(DWORD dwAspect, LPCRECT pRectBounds, POINT ptlLoc, LONG,
+                                  DWORD* pHitResult) {
+  if (dwAspect != DVASPECT_CONTENT) return FALSE;
+  *pHitResult = ::PtInRect(pRectBounds, ptlLoc) ? HITRESULT_HIT : HITRESULT_OUTSIDE;
+  return TRUE;
+}
+
+BOOL COleControl::OnQueryHitRect(DWORD dwAspect, LPCRECT pRectBounds, LPCRECT prcLoc, LONG,
+                                 DWORD* pHitResult) {
+  if (dwAspect != DVASPECT_CONTENT) return FALSE;
+  RECT rc;
+  *pHitResult = ::IntersectRect(&rc, pRectBounds, prcLoc) ? HITRESULT_HIT : HITRESULT_OUTSIDE;
+  return TRUE;
+}
+
+BOOL COleControl::OnGetNaturalExtent(DWORD, LONG, DVTARGETDEVICE*, HDC, DVEXTENTINFO*, LPSIZEL) {
+  return FALSE;
+}
 
 IDropTarget* COleControl::GetWindowlessDropTarget() { return NULL; }
 
@@ -1319,6 +1360,8 @@ BOOL COleControl::OnEdit(LPMSG lpMsg, HWND, LPCRECT) {
 
 // The property pages, in the system's property frame.
 BOOL COleControl::OnProperties(LPMSG, HWND hWndParent, LPCRECT) {
+  // A container that shows property frames itself does it.
+  if (m_pControlSite != NULL && m_pControlSite->ShowPropertyFrame() == S_OK) return TRUE;
   ULONG cPages = 0;
   LPCLSID pPages = GetPropPageIDs(cPages);
   if (cPages == 0 || pPages == NULL) return FALSE;
