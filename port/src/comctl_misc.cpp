@@ -59,6 +59,9 @@ void RegisterCommonControls() {
   RegisterSimpleClasses();
   RegisterListView();
   RegisterTreeView();
+  RegisterRebarClasses();
+  RegisterExtraClasses();
+  RegisterDateClasses();
 }
 
 }  // namespace winport
