@@ -17,6 +17,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <errno.h>
 
 #define WSAAPI WINAPI
 
@@ -282,12 +283,22 @@ inline int connect(SOCKET s, const struct sockaddr* name, int namelen) {
 inline int getpeername(SOCKET s, struct sockaddr* name, int* namelen) {
   socklen_t n = (socklen_t)*namelen;
   int r = ::getpeername((int)s, name, &n);
+  // Windows fails where the system cuts the address short.
+  if (r == 0 && (int)n > *namelen) {
+    errno = EFAULT;
+    return -1;
+  }
   *namelen = (int)n;
   return r;
 }
 inline int getsockname(SOCKET s, struct sockaddr* name, int* namelen) {
   socklen_t n = (socklen_t)*namelen;
   int r = ::getsockname((int)s, name, &n);
+  // Windows fails where the system cuts the address short.
+  if (r == 0 && (int)n > *namelen) {
+    errno = EFAULT;
+    return -1;
+  }
   *namelen = (int)n;
   return r;
 }
