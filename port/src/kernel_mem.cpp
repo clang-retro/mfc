@@ -36,13 +36,15 @@ struct Block {
 const size_t kPrefix = 16;  // keeps the data aligned for any type
 
 std::mutex& BlockLock() {
-  static std::mutex m;
-  return m;
+  // Never destroyed: static destructors (a CWinApp's, say) may still free
+  // memory after this file's statics are gone.
+  static std::mutex* m = new std::mutex;
+  return *m;
 }
 
 std::unordered_set<Block*>& Blocks() {
-  static std::unordered_set<Block*> s;
-  return s;
+  static auto* s = new std::unordered_set<Block*>;  // never destroyed, like BlockLock
+  return *s;
 }
 
 void* NewData(Block* b, SIZE_T size, bool zero) {
@@ -279,12 +281,12 @@ SIZE_T WINAPI HeapSize(HANDLE, DWORD, LPCVOID mem) {
 
 namespace {
 std::mutex& RegionLock() {
-  static std::mutex m;
-  return m;
+  static std::mutex* m = new std::mutex;  // never destroyed, like BlockLock
+  return *m;
 }
 std::map<char*, SIZE_T>& Regions() {
-  static std::map<char*, SIZE_T> m;
-  return m;
+  static auto* m = new std::map<char*, SIZE_T>;  // never destroyed, like BlockLock
+  return *m;
 }
 int Prot(DWORD p) {
   switch (p & 0xff) {

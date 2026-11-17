@@ -62,7 +62,8 @@ const wchar_t* const kHives[] = {L"HKEY_CLASSES_ROOT", L"HKEY_CURRENT_USER", L"H
                                  L"HKEY_PERFORMANCE_DATA", L"HKEY_CURRENT_CONFIG", L"HKEY_DYN_DATA"};
 const int kNumHives = 7;
 
-std::recursive_mutex g_lock;
+// Never destroyed, so that static destructors can still use the registry.
+std::recursive_mutex& g_lock = *new std::recursive_mutex;
 Key g_hives[kNumHives];
 bool g_loaded;
 bool g_dirty;

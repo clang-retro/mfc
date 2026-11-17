@@ -6,14 +6,15 @@
 // clipping, mapping modes and scrolling, lines, shapes, paths and
 // text, icons, accelerators and menus, dialogs and the standard
 // controls, MDI, image lists, the common controls, the list view, the
-// tree view and property sheets;
-// and a CWnd with a message map
-// on top.
+// tree view and property sheets; printing and the print dialogs; and a
+// CWnd with a message map on top.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include <afxwin.h>
 #include <commctrl.h>
+#include <commdlg.h>
+#include <dlgs.h>
 #include <prsht.h>
 #include <stdio.h>
 #include <string.h>
@@ -2101,6 +2102,237 @@ static void TestCWnd() {
   CHECK(wnd.m_bPostNcDestroy && wnd.m_hWnd == NULL);
 }
 
+// ---------------------------------------------------------------------
+// Printing: the default printer, printer DCs and their settings, a job
+// written to a file, and the Print and Page Setup dialogs driven by
+// their hooks.
+
+static int g_abortCalls = 0;
+static BOOL CALLBACK CountingAbortProc(HDC, int) {
+  g_abortCalls++;
+  return TRUE;
+}
+
+static UINT_PTR CALLBACK PrintPagesHook(HWND h, UINT msg, WPARAM, LPARAM lp) {
+  if (msg == WM_INITDIALOG) {
+    CHECK(((PRINTDLGW*)lp)->lCustData == 77);
+    CHECK(::GetDlgItem(h, edt1) != NULL && ::GetDlgItem(h, edt2) != NULL && ::GetDlgItem(h, edt3) != NULL);
+    ::CheckRadioButton(h, rad1, rad3, rad3);
+    ::SetDlgItemInt(h, edt1, 2, FALSE);
+    ::SetDlgItemInt(h, edt2, 3, FALSE);
+    ::SetDlgItemInt(h, edt3, 2, FALSE);
+    ::PostMessageW(h, WM_COMMAND, IDOK, 0);
+    return TRUE;
+  }
+  return 0;
+}
+
+static UINT_PTR CALLBACK PrintCancelHook(HWND h, UINT msg, WPARAM, LPARAM) {
+  if (msg == WM_INITDIALOG) {
+    ::PostMessageW(h, WM_COMMAND, IDCANCEL, 0);
+    return TRUE;
+  }
+  return 0;
+}
+
+static UINT_PTR CALLBACK PageSetupHook(HWND h, UINT msg, WPARAM, LPARAM lp) {
+  if (msg == WM_INITDIALOG) {
+    CHECK(((PAGESETUPDLGW*)lp)->lCustData == 78);
+    ::CheckRadioButton(h, rad1, rad2, rad2);
+    ::SendMessageW(h, WM_COMMAND, MAKEWPARAM(rad2, BN_CLICKED), (LPARAM)::GetDlgItem(h, rad2));
+    ::PostMessageW(h, WM_COMMAND, IDOK, 0);
+    return TRUE;
+  }
+  return 0;
+}
+
+static std::wstring DevNamesDevice(HGLOBAL h) {
+  DEVNAMES* dn = (DEVNAMES*)::GlobalLock(h);
+  std::wstring s = dn ? (const wchar_t*)dn + dn->wDeviceOffset : L"";
+  ::GlobalUnlock(h);
+  return s;
+}
+
+static void TestPrinting() {
+  // The default printer, with a DC.
+  PRINTDLGW pd;
+  memset(&pd, 0, sizeof pd);
+  pd.lStructSize = sizeof pd;
+  pd.Flags = PD_RETURNDEFAULT | PD_RETURNDC;
+  if (!::PrintDlgW(&pd)) {
+    printf("note: no printer (%lu), skipping printing\n", (unsigned long)::CommDlgExtendedError());
+    return;
+  }
+  CHECK(pd.hDevNames != NULL && pd.hDevMode != NULL && pd.hDC != NULL);
+  std::wstring device = DevNamesDevice(pd.hDevNames);
+  DEVMODEW* dm = (DEVMODEW*)::GlobalLock(pd.hDevMode);
+  CHECK(dm != NULL && device == dm->dmDeviceName);
+  CHECK(dm != NULL && (dm->dmFields & DM_ORIENTATION) && dm->dmOrientation == DMORIENT_PORTRAIT);
+  DEVMODEW portrait = *dm;
+  ::GlobalUnlock(pd.hDevMode);
+  DEVNAMES* dn = (DEVNAMES*)::GlobalLock(pd.hDevNames);
+  CHECK(dn != NULL && (dn->wDefault & DN_DEFAULTPRN));
+  ::GlobalUnlock(pd.hDevNames);
+  HDC hdc = pd.hDC;
+  CHECK(::GetDeviceCaps(hdc, TECHNOLOGY) == DT_RASPRINTER);
+  int dpi = ::GetDeviceCaps(hdc, LOGPIXELSX), cx = ::GetDeviceCaps(hdc, HORZRES), cy = ::GetDeviceCaps(hdc, VERTRES);
+  int pw = ::GetDeviceCaps(hdc, PHYSICALWIDTH), ph = ::GetDeviceCaps(hdc, PHYSICALHEIGHT);
+  int ox = ::GetDeviceCaps(hdc, PHYSICALOFFSETX), oy = ::GetDeviceCaps(hdc, PHYSICALOFFSETY);
+  printf("printer '%ls': %d dpi, %dx%d of %dx%d at %d,%d\n", device.c_str(), dpi, cx, cy, pw, ph, ox, oy);
+  CHECK(dpi >= 72 && cy > cx && cx > dpi * 4);
+  CHECK(pw >= cx + ox && ph >= cy + oy);
+  CHECK(::GetDeviceCaps(hdc, HORZSIZE) > 100 && ::GetDeviceCaps(hdc, HORZSIZE) < 300);
+
+  // The same printer turned: a landscape DC, and ResetDC back.
+  portrait.dmFields = DM_ORIENTATION;
+  DEVMODEW landscape = portrait;
+  landscape.dmOrientation = DMORIENT_LANDSCAPE;
+  HDC hdcLand = ::CreateDCW(L"WINSPOOL", device.c_str(), NULL, &landscape);
+  CHECK(hdcLand != NULL);
+  if (hdcLand) {
+    CHECK(::GetDeviceCaps(hdcLand, PHYSICALWIDTH) == ph && ::GetDeviceCaps(hdcLand, PHYSICALHEIGHT) == pw);
+    CHECK(::GetDeviceCaps(hdcLand, HORZRES) > ::GetDeviceCaps(hdcLand, VERTRES));
+    CHECK(::ResetDCW(hdcLand, &portrait) == hdcLand);
+    CHECK(::GetDeviceCaps(hdcLand, HORZRES) == cx && ::GetDeviceCaps(hdcLand, VERTRES) == cy);
+    ::DeleteDC(hdcLand);
+  }
+
+  // A two-page job, to a file, on a DC made from the settings.
+  CHECK(::DeleteDC(hdc));
+  hdc = ::CreateDCW(L"WINSPOOL", device.c_str(), NULL, &portrait);
+  CHECK(hdc != NULL);
+  wchar_t dir[MAX_PATH], path[MAX_PATH];
+  ::GetTempPathW(MAX_PATH, dir);
+  ::GetTempFileNameW(dir, L"prt", 0, path);
+  g_abortCalls = 0;
+  CHECK(::SetAbortProc(hdc, CountingAbortProc) > 0);
+  DOCINFOW di;
+  memset(&di, 0, sizeof di);
+  di.cbSize = sizeof di;
+  di.lpszDocName = L"wintest";
+  di.lpszOutput = path;
+  int job = ::StartDocW(hdc, &di);
+  if (job <= 0) printf("StartDoc: error %lu\n", (unsigned long)::GetLastError());
+  CHECK(job > 0);
+  for (int page = 0; page < 2; page++) {
+    CHECK(::StartPage(hdc) > 0);
+    RECT r = {dpi, dpi, dpi * 3, dpi * 2};
+    HBRUSH br = ::CreateSolidBrush(RGB(0, 0, 255));
+    ::FillRect(hdc, &r, br);
+    ::DeleteObject(br);
+    ::TextOutW(hdc, dpi, dpi * 3, L"Printed by wintest", 18);
+    CHECK(::EndPage(hdc) > 0);
+  }
+  CHECK(::EndDoc(hdc) > 0);
+  CHECK(g_abortCalls >= 1);
+  HANDLE f = ::CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+  CHECK(f != INVALID_HANDLE_VALUE);
+  if (f != INVALID_HANDLE_VALUE) {
+    char head[8] = {};
+    DWORD got = 0;
+    ::ReadFile(f, head, 4, &got, NULL);
+    DWORD size = ::GetFileSize(f, NULL);
+    ::CloseHandle(f);
+    printf("print file: %lu bytes, '%.4s'\n", (unsigned long)size, head);
+    CHECK(got == 4 && size > 100);
+    CHECK(memcmp(head, "%PDF", 4) == 0 || memcmp(head, "%!PS", 4) == 0);
+  }
+  ::DeleteFileW(path);
+
+  // A job abandoned part way.
+  CHECK(::StartDocW(hdc, &di) > 0);
+  CHECK(::StartPage(hdc) > 0);
+  CHECK(::AbortDoc(hdc) > 0);
+  ::DeleteFileW(path);
+  CHECK(::DeleteDC(hdc));
+  ::GlobalFree(pd.hDevNames);
+  ::GlobalFree(pd.hDevMode);
+
+  // Errors: a default asked for with settings given; a wrong size.
+  memset(&pd, 0, sizeof pd);
+  pd.lStructSize = sizeof pd;
+  pd.Flags = PD_RETURNDEFAULT;
+  pd.hDevMode = ::GlobalAlloc(GMEM_MOVEABLE, sizeof(DEVMODEW));
+  CHECK(!::PrintDlgW(&pd) && ::CommDlgExtendedError() == PDERR_RETDEFFAILURE);
+  ::GlobalFree(pd.hDevMode);
+  pd.hDevMode = NULL;
+  pd.lStructSize = 12;
+  CHECK(!::PrintDlgW(&pd) && ::CommDlgExtendedError() == CDERR_STRUCTSIZE);
+
+  // The ANSI form.
+  PRINTDLGA pda;
+  memset(&pda, 0, sizeof pda);
+  pda.lStructSize = sizeof pda;
+  pda.Flags = PD_RETURNDEFAULT;
+  CHECK(::PrintDlgA(&pda));
+  if (pda.hDevNames && pda.hDevMode) {
+    DEVNAMES* dna = (DEVNAMES*)::GlobalLock(pda.hDevNames);
+    DEVMODEA* dma = (DEVMODEA*)::GlobalLock(pda.hDevMode);
+    CHECK(strcmp((const char*)dna + dna->wDeviceOffset, (const char*)dma->dmDeviceName) == 0);
+    CHECK(*((const char*)dna + dna->wDriverOffset) != 0);
+    ::GlobalUnlock(pda.hDevMode);
+    ::GlobalUnlock(pda.hDevNames);
+  }
+  ::GlobalFree(pda.hDevNames);
+  ::GlobalFree(pda.hDevMode);
+
+  // The Print dialog: pages 2 to 3, twice.
+  memset(&pd, 0, sizeof pd);
+  pd.lStructSize = sizeof pd;
+  pd.Flags = PD_ENABLEPRINTHOOK | PD_NOSELECTION;
+  pd.lpfnPrintHook = PrintPagesHook;
+  pd.lCustData = 77;
+  pd.nFromPage = pd.nToPage = 1;
+  pd.nMinPage = 1;
+  pd.nMaxPage = 9;
+  pd.nCopies = 1;
+  CHECK(::PrintDlgW(&pd));
+  CHECK(pd.Flags & PD_PAGENUMS);
+  CHECK(pd.nFromPage == 2 && pd.nToPage == 3);
+  CHECK(pd.hDevNames != NULL && pd.hDevMode != NULL && pd.hDC == NULL);
+  int copies = pd.nCopies;
+  if (pd.hDevMode) {
+    DEVMODEW* m = (DEVMODEW*)::GlobalLock(pd.hDevMode);
+    if (copies == 1 && m) copies = m->dmCopies;
+    ::GlobalUnlock(pd.hDevMode);
+  }
+  CHECK(copies == 2);
+  ::GlobalFree(pd.hDevNames);
+  ::GlobalFree(pd.hDevMode);
+
+  // Cancel leaves the structure.
+  memset(&pd, 0, sizeof pd);
+  pd.lStructSize = sizeof pd;
+  pd.Flags = PD_ENABLEPRINTHOOK;
+  pd.lpfnPrintHook = PrintCancelHook;
+  CHECK(!::PrintDlgW(&pd));
+  CHECK(pd.hDC == NULL && pd.hDevNames == NULL);
+
+  // Page Setup: the defaults, then landscape.
+  PAGESETUPDLGW psd;
+  memset(&psd, 0, sizeof psd);
+  psd.lStructSize = sizeof psd;
+  psd.Flags = PSD_RETURNDEFAULT | PSD_INTHOUSANDTHSOFINCHES;
+  CHECK(::PageSetupDlgW(&psd));
+  POINT paper = psd.ptPaperSize;
+  printf("paper %ldx%ld, margins %ld,%ld,%ld,%ld\n", (long)paper.x, (long)paper.y, (long)psd.rtMargin.left,
+         (long)psd.rtMargin.top, (long)psd.rtMargin.right, (long)psd.rtMargin.bottom);
+  CHECK(paper.y > paper.x && paper.x > 7000 && paper.x < 20000);
+  CHECK(psd.hDevNames != NULL && psd.hDevMode != NULL);
+  psd.Flags = PSD_ENABLEPAGESETUPHOOK | PSD_INTHOUSANDTHSOFINCHES;
+  psd.lpfnPageSetupHook = PageSetupHook;
+  psd.lCustData = 78;
+  CHECK(::PageSetupDlgW(&psd));
+  CHECK(psd.ptPaperSize.x == paper.y && psd.ptPaperSize.y == paper.x);
+  if (psd.hDevMode) {
+    DEVMODEW* m = (DEVMODEW*)::GlobalLock(psd.hDevMode);
+    CHECK(m && m->dmOrientation == DMORIENT_LANDSCAPE);
+    ::GlobalUnlock(psd.hDevMode);
+  }
+  ::GlobalFree(psd.hDevNames);
+  ::GlobalFree(psd.hDevMode);
+}
+
 int main() {
   if (!AfxWinInit(::GetModuleHandle(NULL), NULL, ::GetCommandLine(), SW_SHOW)) {
     printf("FAIL: AfxWinInit\n");
@@ -2127,6 +2359,7 @@ int main() {
   TestListView();
   TestTreeView();
   TestPropertySheets();
+  TestPrinting();
   TestCWnd();
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;

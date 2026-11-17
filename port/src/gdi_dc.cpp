@@ -249,6 +249,10 @@ DrawScope::DrawScope(DCObj* dc, bool forWriting) : dc_(dc), writing_(forWriting)
       clip.Set(MakeRect(0, 0, px.width, px.height));
       break;
     }
+    case kPrinterDC:
+      px = PrinterPage(dc);
+      clip.Set(MakeRect(0, 0, px.width, px.height));
+      break;
     default:
       return;
   }
@@ -298,27 +302,27 @@ HDC WINAPI CreateCompatibleDC(HDC hdc) {
   return h;
 }
 
-static HDC CreateDCCore(const std::wstring& driver, const std::wstring& device) {
+static HDC CreateDCCore(const std::wstring& driver, const std::wstring& device, const DEVMODEW* dm) {
   bool display = driver.empty() || _wcsicmp(driver.c_str(), L"DISPLAY") == 0 ||
                  _wcsicmp(device.c_str(), L"DISPLAY") == 0;
   DCObj* dc = new DCObj(display ? kInfoDC : kPrinterDC);
-  if (display) {
+  if (display)
     dc->size = ScreenSize();
-  } else {
-    // A letter page at 300 dots an inch until printing has a backend.
-    dc->size.cx = 2550;
-    dc->size.cy = 3300;
-  }
+  else
+    InitPrinterDC(dc, device, dm);
   HDC h = (HDC)NewGdiHandle(dc);
   InitDC(dc);
   return h;
 }
 
-HDC WINAPI CreateDCW(LPCWSTR driver, LPCWSTR device, LPCWSTR, const DEVMODEW*) {
-  return CreateDCCore(driver ? driver : L"", device ? device : L"");
+HDC WINAPI CreateDCW(LPCWSTR driver, LPCWSTR device, LPCWSTR, const DEVMODEW* dm) {
+  return CreateDCCore(driver ? driver : L"", device ? device : L"", dm);
 }
-HDC WINAPI CreateDCA(LPCSTR driver, LPCSTR device, LPCSTR, const DEVMODEA*) {
-  return CreateDCCore(driver ? Widen(driver) : std::wstring(), device ? Widen(device) : std::wstring());
+HDC WINAPI CreateDCA(LPCSTR driver, LPCSTR device, LPCSTR, const DEVMODEA* dm) {
+  DEVMODEW w;
+  if (dm) w = DevModeFromA(dm);
+  return CreateDCCore(driver ? Widen(driver) : std::wstring(), device ? Widen(device) : std::wstring(),
+                      dm ? &w : NULL);
 }
 HDC WINAPI CreateICW(LPCWSTR driver, LPCWSTR device, LPCWSTR output, const DEVMODEW* dm) {
   return CreateDCW(driver, device, output, dm);
@@ -326,8 +330,17 @@ HDC WINAPI CreateICW(LPCWSTR driver, LPCWSTR device, LPCWSTR output, const DEVMO
 HDC WINAPI CreateICA(LPCSTR driver, LPCSTR device, LPCSTR output, const DEVMODEA* dm) {
   return CreateDCA(driver, device, output, dm);
 }
-HDC WINAPI ResetDCW(HDC hdc, const DEVMODEW*) { return DCOf(hdc) ? hdc : NULL; }
-HDC WINAPI ResetDCA(HDC hdc, const DEVMODEA*) { return DCOf(hdc) ? hdc : NULL; }
+HDC WINAPI ResetDCW(HDC hdc, const DEVMODEW* dm) {
+  DCObj* dc = DCOf(hdc);
+  if (!dc) return NULL;
+  if (dc->kind == kPrinterDC && dm && !ResetPrinterDC(dc, dm)) return NULL;
+  return hdc;
+}
+HDC WINAPI ResetDCA(HDC hdc, const DEVMODEA* dm) {
+  if (!dm) return ResetDCW(hdc, NULL);
+  DEVMODEW w = DevModeFromA(dm);
+  return ResetDCW(hdc, &w);
+}
 
 BOOL WINAPI DeleteDC(HDC hdc) {
   DCObj* dc = DCOf(hdc);
@@ -868,12 +881,12 @@ int WINAPI GetDeviceCaps(HDC hdc, int index) {
   if (!dc) return 0;
   bool printer = dc->kind == kPrinterDC;
   SIZE sz = printer ? dc->size : ScreenSize();
-  int dpi = printer ? 300 : kLogPixels;
+  int dpi = printer ? dc->dpiX : kLogPixels, dpiY = printer ? dc->dpiY : kLogPixels;
   switch (index) {
     case DRIVERVERSION: return 0x4000;
     case TECHNOLOGY: return printer ? DT_RASPRINTER : DT_RASDISPLAY;
     case HORZSIZE: return sz.cx * 254 / (dpi * 10);
-    case VERTSIZE: return sz.cy * 254 / (dpi * 10);
+    case VERTSIZE: return sz.cy * 254 / (dpiY * 10);
     case HORZRES: case DESKTOPHORZRES: return sz.cx;
     case VERTRES: case DESKTOPVERTRES: return sz.cy;
     case BITSPIXEL: return 32;
@@ -893,13 +906,15 @@ int WINAPI GetDeviceCaps(HDC hdc, int index) {
              RC_STRETCHDIB | RC_FLOODFILL;
     case ASPECTX: case ASPECTY: return 36;
     case ASPECTXY: return 51;
-    case LOGPIXELSX: case LOGPIXELSY: return dpi;
+    case LOGPIXELSX: return dpi;
+    case LOGPIXELSY: return dpiY;
     case SIZEPALETTE: return 0;
     case NUMRESERVED: return 20;
     case COLORRES: return 24;
-    case PHYSICALWIDTH: return printer ? sz.cx : 0;
-    case PHYSICALHEIGHT: return printer ? sz.cy : 0;
-    case PHYSICALOFFSETX: case PHYSICALOFFSETY: return 0;
+    case PHYSICALWIDTH: return printer ? dc->paper.cx : 0;
+    case PHYSICALHEIGHT: return printer ? dc->paper.cy : 0;
+    case PHYSICALOFFSETX: return printer ? dc->paperOffset.x : 0;
+    case PHYSICALOFFSETY: return printer ? dc->paperOffset.y : 0;
     case SCALINGFACTORX: case SCALINGFACTORY: return 0;
     case VREFRESH: return printer ? 0 : 60;
     case BLTALIGNMENT: return 0;
