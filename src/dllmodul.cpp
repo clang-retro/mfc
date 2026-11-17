@@ -98,11 +98,15 @@ static LRESULT CALLBACK DllWndProc(HWND hWnd, UINT nMsg, WPARAM wParam, LPARAM l
 
 // Runs before the DLL's own constructors, so that its CWinApp and OLE
 // factories are made in its state. DllMain gives the previous state back.
-__attribute__((constructor(101))) static void EnterDllState() {
-  if (!IsInDll() || g_pStateBefore != NULL) return;
+// (On Linux and macOS afx.h calls it too, first in each of the DLL's
+// files, since macOS runs constructors in no set order.)
+extern "C" int _AfxEnterDllState() {
+  if (!IsInDll() || g_pStateBefore != NULL) return 0;
   g_dllModuleState.m_pfnAfxWndProc = &DllWndProc;
   g_pStateBefore = AfxSetModuleState(&g_dllModuleState);
+  return 1;
 }
+__attribute__((constructor(101))) static void EnterDllState() { _AfxEnterDllState(); }
 
 static void UnregisterClasses(HINSTANCE hInstance) {
   CStringArray* pList = g_dllModuleState.m_pstrUnregisterList;

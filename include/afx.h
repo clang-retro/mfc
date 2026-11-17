@@ -214,6 +214,15 @@ AFX_MODULE_STATE* __stdcall AfxGetAppModuleState();
 AFX_MODULE_STATE* __stdcall AfxSetModuleState(AFX_MODULE_STATE* pNewState);
 #ifdef _AFXDLL
 AFX_MODULE_STATE* __stdcall AfxGetStaticModuleState();
+#if defined(_WINPORT) && !defined(_AFXEXT) && (defined(_USRDLL) || defined(_WINDLL))
+// A regular DLL's objects (its CWinApp, its OLE factories) are made in
+// its own state, which libmfcs.a enters before its constructors run. On
+// Linux a constructor priority sees to that; macOS has none, so each
+// file that includes this header enters it first: an inline variable
+// is initialized before the definitions that follow it.
+extern "C" int _AfxEnterDllState();
+__attribute__((visibility("hidden"))) inline const int _afxDllStateEntered = _AfxEnterDllState();
+#endif
 struct AFX_MAINTAIN_STATE {
   explicit AFX_MAINTAIN_STATE(AFX_MODULE_STATE* pNewState)
       : m_pPrevModuleState(AfxSetModuleState(pNewState)) {}
