@@ -1717,7 +1717,7 @@ static CString LicPath() {
   TCHAR sz[MAX_PATH];
   ::GetModuleFileName(NULL, sz, MAX_PATH);
   CString str = sz;
-  return str.Left(str.ReverseFind('\\') + 1) + _T("ctltest.lic");
+  return str.Left(max(str.ReverseFind('\\'), str.ReverseFind('/')) + 1) + _T("ctltest.lic");
 }
 
 static void WriteLicFile(LPCSTR pszText) {
@@ -1803,14 +1803,14 @@ void CMainFrame::TestDataPath() {
   TestLog("data path properties");
   // A file to download, bigger than one read.
   CString strPath = LicPath();
-  strPath = strPath.Left(strPath.ReverseFind('\\') + 1) + _T("ctldata.txt");
+  strPath = strPath.Left(max(strPath.ReverseFind('\\'), strPath.ReverseFind('/')) + 1) + _T("ctldata.txt");
   CStringA strData;
   for (int i = 0; i < 2000; i++) strData += "data path line\r\n";
   {
     CFile file(strPath, CFile::modeCreate | CFile::modeWrite);
     file.Write((LPCSTR)strData, strData.GetLength());
   }
-  CString strURL = _T("file:///") + strPath;
+  CString strURL = _T("file:///") + (strPath[0] == '/' ? strPath.Mid(1) : strPath);
   strURL.Replace('\\', '/');
 
   // At once.

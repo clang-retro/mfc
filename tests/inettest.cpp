@@ -11,6 +11,12 @@
 #include <stdio.h>
 #include <afxtempl.h>
 
+// The directory of a path, with its separator: '\\' on Windows, '/' elsewhere.
+static CString ExeDir(const CString& strPath) {
+  int i = strPath.ReverseFind('\\'), j = strPath.ReverseFind('/');
+  return strPath.Left((i > j ? i : j) + 1);
+}
+
 static int g_failures = 0;
 #define CHECK(cond)                                                   \
   do {                                                                \
@@ -544,12 +550,12 @@ static void TestHttp(CTestSession& session, u_short nHttpPort) {
   TCHAR szPath[MAX_PATH];
   ::GetModuleFileName(NULL, szPath, MAX_PATH);
   CString strExe = szPath;
-  CString strLocal = strExe.Left(strExe.ReverseFind('\\') + 1) + _T("inettest.txt");
+  CString strLocal = ExeDir(strExe) + _T("inettest.txt");
   {
     CStdioFile f(strLocal, CFile::modeCreate | CFile::modeWrite | CFile::typeBinary);
     f.Write("local\n", 6);
   }
-  CString strFileURL = _T("file:///") + strLocal;
+  CString strFileURL = _T("file:///") + (strLocal[0] == '/' ? strLocal.Mid(1) : strLocal);
   strFileURL.Replace('\\', '/');
   pStd = session.OpenURL(strFileURL);
   CHECK(pStd != NULL && !pStd->IsKindOf(RUNTIME_CLASS(CInternetFile)));
@@ -613,7 +619,7 @@ static void TestFtp(CTestSession& session, u_short nFtpPort) {
   TCHAR szPath[MAX_PATH];
   ::GetModuleFileName(NULL, szPath, MAX_PATH);
   CString strExe = szPath;
-  CString strDirLocal = strExe.Left(strExe.ReverseFind('\\') + 1);
+  CString strDirLocal = ExeDir(strExe);
   CString strUp = strDirLocal + _T("inetup.txt"), strDown = strDirLocal + _T("inetdown.txt");
   {
     CFile f(strUp, CFile::modeCreate | CFile::modeWrite);

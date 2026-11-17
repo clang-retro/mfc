@@ -259,17 +259,17 @@ inline SOCKET accept(SOCKET s, struct sockaddr* addr, int* addrlen) {
   _WinportSocketCalled(s, FD_ACCEPT, fd);
   return fd < 0 ? INVALID_SOCKET : (SOCKET)fd;
 }
-inline int recv(SOCKET s, char* buf, int len, int flags) {
+inline int recv(SOCKET s, char* buf, size_t len, int flags) {
   int r = (int)::recv((int)s, (void*)buf, (size_t)len, flags);
   _WinportSocketCalled(s, (flags & MSG_OOB) ? FD_OOB : FD_READ, r);
   return r;
 }
-inline int send(SOCKET s, const char* buf, int len, int flags) {
+inline int send(SOCKET s, const char* buf, size_t len, int flags) {
   int r = (int)::send((int)s, (const void*)buf, (size_t)len, flags | MSG_NOSIGNAL_WINPORT);
   _WinportSocketCalled(s, FD_WRITE, r);
   return r;
 }
-inline int sendto(SOCKET s, const char* buf, int len, int flags, const struct sockaddr* to, int tolen) {
+inline int sendto(SOCKET s, const char* buf, size_t len, int flags, const struct sockaddr* to, int tolen) {
   int r = (int)::sendto((int)s, (const void*)buf, (size_t)len, flags | MSG_NOSIGNAL_WINPORT, to, (socklen_t)tolen);
   _WinportSocketCalled(s, FD_WRITE, r);
   return r;
@@ -297,7 +297,7 @@ inline int getsockopt(SOCKET s, int level, int optname, char* optval, int* optle
   *optlen = (int)n;
   return r;
 }
-inline int recvfrom(SOCKET s, char* buf, int len, int flags, struct sockaddr* from, int* fromlen) {
+inline int recvfrom(SOCKET s, char* buf, size_t len, int flags, struct sockaddr* from, int* fromlen) {
   socklen_t n = fromlen != NULL ? (socklen_t)*fromlen : 0;
   int r = (int)::recvfrom((int)s, buf, (size_t)len, flags, from, fromlen != NULL ? &n : NULL);
   if (fromlen != NULL) *fromlen = (int)n;
