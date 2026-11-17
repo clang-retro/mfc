@@ -1665,6 +1665,285 @@ static void TestCommonControls() {
   ::DestroyWindow(host);
 }
 
+static std::vector<UINT> g_commands;  // WM_COMMAND notification codes
+
+static LRESULT CALLBACK MoreHostProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_NOTIFY) g_notifies.push_back(((NMHDR*)lp)->code);
+  if (msg == WM_COMMAND && lp) g_commands.push_back(HIWORD(wp));
+  return ::DefWindowProcW(h, msg, wp, lp);
+}
+
+static bool Commanded(UINT code) {
+  for (UINT c : g_commands)
+    if (c == code) return true;
+  return false;
+}
+
+// Pumps messages for up to half a second until the code comes.
+static bool WaitCommand(UINT code) {
+  for (int i = 0; i < 50 && !Commanded(code); i++) {
+    Pump();
+    if (!Commanded(code)) ::Sleep(10);
+  }
+  return Commanded(code);
+}
+
+static bool SameDate(const SYSTEMTIME& a, const SYSTEMTIME& b) {
+  return a.wYear == b.wYear && a.wMonth == b.wMonth && a.wDay == b.wDay;
+}
+
+// A two-frame, 16x16, 8-bit uncompressed AVI file.
+static std::vector<BYTE> MakeAvi() {
+  std::vector<BYTE> v;
+  auto put32 = [&](DWORD d) {
+    for (int i = 0; i < 4; i++) v.push_back((BYTE)(d >> (8 * i)));
+  };
+  auto put16 = [&](WORD w) {
+    v.push_back((BYTE)w);
+    v.push_back((BYTE)(w >> 8));
+  };
+  auto fcc = [&](const char* s) { v.insert(v.end(), s, s + 4); };
+  auto patch = [&](size_t at) {  // the size of the chunk whose size field is at `at`
+    DWORD n = (DWORD)(v.size() - at - 4);
+    for (int i = 0; i < 4; i++) v[at + i] = (BYTE)(n >> (8 * i));
+  };
+  const int w = 16, h = 16, frames = 2;
+  fcc("RIFF");
+  size_t riff = v.size();
+  put32(0);
+  fcc("AVI ");
+  fcc("LIST");
+  size_t hdrl = v.size();
+  put32(0);
+  fcc("hdrl");
+  fcc("avih");
+  put32(56);
+  put32(100000);         // microseconds per frame
+  put32(0);              // max bytes per second
+  put32(0);              // padding
+  put32(0x10);           // AVIF_HASINDEX
+  put32(frames);         // total frames
+  put32(0);              // initial frames
+  put32(1);              // streams
+  put32(w * h);          // suggested buffer size
+  put32(w);
+  put32(h);
+  for (int i = 0; i < 4; i++) put32(0);
+  fcc("LIST");
+  size_t strl = v.size();
+  put32(0);
+  fcc("strl");
+  fcc("strh");
+  put32(56);
+  fcc("vids");
+  fcc("DIB ");
+  put32(0);              // flags
+  put16(0);              // priority
+  put16(0);              // language
+  put32(0);              // initial frames
+  put32(1);              // scale
+  put32(10);             // rate
+  put32(0);              // start
+  put32(frames);         // length
+  put32(w * h);          // suggested buffer size
+  put32((DWORD)-1);      // quality
+  put32(0);              // sample size
+  put16(0);
+  put16(0);
+  put16(w);
+  put16(h);
+  fcc("strf");
+  put32(40 + 2 * 4);
+  put32(40);
+  put32(w);
+  put32(h);
+  put16(1);
+  put16(8);
+  put32(BI_RGB);
+  put32(w * h);
+  put32(0);
+  put32(0);
+  put32(2);              // colors used
+  put32(0);
+  put32(0x00ff0000);     // blue... (RGBQUAD order: blue, green, red)
+  put32(0x000000ff);
+  patch(strl);
+  patch(hdrl);
+  fcc("LIST");
+  size_t movi = v.size();
+  put32(0);
+  fcc("movi");
+  DWORD offsets[frames];
+  for (int f = 0; f < frames; f++) {
+    offsets[f] = (DWORD)(v.size() - (movi + 4));
+    fcc("00db");
+    put32(w * h);
+    for (int i = 0; i < w * h; i++) v.push_back((BYTE)((i / w < h / 2) == (f == 0)));
+  }
+  patch(movi);
+  fcc("idx1");
+  put32(16 * frames);
+  for (int f = 0; f < frames; f++) {
+    fcc("00db");
+    put32(0x10);  // AVIIF_KEYFRAME
+    put32(offsets[f]);
+    put32(w * h);
+  }
+  patch(riff);
+  return v;
+}
+
+// The rest of the common controls: IP address, ComboBoxEx, month
+// calendar, date and time picker, animation.
+static void TestMoreControls() {
+  INITCOMMONCONTROLSEX icc = {sizeof icc, ICC_INTERNET_CLASSES | ICC_USEREX_CLASSES | ICC_DATE_CLASSES |
+                                              ICC_ANIMATE_CLASS};
+  CHECK(::InitCommonControlsEx(&icc));
+  WNDCLASSW wc = {};
+  wc.lpfnWndProc = MoreHostProc;
+  wc.hInstance = ::GetModuleHandleW(NULL);
+  wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+  wc.lpszClassName = L"MoreHost";
+  ::RegisterClassW(&wc);
+  HWND host = ::CreateWindowW(L"MoreHost", L"More controls", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, 0, 0, 520,
+                              400, NULL, NULL, wc.hInstance, NULL);
+  CHECK(host != NULL);
+  HINSTANCE inst = wc.hInstance;
+  DWORD child = WS_CHILD | WS_VISIBLE;
+  wchar_t buf[64] = L"";
+
+  // IP address: the address in and out, as text too, and a blank field.
+  HWND ip = ::CreateWindowW(WC_IPADDRESSW, L"", child | WS_TABSTOP, 10, 10, 150, 22, host, (HMENU)1, inst, NULL);
+  CHECK(ip != NULL);
+  CHECK(::SendMessageW(ip, IPM_ISBLANK, 0, 0));
+  ::SendMessageW(ip, IPM_SETADDRESS, 0, MAKEIPADDRESS(192, 168, 1, 20));
+  DWORD addr = 0;
+  CHECK(::SendMessageW(ip, IPM_GETADDRESS, 0, (LPARAM)&addr) == 4 && addr == MAKEIPADDRESS(192, 168, 1, 20));
+  CHECK(!::SendMessageW(ip, IPM_ISBLANK, 0, 0));
+  ::GetWindowTextW(ip, buf, 64);
+  CHECK(wcscmp(buf, L"192.168.1.20") == 0);
+  ::SendMessageW(ip, IPM_CLEARADDRESS, 0, 0);
+  CHECK(::SendMessageW(ip, IPM_ISBLANK, 0, 0));
+  CHECK(::SendMessageW(ip, IPM_GETADDRESS, 0, (LPARAM)&addr) == 0);
+
+  // ComboBoxEx: items with text and data through the inner combo box.
+  HWND cbx = ::CreateWindowW(WC_COMBOBOXEXW, L"", child | CBS_DROPDOWNLIST, 180, 10, 160, 200, host, (HMENU)2,
+                             inst, NULL);
+  CHECK(cbx != NULL);
+  HWND inner = (HWND)::SendMessageW(cbx, CBEM_GETCOMBOCONTROL, 0, 0);
+  CHECK(inner != NULL && ::GetParent(inner) == cbx);
+  COMBOBOXEXITEMW cbi = {};
+  cbi.mask = CBEIF_TEXT | CBEIF_LPARAM | CBEIF_INDENT;
+  cbi.iItem = -1;
+  cbi.pszText = (LPWSTR)L"Alpha";
+  cbi.lParam = 101;
+  CHECK(::SendMessageW(cbx, CBEM_INSERTITEMW, 0, (LPARAM)&cbi) == 0);
+  cbi.pszText = (LPWSTR)L"Beta";
+  cbi.lParam = 102;
+  cbi.iIndent = 1;
+  CHECK(::SendMessageW(cbx, CBEM_INSERTITEMW, 0, (LPARAM)&cbi) == 1);
+  cbi.iItem = 0;
+  cbi.pszText = (LPWSTR)L"First";
+  cbi.lParam = 100;
+  cbi.iIndent = 0;
+  CHECK(::SendMessageW(cbx, CBEM_INSERTITEMW, 0, (LPARAM)&cbi) == 0);
+  CHECK(::SendMessageW(cbx, CB_GETCOUNT, 0, 0) == 3);
+  COMBOBOXEXITEMW gi = {};
+  gi.mask = CBEIF_TEXT | CBEIF_LPARAM | CBEIF_INDENT;
+  gi.iItem = 2;
+  gi.pszText = buf;
+  gi.cchTextMax = 64;
+  CHECK(::SendMessageW(cbx, CBEM_GETITEMW, 0, (LPARAM)&gi) && wcscmp(buf, L"Beta") == 0 && gi.lParam == 102 &&
+        gi.iIndent == 1);
+  ::SendMessageW(cbx, CB_SETCURSEL, 1, 0);
+  CHECK(::SendMessageW(cbx, CB_GETCURSEL, 0, 0) == 1 && ::SendMessageW(cbx, CB_GETITEMDATA, 1, 0) == 101);
+  CHECK(::SendMessageW(cbx, CBEM_DELETEITEM, 0, 0) == 2 && ::SendMessageW(cbx, CB_GETCOUNT, 0, 0) == 2);
+
+  // Month calendar: the selection, the range and the first day.
+  HWND cal = ::CreateWindowW(MONTHCAL_CLASSW, L"", child, 10, 50, 220, 160, host, (HMENU)3, inst, NULL);
+  CHECK(cal != NULL);
+  SYSTEMTIME day = {};
+  day.wYear = 2026;
+  day.wMonth = 11;
+  day.wDay = 17;
+  day.wDayOfWeek = 2;
+  CHECK(::SendMessageW(cal, MCM_SETCURSEL, 0, (LPARAM)&day));
+  SYSTEMTIME got = {};
+  CHECK(::SendMessageW(cal, MCM_GETCURSEL, 0, (LPARAM)&got) && SameDate(got, day));
+  RECT need = {};
+  CHECK(::SendMessageW(cal, MCM_GETMINREQRECT, 0, (LPARAM)&need) && need.right > 100 && need.bottom > 80);
+  SYSTEMTIME range[2] = {};
+  range[0].wYear = 2026;
+  range[0].wMonth = 1;
+  range[0].wDay = 1;
+  range[1].wYear = 2026;
+  range[1].wMonth = 12;
+  range[1].wDay = 31;
+  CHECK(::SendMessageW(cal, MCM_SETRANGE, GDTR_MIN | GDTR_MAX, (LPARAM)range));
+  SYSTEMTIME gotRange[2] = {};
+  CHECK(::SendMessageW(cal, MCM_GETRANGE, 0, (LPARAM)gotRange) == (GDTR_MIN | GDTR_MAX) &&
+        SameDate(gotRange[0], range[0]) && SameDate(gotRange[1], range[1]));
+  SYSTEMTIME outside = day;
+  outside.wYear = 2027;
+  CHECK(!::SendMessageW(cal, MCM_SETCURSEL, 0, (LPARAM)&outside));
+  CHECK(::SendMessageW(cal, MCM_GETCURSEL, 0, (LPARAM)&got) && SameDate(got, day));
+  ::SendMessageW(cal, MCM_SETFIRSTDAYOFWEEK, 0, 6);  // Sunday
+  CHECK(LOWORD(::SendMessageW(cal, MCM_GETFIRSTDAYOFWEEK, 0, 0)) == 6);
+  ::SendMessageW(cal, MCM_SETCOLOR, MCSC_TITLEBK, RGB(0, 0, 128));
+  CHECK(::SendMessageW(cal, MCM_GETCOLOR, MCSC_TITLEBK, 0) == RGB(0, 0, 128));
+
+  // Date and time picker: the date in and out, none, and the format.
+  HWND dtp = ::CreateWindowW(DATETIMEPICK_CLASSW, L"", child | WS_TABSTOP | DTS_SHOWNONE, 250, 50, 160, 22, host,
+                             (HMENU)4, inst, NULL);
+  CHECK(dtp != NULL);
+  CHECK(::SendMessageW(dtp, DTM_SETSYSTEMTIME, GDT_VALID, (LPARAM)&day));
+  memset(&got, 0, sizeof got);
+  CHECK(::SendMessageW(dtp, DTM_GETSYSTEMTIME, 0, (LPARAM)&got) == GDT_VALID && SameDate(got, day));
+  CHECK(::SendMessageW(dtp, DTM_SETFORMATW, 0, (LPARAM)L"yyyy'-'MM'-'dd"));
+  CHECK(::SendMessageW(dtp, DTM_SETSYSTEMTIME, GDT_NONE, (LPARAM)&day));
+  CHECK(::SendMessageW(dtp, DTM_GETSYSTEMTIME, 0, (LPARAM)&got) == GDT_NONE);
+  CHECK(::SendMessageW(dtp, DTM_SETSYSTEMTIME, GDT_VALID, (LPARAM)&day));
+  ::SendMessageW(dtp, DTM_SETMCCOLOR, MCSC_TITLEBK, RGB(0, 128, 0));
+  CHECK(::SendMessageW(dtp, DTM_GETMCCOLOR, MCSC_TITLEBK, 0) == RGB(0, 128, 0));
+  ::ShowWindow(host, SW_SHOW);
+
+  // Animation: a clip from a file, its first frame on show, playing and
+  // stopping.
+  std::vector<BYTE> avi = MakeAvi();
+  wchar_t dir[MAX_PATH], path[MAX_PATH];
+  ::GetTempPathW(MAX_PATH, dir);
+  ::GetTempFileNameW(dir, L"avi", 0, path);
+  HANDLE file = ::CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+  DWORD wrote = 0;
+  CHECK(file != INVALID_HANDLE_VALUE && ::WriteFile(file, avi.data(), (DWORD)avi.size(), &wrote, NULL));
+  ::CloseHandle(file);
+  HWND anim = ::CreateWindowW(ANIMATE_CLASSW, L"", child, 10, 230, 100, 100, host, (HMENU)5, inst, NULL);
+  CHECK(anim != NULL);
+  CHECK(!::SendMessageW(anim, ACM_OPENW, 0, (LPARAM)L"no such clip.avi"));
+  CHECK(::SendMessageW(anim, ACM_OPENW, 0, (LPARAM)path));
+  RECT ar = {};
+  ::GetClientRect(anim, &ar);
+  CHECK(ar.right == 16 && ar.bottom == 16);
+  CHECK(::SendMessageW(anim, ACM_PLAY, 1, MAKELPARAM(0, 0)));
+  Pump();
+  ::UpdateWindow(host);
+  HDC screen = ::GetDC(anim);
+  CHECK(::GetPixel(screen, 2, 2) == RGB(255, 0, 0) && ::GetPixel(screen, 2, 13) == RGB(0, 0, 255));
+  ::ReleaseDC(anim, screen);
+  // The notifications may come posted.
+  g_commands.clear();
+  CHECK(::SendMessageW(anim, ACM_PLAY, (WPARAM)-1, MAKELPARAM(0, -1)));
+  CHECK(WaitCommand(ACN_START));
+  CHECK(::SendMessageW(anim, ACM_STOP, 0, 0));
+  CHECK(WaitCommand(ACN_STOP));
+  CHECK(::SendMessageW(anim, ACM_OPENW, 0, 0));
+  ::DestroyWindow(anim);
+  ::DeleteFileW(path);
+
+  Pump();
+  ::DestroyWindow(host);
+}
+
 static int CALLBACK CompareDown(LPARAM a, LPARAM b, LPARAM) { return (int)(b - a); }
 
 static void TestListView() {
@@ -2356,6 +2635,7 @@ int main() {
   TestMdi();
   TestImageLists();
   TestCommonControls();
+  TestMoreControls();
   TestListView();
   TestTreeView();
   TestPropertySheets();

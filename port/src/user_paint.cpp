@@ -21,6 +21,12 @@ RECT ClientBox(Window* w) {
   return MakeRect(0, 0, w->client.right - w->client.left, w->client.bottom - w->client.top);
 }
 
+// Whether the client area is smaller than the window.
+bool HasFrame(Window* w) {
+  return w->client.left > 0 || w->client.top > 0 || w->client.right < w->rect.right - w->rect.left ||
+         w->client.bottom < w->rect.bottom - w->rect.top;
+}
+
 bool NeedsPaint(Window* w) { return !w->update.Empty() || w->ncPaint || w->internalPaint; }
 
 Window* FindToPaint(Window* w, DWORD tid) {
@@ -64,6 +70,8 @@ void InvalidateWindow(Window* w, const Region* rgn, UINT flags) {
       Region part = rgn ? *rgn : Region(box);
       part.Intersect(cr);
       if (part.Empty()) continue;
+      // The parent draws over the child's frame too.
+      if ((flags & RDW_INVALIDATE) && HasFrame(c)) c->ncPaint = true;
       part.Offset(-(cr.left + c->client.left), -(cr.top + c->client.top));
       InvalidateWindow(c, &part, flags);
     }
@@ -119,7 +127,7 @@ bool PaintFrameAndBackground(Window* w, HDC dc, bool erase) {
   }
   if (nc && (w->style & (WS_BORDER | WS_DLGFRAME | WS_THICKFRAME | WS_VSCROLL | WS_HSCROLL) ||
              (w->exStyle & (WS_EX_CLIENTEDGE | WS_EX_STATICEDGE | WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE)) ||
-             (!w->Child() && w->menu))) {
+             (!w->Child() && w->menu) || HasFrame(w))) {
     SendTo(w, WM_NCPAINT, 1, 0);
   }
   if (!GetWindow(h)) return false;

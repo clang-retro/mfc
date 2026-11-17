@@ -36,8 +36,11 @@ HFONT ControlFont();
 // The common control classes, registered with the system ones.
 void RegisterCommonControls();
 void RegisterBarClasses();     // comctl_bars.cpp: status bar, toolbar, tooltips
-void RegisterSimpleClasses();  // comctl_simple.cpp: progress, trackbar, up-down, header, tab, hotkey, animate
+void RegisterSimpleClasses();  // comctl_simple.cpp: progress, trackbar, up-down, header, tab, hotkey
 void RegisterListView();       // comctl_listview.cpp
 void RegisterTreeView();       // comctl_treeview.cpp
+void RegisterRebarClasses();   // comctl_rebar.cpp: rebar, pager, SysLink
+void RegisterExtraClasses();   // comctl_extra.cpp: IP address, ComboBoxEx, animate
+void RegisterDateClasses();    // comctl_date.cpp: month calendar, date and time picker
 
 }  // namespace winport

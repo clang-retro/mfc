@@ -125,6 +125,11 @@ document's name in `~/Documents`. PrintDlg and PageSetupDlg show their
 dialogs, with hooks and the usual control IDs from `dlgs.h`, or return
 the default printer. `WINPORT_PRINTERS=pdf` leaves CUPS out.
 
+The common controls are all there: besides the bars, list and tree
+views, tabs and the rest, the rebar, pager, SysLink, IP address,
+ComboBoxEx, animation (uncompressed and RLE8 AVI clips), month calendar
+and date and time picker.
+
 The functions not written yet are
 listed in `port/src/stubs.txt` and fail with `ERROR_CALL_NOT_IMPLEMENTED`;
 `WINPORT_DEBUG=1` names each one the first time a program calls it.
@@ -194,8 +199,8 @@ clang++ --config=winxp.cfg -D_AFXDLL -Ipath/to/mfc/include -shared ext.cpp ext-r
 `make check` (with the same variables as the build) builds the programs
 in `tests/` in ANSI and Unicode and runs them under Wine, starting Xvfb
 when there is no display. For a Linux or macOS target it builds `core`,
-`memtest`, `wintest`, `disptest`, `isapitest`, `dlgtest`, `sditest` and
-`mditest` against the portable layer and runs them directly; `NATIVE_TESTS` names others to try.
+`memtest`, `wintest`, `disptest`, `isapitest`, `dlgtest`, `sditest`,
+`mditest` and `cmntest` against the portable layer and runs them directly; `NATIVE_TESTS` names others to try.
 
 * `core`: CString, collections, CFile, CArchive and serialization,
   CTime, exceptions and run-time classes, on the console.
@@ -210,7 +215,11 @@ when there is no display. For a Linux or macOS target it builds `core`,
   Unicode window procedures, focus, painting and scrolling, memory DCs,
   monochrome bitmaps, DIB sections, raster operations, regions,
   clipping, SaveDC and mapping modes, lines, shapes, fill modes, flood
-  fills, paths, text metrics and extents, TextOut and DrawText; printer
+  fills, paths, text metrics and extents, TextOut and DrawText; the
+  common controls through their messages (status bar, progress,
+  trackbar, up-down, header, tabs, hotkey, list and tree views, IP
+  address, ComboBoxEx, month calendar, date and time picker, an
+  animation from an AVI file) and property sheets; printer
   DCs, a job printed to a file, and the Print and Page Setup dialogs
   driven through their hooks; and a CWnd with a message map, on the
   console.
