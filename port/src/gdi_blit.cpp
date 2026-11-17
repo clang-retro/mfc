@@ -313,6 +313,13 @@ void DeviceBox(DCObj* dc, int x, int y, int w, int h, int* dx, int* dy, int* dw,
 BOOL StretchCore(HDC hdst, int x, int y, int w, int h, HDC hsrc, int sx, int sy, int sw, int sh, const BlendInfo& how) {
   DCObj* dst = DCOf(hdst);
   if (!dst) return FALSE;
+  if (IsMetaDC(dst)) {
+    if (how.kind == kRop && (!UsesSource(how.rop) || !hsrc))
+      meta::PatBlt(dst, x, y, w, h, how.rop);
+    else
+      meta::Blt(dst, x, y, w, h, hsrc, sx, sy, sw, sh, how.kind == kRop ? how.rop : SRCCOPY);
+    return TRUE;
+  }
   if (how.kind == kRop && !UsesSource(how.rop)) {
     int dx, dy, dw, dh;
     DeviceBox(dst, x, y, w, h, &dx, &dy, &dw, &dh);
@@ -399,6 +406,10 @@ BOOL WINAPI PatBlt(HDC hdc, int x, int y, int w, int h, DWORD rop) {
 int WINAPI FillRect(HDC hdc, const RECT* r, HBRUSH brush) {
   DCObj* dc = DCOf(hdc);
   if (!dc || !r) return FALSE;
+  if (IsMetaDC(dc)) {
+    meta::FillRect(dc, *r, brush, PATCOPY);
+    return TRUE;
+  }
   FillDevice(dc, dc->ToDevice(*r), PaintFor(dc, brush), PATCOPY);
   return TRUE;
 }
@@ -407,6 +418,14 @@ int WINAPI FrameRect(HDC hdc, const RECT* r, HBRUSH brush) {
   DCObj* dc = DCOf(hdc);
   if (!dc || !r) return FALSE;
   if (r->right <= r->left || r->bottom <= r->top) return TRUE;
+  if (IsMetaDC(dc)) {
+    const RECT& a = *r;
+    meta::FillRect(dc, MakeRect(a.left, a.top, a.right, a.top + 1), brush, PATCOPY);
+    meta::FillRect(dc, MakeRect(a.left, a.bottom - 1, a.right, a.bottom), brush, PATCOPY);
+    meta::FillRect(dc, MakeRect(a.left, a.top + 1, a.left + 1, a.bottom - 1), brush, PATCOPY);
+    meta::FillRect(dc, MakeRect(a.right - 1, a.top + 1, a.right, a.bottom - 1), brush, PATCOPY);
+    return TRUE;
+  }
   BrushPaint p = PaintFor(dc, brush);
   RECT d = dc->ToDevice(*r);
   int bx = dc->ScaleX(1), by = dc->ScaleY(1);
@@ -422,6 +441,10 @@ int WINAPI FrameRect(HDC hdc, const RECT* r, HBRUSH brush) {
 BOOL WINAPI InvertRect(HDC hdc, const RECT* r) {
   DCObj* dc = DCOf(hdc);
   if (!dc || !r) return FALSE;
+  if (IsMetaDC(dc)) {
+    meta::PatBlt(dc, r->left, r->top, r->right - r->left, r->bottom - r->top, DSTINVERT);
+    return TRUE;
+  }
   FillDevice(dc, dc->ToDevice(*r), BrushPaint(), DSTINVERT);
   return TRUE;
 }
@@ -430,6 +453,10 @@ static BOOL RegionOp(HDC hdc, HRGN h, HBRUSH brush, DWORD rop) {
   DCObj* dc = DCOf(hdc);
   RegionObj* r = GdiAs<RegionObj>(h, OBJ_REGION);
   if (!dc || !r) return FALSE;
+  if (IsMetaDC(dc)) {
+    for (const RECT& rc : r->rgn.Rects()) meta::FillRect(dc, rc, brush, rop);
+    return TRUE;
+  }
   BrushPaint p = brush ? PaintFor(dc, brush) : BrushPaint();
   for (const RECT& rc : r->rgn.Rects()) FillDevice(dc, dc->ToDevice(rc), p, rop);
   return TRUE;
@@ -468,6 +495,10 @@ BOOL WINAPI FrameRgn(HDC hdc, HRGN h, HBRUSH brush, int w, int ht) {
 COLORREF WINAPI SetPixel(HDC hdc, int x, int y, COLORREF c) {
   DCObj* dc = DCOf(hdc);
   if (!dc) return CLR_INVALID;
+  if (IsMetaDC(dc)) {
+    meta::Pixel(dc, x, y, c);
+    return c;
+  }
   POINT p = dc->ToDevice(x, y);
   DrawScope ds(dc);
   if (!ds.ok || !ds.clip.Contains(p.x, p.y)) return CLR_INVALID;
@@ -595,6 +626,10 @@ int WINAPI StretchDIBits(HDC hdc, int x, int y, int w, int h, int sx, int sy, in
                          const BITMAPINFO* bmi, UINT usage, DWORD rop) {
   DCObj* dc = DCOf(hdc);
   if (!dc) return 0;
+  if (IsMetaDC(dc)) {
+    meta::Dib(dc, x, y, w, h, sx, sy, sw, sh, bits, bmi, usage, rop);
+    return bmi ? abs(bmi->bmiHeader.biHeight) : 0;
+  }
   Source s;
   if (!ReadDib(bmi, bits, usage, sx, sy, sw, sh, 0, -1, &s)) return 0;
   int dx, dy, dw, dh;
@@ -611,6 +646,10 @@ int WINAPI SetDIBitsToDevice(HDC hdc, int x, int y, DWORD w, DWORD h, int sx, in
                              const void* bits, const BITMAPINFO* bmi, UINT usage) {
   DCObj* dc = DCOf(hdc);
   if (!dc) return 0;
+  if (IsMetaDC(dc)) {
+    meta::Dib(dc, x, y, (int)w, (int)h, sx, sy, (int)w, (int)h, bits, bmi, usage, SRCCOPY);
+    return (int)lines;
+  }
   Source s;
   if (!ReadDib(bmi, bits, usage, sx, sy, (int)w, (int)h, (int)start, (int)lines, &s)) return 0;
   POINT p = dc->ToDevice(x, y);

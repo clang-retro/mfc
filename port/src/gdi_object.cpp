@@ -1239,8 +1239,9 @@ BOOL WINAPI DeleteObject(HGDIOBJ h) {
     return FALSE;
   }
   if (o->stock) return TRUE;
-  if (o->type == OBJ_DC || o->type == OBJ_MEMDC) return FALSE;
+  if (o->type == OBJ_DC || o->type == OBJ_MEMDC || o->type == OBJ_METADC || o->type == OBJ_ENHMETADC) return FALSE;
   if (o->type == OBJ_BITMAP && ((BitmapObj*)o)->selectedIn) return FALSE;
+  MetaObjectDeleted(h);
   if (o->refs > 0) {
     o->deletePending = true;
     return TRUE;

@@ -9,23 +9,14 @@ ChooseColorA
 ChooseColorW
 ChooseFontA
 ChooseFontW
-CloseMetaFile
-CopyEnhMetaFileA
-CopyEnhMetaFileW
-CopyMetaFileA
-CopyMetaFileW
 CreateAsyncBindCtx
 CreateBindCtx
 CreateDataAdviseHolder
 CreateFileMoniker
 CreateGenericComposite
 CreateItemMoniker
-CreateMetaFileA
-CreateMetaFileW
 CreateOleAdviseHolder
 CreateURLMoniker
-DeleteEnhMetaFile
-DeleteMetaFile
 DoDragDrop
 DragFinish
 DragQueryFileA
@@ -85,8 +76,6 @@ OleUIPasteSpecialA
 OleUIPasteSpecialW
 OleUIUpdateLinksA
 OleUIUpdateLinksW
-PlayMetaFile
-ReadFmtUserTypeStg
 RegisterDragDrop
 RegisterTypeLib
 ReplaceTextA
@@ -124,17 +113,10 @@ SQLSetConnectAttrW
 SQLSetEnvAttr
 SQLSetStmtAttrA
 SQLSetStmtAttrW
-SetConvertStg
 SetWindowRgn
-StgCreateDocfile
-StgCreateDocfileOnILockBytes
-StgOpenStorage
-StgOpenStorageOnILockBytes
 UnRegisterTypeLib
 WinHelpA
 WinHelpW
-WriteClassStg
-WriteFmtUserTypeStg
 
 # wininet
 GopherCreateLocatorA
