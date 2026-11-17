@@ -206,6 +206,10 @@ BOOL TextOutCore(HDC hdc, int x, int y, UINT opt, const RECT* rc, const wchar_t*
     SetLastError(ERROR_INVALID_PARAMETER);
     return FALSE;
   }
+  if (IsMetaDC(dc)) {
+    meta::Text(dc, x, y, opt, rc, s, n, dx);
+    return TRUE;
+  }
   RealFont* f = FontOf(dc);
   std::vector<int> adv = Advances(dc, f, s, n, dx, (opt & ETO_PDY) != 0);
   int width = Sum(adv);

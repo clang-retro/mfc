@@ -580,6 +580,7 @@ BOOL WINAPI MoveToEx(HDC hdc, int x, int y, LPPOINT old) {
   if (!dc) return FALSE;
   if (old) *old = dc->s.current;
   dc->s.current = {x, y};
+  meta::Point(dc, META_MOVETO, x, y);
   if (Recording(dc)) {
     Figure f;
     f.pts.push_back(Dev(dc, x, y));
@@ -602,6 +603,11 @@ BOOL WINAPI GetCurrentPositionEx(HDC hdc, LPPOINT p) {
 BOOL WINAPI LineTo(HDC hdc, int x, int y) {
   DCObj* dc = DCOf(hdc);
   if (!dc) return FALSE;
+  if (IsMetaDC(dc)) {
+    meta::Point(dc, META_LINETO, x, y);
+    dc->s.current = {x, y};
+    return TRUE;
+  }
   BOOL ok = LinesFromCurrent(dc, {Dev(dc, x, y)});
   dc->s.current = {x, y};
   return ok;
@@ -610,6 +616,10 @@ BOOL WINAPI LineTo(HDC hdc, int x, int y) {
 BOOL WINAPI Polyline(HDC hdc, const POINT* pts, int n) {
   DCObj* dc = DCOf(hdc);
   if (!dc || !pts || n < 2) return FALSE;
+  if (IsMetaDC(dc)) {
+    meta::Poly(dc, META_POLYLINE, pts, n);
+    return TRUE;
+  }
   std::vector<Figure> f(1);
   for (int i = 0; i < n; i++) f[0].pts.push_back(DevPoint(dc, pts[i]));
   return DrawFigures(dc, f, false, true);
@@ -619,6 +629,11 @@ BOOL WINAPI PolylineTo(HDC hdc, const POINT* pts, DWORD n) {
   DCObj* dc = DCOf(hdc);
   if (!dc || !pts) return FALSE;
   if (!n) return TRUE;
+  if (IsMetaDC(dc)) {
+    for (DWORD i = 0; i < n; i++) meta::Point(dc, META_LINETO, pts[i].x, pts[i].y);
+    dc->s.current = pts[n - 1];
+    return TRUE;
+  }
   std::vector<PtF> p;
   for (DWORD i = 0; i < n; i++) p.push_back(DevPoint(dc, pts[i]));
   BOOL ok = LinesFromCurrent(dc, p);
@@ -629,6 +644,13 @@ BOOL WINAPI PolylineTo(HDC hdc, const POINT* pts, DWORD n) {
 BOOL WINAPI PolyPolyline(HDC hdc, const POINT* pts, const DWORD* counts, DWORD n) {
   DCObj* dc = DCOf(hdc);
   if (!dc || !pts || !counts) return FALSE;
+  if (IsMetaDC(dc)) {
+    for (DWORD i = 0; i < n; i++) {
+      meta::Poly(dc, META_POLYLINE, pts, (int)counts[i]);
+      pts += counts[i];
+    }
+    return TRUE;
+  }
   std::vector<Figure> figs;
   for (DWORD i = 0; i < n; i++) {
     if (counts[i] < 2) return FALSE;
@@ -642,6 +664,10 @@ BOOL WINAPI PolyPolyline(HDC hdc, const POINT* pts, const DWORD* counts, DWORD n
 BOOL WINAPI Polygon(HDC hdc, const POINT* pts, int n) {
   DCObj* dc = DCOf(hdc);
   if (!dc || !pts || n < 2) return FALSE;
+  if (IsMetaDC(dc)) {
+    meta::Poly(dc, META_POLYGON, pts, n);
+    return TRUE;
+  }
   std::vector<Figure> f(1);
   for (int i = 0; i < n; i++) f[0].pts.push_back(DevPoint(dc, pts[i]));
   f[0].closed = true;
@@ -651,6 +677,10 @@ BOOL WINAPI Polygon(HDC hdc, const POINT* pts, int n) {
 BOOL WINAPI PolyPolygon(HDC hdc, const POINT* pts, const INT* counts, int n) {
   DCObj* dc = DCOf(hdc);
   if (!dc || !pts || !counts || n <= 0) return FALSE;
+  if (IsMetaDC(dc)) {
+    meta::PolyPoly(dc, pts, counts, n);
+    return TRUE;
+  }
   std::vector<Figure> figs;
   for (int i = 0; i < n; i++) {
     if (counts[i] < 2) return FALSE;
@@ -777,6 +807,10 @@ BOOL WINAPI PolyDraw(HDC hdc, const POINT* pts, const BYTE* types, int n) {
 BOOL WINAPI Rectangle(HDC hdc, int l, int t, int r, int b) {
   DCObj* dc = DCOf(hdc);
   if (!dc) return FALSE;
+  if (IsMetaDC(dc)) {
+    meta::Box(dc, META_RECTANGLE, l, t, r, b);
+    return TRUE;
+  }
   PenInfo pen = PenFor(dc);
   Frame f = BoxFrame(dc, l, t, r, b, &pen);
   return DrawFigures(dc, {RectFigure(f)}, true, true, ALTERNATE);
@@ -785,6 +819,10 @@ BOOL WINAPI Rectangle(HDC hdc, int l, int t, int r, int b) {
 BOOL WINAPI Ellipse(HDC hdc, int l, int t, int r, int b) {
   DCObj* dc = DCOf(hdc);
   if (!dc) return FALSE;
+  if (IsMetaDC(dc)) {
+    meta::Box(dc, META_ELLIPSE, l, t, r, b);
+    return TRUE;
+  }
   PenInfo pen = PenFor(dc);
   Frame f = BoxFrame(dc, l, t, r, b, &pen);
   return DrawFigures(dc, {EllipseFigure(f)}, true, true, ALTERNATE);
@@ -793,6 +831,10 @@ BOOL WINAPI Ellipse(HDC hdc, int l, int t, int r, int b) {
 BOOL WINAPI RoundRect(HDC hdc, int l, int t, int r, int b, int ew, int eh) {
   DCObj* dc = DCOf(hdc);
   if (!dc) return FALSE;
+  if (IsMetaDC(dc)) {
+    meta::RoundRect(dc, l, t, r, b, ew, eh);
+    return TRUE;
+  }
   PenInfo pen = PenFor(dc);
   Frame f = BoxFrame(dc, l, t, r, b, &pen);
   double rx, ry;
@@ -830,6 +872,11 @@ enum ArcKind { kArc, kArcTo, kChord, kPie };
 BOOL ArcCore(HDC hdc, ArcKind kind, int l, int t, int r, int b, int xs, int ys, int xe, int ye) {
   DCObj* dc = DCOf(hdc);
   if (!dc) return FALSE;
+  if (IsMetaDC(dc)) {
+    if (kind != kArcTo)
+      meta::Arc(dc, kind == kArc ? META_ARC : kind == kChord ? META_CHORD : META_PIE, l, t, r, b, xs, ys, xe, ye);
+    return TRUE;
+  }
   PenInfo pen = PenFor(dc);
   Frame f = BoxFrame(dc, l, t, r, b, kind == kArc || kind == kArcTo ? NULL : &pen);
   double a0, sweep;

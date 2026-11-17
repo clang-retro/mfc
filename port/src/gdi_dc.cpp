@@ -77,6 +77,7 @@ void FixIsotropic(DCState& s) {
 }  // namespace
 
 void FreeDC(DCObj* dc) {
+  MetaDCFreed(dc);
   UnrefState(dc->s);
   for (DCState& st : dc->saved) UnrefState(st);
   dc->saved.clear();
@@ -383,6 +384,7 @@ HGDIOBJ WINAPI SelectObject(HDC hdc, HGDIOBJ h) {
       return NULL;
   }
   HGDIOBJ old = *slot;
+  meta::Select(dc, h);
   if (old == h) return old;
   Ref(h);
   *slot = h;
@@ -428,7 +430,7 @@ BOOL WINAPI UpdateColors(HDC hdc) { return DCOf(hdc) != NULL; }
 // ---------------------------------------------------------------------
 // Attributes
 
-#define DC_ATTR(type, Get, Set, field, bad)    \
+#define DC_ATTR(type, Get, Set, field, bad, rec) \
   type WINAPI Get(HDC hdc) {                   \
     DCObj* dc = DCOf(hdc);                     \
     return dc ? (type)dc->s.field : (type)bad; \
@@ -438,21 +440,22 @@ BOOL WINAPI UpdateColors(HDC hdc) { return DCOf(hdc) != NULL; }
     if (!dc) return (type)bad;                 \
     type old = (type)dc->s.field;              \
     dc->s.field = v;                           \
+    if (rec) meta::Attr(dc, rec, (DWORD)v);    \
     return old;                                \
   }
 
-DC_ATTR(COLORREF, GetBkColor, SetBkColor, bkColor, CLR_INVALID)
-DC_ATTR(COLORREF, GetTextColor, SetTextColor, textColor, CLR_INVALID)
-DC_ATTR(COLORREF, GetDCBrushColor, SetDCBrushColor, dcBrushColor, CLR_INVALID)
-DC_ATTR(COLORREF, GetDCPenColor, SetDCPenColor, dcPenColor, CLR_INVALID)
-DC_ATTR(int, GetBkMode, SetBkMode, bkMode, 0)
-DC_ATTR(int, GetROP2, SetROP2, rop2, 0)
-DC_ATTR(int, GetPolyFillMode, SetPolyFillMode, polyFill, 0)
-DC_ATTR(int, GetStretchBltMode, SetStretchBltMode, stretchMode, 0)
-DC_ATTR(UINT, GetTextAlign, SetTextAlign, textAlign, GDI_ERROR)
-DC_ATTR(int, GetTextCharacterExtra, SetTextCharacterExtra, charExtra, 0x80000000)
-DC_ATTR(int, GetArcDirection, SetArcDirection, arcDirection, 0)
-DC_ATTR(DWORD, GetLayout, SetLayout, layout, GDI_ERROR)
+DC_ATTR(COLORREF, GetBkColor, SetBkColor, bkColor, CLR_INVALID, META_SETBKCOLOR)
+DC_ATTR(COLORREF, GetTextColor, SetTextColor, textColor, CLR_INVALID, META_SETTEXTCOLOR)
+DC_ATTR(COLORREF, GetDCBrushColor, SetDCBrushColor, dcBrushColor, CLR_INVALID, 0)
+DC_ATTR(COLORREF, GetDCPenColor, SetDCPenColor, dcPenColor, CLR_INVALID, 0)
+DC_ATTR(int, GetBkMode, SetBkMode, bkMode, 0, META_SETBKMODE)
+DC_ATTR(int, GetROP2, SetROP2, rop2, 0, META_SETROP2)
+DC_ATTR(int, GetPolyFillMode, SetPolyFillMode, polyFill, 0, META_SETPOLYFILLMODE)
+DC_ATTR(int, GetStretchBltMode, SetStretchBltMode, stretchMode, 0, META_SETSTRETCHBLTMODE)
+DC_ATTR(UINT, GetTextAlign, SetTextAlign, textAlign, GDI_ERROR, META_SETTEXTALIGN)
+DC_ATTR(int, GetTextCharacterExtra, SetTextCharacterExtra, charExtra, 0x80000000, META_SETTEXTCHAREXTRA)
+DC_ATTR(int, GetArcDirection, SetArcDirection, arcDirection, 0, 0)
+DC_ATTR(DWORD, GetLayout, SetLayout, layout, GDI_ERROR, 0)
 
 #undef DC_ATTR
 
@@ -554,6 +557,7 @@ int WINAPI SetMapMode(HDC hdc, int mode) {
   DCState& s = dc->s;
   int old = s.mapMode;
   s.mapMode = mode;
+  meta::MapMode(dc, mode);
   // Units per inch of each fixed mode, against pixels per inch.
   LONG units = 0;
   switch (mode) {
@@ -581,9 +585,10 @@ int WINAPI GetMapMode(HDC hdc) {
   return dc ? dc->s.mapMode : 0;
 }
 
-static BOOL SetPoint(HDC hdc, POINT DCState::*field, int x, int y, LPPOINT old, bool add) {
+static BOOL SetPoint(HDC hdc, POINT DCState::*field, int x, int y, LPPOINT old, bool add, WORD rec) {
   DCObj* dc = DCOf(hdc);
   if (!dc) return FALSE;
+  meta::Mapping(dc, rec, x, y);
   POINT& p = dc->s.*field;
   if (old) *old = p;
   if (add) {
@@ -604,17 +609,17 @@ static BOOL GetPoint(HDC hdc, POINT DCState::*field, LPPOINT out) {
 }
 
 BOOL WINAPI SetViewportOrgEx(HDC hdc, int x, int y, LPPOINT old) {
-  return SetPoint(hdc, &DCState::viewportOrg, x, y, old, false);
+  return SetPoint(hdc, &DCState::viewportOrg, x, y, old, false, META_SETVIEWPORTORG);
 }
 BOOL WINAPI OffsetViewportOrgEx(HDC hdc, int x, int y, LPPOINT old) {
-  return SetPoint(hdc, &DCState::viewportOrg, x, y, old, true);
+  return SetPoint(hdc, &DCState::viewportOrg, x, y, old, true, META_OFFSETVIEWPORTORG);
 }
 BOOL WINAPI GetViewportOrgEx(HDC hdc, LPPOINT out) { return GetPoint(hdc, &DCState::viewportOrg, out); }
 BOOL WINAPI SetWindowOrgEx(HDC hdc, int x, int y, LPPOINT old) {
-  return SetPoint(hdc, &DCState::windowOrg, x, y, old, false);
+  return SetPoint(hdc, &DCState::windowOrg, x, y, old, false, META_SETWINDOWORG);
 }
 BOOL WINAPI OffsetWindowOrgEx(HDC hdc, int x, int y, LPPOINT old) {
-  return SetPoint(hdc, &DCState::windowOrg, x, y, old, true);
+  return SetPoint(hdc, &DCState::windowOrg, x, y, old, true, META_OFFSETWINDOWORG);
 }
 BOOL WINAPI GetWindowOrgEx(HDC hdc, LPPOINT out) { return GetPoint(hdc, &DCState::windowOrg, out); }
 
@@ -626,6 +631,7 @@ static BOOL SetExt(HDC hdc, bool viewport, int x, int y, LPSIZE old) {
   // Only the scalable modes have extents to set.
   if (dc->s.mapMode != MM_ISOTROPIC && dc->s.mapMode != MM_ANISOTROPIC) return TRUE;
   if (x == 0 || y == 0) return FALSE;
+  meta::Mapping(dc, viewport ? META_SETVIEWPORTEXT : META_SETWINDOWEXT, x, y);
   e.cx = x;
   e.cy = y;
   FixIsotropic(dc->s);
@@ -654,6 +660,7 @@ static BOOL ScaleExt(HDC hdc, bool viewport, int xn, int xd, int yn, int yd, LPS
   SIZE& e = viewport ? dc->s.viewportExt : dc->s.windowExt;
   if (old) *old = e;
   if (dc->s.mapMode != MM_ISOTROPIC && dc->s.mapMode != MM_ANISOTROPIC) return TRUE;
+  meta::Scale(dc, viewport ? META_SCALEVIEWPORTEXT : META_SCALEWINDOWEXT, xn, xd, yn, yd);
   LONG cx = (LONG)((long long)e.cx * xn / xd), cy = (LONG)((long long)e.cy * yn / yd);
   if (cx == 0 || cy == 0) return FALSE;
   e.cx = cx;
@@ -758,6 +765,7 @@ int WINAPI SelectClipRgn(HDC hdc, HRGN h) { return ExtSelectClipRgn(hdc, h, RGN_
 static int ClipRect(HDC hdc, int l, int t, int r, int b, bool exclude) {
   DCObj* dc = DCOf(hdc);
   if (!dc) return ERROR;
+  meta::Box(dc, exclude ? META_EXCLUDECLIPRECT : META_INTERSECTCLIPRECT, l, t, r, b);
   RECT d = dc->ToDevice(MakeRect(l, t, r, b));
   DCState& s = dc->s;
   if (!s.hasClip) {
@@ -844,6 +852,7 @@ int WINAPI GetRandomRgn(HDC hdc, HRGN h, INT which) {
 int WINAPI SaveDC(HDC hdc) {
   DCObj* dc = DCOf(hdc);
   if (!dc) return 0;
+  meta::Save(dc);
   dc->saved.push_back(dc->s);
   RefState(dc->saved.back());
   return (int)dc->saved.size();
@@ -855,6 +864,7 @@ BOOL WINAPI RestoreDC(HDC hdc, int level) {
   int n = (int)dc->saved.size();
   if (level < 0) level = n + 1 + level;
   if (level <= 0 || level > n) return FALSE;
+  meta::Restore(dc, level - n - 1);
   // Drop the newer saved states, then make the chosen one current.
   while ((int)dc->saved.size() > level) {
     UnrefState(dc->saved.back());
@@ -884,7 +894,7 @@ int WINAPI GetDeviceCaps(HDC hdc, int index) {
   int dpi = printer ? dc->dpiX : kLogPixels, dpiY = printer ? dc->dpiY : kLogPixels;
   switch (index) {
     case DRIVERVERSION: return 0x4000;
-    case TECHNOLOGY: return printer ? DT_RASPRINTER : DT_RASDISPLAY;
+    case TECHNOLOGY: return printer ? DT_RASPRINTER : dc->type == OBJ_METADC ? DT_METAFILE : DT_RASDISPLAY;
     case HORZSIZE: return sz.cx * 254 / (dpi * 10);
     case VERTSIZE: return sz.cy * 254 / (dpiY * 10);
     case HORZRES: case DESKTOPHORZRES: return sz.cx;

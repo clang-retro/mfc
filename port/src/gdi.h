@@ -219,8 +219,8 @@ struct DCObj : GdiObject {
   bool hasExtraClip = false;
   // A DC with nowhere to draw (an information or printer DC) has a size.
   SIZE size = {0, 0};
-  // A metafile DC records into this.
-  std::vector<BYTE> record;
+  // A metafile DC records into this (metafile.cpp).
+  std::shared_ptr<struct MetaRecorder> meta;
   // A printer DC: its dots per inch, and its printer and job (print.cpp).
   // size is the printable area, which lies offset on the paper.
   int dpiX = 0, dpiY = 0;
@@ -318,6 +318,35 @@ DWORD ToMono(DWORD p);
 DWORD Rop3(DWORD rop, DWORD dst, DWORD src, DWORD pat);
 // A binary raster operation (R2_*).
 DWORD Rop2(int rop, DWORD dst, DWORD pen);
+
+// Metafile recording (metafile.cpp): the GDI functions call these on a
+// metafile DC (kind kMetaDC), which records instead of drawing.
+namespace meta {
+void Attr(DCObj* dc, WORD fn, DWORD v);
+void Mapping(DCObj* dc, WORD fn, int x, int y);
+void Scale(DCObj* dc, WORD fn, int xn, int xd, int yn, int yd);
+void MapMode(DCObj* dc, int mode);
+void Point(DCObj* dc, WORD fn, int x, int y);
+void Box(DCObj* dc, WORD fn, int l, int t, int r, int b);
+void RoundRect(DCObj* dc, int l, int t, int r, int b, int w, int h);
+void Arc(DCObj* dc, WORD fn, int l, int t, int r, int b, int xs, int ys, int xe, int ye);
+void Poly(DCObj* dc, WORD fn, const POINT* pts, int n);
+void PolyPoly(DCObj* dc, const POINT* pts, const INT* counts, int polys);
+void Text(DCObj* dc, int x, int y, UINT opt, const RECT* rc, const wchar_t* s, int n, const INT* dx);
+void PatBlt(DCObj* dc, int x, int y, int w, int h, DWORD rop);
+void Pixel(DCObj* dc, int x, int y, COLORREF c);
+void Save(DCObj* dc);
+void Restore(DCObj* dc, int level);
+void Select(DCObj* dc, HGDIOBJ h);
+void FillRect(DCObj* dc, const RECT& r, HBRUSH brush, DWORD rop);
+void Dib(DCObj* dc, int x, int y, int w, int h, int sx, int sy, int sw, int sh, const void* bits,
+         const BITMAPINFO* bmi, UINT usage, DWORD rop);
+void Blt(DCObj* dc, int x, int y, int w, int h, HDC src, int sx, int sy, int sw, int sh, DWORD rop);
+}  // namespace meta
+inline bool IsMetaDC(const DCObj* dc) { return dc && dc->kind == kMetaDC; }
+// A deleted object leaves the recorders' tables; a metafile DC is freed.
+void MetaObjectDeleted(HGDIOBJ h);
+void MetaDCFreed(DCObj* dc);
 
 // The display's size and depth.
 SIZE ScreenSize();
