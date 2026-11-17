@@ -476,9 +476,32 @@ CArchive& AFXAPI operator<<(CArchive& ar, const CStringA& str) {
   return ar;
 }
 
+// A wide string is stored as UTF-16, whatever the size of WCHAR here (it
+// is 4 bytes on Linux and macOS).
+static void ToUtf16(const WCHAR* s, int n, CArray<WORD, WORD>& out) {
+  out.RemoveAll();
+  for (int i = 0; i < n; i++) {
+    DWORD c = (DWORD)s[i];
+    if (c >= 0x10000 && c <= 0x10FFFF) {
+      c -= 0x10000;
+      out.Add((WORD)(0xD800 + (c >> 10)));
+      out.Add((WORD)(0xDC00 + (c & 0x3FF)));
+    } else {
+      out.Add((WORD)c);
+    }
+  }
+}
+
 CArchive& AFXAPI operator<<(CArchive& ar, const CStringW& str) {
-  WriteStringLength(ar, str.GetLength(), true);
-  ar.Write(str.GetString(), str.GetLength() * sizeof(WCHAR));
+  if (sizeof(WCHAR) == 2) {
+    WriteStringLength(ar, str.GetLength(), true);
+    ar.Write(str.GetString(), str.GetLength() * sizeof(WCHAR));
+    return ar;
+  }
+  CArray<WORD, WORD> units;
+  ToUtf16(str.GetString(), str.GetLength(), units);
+  WriteStringLength(ar, (DWORD)units.GetSize(), true);
+  for (INT_PTR i = 0; i < units.GetSize(); i++) ar << units[i];
   return ar;
 }
 
@@ -494,9 +517,24 @@ static void ReadAnyString(CArchive& ar, S& str) {
     str = a;
   } else {
     CStringW w;
-    WCHAR* p = w.GetBuffer((int)n);
-    ar.EnsureRead(p, n * sizeof(WCHAR));
-    w.ReleaseBufferSetLength((int)n);
+    if (sizeof(WCHAR) == 2) {
+      WCHAR* p = w.GetBuffer((int)n);
+      ar.EnsureRead(p, n * sizeof(WCHAR));
+      w.ReleaseBufferSetLength((int)n);
+    } else {
+      // UTF-16 units, surrogate pairs made one character again.
+      WCHAR* p = w.GetBuffer((int)n);
+      int k = 0;
+      for (DWORD i = 0; i < n; i++) {
+        WORD u;
+        ar >> u;
+        if (u >= 0xDC00 && u < 0xE000 && k > 0 && (DWORD)p[k - 1] >= 0xD800 && (DWORD)p[k - 1] < 0xDC00)
+          p[k - 1] = (WCHAR)(0x10000 + (((DWORD)p[k - 1] - 0xD800) << 10) + (u - 0xDC00));
+        else
+          p[k++] = (WCHAR)u;
+      }
+      w.ReleaseBufferSetLength(k);
+    }
     str = w;
   }
 }
