@@ -13,6 +13,7 @@
 #include "winport.h"
 #include "region.h"
 
+#include <memory>
 #include <vector>
 
 namespace winport {
@@ -220,9 +221,13 @@ struct DCObj : GdiObject {
   SIZE size = {0, 0};
   // A metafile DC records into this.
   std::vector<BYTE> record;
-  // Printing
+  // A printer DC: its dots per inch, and its printer and job (print.cpp).
+  // size is the printable area, which lies offset on the paper.
+  int dpiX = 0, dpiY = 0;
+  SIZE paper = {0, 0};
+  POINT paperOffset = {0, 0};
+  std::shared_ptr<struct PrinterState> printer;
   ABORTPROC abortProc = NULL;
-  int docState = 0;
   // BeginPath records figures here until EndPath.
   enum { kNoPath, kPathOpen, kPathClosed } pathState = kNoPath;
   std::vector<Figure> path;
@@ -290,6 +295,14 @@ struct BrushPaint {
   bool Draws(int x, int y) const;  // false where a transparent hatch leaves the pixel
 };
 BrushPaint PaintFor(DCObj* dc, HBRUSH brush);
+
+// Printer DCs (print.cpp): sets a new one up for a printer and the
+// application's settings, which may be NULL; and the page being printed,
+// which is not valid outside StartPage and EndPage.
+void InitPrinterDC(DCObj* dc, const std::wstring& device, const DEVMODEW* dm);
+bool ResetPrinterDC(DCObj* dc, const DEVMODEW* dm);
+Pixels PrinterPage(DCObj* dc);
+DEVMODEW DevModeFromA(const DEVMODEA* a);
 
 // Fills the device rectangle, clipped, with a brush and a raster op.
 void FillDevice(DCObj* dc, const RECT& device, const BrushPaint& paint, DWORD rop3);

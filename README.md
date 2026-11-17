@@ -114,7 +114,18 @@ text. Windows show on Wayland, on X11 or with Cocoa on macOS (Mac OS X
 (`wayland`, `x11`, `cocoa`, or `headless` to keep windows in memory, as
 the tests do). Wayland, X11 and xkbcommon are loaded when a program
 starts, so it runs without them. Text copied and pasted through the
-clipboard goes to and from other programs. The functions not written yet are
+clipboard goes to and from other programs.
+
+Printing and print preview work too. The printers are the system's CUPS
+queues and "Save as PDF"; a printer DC draws each page as a picture at
+the printer's resolution (300 dots an inch unless the `DEVMODE` asks for
+another), and the job becomes a PDF file that goes to CUPS's `lp`, to the
+file `DOCINFO` names, or (for "Save as PDF" with no file named) to the
+document's name in `~/Documents`. PrintDlg and PageSetupDlg show their
+dialogs, with hooks and the usual control IDs from `dlgs.h`, or return
+the default printer. `WINPORT_PRINTERS=pdf` leaves CUPS out.
+
+The functions not written yet are
 listed in `port/src/stubs.txt` and fail with `ERROR_CALL_NOT_IMPLEMENTED`;
 `WINPORT_DEBUG=1` names each one the first time a program calls it.
 
@@ -183,8 +194,8 @@ clang++ --config=winxp.cfg -D_AFXDLL -Ipath/to/mfc/include -shared ext.cpp ext-r
 `make check` (with the same variables as the build) builds the programs
 in `tests/` in ANSI and Unicode and runs them under Wine, starting Xvfb
 when there is no display. For a Linux or macOS target it builds `core`,
-`memtest`, `wintest`, `disptest` and `isapitest` against the portable
-layer and runs them directly; `NATIVE_TESTS` names others to try.
+`memtest`, `wintest`, `disptest`, `isapitest`, `dlgtest`, `sditest` and
+`mditest` against the portable layer and runs them directly; `NATIVE_TESTS` names others to try.
 
 * `core`: CString, collections, CFile, CArchive and serialization,
   CTime, exceptions and run-time classes, on the console.
@@ -199,8 +210,10 @@ layer and runs them directly; `NATIVE_TESTS` names others to try.
   Unicode window procedures, focus, painting and scrolling, memory DCs,
   monochrome bitmaps, DIB sections, raster operations, regions,
   clipping, SaveDC and mapping modes, lines, shapes, fill modes, flood
-  fills, paths, text metrics and extents, TextOut and DrawText; and a
-  CWnd with a message map, on the console.
+  fills, paths, text metrics and extents, TextOut and DrawText; printer
+  DCs, a job printed to a file, and the Print and Page Setup dialogs
+  driven through their hooks; and a CWnd with a message map, on the
+  console.
 * `disptest`: the automation helpers in `afxdisp.h` (COleDateTime and
   its span, COleCurrency, COleVariant, COleSafeArray) and a
   COleDispatchDriver calling an IDispatch written in the test, on the

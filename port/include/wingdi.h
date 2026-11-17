@@ -992,8 +992,16 @@ typedef struct _devicemodeW {
 #define DMORIENT_PORTRAIT 1
 #define DMORIENT_LANDSCAPE 2
 #define DMPAPER_LETTER 1
+#define DMPAPER_TABLOID 3
 #define DMPAPER_LEGAL 5
+#define DMPAPER_EXECUTIVE 7
+#define DMPAPER_A3 8
 #define DMPAPER_A4 9
+#define DMPAPER_A5 11
+#define DMPAPER_B5 13
+#define DMPAPER_USER 256
+#define DMCOLLATE_FALSE 0
+#define DMCOLLATE_TRUE 1
 #define DMCOLOR_MONOCHROME 1
 #define DMCOLOR_COLOR 2
 #define DMDUP_SIMPLEX 1

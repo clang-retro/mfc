@@ -3,6 +3,7 @@
 // needs a PPD file; this one describes a plain US Letter printer.
 #include <windows.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 static const char szPPD[] =
     "*PPD-Adobe: \"4.3\"\n"
@@ -30,6 +31,19 @@ static const char szPPD[] =
     "*ImageableArea Letter/US Letter: \"18 36 594 756\"\n"
     "*DefaultPaperDimension: Letter\n"
     "*PaperDimension Letter/US Letter: \"612 792\"\n";
+
+static BOOL HasPrintProcessor(const char* pszName) {
+  DWORD cb = 0, n = 0;
+  EnumPrintProcessorsA(NULL, NULL, 1, NULL, 0, &cb, &n);
+  if (cb == 0) return FALSE;
+  PRINTPROCESSOR_INFO_1A* p = (PRINTPROCESSOR_INFO_1A*)malloc(cb);
+  BOOL bFound = FALSE;
+  if (p != NULL && EnumPrintProcessorsA(NULL, NULL, 1, (BYTE*)p, cb, &cb, &n))
+    for (DWORD i = 0; i < n; i++)
+      if (lstrcmpiA(p[i].pName, pszName) == 0) bFound = TRUE;
+  free(p);
+  return bFound;
+}
 
 int main() {
   const char* pszName = "MFC Test Printer";
@@ -66,7 +80,10 @@ int main() {
   pi.pPrinterName = (LPSTR)pszName;
   pi.pPortName = (LPSTR) "FILE:";
   pi.pDriverName = di.pName;
-  pi.pPrintProcessor = (LPSTR) "WinPrint";
+  // Wine 9 spools jobs as EMF, which its wineps print processor plays;
+  // WinPrint takes only RAW, and StartDoc would fail.
+  const char* pszProcessor = HasPrintProcessor("wineps") ? "wineps" : "WinPrint";
+  pi.pPrintProcessor = (LPSTR)pszProcessor;
   pi.pDatatype = (LPSTR) "RAW";
   HANDLE h = AddPrinterA(NULL, 2, (BYTE*)&pi);
   if (h != NULL)
@@ -74,6 +91,23 @@ int main() {
   else if (GetLastError() != ERROR_PRINTER_ALREADY_EXISTS) {
     printf("AddPrinter failed: %lu\n", GetLastError());
     return 1;
+  }
+  // A prefix from before keeps its printer; give it the processor too.
+  HANDLE hPrinter;
+  PRINTER_DEFAULTSA pd = {NULL, NULL, PRINTER_ALL_ACCESS};
+  if (OpenPrinterA((LPSTR)pszName, &hPrinter, &pd)) {
+    DWORD cbInfo = 0;
+    GetPrinterA(hPrinter, 2, NULL, 0, &cbInfo);
+    PRINTER_INFO_2A* ppi = cbInfo ? (PRINTER_INFO_2A*)malloc(cbInfo) : NULL;
+    if (ppi != NULL && GetPrinterA(hPrinter, 2, (BYTE*)ppi, cbInfo, &cbInfo) &&
+        lstrcmpiA(ppi->pPrintProcessor, pszProcessor) != 0) {
+      ppi->pPrintProcessor = (LPSTR)pszProcessor;
+      ppi->pSecurityDescriptor = NULL;
+      if (!SetPrinterA(hPrinter, 2, (BYTE*)ppi, 0))
+        printf("SetPrinter failed: %lu\n", GetLastError());
+    }
+    free(ppi);
+    ClosePrinter(hPrinter);
   }
   if (!SetDefaultPrinterA(pszName)) {
     printf("SetDefaultPrinter failed: %lu\n", GetLastError());

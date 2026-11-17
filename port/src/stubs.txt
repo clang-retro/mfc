@@ -5,13 +5,11 @@
 # Part of clang-retro MFC, an independent implementation of the MFC API.
 # SPDX-License-Identifier: AGPL-3.0-only
 
-AbortDoc
 ChooseColorA
 ChooseColorW
 ChooseFontA
 ChooseFontW
 CloseMetaFile
-CommDlgExtendedError
 CopyEnhMetaFileA
 CopyEnhMetaFileW
 CopyMetaFileA
@@ -32,8 +30,6 @@ DoDragDrop
 DragFinish
 DragQueryFileA
 DragQueryFileW
-EndDoc
-EndPage
 FindTextA
 FindTextW
 GetOpenFileNameA
@@ -89,11 +85,7 @@ OleUIPasteSpecialA
 OleUIPasteSpecialW
 OleUIUpdateLinksA
 OleUIUpdateLinksW
-PageSetupDlgA
-PageSetupDlgW
 PlayMetaFile
-PrintDlgA
-PrintDlgW
 ReadFmtUserTypeStg
 RegisterDragDrop
 RegisterTypeLib
@@ -129,12 +121,8 @@ SQLSetConnectAttrW
 SQLSetEnvAttr
 SQLSetStmtAttrA
 SQLSetStmtAttrW
-SetAbortProc
 SetConvertStg
 SetWindowRgn
-StartDocA
-StartDocW
-StartPage
 StgCreateDocfile
 StgCreateDocfileOnILockBytes
 StgOpenStorage
