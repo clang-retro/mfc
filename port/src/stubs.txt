@@ -10,10 +10,6 @@ ChooseColorW
 ChooseFontA
 ChooseFontW
 CreateAsyncBindCtx
-CreateBindCtx
-CreateFileMoniker
-CreateGenericComposite
-CreateItemMoniker
 CreateURLMoniker
 DoDragDrop
 DragFinish
@@ -23,7 +19,6 @@ FindTextA
 FindTextW
 GetOpenFileNameA
 GetOpenFileNameW
-GetRunningObjectTable
 GetSaveFileNameA
 GetSaveFileNameW
 LoadTypeLib
@@ -35,8 +30,6 @@ OleCreateMenuDescriptor
 OleCreatePropertyFrame
 OleDestroyMenuDescriptor
 OleDoAutoConvert
-OleLoadFromStream
-OleSaveToStream
 OleSetMenuDescriptor
 OleTranslateAccelerator
 OleTranslateColor
@@ -110,7 +103,6 @@ GopherOpenFileW
 
 # from main: HTML views, DAO, OLE dialogs, controls
 CoInternetCreateSecurityManager
-CoRegisterMessageFilter
 OleCreatePictureIndirect
 OleLoadPicture
 OleUIChangeSourceA

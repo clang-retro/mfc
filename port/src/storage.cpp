@@ -1414,13 +1414,33 @@ HRESULT WINAPI ReadClassStg(LPSTORAGE stg, CLSID* clsid) {
 HRESULT WINAPI GetClassFile(LPCOLESTR name, CLSID* clsid) {
   if (name == NULL || clsid == NULL) return E_INVALIDARG;
   *clsid = CLSID_NULL;
-  if (StgIsStorageFile(name) != S_OK) return MK_E_CANTOPENFILE;
-  IStorage* stg = NULL;
-  HRESULT hr = StgOpenStorage(name, NULL, STGM_READ | STGM_SHARE_DENY_NONE | STGM_TRANSACTED, NULL, 0, &stg);
-  if (FAILED(hr)) return MK_E_CANTOPENFILE;
-  hr = ReadClassStg(stg, clsid);
-  stg->Release();
-  if (FAILED(hr) || IsEqualCLSID(*clsid, CLSID_NULL)) return MK_E_INVALIDEXTENSION;
+  // A compound file names its class.
+  if (StgIsStorageFile(name) == S_OK) {
+    IStorage* stg = NULL;
+    HRESULT hr = StgOpenStorage(name, NULL, STGM_READ | STGM_SHARE_DENY_NONE | STGM_TRANSACTED, NULL, 0, &stg);
+    if (SUCCEEDED(hr)) {
+      hr = ReadClassStg(stg, clsid);
+      stg->Release();
+      if (SUCCEEDED(hr) && !IsEqualCLSID(*clsid, CLSID_NULL)) return S_OK;
+    }
+  } else if (GetFileAttributesW(name) == INVALID_FILE_ATTRIBUTES) {
+    return MK_E_CANTOPENFILE;
+  }
+  // Otherwise its extension does: HKEY_CLASSES_ROOT\.ext names a program
+  // ID, whose CLSID key names the class.
+  std::wstring path = name;
+  size_t dot = path.find_last_of(L'.');
+  size_t sep = path.find_last_of(L"/\\");
+  if (dot == std::wstring::npos || (sep != std::wstring::npos && dot < sep)) return MK_E_INVALIDEXTENSION;
+  WCHAR progId[256], clsidText[64];
+  LONG cb = sizeof progId;
+  if (RegQueryValueW(HKEY_CLASSES_ROOT, path.substr(dot).c_str(), progId, &cb) != ERROR_SUCCESS || !progId[0])
+    return MK_E_INVALIDEXTENSION;
+  std::wstring key = std::wstring(progId) + L"\\CLSID";
+  cb = sizeof clsidText;
+  if (RegQueryValueW(HKEY_CLASSES_ROOT, key.c_str(), clsidText, &cb) != ERROR_SUCCESS ||
+      FAILED(CLSIDFromString(clsidText, clsid)))
+    return MK_E_INVALIDEXTENSION;
   return S_OK;
 }
 
