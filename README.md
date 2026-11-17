@@ -225,8 +225,8 @@ in `tests/` in ANSI and Unicode and runs them under Wine, starting Xvfb
 when there is no display. For a Linux or macOS target it builds `core`,
 `memtest`, `wintest`, `disptest`, `isapitest`, `dlgtest`, `sditest`,
 `mditest`, `cmntest`, `splittest`, `docktest`, `dbtest`, `rvtest`,
-`socktest`, `occtest`, `dlltest`, `inettest`, `oletest`, `iptest` and
-`docobtest` against the portable layer,
+`socktest`, `occtest`, `dlltest`, `inettest`, `oletest`, `iptest`,
+`docobtest`, `linktest` and `bindtest` against the portable layer,
 and `exttest`, `core`, `sditest`, `dlgtest` and `dlltest` again with the
 shared libraries (`SHARED_TESTS`), and runs them directly; `NATIVE_TESTS` names others to try.
 
