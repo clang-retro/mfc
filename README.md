@@ -400,6 +400,19 @@ when there is no display. For a Linux or macOS target it builds `core`,
   ExitInstance and window classes. It runs with the static library and
   again with `mfc.dll` (`_AFXDLL` and `_USRDLL`), where AFX_MANAGE_STATE
   switches between the two modules' states.
+* `atltest`: a COM server written with ATL (`atltest-dll`), an ATL 3
+  one (CComModule and an object map) in the ANSI build and an ATL 7 one
+  (CAtlDllModuleT and OBJECT_ENTRY_AUTO) in the Unicode build:
+  registration from an `.rgs` script with replacements and from the old
+  DECLARE_REGISTRY, CoCreateInstance through the class factories, calls
+  through the vtable and through IDispatchImpl over a type library the
+  test writes and registers, Error and ISupportErrorInfo (also through
+  IDispatch, as an exception), events to a sink made with CComObject
+  through the connection point (Advise, Unadvise, the enumerators),
+  IProvideClassInfo2, a tear-off and a cached tear-off, aggregation, a
+  singleton class factory, unloading through DllCanUnloadNow and
+  unregistration; and the client's own CComObject, CComObjectStack and
+  CComEnum.
 * `ctltest`: writing a control with COleControl, the test being both
   its server and its container: stock and custom properties, a method,
   stock and custom events, verbs from its message map (ON_OLEVERB,
@@ -595,6 +608,26 @@ request with the stock MinGW-w64 toolchain.
   (BEGIN_DHTMLEDITING_CMDMAP) and CHtmlEditDoc.
   `atlcomcli.h` has the CComPtr, CComQIPtr, CComBSTR and CComVariant
   their members use.
+* ATL, for COM servers and objects (`atlbase.h`, `atlcom.h`): CComModule
+  (ATL 3, with an object map) and CAtlDllModuleT and CAtlExeModuleT
+  (ATL 7, with OBJECT_ENTRY_AUTO); the registrar that runs `.rgs`
+  scripts from REGISTRY resources (with %MODULE% and replacement maps)
+  and CRegKey; CComObjectRootEx and the threading models; CComObject,
+  CComObjectNoLock, CComObjectCached, CComObjectGlobal,
+  CComObjectStack, CComAggObject, CComPolyObject, CComContainedObject,
+  tear-offs and cached tear-offs; BEGIN_COM_MAP with the
+  COM_INTERFACE_ENTRY forms (2, IID, IMPL, FUNC, TEAR_OFF,
+  CACHED_TEAR_OFF, AGGREGATE, AUTOAGGREGATE, CHAIN, NOINTERFACE, the
+  blind ones); the creators and the DECLARE_*AGGREGATABLE macros;
+  CComClassFactory, CComClassFactory2 (licensing) and the singleton
+  factory; CComCoClass with Error and CreateInstance; the
+  DECLARE_REGISTRY forms and the category map; IDispatchImpl over a
+  registered type library (or the module's own), ISupportErrorInfoImpl
+  and AtlReportError, IProvideClassInfo2Impl; IConnectionPointImpl,
+  IConnectionPointContainerImpl and the connection point map,
+  CComDynamicUnkArray and CComUnkArray; CComEnum and CComEnumOnSTL with
+  the _Copy policies; IObjectWithSiteImpl and IObjectSafetyImpl.
+  `atlimpl.cpp` is there, empty, for the ATL 3 programs that include it.
 
 ## Differences from Visual C++ MFC
 

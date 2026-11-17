@@ -1,0 +1,11 @@
+// atltest-dll.rc - the ATL test server's registration script and strings.
+#include <windows.h>
+#include "atltest.h"
+
+IDR_ATLTHING REGISTRY "atltest-thing.rgs"
+
+STRINGTABLE
+BEGIN
+  IDS_FAIL "thing failed by id"
+  IDS_SINGLE "ATL test singleton"
+END
