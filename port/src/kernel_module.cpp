@@ -56,8 +56,9 @@ struct Module {
 };
 
 std::recursive_mutex& ModuleLock() {
-  static std::recursive_mutex m;
-  return m;
+  // Never destroyed, so that static destructors can still use it.
+  static std::recursive_mutex* m = new std::recursive_mutex;
+  return *m;
 }
 
 std::vector<Module*>& Modules() {
