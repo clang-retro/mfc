@@ -271,8 +271,9 @@ static void TestDatagram() {
 class CCancelSocket : public CSocket {
 public:
   int m_nPending = 0;
+  BOOL m_bCancel = FALSE;  // counts (and cancels) only once set
   virtual BOOL OnMessagePending() {
-    if (++m_nPending == 2) CancelBlockingCall();
+    if (m_bCancel && ++m_nPending == 2) CancelBlockingCall();
     return CSocket::OnMessagePending();
   }
 };
@@ -309,6 +310,9 @@ static void TestErrors() {
   client.m_nTimeOut = 50;
   CHECK(client.Create());
   CHECK(client.Connect(_T("127.0.0.1"), nListenPort));
+  // The connect may wait for its notice too (not on Windows, where a
+  // local connect is done at once); only the receive is cancelled.
+  client.m_bCancel = TRUE;
   char c;
   CHECK(client.Receive(&c, 1) == SOCKET_ERROR);
   CHECK(CAsyncSocket::GetLastError() == WSAEINTR);
