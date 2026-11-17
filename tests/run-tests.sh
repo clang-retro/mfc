@@ -56,10 +56,32 @@ if [ $NATIVE = 1 ]; then
   esac
   nfail=0
   npass=0
-  # macOS has no timeout(1) unless coreutils is installed.
-  TIMEOUT="timeout 120"
-  command -v timeout >/dev/null 2>&1 || TIMEOUT=
-  command -v gtimeout >/dev/null 2>&1 && [ -z "$TIMEOUT" ] && TIMEOUT="gtimeout 120"
+  # Runs a test for at most two minutes. macOS has no timeout(1), so a
+  # watchdog stops it there, first writing the threads' stacks (sample)
+  # to the log, so that a hang shows where it is.
+  run_limited() {  # log exe
+    if [ -z "${MFC_TEST_WATCHDOG:-}" ] && command -v timeout >/dev/null 2>&1; then
+      timeout 120 "$2" > "$1" 2>&1
+      return
+    fi
+    "$2" > "$1" 2>&1 &
+    pid=$!
+    (
+      n=0
+      while [ $n -lt 120 ] && kill -0 $pid 2>/dev/null; do sleep 1; n=$((n + 1)); done
+      if kill -0 $pid 2>/dev/null; then
+        echo "timed out; the threads were:" >> "$1"
+        command -v sample >/dev/null 2>&1 && sample $pid 1 2>/dev/null |
+          sed -n '/^Call graph:/,/^Total number in stack/p' | grep -v '^ *$' | head -80 >> "$1"
+        kill -9 $pid 2>/dev/null
+      fi
+    ) &
+    watchdog=$!
+    wait $pid
+    status=$?
+    kill $watchdog 2>/dev/null
+    return $status
+  }
   for v in a u; do
     flags=
     lib=-lmfc
@@ -111,7 +133,9 @@ if [ $NATIVE = 1 ]; then
       # The tests that close their own message boxes want them as windows.
       box=
       case $name in rvtest) box=window ;; esac
-      if WINPORT_MESSAGEBOX=$box MFC_TEST_OUT="$T/$v" WINPORT_BACKEND=${WINPORT_BACKEND:-headless} WINPORT_REGISTRY="$T/$v/registry.reg" $TIMEOUT "$exe" > "$T/$v/$name.log" 2>&1; then
+      export WINPORT_MESSAGEBOX=$box MFC_TEST_OUT="$T/$v" WINPORT_BACKEND=${WINPORT_BACKEND:-headless}
+      export WINPORT_REGISTRY="$T/$v/registry.reg"
+      if run_limited "$T/$v/$name.log" "$exe"; then
         echo "PASS   $name-$v"; npass=$((npass + 1))
       else
         echo "FAIL   $name-$v"; sed 's/^/       /' "$T/$v/$name.log"; nfail=$((nfail + 1))
