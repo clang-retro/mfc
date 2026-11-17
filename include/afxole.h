@@ -706,6 +706,32 @@ enum OLE_APPTYPE {
   OAT_DOC_OBJECT_CONTAINER = 5
 };
 
+// Registers a server's class: its CLSID key, ProgID (lpszClassName) and
+// the keys nAppType calls for. rglpszRegister replaces the default list
+// of entries and rglpszOverwrite adds entries written even over existing
+// values; each entry is "key\0value", with %1 the CLSID, %2 the class
+// name, %3 the module's path, %4 the short type name, %5 the long type
+// name, %6 the application's short name, %7 the icon index, %8 the
+// filter name and %9 the filter's extension (%% is a percent sign).
+BOOL AFXAPI AfxOleRegisterServerClass(REFCLSID clsid, LPCTSTR lpszClassName,
+                                      LPCTSTR lpszShortTypeName, LPCTSTR lpszLongTypeName,
+                                      OLE_APPTYPE nAppType = OAT_SERVER,
+                                      LPCTSTR* rglpszRegister = NULL,
+                                      LPCTSTR* rglpszOverwrite = NULL, int nIconIndex = 0,
+                                      LPCTSTR lpszFilterName = NULL, LPCTSTR lpszFilterExt = NULL);
+// Removes what AfxOleRegisterServerClass registered.
+BOOL AFXAPI AfxOleUnregisterServerClass(REFCLSID clsid, LPCTSTR lpszClassName,
+                                        LPCTSTR lpszShortTypeName, LPCTSTR lpszLongTypeName,
+                                        OLE_APPTYPE nAppType = OAT_SERVER,
+                                        LPCTSTR* rglpszRegister = NULL,
+                                        LPCTSTR* rglpszOverwrite = NULL);
+// Writes a NULL-terminated list of "key\0value" entries under hKeyRoot,
+// with %1 to %9 replaced by rglpszSymbols. Without bReplace, a key that
+// already has a value keeps it.
+BOOL AFXAPI AfxOleRegisterHelper(LPCTSTR const* rglpszRegister, LPCTSTR const* rglpszSymbols,
+                                 int nSymbols, BOOL bReplace,
+                                 HKEY hKeyRoot = HKEY_CLASSES_ROOT);
+
 // COleLinkingDoc: a document that other programs can find in the running
 // object table while it is open.
 class COleLinkingDoc : public COleDocument {

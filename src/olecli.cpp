@@ -1033,41 +1033,52 @@ void COleClientItem::SetState(UINT nNewState) {
 // Serialization: the item's number and aspect, then its storage, either
 // copied into the archive or in its own storage of the compound file.
 
+// An item in its document's stream: a fixed 4 bytes, the item number
+// (which names its "Embedding N" storage), a fixed DWORD and WORD, and
+// the draw aspect, as Visual C++ MFC writes them. A document that is not
+// a compound file then has the item's storage, as a DWORD length and the
+// bytes of a compound file.
 void COleClientItem::Serialize(CArchive& ar) {
   CDocItem::Serialize(ar);
+  COleDocument* pDoc = GetDocument();
   if (ar.IsStoring()) {
-    COleDocument* pDoc = GetDocument();
     BOOL bFlat = ar.m_bForceFlat || pDoc == NULL || !pDoc->m_bCompoundFile ||
                  pDoc->m_lpRootStg == NULL;
+    ar << (WORD)0x0100 << (WORD)0;
     ar << m_dwItemNumber;
-    ar << (LONG)m_nDrawAspect;
-    // 0: in the compound file, 1: in the archive, 2: no object.
-    BYTE nWhere = m_lpObject == NULL ? 2 : bFlat ? 1 : 0;
-    ar << nWhere;
-    if (nWhere == 1)
+    ar << (DWORD)1 << (WORD)0;
+    ar << (DWORD)m_nDrawAspect;
+    // An item without an object has no storage: an empty one in a flat
+    // file, none in a compound file.
+    if (m_lpObject == NULL) {
+      if (bFlat) ar << (DWORD)0;
+    } else if (bFlat) {
       WriteItemFlat(ar);
-    else if (nWhere == 0)
+    } else {
       WriteItem(ar);
+    }
   } else {
     if (m_pDocument == NULL && ar.m_pDocument != NULL &&
         ar.m_pDocument->IsKindOf(RUNTIME_CLASS(COleDocument)))
       ((COleDocument*)ar.m_pDocument)->AddItem(this);
     Release();
-    LONG lAspect;
-    BYTE bFlat;
+    pDoc = GetDocument();
+    WORD w1, w2, w3;
+    DWORD dw, dwAspect;
+    ar >> w1 >> w2;
     ar >> m_dwItemNumber;
-    ar >> lAspect;
-    ar >> bFlat;
-    m_nDrawAspect = (DVASPECT)lAspect;
-    COleDocument* pDoc = GetDocument();
+    ar >> dw >> w3;
+    ar >> dwAspect;
+    m_nDrawAspect = (DVASPECT)dwAspect;
     if (pDoc != NULL && m_dwItemNumber >= pDoc->m_dwNextItemNumber)
       pDoc->m_dwNextItemNumber = m_dwItemNumber + 1;
-    if (bFlat == 2) return;
+    BOOL bFlat = ar.m_bForceFlat || pDoc == NULL || !pDoc->m_bCompoundFile ||
+                 pDoc->m_lpRootStg == NULL;
     if (bFlat)
       ReadItemFlat(ar);
     else
       ReadItem(ar);
-    FinishLoad();
+    if (m_lpObject != NULL) FinishLoad();
   }
 }
 
@@ -1134,6 +1145,7 @@ void COleClientItem::WriteItemFlat(CArchive& ar) {
 void COleClientItem::ReadItemFlat(CArchive& ar) {
   DWORD cb;
   ar >> cb;
+  if (cb == 0) return;
   HGLOBAL hGlobal = ::GlobalAlloc(GMEM_MOVEABLE, cb ? cb : 1);
   if (hGlobal == NULL) AfxThrowMemoryException();
   void* p = ::GlobalLock(hGlobal);
@@ -1206,6 +1218,8 @@ void COleClientItem::ReadItem(CArchive&) {
   if (FAILED(sc))
     sc = pDoc->m_lpRootStg->OpenStorage(szName, NULL, STGM_READ | STGM_SHARE_EXCLUSIVE, NULL, 0,
                                         &m_lpStorage);
+  // An item saved without an object has no storage.
+  if (sc == STG_E_FILENOTFOUND) return;
   if (SUCCEEDED(sc))
     sc = ::OleLoad(m_lpStorage, IID_IOleObject, GetClientSite(), (void**)&m_lpObject);
   if (FAILED(sc)) {

@@ -597,7 +597,8 @@ class CArchiveException : public CException {
 public:
   enum {
     none, genericException, readOnly, endOfFile, writeOnly, badIndex,
-    badClass, badSchema, bufferFull
+    badClass, badSchema, bufferFull,
+    generic = genericException  // the name in Visual C++ 6 and before
   };
   CArchiveException(int cause = none, LPCTSTR lpszArchiveName = NULL);
   virtual BOOL GetErrorMessage(LPTSTR lpszError, UINT nMaxError,
@@ -614,7 +615,8 @@ public:
   enum {
     none, genericException, fileNotFound, badPath, tooManyOpenFiles,
     accessDenied, invalidFile, removeCurrentDir, directoryFull, badSeek,
-    hardIO, sharingViolation, lockViolation, diskFull, endOfFile
+    hardIO, sharingViolation, lockViolation, diskFull, endOfFile,
+    generic = genericException  // the name in Visual C++ 6 and before
   };
   CFileException(int cause = CFileException::none, LONG lOsError = -1,
                  LPCTSTR lpszArchiveName = NULL);
