@@ -124,6 +124,8 @@ void WSAAPI WSASetLastError(int error) {
 // not posted again until the call that answers it (recv for FD_READ,
 // accept for FD_ACCEPT, a send that would block for FD_WRITE).
 
+}  // extern "C"
+
 namespace {
 
 struct AsyncSocket {
@@ -132,6 +134,9 @@ struct AsyncSocket {
   LONG events;   // asked for
   LONG enabled;  // may be posted now
   bool connecting = false;
+  // Once connected, a socket is watched until it closes: after both ends
+  // shut down, getpeername fails, but FD_CLOSE is still to come.
+  bool connected = false;
 };
 
 struct AsyncSelect {
@@ -187,8 +192,10 @@ struct AsyncSelect {
           AsyncSocket& a = it.second;
           short want = 0;
           bool stream = Stream(fd);
-          bool ready = !stream || a.connecting || Listening(fd) || Connected(fd);
-          if (!ready) continue;
+          if (stream && !a.connected && !a.connecting && !Listening(fd)) {
+            if (!Connected(fd)) continue;
+            a.connected = true;
+          }
           if (a.enabled & (FD_READ | FD_ACCEPT | FD_CLOSE | FD_OOB)) want |= POLLIN | POLLPRI;
           if (a.enabled & (FD_WRITE | FD_CONNECT)) want |= POLLOUT;
           if (want) fds.push_back({fd, want, 0});
@@ -212,6 +219,7 @@ struct AsyncSelect {
           socklen_t n = sizeof err;
           getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &n);
           a.connecting = false;
+          a.connected = err == 0;
           int wsa = 0;
           if (err) {
             errno = err;
@@ -251,6 +259,8 @@ AsyncSelect& Async() {
 
 }  // namespace
 
+extern "C" {
+
 int WSAAPI WSAAsyncSelect(SOCKET s, HWND hWnd, UINT wMsg, LONG lEvent) {
   int fd = (int)s;
   int flags = fcntl(fd, F_GETFL);
@@ -267,9 +277,10 @@ int WSAAPI WSAAsyncSelect(SOCKET s, HWND hWnd, UINT wMsg, LONG lEvent) {
   } else {
     as.Start();
     AsyncSocket& a = as.sockets[fd];
-    bool connecting = a.connecting;
+    bool connecting = a.connecting, connected = a.connected;
     a = AsyncSocket{hWnd, wMsg, lEvent, lEvent};
     a.connecting = connecting;
+    a.connected = connected;
   }
   as.Wake();
   return 0;
@@ -286,6 +297,7 @@ extern "C" void WINAPI _WinportSocketCalled(SOCKET s, LONG events, int result) {
       if (events == FD_CONNECT) {
         if (result < 0 && (e == EINPROGRESS || e == EWOULDBLOCK)) a.connecting = true;
         if (result == 0) {
+          a.connected = true;
           // Connected at once: say so, and that it can send.
           if (a.events & FD_CONNECT) as.Post((int)s, a, FD_CONNECT, 0);
           a.enabled |= a.events & FD_WRITE;
@@ -298,6 +310,7 @@ extern "C" void WINAPI _WinportSocketCalled(SOCKET s, LONG events, int result) {
           if (flags >= 0) fcntl(result, F_SETFL, flags | O_NONBLOCK);
           AsyncSocket& n = as.sockets[result];
           n = AsyncSocket{a.hwnd, a.msg, a.events, a.events & ~(FD_ACCEPT | FD_CONNECT)};
+          n.connected = true;
         }
       } else if (events == FD_WRITE) {
         // Only a send that would block re-enables FD_WRITE.
