@@ -275,6 +275,13 @@ inline int sendto(SOCKET s, const char* buf, size_t len, int flags, const struct
   _WinportSocketCalled(s, FD_WRITE, r);
   return r;
 }
+// listen tells WSAAsyncSelect too, which then looks for FD_ACCEPT.
+#define _WINPORT_FD_LISTEN 0x40000000
+inline int listen(SOCKET s, int backlog) {
+  int r = ::listen((int)s, backlog);
+  _WinportSocketCalled(s, _WINPORT_FD_LISTEN, r);
+  return r;
+}
 inline int connect(SOCKET s, const struct sockaddr* name, int namelen) {
   int r = ::connect((int)s, name, (socklen_t)namelen);
   _WinportSocketCalled(s, FD_CONNECT, r);

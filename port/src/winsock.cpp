@@ -11,6 +11,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <map>
+#include <set>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -142,6 +143,9 @@ struct AsyncSocket {
 struct AsyncSelect {
   std::mutex lock;
   std::map<int, AsyncSocket> sockets;
+  // The sockets listen() was called on: macOS does not answer
+  // SO_ACCEPTCONN, so the layer keeps count itself.
+  std::set<int> listening;
   int wake[2] = {-1, -1};
   bool started = false;
 
@@ -165,6 +169,7 @@ struct AsyncSelect {
     socklen_t n = sizeof v;
     return getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, &v, &n) == 0 && v;
   }
+  bool IsListening(int fd) { return listening.count(fd) || Listening(fd); }
   static bool Stream(int fd) {
     int v = 0;
     socklen_t n = sizeof v;
@@ -192,7 +197,7 @@ struct AsyncSelect {
           AsyncSocket& a = it.second;
           short want = 0;
           bool stream = Stream(fd);
-          if (stream && !a.connected && !a.connecting && !Listening(fd)) {
+          if (stream && !a.connected && !a.connecting && !IsListening(fd)) {
             if (!Connected(fd)) continue;
             a.connected = true;
           }
@@ -232,7 +237,7 @@ struct AsyncSelect {
         }
         if ((re & POLLPRI) && (a.enabled & FD_OOB)) Post(fd, a, FD_OOB, 0);
         if (re & (POLLIN | POLLHUP | POLLERR)) {
-          if (Listening(fd)) {
+          if (IsListening(fd)) {
             if (a.enabled & FD_ACCEPT) Post(fd, a, FD_ACCEPT, 0);
           } else {
             char c;
@@ -291,6 +296,14 @@ extern "C" void WINAPI _WinportSocketCalled(SOCKET s, LONG events, int result) {
   AsyncSelect& as = Async();
   {
     std::lock_guard<std::mutex> g(as.lock);
+    if (events == _WINPORT_FD_LISTEN) {
+      if (result == 0) {
+        as.listening.insert((int)s);
+        as.Wake();
+      }
+      errno = e;
+      return;
+    }
     auto it = as.sockets.find((int)s);
     if (it != as.sockets.end()) {
       AsyncSocket& a = it->second;
@@ -328,6 +341,7 @@ int WSAAPI closesocket(SOCKET s) {
   {
     AsyncSelect& as = Async();
     std::lock_guard<std::mutex> g(as.lock);
+    as.listening.erase((int)s);
     if (as.sockets.erase((int)s)) as.Wake();
   }
   return close((int)s) == 0 ? 0 : SOCKET_ERROR;

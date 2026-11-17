@@ -79,7 +79,8 @@ if [ $NATIVE = 1 ]; then
     watchdog=$!
     wait $pid
     status=$?
-    kill $watchdog 2>/dev/null
+    # (Quietly: some shells report the watchdog's end.)
+    { kill $watchdog && wait $watchdog; } 2>/dev/null
     return $status
   }
   for v in a u; do
