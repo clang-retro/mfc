@@ -22,6 +22,8 @@
 #ifdef __APPLE__
 #include <crt_externs.h>
 #include <mach-o/dyld.h>
+#else
+#include <link.h>
 #endif
 
 #include <mutex>
@@ -435,6 +437,99 @@ HMODULE WINAPI LoadLibraryExA(LPCSTR name, HANDLE, DWORD) {
     return NULL;
   }
   return (HMODULE)m;
+}
+
+BOOL WINAPI GetModuleHandleExA(DWORD flags, LPCSTR name, HMODULE* phModule) {
+  if (phModule == NULL) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  *phModule = NULL;
+  Module* m;
+  if (flags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS) {
+    m = ModuleAt(name);
+  } else {
+    m = (Module*)GetModuleHandleA(name);
+    if (m == NULL) return FALSE;
+  }
+  // The count goes up unless asked not to (the program and the system
+  // DLLs never go away).
+  if (!(flags & (GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT | GET_MODULE_HANDLE_EX_FLAG_PIN)) &&
+      m->dl != NULL && !m->system && m != MainModule()) {
+    std::lock_guard<std::recursive_mutex> g(ModuleLock());
+    m->loads++;
+  }
+  *phModule = (HMODULE)m;
+  return TRUE;
+}
+
+BOOL WINAPI GetModuleHandleExW(DWORD flags, LPCWSTR name, HMODULE* phModule) {
+  if (flags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS) return GetModuleHandleExA(flags, (LPCSTR)name, phModule);
+  return GetModuleHandleExA(flags, name ? Narrow(name).c_str() : NULL, phModule);
+}
+
+// The libraries a program links with load before it starts. On Windows
+// their DllMains run then (an MFC extension DLL's adds it to the
+// program's list of DLLs); here the program's startup calls this, which
+// calls them, the libraries each depends on first, and calls them again
+// as the process ends.
+static std::vector<Module*>& AttachedModules() {
+  static std::vector<Module*>* v = new std::vector<Module*>;
+  return *v;
+}
+
+static void DetachLinkedLibraries() {
+  std::vector<Module*>& v = AttachedModules();
+  while (!v.empty()) {
+    Module* m = v.back();
+    v.pop_back();
+    void* p = dlsym(m->dl, "DllMain");
+    if (p) ((DllMainProc)p)((HINSTANCE)m, DLL_PROCESS_DETACH, (LPVOID)1);
+  }
+}
+
+#ifndef __APPLE__
+static int AddLibrary(struct dl_phdr_info* info, size_t, void* data) {
+  if (info->dlpi_name && info->dlpi_name[0]) ((std::vector<std::string>*)data)->push_back(info->dlpi_name);
+  return 0;
+}
+#endif
+
+void WINAPI _WinportAttachLinkedLibraries() {
+  static bool done = false;
+  if (done) return;
+  done = true;
+  std::vector<std::string> paths;
+#ifdef __APPLE__
+  for (uint32_t i = 1; i < _dyld_image_count(); i++) paths.push_back(_dyld_get_image_name(i));
+#else
+  dl_iterate_phdr(AddLibrary, &paths);
+#endif
+  // Loaded in the order the program names them, each before those it
+  // needs: the last are the ones the others depend on.
+  for (size_t i = paths.size(); i-- > 0;) {
+    void* dl = dlopen(paths[i].c_str(), RTLD_NOW | RTLD_NOLOAD);
+    if (!dl) continue;
+    void* p = dlsym(dl, "DllMain");
+    Dl_info info;
+    std::string path = RealPath(paths[i].c_str());
+    if (!p || !dladdr(p, &info) || RealPath(info.dli_fname) != path) {
+      dlclose(dl);
+      continue;
+    }
+    Module* m = ModuleAt(p);
+    {
+      std::lock_guard<std::recursive_mutex> g(ModuleLock());
+      if (m == MainModule() || m->dl != NULL) {
+        dlclose(dl);
+        continue;
+      }
+      m->dl = dl;
+      m->loads = 1 << 30;  // FreeLibrary does not unload it
+    }
+    if (((DllMainProc)p)((HINSTANCE)m, DLL_PROCESS_ATTACH, (LPVOID)1)) AttachedModules().push_back(m);
+  }
+  if (!AttachedModules().empty()) atexit(DetachLinkedLibraries);
 }
 
 HMODULE WINAPI LoadLibraryA(LPCSTR name) { return LoadLibraryExA(name, NULL, 0); }

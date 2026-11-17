@@ -23,6 +23,7 @@ static LPSTR SkipProgramName(LPSTR p) {
 }
 
 int main(int, char**) {
+  _WinportAttachLinkedLibraries();
   STARTUPINFOA si;
   GetStartupInfoA(&si);
   int show = (si.dwFlags & STARTF_USESHOWWINDOW) ? si.wShowWindow : 10;  // SW_SHOWDEFAULT

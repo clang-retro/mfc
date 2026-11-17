@@ -81,10 +81,26 @@ DEF_STRIP = $(if $(filter i%86,$(firstword $(subst -, ,$(MACHINE)))),1,0)
 
 STATIC_LIBS = $(OUT)/libmfc.a $(OUT)/libmfcu.a
 SHARED_LIBS = $(OUT)/mfc.dll $(OUT)/mfcu.dll $(OUT)/libmfcs.a $(OUT)/libmfcus.a
-# Linux and macOS have no shared library build yet.
+# Linux and macOS: the shared libraries go in $(OUT)/shared, under the
+# static ones' names (libmfc.so, libmfcu.so and libwinport.so, or .dylib),
+# so that -L$(OUT)/shared picks them; libmfcs.a and libmfcus.a are as on
+# Windows. The program's main stays in the program (libmfcs.a for MFC
+# programs), so the layer's crt0 is left out of libwinport.so.
 ifeq ($(PORTABLE),1)
 STATIC_LIBS += $(PORT_LIB)
-SHARED_LIBS =
+ifneq ($(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
+SHLIB_EXT = dylib
+SHLIB_SYSLIBS = -framework Cocoa -lpthread
+SHLIB_FLAGS = -dynamiclib -Wl,-install_name,@rpath/$(notdir $@) -Wl,-rpath,@loader_path
+else
+SHLIB_EXT = so
+SHLIB_SYSLIBS = -ldl -lpthread
+SHLIB_FLAGS = -shared -Wl,-soname,$(notdir $@) -Wl,-rpath,'$$ORIGIN'
+endif
+SHARED_DIR = $(OUT)/shared
+PORT_SHLIB = $(SHARED_DIR)/libwinport.$(SHLIB_EXT)
+SHARED_LIBS = $(SHARED_DIR)/libmfc.$(SHLIB_EXT) $(SHARED_DIR)/libmfcu.$(SHLIB_EXT) $(PORT_SHLIB) \
+  $(OUT)/libmfcs.a $(OUT)/libmfcus.a
 endif
 
 all: $(STATIC_LIBS) $(SHARED_LIBS)
@@ -118,6 +134,18 @@ $(OUT)/libmfcs.a: $(OBJS_SA)
 $(OUT)/libmfcus.a: $(OBJS_SU)
 	rm -f $@
 	$(AR) rcs $@ $^
+
+ifeq ($(PORTABLE),1)
+$(PORT_SHLIB): $(filter-out $(OUT)/port/crt0.o,$(PORT_OBJS))
+	@mkdir -p $(dir $@)
+	$(CXX) $(ALL_CXXFLAGS) $(SHLIB_FLAGS) -o $@ $^ $(SHLIB_SYSLIBS) $(DLL_LDFLAGS)
+
+$(SHARED_DIR)/libmfc.$(SHLIB_EXT): $(OBJS_DA) $(PORT_SHLIB)
+	$(CXX) $(ALL_CXXFLAGS) $(SHLIB_FLAGS) -o $@ $(OBJS_DA) -L$(SHARED_DIR) -lwinport $(SHLIB_SYSLIBS) $(DLL_LDFLAGS)
+
+$(SHARED_DIR)/libmfcu.$(SHLIB_EXT): $(OBJS_DU) $(PORT_SHLIB)
+	$(CXX) $(ALL_CXXFLAGS) $(SHLIB_FLAGS) -o $@ $(OBJS_DU) -L$(SHARED_DIR) -lwinport $(SHLIB_SYSLIBS) $(DLL_LDFLAGS)
+endif
 
 # The DLL exports what its objects define, apart from the C++ runtime's
 # (src/mkdef.awk); the import library comes with it.
@@ -159,7 +187,9 @@ install: all
 	mkdir -p $(PREFIX)/include/mfc $(PREFIX)/lib $(PREFIX)/bin
 	cp include/*.h include/*.rc $(PREFIX)/include/mfc/
 ifeq ($(PORTABLE),1)
-	cp $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PORT_LIB) $(PREFIX)/lib/
+	cp $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PORT_LIB) $(OUT)/libmfcs.a $(OUT)/libmfcus.a $(PREFIX)/lib/
+	mkdir -p $(PREFIX)/lib/mfc-shared
+	cp $(SHARED_LIBS:%.a=) $(PREFIX)/lib/mfc-shared/
 	mkdir -p $(PREFIX)/include/winport
 	cp port/include/*.h $(PREFIX)/include/winport/
 else

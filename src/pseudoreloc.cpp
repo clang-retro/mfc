@@ -16,7 +16,7 @@
 #include <windows.h>
 #include <string.h>
 
-#if defined(_AFXDLL) && !defined(_AFX_BUILDING_DLL)
+#if defined(_AFXDLL) && !defined(_AFX_BUILDING_DLL) && !defined(_WINPORT)  // Windows only
 
 extern "C" char __RUNTIME_PSEUDO_RELOC_LIST__[];
 extern "C" char __RUNTIME_PSEUDO_RELOC_LIST_END__[];
