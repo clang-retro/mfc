@@ -207,6 +207,9 @@ public:
   virtual void SetText(LPCTSTR) {}
 };
 
+// A dialog template's string (16-bit units, whatever the size of wchar_t).
+CStringW AFXAPI _AfxTemplateString(const WORD* p);
+
 // The current message for this thread (CWinThread::m_msgCur if there is one).
 MSG* AFXAPI _AfxGetCurrentMsg();
 

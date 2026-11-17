@@ -805,8 +805,11 @@ int DefaultAnswer(UINT type) {
 
 int MessageBoxCore(HWND owner, const std::wstring& text, const std::wstring& caption, UINT type, HICON custom) {
   // With nothing to show windows on, the text goes to standard error and
-  // the default button is the answer, so that programs run unattended.
-  if (strcmp(GetBackend()->Name(), "headless") == 0) {
+  // the default button is the answer, so that programs run unattended;
+  // WINPORT_MESSAGEBOX=window puts the box up as a window all the same
+  // (for a program that closes it itself, such as a test).
+  const char* how = getenv("WINPORT_MESSAGEBOX");
+  if (strcmp(GetBackend()->Name(), "headless") == 0 && !(how && strcmp(how, "window") == 0)) {
     fprintf(stderr, "%s%s%s\n", Narrow(caption.c_str()).c_str(), caption.empty() ? "" : ": ",
             Narrow(text.c_str()).c_str());
     return DefaultAnswer(type);

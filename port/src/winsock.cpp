@@ -8,6 +8,13 @@
 #include <winsock2.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
+#include <map>
+#include <set>
+#include <mutex>
+#include <thread>
+#include <vector>
 #include <stdio.h>
 #include <string.h>
 
@@ -88,6 +95,9 @@ int WSAAPI WSAStartup(WORD version, LPWSADATA data) {
   data->iMaxSockets = 0;
   data->iMaxUdpDg = 0;
   if (LOBYTE(version) < 1) return WSAVERNOTSUPPORTED;
+#ifndef MSG_NOSIGNAL
+  signal(SIGPIPE, SIG_IGN);
+#endif
   return 0;
 }
 
@@ -109,7 +119,233 @@ void WSAAPI WSASetLastError(int error) {
   t_wsaErrno = errno;
 }
 
-int WSAAPI closesocket(SOCKET s) { return close((int)s) == 0 ? 0 : SOCKET_ERROR; }
+// ---------------------------------------------------------------------
+// WSAAsyncSelect: a thread polls the sockets that asked for events and
+// posts each event to its window. As on Windows, an event once posted is
+// not posted again until the call that answers it (recv for FD_READ,
+// accept for FD_ACCEPT, a send that would block for FD_WRITE).
+
+}  // extern "C"
+
+namespace {
+
+struct AsyncSocket {
+  HWND hwnd;
+  UINT msg;
+  LONG events;   // asked for
+  LONG enabled;  // may be posted now
+  bool connecting = false;
+  // Once connected, a socket is watched until it closes: after both ends
+  // shut down, getpeername fails, but FD_CLOSE is still to come.
+  bool connected = false;
+};
+
+struct AsyncSelect {
+  std::mutex lock;
+  std::map<int, AsyncSocket> sockets;
+  // The sockets listen() was called on: macOS does not answer
+  // SO_ACCEPTCONN, so the layer keeps count itself.
+  std::set<int> listening;
+  int wake[2] = {-1, -1};
+  bool started = false;
+
+  void Wake() {
+    char c = 0;
+    if (wake[1] >= 0) (void)!write(wake[1], &c, 1);
+  }
+
+  void Start() {
+    if (started) return;
+    started = true;
+    if (pipe(wake) == 0) {
+      fcntl(wake[0], F_SETFL, O_NONBLOCK);
+      fcntl(wake[1], F_SETFL, O_NONBLOCK);
+    }
+    std::thread([this] { Run(); }).detach();
+  }
+
+  static bool Listening(int fd) {
+    int v = 0;
+    socklen_t n = sizeof v;
+    return getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, &v, &n) == 0 && v;
+  }
+  bool IsListening(int fd) { return listening.count(fd) || Listening(fd); }
+  static bool Stream(int fd) {
+    int v = 0;
+    socklen_t n = sizeof v;
+    return getsockopt(fd, SOL_SOCKET, SO_TYPE, &v, &n) == 0 && v == SOCK_STREAM;
+  }
+  static bool Connected(int fd) {
+    sockaddr_storage a;
+    socklen_t n = sizeof a;
+    return getpeername(fd, (sockaddr*)&a, &n) == 0;
+  }
+
+  void Post(int fd, AsyncSocket& a, LONG event, int error) {
+    a.enabled &= ~event;
+    PostMessageW(a.hwnd, a.msg, (WPARAM)fd, WSAMAKESELECTREPLY(event, error));
+  }
+
+  void Run() {
+    for (;;) {
+      std::vector<pollfd> fds;
+      {
+        std::lock_guard<std::mutex> g(lock);
+        fds.push_back({wake[0], POLLIN, 0});
+        for (auto& it : sockets) {
+          int fd = it.first;
+          AsyncSocket& a = it.second;
+          short want = 0;
+          bool stream = Stream(fd);
+          if (stream && !a.connected && !a.connecting && !IsListening(fd)) {
+            if (!Connected(fd)) continue;
+            a.connected = true;
+          }
+          if (a.enabled & (FD_READ | FD_ACCEPT | FD_CLOSE | FD_OOB)) want |= POLLIN | POLLPRI;
+          if (a.enabled & (FD_WRITE | FD_CONNECT)) want |= POLLOUT;
+          if (want) fds.push_back({fd, want, 0});
+        }
+      }
+      if (poll(fds.data(), (nfds_t)fds.size(), 1000) <= 0) continue;
+      if (fds[0].revents) {
+        char buf[64];
+        while (read(wake[0], buf, sizeof buf) > 0) {}
+      }
+      std::lock_guard<std::mutex> g(lock);
+      for (size_t i = 1; i < fds.size(); i++) {
+        if (!fds[i].revents) continue;
+        auto it = sockets.find(fds[i].fd);
+        if (it == sockets.end()) continue;
+        int fd = it->first;
+        AsyncSocket& a = it->second;
+        short re = fds[i].revents;
+        if (a.connecting && (re & (POLLOUT | POLLERR | POLLHUP))) {
+          int err = 0;
+          socklen_t n = sizeof err;
+          getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &n);
+          a.connecting = false;
+          a.connected = err == 0;
+          int wsa = 0;
+          if (err) {
+            errno = err;
+            wsa = WSAGetLastError();
+          }
+          if (a.enabled & FD_CONNECT) Post(fd, a, FD_CONNECT, wsa);
+          if (err) continue;
+          if (a.enabled & FD_WRITE) Post(fd, a, FD_WRITE, 0);
+          continue;
+        }
+        if ((re & POLLPRI) && (a.enabled & FD_OOB)) Post(fd, a, FD_OOB, 0);
+        if (re & (POLLIN | POLLHUP | POLLERR)) {
+          if (IsListening(fd)) {
+            if (a.enabled & FD_ACCEPT) Post(fd, a, FD_ACCEPT, 0);
+          } else {
+            char c;
+            ssize_t r = ::recv(fd, (void*)&c, (size_t)1, MSG_PEEK | MSG_DONTWAIT);
+            if (r > 0 || !Stream(fd)) {
+              if (a.enabled & FD_READ) Post(fd, a, FD_READ, 0);
+            } else if (r == 0 || (errno != EAGAIN && errno != EWOULDBLOCK)) {
+              int wsa = r == 0 ? 0 : WSAGetLastError();
+              if (a.enabled & FD_CLOSE) Post(fd, a, FD_CLOSE, wsa);
+              a.enabled &= ~(FD_READ | FD_CLOSE | FD_OOB);
+            }
+          }
+        }
+        if ((re & POLLOUT) && (a.enabled & FD_WRITE)) Post(fd, a, FD_WRITE, 0);
+      }
+    }
+  }
+};
+
+AsyncSelect& Async() {
+  static AsyncSelect* a = new AsyncSelect;  // the thread outlives exit
+  return *a;
+}
+
+}  // namespace
+
+extern "C" {
+
+int WSAAPI WSAAsyncSelect(SOCKET s, HWND hWnd, UINT wMsg, LONG lEvent) {
+  int fd = (int)s;
+  int flags = fcntl(fd, F_GETFL);
+  if (flags < 0) {
+    WSASetLastError(WSAENOTSOCK);
+    return SOCKET_ERROR;
+  }
+  // The socket turns non-blocking, as on Windows.
+  fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+  AsyncSelect& as = Async();
+  std::lock_guard<std::mutex> g(as.lock);
+  if (lEvent == 0 || hWnd == NULL) {
+    as.sockets.erase(fd);
+  } else {
+    as.Start();
+    AsyncSocket& a = as.sockets[fd];
+    bool connecting = a.connecting, connected = a.connected;
+    a = AsyncSocket{hWnd, wMsg, lEvent, lEvent};
+    a.connecting = connecting;
+    a.connected = connected;
+  }
+  as.Wake();
+  return 0;
+}
+
+extern "C" void WINAPI _WinportSocketCalled(SOCKET s, LONG events, int result) {
+  int e = errno;
+  AsyncSelect& as = Async();
+  {
+    std::lock_guard<std::mutex> g(as.lock);
+    if (events == _WINPORT_FD_LISTEN) {
+      if (result == 0) {
+        as.listening.insert((int)s);
+        as.Wake();
+      }
+      errno = e;
+      return;
+    }
+    auto it = as.sockets.find((int)s);
+    if (it != as.sockets.end()) {
+      AsyncSocket& a = it->second;
+      if (events == FD_CONNECT) {
+        if (result < 0 && (e == EINPROGRESS || e == EWOULDBLOCK)) a.connecting = true;
+        if (result == 0) {
+          a.connected = true;
+          // Connected at once: say so, and that it can send.
+          if (a.events & FD_CONNECT) as.Post((int)s, a, FD_CONNECT, 0);
+          a.enabled |= a.events & FD_WRITE;
+        }
+      } else if (events == FD_ACCEPT) {
+        a.enabled |= a.events & FD_ACCEPT;
+        if (result >= 0) {
+          // The new socket has the listening socket's events, as on Windows.
+          int flags = fcntl(result, F_GETFL);
+          if (flags >= 0) fcntl(result, F_SETFL, flags | O_NONBLOCK);
+          AsyncSocket& n = as.sockets[result];
+          n = AsyncSocket{a.hwnd, a.msg, a.events, a.events & ~(FD_ACCEPT | FD_CONNECT)};
+          n.connected = true;
+        }
+      } else if (events == FD_WRITE) {
+        // Only a send that would block re-enables FD_WRITE.
+        if (result < 0 && (e == EWOULDBLOCK || e == EAGAIN)) a.enabled |= a.events & FD_WRITE;
+      } else {
+        a.enabled |= a.events & (events | (events == FD_READ ? FD_CLOSE : 0));
+      }
+      as.Wake();
+    }
+  }
+  errno = e;
+}
+
+int WSAAPI closesocket(SOCKET s) {
+  {
+    AsyncSelect& as = Async();
+    std::lock_guard<std::mutex> g(as.lock);
+    as.listening.erase((int)s);
+    if (as.sockets.erase((int)s)) as.Wake();
+  }
+  return close((int)s) == 0 ? 0 : SOCKET_ERROR;
+}
 
 int WSAAPI ioctlsocket(SOCKET s, LONG cmd, ULONG* argp) {
   if (argp == NULL) {

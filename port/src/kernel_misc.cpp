@@ -161,6 +161,35 @@ const char* SystemMessage(DWORD uid) {
     case DISP_E_BADVARTYPE: return "Bad variable type.";
     case STG_E_FILENOTFOUND: return "%1 could not be found.";
     case STG_E_ACCESSDENIED: return "Access Denied.";
+    // The Internet functions' errors (wininet.h).
+    case 12001: return "No more Internet handles could be created.";
+    case 12002: return "The operation timed out.";
+    case 12003: return "The server returned extended information.";
+    case 12004: return "An internal error occurred in the Internet functions.";
+    case 12005: return "The URL is invalid.";
+    case 12006: return "The URL does not use a recognized protocol.";
+    case 12007: return "The server name could not be resolved.";
+    case 12009: return "The option is not valid.";
+    case 12010: return "The option has the wrong length.";
+    case 12011: return "The option cannot be set.";
+    case 12013: return "The user name is not correct.";
+    case 12014: return "The password is not correct.";
+    case 12015: return "The login request was denied.";
+    case 12016: return "The operation is not valid for this handle.";
+    case 12017: return "The operation was canceled.";
+    case 12018: return "The handle is of the wrong type for this operation.";
+    case 12019: return "The handle is not in the right state for this operation.";
+    case 12029: return "A connection with the server could not be established.";
+    case 12030: return "The connection with the server was ended.";
+    case 12031: return "The connection with the server was reset.";
+    case 12110: return "An FTP transfer is already in progress.";
+    case 12111: return "The FTP connection was dropped.";
+    case 12150: return "The HTTP header was not found.";
+    case 12152: return "The server returned an invalid response.";
+    case 12153: return "The HTTP header is not valid.";
+    case 12154: return "The HTTP query is not valid.";
+    case 12155: return "The HTTP header already exists.";
+    case 12156: return "The redirection failed.";
     default: return NULL;
   }
 }

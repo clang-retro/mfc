@@ -2017,6 +2017,10 @@ LRESULT CALLBACK BarProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
   if (msg == WM_NCCREATE) {
     b = new Bar;
     b->hwnd = h;
+    // Notifications go to the window that was the parent at creation, even
+    // after SetParent (MFC moves a floating toolbar into another frame and
+    // still gets its commands); TB_SETPARENT changes it.
+    b->notify = ((CREATESTRUCTW*)lp)->hwndParent;
     SetWindowLongPtrW(h, 0, (LONG_PTR)b);
     return DefWindowProcW(h, msg, wp, lp);
   }

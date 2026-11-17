@@ -259,7 +259,7 @@ static void TestDispatch() {
   CHECK(r.vt == VT_CY && r.cyVal.int64 == 24690);
 
   // By reference, written back.
-  long a = 1, b = 2;
+  LONG a = 1, b = 2;
   args[0].vt = VT_BYREF | VT_I4;
   args[0].plVal = &a;
   args[1].vt = VT_BYREF | VT_I4;
@@ -627,7 +627,7 @@ static void TestLocalServer() {
   ::VariantClear(&r);
   ::SysFreeString(args[0].bstrVal);
   ::SysFreeString(args[1].bstrVal);
-  long a = 3, b = 4;
+  LONG a = 3, b = 4;
   args[0].vt = VT_BYREF | VT_I4;
   args[0].plVal = &a;
   args[1].vt = VT_BYREF | VT_I4;

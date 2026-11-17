@@ -7,28 +7,30 @@
 #include <stdint.h>
 
 // No headers: each placeholder only needs the right name and a result
-// in the return register, whatever its declared arguments.
+// in the return register, whatever its declared arguments. They are
+// weak, so that a program's own definition (a test's mock ODBC driver,
+// say) takes their place.
 extern "C" void _WinportStub(const char* name, bool* reported);
 
 #define STUB_ZERO(f)                  \
-  extern "C" intptr_t f(void) {      \
+  extern "C" __attribute__((weak)) intptr_t f(void) { \
     static bool reported;             \
     _WinportStub(#f, &reported);      \
     return 0;                         \
   }
 #define STUB_VOID(f)                  \
-  extern "C" void f(void) {          \
+  extern "C" __attribute__((weak)) void f(void) { \
     static bool reported;             \
     _WinportStub(#f, &reported);      \
   }
 #define STUB_HRESULT(f)               \
-  extern "C" int32_t f(void) {       \
+  extern "C" __attribute__((weak)) int32_t f(void) { \
     static bool reported;             \
     _WinportStub(#f, &reported);      \
     return (int32_t)0x80004001;       \
   }
 #define STUB_SQL(f)                   \
-  extern "C" int16_t f(void) {       \
+  extern "C" __attribute__((weak)) int16_t f(void) { \
     static bool reported;             \
     _WinportStub(#f, &reported);      \
     return -1;                        \
@@ -160,32 +162,10 @@ STUB_HRESULT(StgCreateDocfileOnILockBytes)
 STUB_HRESULT(StgOpenStorage)
 STUB_HRESULT(StgOpenStorageOnILockBytes)
 STUB_HRESULT(UnRegisterTypeLib)
-STUB_ZERO(WSAAsyncSelect)
 STUB_ZERO(WinHelpA)
 STUB_ZERO(WinHelpW)
 STUB_HRESULT(WriteClassStg)
 STUB_HRESULT(WriteFmtUserTypeStg)
-STUB_ZERO(FtpCreateDirectoryA)
-STUB_ZERO(FtpCreateDirectoryW)
-STUB_ZERO(FtpDeleteFileA)
-STUB_ZERO(FtpDeleteFileW)
-STUB_ZERO(FtpFindFirstFileA)
-STUB_ZERO(FtpFindFirstFileW)
-STUB_ZERO(FtpGetCurrentDirectoryA)
-STUB_ZERO(FtpGetCurrentDirectoryW)
-STUB_ZERO(FtpGetFileA)
-STUB_ZERO(FtpGetFileSize)
-STUB_ZERO(FtpGetFileW)
-STUB_ZERO(FtpOpenFileA)
-STUB_ZERO(FtpOpenFileW)
-STUB_ZERO(FtpPutFileA)
-STUB_ZERO(FtpPutFileW)
-STUB_ZERO(FtpRemoveDirectoryA)
-STUB_ZERO(FtpRemoveDirectoryW)
-STUB_ZERO(FtpRenameFileA)
-STUB_ZERO(FtpRenameFileW)
-STUB_ZERO(FtpSetCurrentDirectoryA)
-STUB_ZERO(FtpSetCurrentDirectoryW)
 STUB_ZERO(GopherCreateLocatorA)
 STUB_ZERO(GopherCreateLocatorW)
 STUB_ZERO(GopherFindFirstFileA)
@@ -196,46 +176,6 @@ STUB_ZERO(GopherGetLocatorTypeA)
 STUB_ZERO(GopherGetLocatorTypeW)
 STUB_ZERO(GopherOpenFileA)
 STUB_ZERO(GopherOpenFileW)
-STUB_ZERO(HttpAddRequestHeadersA)
-STUB_ZERO(HttpAddRequestHeadersW)
-STUB_ZERO(HttpEndRequestA)
-STUB_ZERO(HttpEndRequestW)
-STUB_ZERO(HttpOpenRequestA)
-STUB_ZERO(HttpOpenRequestW)
-STUB_ZERO(HttpQueryInfoA)
-STUB_ZERO(HttpQueryInfoW)
-STUB_ZERO(HttpSendRequestA)
-STUB_ZERO(HttpSendRequestExA)
-STUB_ZERO(HttpSendRequestExW)
-STUB_ZERO(HttpSendRequestW)
-STUB_ZERO(InternetCloseHandle)
-STUB_ZERO(InternetConnectA)
-STUB_ZERO(InternetConnectW)
-STUB_ZERO(InternetCrackUrlA)
-STUB_ZERO(InternetCrackUrlW)
-STUB_ZERO(InternetErrorDlg)
-STUB_ZERO(InternetFindNextFileA)
-STUB_ZERO(InternetFindNextFileW)
-STUB_ZERO(InternetGetCookieA)
-STUB_ZERO(InternetGetCookieW)
-STUB_ZERO(InternetGetLastResponseInfoA)
-STUB_ZERO(InternetGetLastResponseInfoW)
-STUB_ZERO(InternetOpenA)
-STUB_ZERO(InternetOpenUrlA)
-STUB_ZERO(InternetOpenUrlW)
-STUB_ZERO(InternetOpenW)
-STUB_ZERO(InternetQueryDataAvailable)
-STUB_ZERO(InternetQueryOptionA)
-STUB_ZERO(InternetQueryOptionW)
-STUB_ZERO(InternetReadFile)
-STUB_ZERO(InternetSetCookieA)
-STUB_ZERO(InternetSetCookieW)
-STUB_ZERO(InternetSetFilePointer)
-STUB_ZERO(InternetSetOptionA)
-STUB_ZERO(InternetSetOptionW)
-STUB_ZERO(InternetSetStatusCallbackA)
-STUB_ZERO(InternetSetStatusCallbackW)
-STUB_ZERO(InternetWriteFile)
 STUB_HRESULT(CoInternetCreateSecurityManager)
 STUB_HRESULT(CoRegisterMessageFilter)
 STUB_HRESULT(OleCreatePictureIndirect)

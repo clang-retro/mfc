@@ -36,7 +36,7 @@ static const IID IID_DDllCtrlEvents = {
     0x7b2e4a63, 0x1f5c, 0x4e8b, {0xa0, 0x34, 0x9c, 0x6f, 0x2d, 0xbe, 0x5a, 0x72}};
 
 static int g_nAlive = 0;
-static TCHAR g_szClass[64];
+static TCHAR g_szClass[128];  // room for an Afx: name with 64-bit handles
 
 class CDllCtrl : public COleControl {
   DECLARE_DYNCREATE(CDllCtrl)

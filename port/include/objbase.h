@@ -57,6 +57,7 @@ HRESULT WINAPI CoFileTimeNow(FILETIME*);
 BOOL WINAPI CoFileTimeToDosDateTime(FILETIME*, LPWORD, LPWORD);
 BOOL WINAPI CoDosDateTimeToFileTime(WORD, WORD, FILETIME*);
 void WINAPI CoFreeUnusedLibraries(void);
+void WINAPI CoFreeUnusedLibrariesEx(DWORD dwUnloadDelay, DWORD dwReserved);
 HINSTANCE WINAPI CoLoadLibrary(LPOLESTR, BOOL);
 void WINAPI CoFreeLibrary(HINSTANCE);
 HRESULT WINAPI CoMarshalInterface(LPSTREAM, REFIID, LPUNKNOWN, DWORD, LPVOID, DWORD);

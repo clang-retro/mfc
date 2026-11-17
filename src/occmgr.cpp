@@ -111,7 +111,7 @@ public:
 // An OLE control's class is its CLSID in braces.
 BOOL ItemClsid(const ItemPos& item, CLSID* pClsid) {
   if (*item.pClass == 0xFFFF || *item.pClass != L'{') return FALSE;
-  CStringW strClass((LPCWSTR)item.pClass);
+  CStringW strClass = _AfxTemplateString(item.pClass);
   return SUCCEEDED(::CLSIDFromString((LPOLESTR)(LPCWSTR)strClass, pClsid));
 }
 
@@ -179,7 +179,7 @@ DLGTEMPLATE* PASCAL COccManager::SplitDialogTemplate(const DLGTEMPLATE* pTemplat
       info.dwStyle = item.dwStyle;
       info.dwExStyle = item.dwExStyle;
       info.rect.SetRect(item.x, item.y, item.x + item.cx, item.y + item.cy);
-      if (*item.pTitle != 0xFFFF) info.strText = CString((LPCWSTR)item.pTitle);
+      if (*item.pTitle != 0xFFFF) info.strText = CString(_AfxTemplateString(item.pTitle));
       pInfo->m_pnIndex[pInfo->m_cItems] = nIndex;
       pInfo->m_cItems++;
     } else {
@@ -708,4 +708,18 @@ void AFXAPI DDX_OCFloatRO(CDataExchange* pDX, int nIDC, DISPID dispid, float& va
 }
 void AFXAPI DDX_OCFloatRO(CDataExchange* pDX, int nIDC, DISPID dispid, double& value) {
   DDXProp(pDX, nIDC, dispid, VT_R8, value, TRUE);
+}
+
+// A template's string: 16-bit units, whatever the size of wchar_t.
+CStringW AFXAPI _AfxTemplateString(const WORD* p) {
+  CStringW str;
+  for (; *p != 0; p++) {
+    if (*p >= 0xD800 && *p < 0xDC00 && p[1] >= 0xDC00 && p[1] < 0xE000 && sizeof(wchar_t) == 4) {
+      str += (wchar_t)(0x10000 + ((p[0] - 0xD800) << 10) + (p[1] - 0xDC00));
+      p++;
+    } else {
+      str += (wchar_t)*p;
+    }
+  }
+  return str;
 }

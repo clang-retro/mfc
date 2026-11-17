@@ -33,7 +33,7 @@ case "$TARGET" in
   *) NATIVE=0 ;;
 esac
 if [ $NATIVE = 1 ]; then
-  TESTS=${NATIVE_TESTS:-"core memtest wintest disptest isapitest dlgtest sditest mditest cmntest"}
+  TESTS=${NATIVE_TESTS:-"core memtest wintest disptest isapitest dlgtest sditest mditest cmntest splittest docktest dbtest rvtest socktest occtest dlltest inettest"}
   T=$OUT/tests
   mkdir -p "$T/a" "$T/u"
   python3 tests/gen-toolbar-bmp.py "$T/toolbar.bmp" 6 || exit 1
@@ -56,10 +56,33 @@ if [ $NATIVE = 1 ]; then
   esac
   nfail=0
   npass=0
-  # macOS has no timeout(1) unless coreutils is installed.
-  TIMEOUT="timeout 120"
-  command -v timeout >/dev/null 2>&1 || TIMEOUT=
-  command -v gtimeout >/dev/null 2>&1 && [ -z "$TIMEOUT" ] && TIMEOUT="gtimeout 120"
+  # Runs a test for at most two minutes. macOS has no timeout(1), so a
+  # watchdog stops it there, first writing the threads' stacks (sample)
+  # to the log, so that a hang shows where it is.
+  run_limited() {  # log exe
+    if [ -z "${MFC_TEST_WATCHDOG:-}" ] && command -v timeout >/dev/null 2>&1; then
+      timeout 120 "$2" > "$1" 2>&1
+      return
+    fi
+    "$2" > "$1" 2>&1 &
+    pid=$!
+    (
+      n=0
+      while [ $n -lt 120 ] && kill -0 $pid 2>/dev/null; do sleep 1; n=$((n + 1)); done
+      if kill -0 $pid 2>/dev/null; then
+        echo "timed out; the threads were:" >> "$1"
+        command -v sample >/dev/null 2>&1 && sample $pid 1 2>/dev/null |
+          sed -n '/^Call graph:/,/^Total number in stack/p' | grep -v '^ *$' | head -80 >> "$1"
+        kill -9 $pid 2>/dev/null
+      fi
+    ) &
+    watchdog=$!
+    wait $pid
+    status=$?
+    # (Quietly: some shells report the watchdog's end.)
+    { kill $watchdog && wait $watchdog; } 2>/dev/null
+    return $status
+  }
   for v in a u; do
     flags=
     lib=-lmfc
@@ -74,11 +97,46 @@ if [ $NATIVE = 1 ]; then
           echo "FAIL   $name-$v (resources)"; cat "$T/$name-rc.log"; nfail=$((nfail + 1)); continue; }
         srcs="$srcs $T/$name-res.cpp"
       fi
+      # A test with a regular DLL of its own (tests/NAME-dll.cpp with a .def)
+      # gets it as a shared library, named as on Windows, next to the
+      # program. It has its own copy of the library and exports only what
+      # the .def names (and DllMain); the layer comes from the program,
+      # which exports it.
+      exeflags=
+      if [ -f tests/$name-dll.cpp ] && [ -f tests/$name-dll.def ]; then
+        dllsrcs=tests/$name-dll.cpp
+        if [ -f tests/$name-dll.rc ]; then
+          CXX="$CXX" RC="$RC_NATIVE" python3 port/tools/res2cpp.py -I include -I tests -I "$T" \
+            tests/$name-dll.rc -o "$T/$name-dll-res.cpp" 2>"$T/$name-dll-rc.log" || {
+            echo "FAIL   $name-$v (DLL resources)"; cat "$T/$name-dll-rc.log"; nfail=$((nfail + 1)); continue; }
+          dllsrcs="$dllsrcs $T/$name-dll-res.cpp"
+        fi
+        exports=$(sed -n '/^EXPORTS/,$p' tests/$name-dll.def | sed '1d' | awk '{split($1, a, "="); print a[1]}')
+        case $TARGET in
+          *apple* | *darwin*)
+            for e in DllMain $exports; do echo "_$e"; done > "$T/$name-dll.exp"
+            dllflags="-dynamiclib -undefined dynamic_lookup -Wl,-exported_symbols_list,$T/$name-dll.exp" ;;
+          *)
+            { echo "{ global:"; for e in DllMain $exports; do echo "  $e;"; done; echo "local: *; };"; } \
+              > "$T/$name-dll.map"
+            dllflags="-shared -fPIC -Wl,--version-script=$T/$name-dll.map"
+            exeflags=-rdynamic ;;
+        esac
+        # shellcheck disable=SC2086
+        "$CXX" $CXXFLAGS $flags -fPIC -D_USRDLL $dllsrcs -L"$OUT" $LDFLAGS $lib $dllflags \
+          -o "$T/$name-dll-$v.dll" 2>"$T/$name-dll-$v-build.log" || {
+          echo "FAIL   $name-$v (DLL build)"; cat "$T/$name-dll-$v-build.log"; nfail=$((nfail + 1)); continue; }
+      fi
       # shellcheck disable=SC2086
-      "$CXX" $CXXFLAGS $flags $srcs -L"$OUT" $LDFLAGS $lib -lwinport $SYSLIBS -o "$exe" \
+      "$CXX" $CXXFLAGS $flags $exeflags $srcs -L"$OUT" $LDFLAGS $lib -lwinport $SYSLIBS -o "$exe" \
         2>"$T/$name-$v-build.log" || {
         echo "FAIL   $name-$v (build)"; cat "$T/$name-$v-build.log"; nfail=$((nfail + 1)); continue; }
-      if MFC_TEST_OUT="$T/$v" WINPORT_BACKEND=${WINPORT_BACKEND:-headless} WINPORT_REGISTRY="$T/$v/registry.reg" $TIMEOUT "$exe" > "$T/$v/$name.log" 2>&1; then
+      # The tests that close their own message boxes want them as windows.
+      box=
+      case $name in rvtest) box=window ;; esac
+      export WINPORT_MESSAGEBOX=$box MFC_TEST_OUT="$T/$v" WINPORT_BACKEND=${WINPORT_BACKEND:-headless}
+      export WINPORT_REGISTRY="$T/$v/registry.reg"
+      if run_limited "$T/$v/$name.log" "$exe"; then
         echo "PASS   $name-$v"; npass=$((npass + 1))
       else
         echo "FAIL   $name-$v"; sed 's/^/       /' "$T/$v/$name.log"; nfail=$((nfail + 1))

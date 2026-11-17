@@ -17,6 +17,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <errno.h>
 
 #define WSAAPI WINAPI
 
@@ -237,23 +238,74 @@ int WSAAPI WSAAddressToStringW(LPSOCKADDR lpsaAddress, DWORD dwAddressLength,
 #define SO_PROTOCOL_INFO SO_PROTOCOL_INFOA
 #endif
 
+// Winsock never raises SIGPIPE; on Linux each send says so, and macOS
+// (no MSG_NOSIGNAL) ignores the signal from WSAStartup on.
+#ifdef MSG_NOSIGNAL
+#define MSG_NOSIGNAL_WINPORT MSG_NOSIGNAL
+#else
+#define MSG_NOSIGNAL_WINPORT 0
+#endif
+
+// After a call that consumes an event, WSAAsyncSelect reports that
+// event again (FD_READ after recv, FD_ACCEPT after accept and so on).
+extern "C" void WINAPI _WinportSocketCalled(SOCKET s, LONG events, int result);
+
 // Windows passes address and option lengths as int; the system takes
-// socklen_t. These overloads let Windows code call the system functions.
+// socklen_t. These overloads let Windows code call the system functions
+// (and tell WSAAsyncSelect).
 inline SOCKET accept(SOCKET s, struct sockaddr* addr, int* addrlen) {
   socklen_t n = addrlen != NULL ? (socklen_t)*addrlen : 0;
   int fd = ::accept((int)s, addr, addrlen != NULL ? &n : NULL);
   if (addrlen != NULL) *addrlen = (int)n;
+  _WinportSocketCalled(s, FD_ACCEPT, fd);
   return fd < 0 ? INVALID_SOCKET : (SOCKET)fd;
+}
+inline int recv(SOCKET s, char* buf, size_t len, int flags) {
+  int r = (int)::recv((int)s, (void*)buf, (size_t)len, flags);
+  _WinportSocketCalled(s, (flags & MSG_OOB) ? FD_OOB : FD_READ, r);
+  return r;
+}
+inline int send(SOCKET s, const char* buf, size_t len, int flags) {
+  int r = (int)::send((int)s, (const void*)buf, (size_t)len, flags | MSG_NOSIGNAL_WINPORT);
+  _WinportSocketCalled(s, FD_WRITE, r);
+  return r;
+}
+inline int sendto(SOCKET s, const char* buf, size_t len, int flags, const struct sockaddr* to, int tolen) {
+  int r = (int)::sendto((int)s, (const void*)buf, (size_t)len, flags | MSG_NOSIGNAL_WINPORT, to, (socklen_t)tolen);
+  _WinportSocketCalled(s, FD_WRITE, r);
+  return r;
+}
+// listen tells WSAAsyncSelect too, which then looks for FD_ACCEPT.
+#define _WINPORT_FD_LISTEN 0x40000000
+inline int listen(SOCKET s, int backlog) {
+  int r = ::listen((int)s, backlog);
+  _WinportSocketCalled(s, _WINPORT_FD_LISTEN, r);
+  return r;
+}
+inline int connect(SOCKET s, const struct sockaddr* name, int namelen) {
+  int r = ::connect((int)s, name, (socklen_t)namelen);
+  _WinportSocketCalled(s, FD_CONNECT, r);
+  return r;
 }
 inline int getpeername(SOCKET s, struct sockaddr* name, int* namelen) {
   socklen_t n = (socklen_t)*namelen;
   int r = ::getpeername((int)s, name, &n);
+  // Windows fails where the system cuts the address short.
+  if (r == 0 && (int)n > *namelen) {
+    errno = EFAULT;
+    return -1;
+  }
   *namelen = (int)n;
   return r;
 }
 inline int getsockname(SOCKET s, struct sockaddr* name, int* namelen) {
   socklen_t n = (socklen_t)*namelen;
   int r = ::getsockname((int)s, name, &n);
+  // Windows fails where the system cuts the address short.
+  if (r == 0 && (int)n > *namelen) {
+    errno = EFAULT;
+    return -1;
+  }
   *namelen = (int)n;
   return r;
 }
@@ -263,10 +315,11 @@ inline int getsockopt(SOCKET s, int level, int optname, char* optval, int* optle
   *optlen = (int)n;
   return r;
 }
-inline int recvfrom(SOCKET s, char* buf, int len, int flags, struct sockaddr* from, int* fromlen) {
+inline int recvfrom(SOCKET s, char* buf, size_t len, int flags, struct sockaddr* from, int* fromlen) {
   socklen_t n = fromlen != NULL ? (socklen_t)*fromlen : 0;
   int r = (int)::recvfrom((int)s, buf, (size_t)len, flags, from, fromlen != NULL ? &n : NULL);
   if (fromlen != NULL) *fromlen = (int)n;
+  _WinportSocketCalled(s, FD_READ, r);
   return r;
 }
 

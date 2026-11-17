@@ -105,7 +105,9 @@ python3 path/to/mfc/port/tools/res2cpp.py -I path/to/mfc/include app.rc -o app-r
 
 It is a work in progress. So far the non-window classes, automation, the
 registry (kept in `~/.config/winport/registry.reg`), resources, sockets
-and COM within one process work, and so does the window manager: window
+(with `WSAAsyncSelect`), ODBC through the system's driver manager,
+WinInet's HTTP and FTP (no HTTPS yet), and COM within one process,
+in-process servers in a shared library included, work, and so does the window manager: window
 classes and windows, messages and the message loop, timers, hooks,
 focus, painting, and drawing in software with device contexts, bitmaps,
 DIBs, regions, fills and blits, lines, curves, shapes and paths, and
@@ -124,6 +126,12 @@ file `DOCINFO` names, or (for "Save as PDF" with no file named) to the
 document's name in `~/Documents`. PrintDlg and PageSetupDlg show their
 dialogs, with hooks and the usual control IDs from `dlgs.h`, or return
 the default printer. `WINPORT_PRINTERS=pdf` leaves CUPS out.
+
+A regular DLL builds as a shared library (`-shared`, exporting
+`DllMain` and the `.def` file's names; the program links with
+`-rdynamic` on Linux, and the library with `-undefined dynamic_lookup`
+on macOS), and `LoadLibrary` calls its `DllMain`. The shared MFC
+library (`_AFXDLL`) is not built for these targets yet.
 
 The common controls are all there: besides the bars, list and tree
 views, tabs and the rest, the rebar, pager, SysLink, IP address,
@@ -200,7 +208,8 @@ clang++ --config=winxp.cfg -D_AFXDLL -Ipath/to/mfc/include -shared ext.cpp ext-r
 in `tests/` in ANSI and Unicode and runs them under Wine, starting Xvfb
 when there is no display. For a Linux or macOS target it builds `core`,
 `memtest`, `wintest`, `disptest`, `isapitest`, `dlgtest`, `sditest`,
-`mditest` and `cmntest` against the portable layer and runs them directly; `NATIVE_TESTS` names others to try.
+`mditest`, `cmntest`, `splittest`, `docktest`, `dbtest`, `rvtest`,
+`socktest`, `occtest`, `dlltest` and `inettest` against the portable layer and runs them directly; `NATIVE_TESTS` names others to try.
 
 * `core`: CString, collections, CFile, CArchive and serialization,
   CTime, exceptions and run-time classes, on the console.
