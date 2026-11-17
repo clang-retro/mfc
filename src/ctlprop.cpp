@@ -4,8 +4,9 @@
 // COleControl's IPersistStreamInit, IPersistStorage and
 // IPersistPropertyBag.
 //
-// The stream format is this library's own: the properties in the order
-// DoPropExchange names them, each in CArchive's form.
+// The stream format is Visual C++ MFC's: the properties in the order
+// DoPropExchange names them, each in CArchive's form, with fonts and
+// other objects as a flag byte and then OleSaveToStream's data.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -132,27 +133,6 @@ BOOL CPropExchange::ExchangeVersion(DWORD& dwVersionLoaded, DWORD dwVersionDefau
 
 namespace {
 
-// Loads a font object from the bytes of its IPersistStream.
-LPFONT LoadFontFromStream(LPSTREAM pStm) {
-  LPFONT pFont = NULL;
-  FONTDESC fd;
-  memset(&fd, 0, sizeof(fd));
-  fd.cbSizeofstruct = sizeof(fd);
-  fd.lpstrName = (LPOLESTR)L"MS Sans Serif";
-  fd.cySize.Lo = 80000;
-  fd.sWeight = FW_NORMAL;
-  if (FAILED(::OleCreateFontIndirect(&fd, IID_IFont, (void**)&pFont))) return NULL;
-  LPPERSISTSTREAM pPS = NULL;
-  if (FAILED(pFont->QueryInterface(IID_IPersistStream, (void**)&pPS)) ||
-      FAILED(pPS->Load(pStm))) {
-    if (pPS != NULL) pPS->Release();
-    pFont->Release();
-    return NULL;
-  }
-  pPS->Release();
-  return pFont;
-}
-
 // The bytes of an object's IPersistStream, in a global memory block.
 HGLOBAL SaveToHGlobal(LPUNKNOWN pUnk) {
   LPPERSISTSTREAM pPS = NULL;
@@ -193,8 +173,166 @@ HGLOBAL ReadHGlobal(CArchive& ar, DWORD* pcb) {
   return hGlobal;
 }
 
+// {F6F07540-42EC-11CE-8135-00AA004BB851}, the class Visual C++ MFC gives
+// its blob objects.
+const CLSID kClsidBlob = {0xf6f07540, 0x42ec, 0x11ce, {0x81, 0x35, 0x00, 0xaa, 0x00, 0x4b, 0xb8, 0x51}};
+
+// A blob in a property bag is an object whose IPersistStream data is
+// the blob's length, then its bytes, as in a stream.
+class CBlobObject : public IPersistStream {
+public:
+  explicit CBlobObject(HGLOBAL hBlob) : m_cRef(1), m_hBlob(NULL) {
+    SIZE_T cb = hBlob != NULL ? ::GlobalSize(hBlob) : 0;
+    if (cb != 0 && (m_hBlob = ::GlobalAlloc(GMEM_MOVEABLE, cb)) != NULL) {
+      memcpy(::GlobalLock(m_hBlob), ::GlobalLock(hBlob), cb);
+      ::GlobalUnlock(m_hBlob);
+      ::GlobalUnlock(hBlob);
+    }
+  }
+  virtual ~CBlobObject() {
+    if (m_hBlob != NULL) ::GlobalFree(m_hBlob);
+  }
+
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) override {
+    if (iid == IID_IUnknown || iid == IID_IPersist || iid == IID_IPersistStream) {
+      *ppv = this;
+      AddRef();
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() override { return (ULONG)::InterlockedIncrement(&m_cRef); }
+  STDMETHOD_(ULONG, Release)() override {
+    LONG n = ::InterlockedDecrement(&m_cRef);
+    if (n == 0) delete this;
+    return (ULONG)n;
+  }
+  STDMETHOD(GetClassID)(CLSID* pClassID) override {
+    if (pClassID == NULL) return E_POINTER;
+    *pClassID = kClsidBlob;
+    return S_OK;
+  }
+  STDMETHOD(IsDirty)() override { return S_OK; }
+  STDMETHOD(Load)(LPSTREAM pStm) override {
+    DWORD cb = 0;
+    ULONG n = 0;
+    HRESULT hr = pStm->Read(&cb, sizeof(cb), &n);
+    if (FAILED(hr) || n != sizeof(cb)) return E_FAIL;
+    HGLOBAL hNew = NULL;
+    if (cb != 0) {
+      hNew = ::GlobalAlloc(GMEM_MOVEABLE, cb);
+      if (hNew == NULL) return E_OUTOFMEMORY;
+      hr = pStm->Read(::GlobalLock(hNew), cb, &n);
+      ::GlobalUnlock(hNew);
+      if (FAILED(hr) || n != cb) {
+        ::GlobalFree(hNew);
+        return E_FAIL;
+      }
+    }
+    if (m_hBlob != NULL) ::GlobalFree(m_hBlob);
+    m_hBlob = hNew;
+    return S_OK;
+  }
+  STDMETHOD(Save)(LPSTREAM pStm, BOOL) override {
+    DWORD cb = m_hBlob != NULL ? (DWORD)::GlobalSize(m_hBlob) : 0;
+    HRESULT hr = pStm->Write(&cb, sizeof(cb), NULL);
+    if (SUCCEEDED(hr) && cb != 0) {
+      hr = pStm->Write(::GlobalLock(m_hBlob), cb, NULL);
+      ::GlobalUnlock(m_hBlob);
+    }
+    return hr;
+  }
+  STDMETHOD(GetSizeMax)(ULARGE_INTEGER* pcbSize) override {
+    if (pcbSize == NULL) return E_POINTER;
+    pcbSize->QuadPart = sizeof(DWORD) + (m_hBlob != NULL ? ::GlobalSize(m_hBlob) : 0);
+    return S_OK;
+  }
+
+private:
+  LONG m_cRef;
+  HGLOBAL m_hBlob;
+};
+
+// The blob in an object's IPersistStream data: its length, then its
+// bytes. NULL for an empty blob or data in another form.
+HGLOBAL BlobFromObject(LPUNKNOWN pUnk) {
+  HGLOBAL hData = SaveToHGlobal(pUnk);
+  if (hData == NULL) return NULL;
+  HGLOBAL hBlob = NULL;
+  SIZE_T cbData = ::GlobalSize(hData);
+  const BYTE* p = (const BYTE*)::GlobalLock(hData);
+  DWORD cb = 0;
+  if (cbData >= sizeof(DWORD)) memcpy(&cb, p, sizeof(DWORD));
+  if (cb != 0 && cb <= cbData - sizeof(DWORD) &&
+      (hBlob = ::GlobalAlloc(GMEM_MOVEABLE, cb)) != NULL) {
+    memcpy(::GlobalLock(hBlob), p + sizeof(DWORD), cb);
+    ::GlobalUnlock(hBlob);
+  }
+  ::GlobalUnlock(hData);
+  ::GlobalFree(hData);
+  return hBlob;
+}
+
 // ---------------------------------------------------------------------
 // Archives: streams and storages
+
+// The flag byte in front of an object in the stream.
+const BYTE kObjectPresent = 0;
+const BYTE kObjectNull = 0xFF;
+
+// A stream that reads and writes through a CArchive, for an archive on a
+// file that is not an OLE stream. It lives on the caller's stack.
+class CArchiveIStream : public IStream {
+public:
+  explicit CArchiveIStream(CArchive* pArchive) : m_pArchive(pArchive) {}
+
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) override {
+    if (iid == IID_IUnknown || iid == IID_IStream || iid == IID_ISequentialStream) {
+      *ppv = this;
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() override { return 1; }
+  STDMETHOD_(ULONG, Release)() override { return 1; }
+  STDMETHOD(Read)(void* pv, ULONG cb, ULONG* pcbRead) override {
+    ULONG n = 0;
+    try {
+      n = m_pArchive->Read(pv, cb);
+    } catch (CException* e) {
+      e->Delete();
+      return STG_E_READFAULT;
+    }
+    if (pcbRead != NULL) *pcbRead = n;
+    return S_OK;
+  }
+  STDMETHOD(Write)(const void* pv, ULONG cb, ULONG* pcbWritten) override {
+    try {
+      m_pArchive->Write(pv, cb);
+    } catch (CException* e) {
+      e->Delete();
+      return STG_E_WRITEFAULT;
+    }
+    if (pcbWritten != NULL) *pcbWritten = cb;
+    return S_OK;
+  }
+  STDMETHOD(Seek)(LARGE_INTEGER, DWORD, ULARGE_INTEGER*) override { return E_NOTIMPL; }
+  STDMETHOD(SetSize)(ULARGE_INTEGER) override { return E_NOTIMPL; }
+  STDMETHOD(CopyTo)(IStream*, ULARGE_INTEGER, ULARGE_INTEGER*, ULARGE_INTEGER*) override {
+    return E_NOTIMPL;
+  }
+  STDMETHOD(Commit)(DWORD) override { return S_OK; }
+  STDMETHOD(Revert)() override { return E_NOTIMPL; }
+  STDMETHOD(LockRegion)(ULARGE_INTEGER, ULARGE_INTEGER, DWORD) override { return E_NOTIMPL; }
+  STDMETHOD(UnlockRegion)(ULARGE_INTEGER, ULARGE_INTEGER, DWORD) override { return E_NOTIMPL; }
+  STDMETHOD(Stat)(STATSTG*, DWORD) override { return E_NOTIMPL; }
+  STDMETHOD(Clone)(IStream**) override { return E_NOTIMPL; }
+
+private:
+  CArchive* m_pArchive;
+};
 
 class CArchivePropExchange : public CPropExchange {
 public:
@@ -252,32 +390,19 @@ public:
     return TRUE;
   }
 
+  // A font is an object in the stream, like any other.
   virtual BOOL ExchangeFontProp(LPCTSTR, CFontHolder& font, const FONTDESC* pFontDesc,
                                 LPFONTDISP pFontDispAmbient) {
     if (m_bLoading) {
-      DWORD cb;
-      HGLOBAL hGlobal = ReadHGlobal(m_ar, &cb);
-      LPFONT pFont = NULL;
-      if (cb != 0) {
-        LPSTREAM pStm = NULL;
-        if (SUCCEEDED(::CreateStreamOnHGlobal(hGlobal, TRUE, &pStm))) {
-          hGlobal = NULL;
-          pFont = LoadFontFromStream(pStm);
-          pStm->Release();
-        }
-      }
-      if (hGlobal != NULL) ::GlobalFree(hGlobal);
-      if (pFont != NULL)
-        font.SetFont(pFont);
+      LPUNKNOWN pUnk = NULL;
+      BOOL bOK = LoadObject(IID_IFont, &pUnk);
+      if (bOK && pUnk != NULL)
+        font.SetFont((LPFONT)pUnk);
       else
         font.InitializeFont(pFontDesc, pFontDispAmbient);
-      return pFont != NULL;
+      return bOK && pUnk != NULL;
     }
-    HGLOBAL hGlobal = SaveToHGlobal(font.m_pFont);
-    SIZE_T cb = hGlobal != NULL ? ::GlobalSize(hGlobal) : 0;
-    WriteHGlobal(m_ar, hGlobal, cb);
-    if (hGlobal != NULL) ::GlobalFree(hGlobal);
-    return TRUE;
+    return SaveObject(font.m_pFont);
   }
 
   virtual BOOL ExchangePersistentProp(LPCTSTR, LPUNKNOWN* ppUnk, REFIID iid, LPUNKNOWN) {
@@ -286,47 +411,53 @@ public:
         (*ppUnk)->Release();
         *ppUnk = NULL;
       }
-      DWORD cb;
-      HGLOBAL hGlobal = ReadHGlobal(m_ar, &cb);
-      BOOL bOK = cb == 0;
-      if (cb > sizeof(CLSID)) {
-        LPSTREAM pStm = NULL;
-        if (SUCCEEDED(::CreateStreamOnHGlobal(hGlobal, TRUE, &pStm))) {
-          hGlobal = NULL;
-          bOK = SUCCEEDED(::OleLoadFromStream(pStm, iid, (void**)ppUnk));
-          pStm->Release();
-        }
-      }
-      if (hGlobal != NULL) ::GlobalFree(hGlobal);
-      return bOK;
+      return LoadObject(iid, ppUnk);
     }
-    // The class ID, then the object's own data.
-    LPPERSISTSTREAM pPS = NULL;
-    HGLOBAL hGlobal = NULL;
-    if (*ppUnk != NULL && SUCCEEDED((*ppUnk)->QueryInterface(IID_IPersistStream, (void**)&pPS))) {
-      LPSTREAM pStm = NULL;
-      if (SUCCEEDED(::CreateStreamOnHGlobal(NULL, FALSE, &pStm))) {
-        if (SUCCEEDED(::OleSaveToStream(pPS, pStm))) ::GetHGlobalFromStream(pStm, &hGlobal);
-        pStm->Release();
-      }
-      pPS->Release();
-    }
-    ULARGE_INTEGER size = {};
-    if (hGlobal != NULL) {
-      // The stream's own size, not the block's.
-      LPSTREAM pStm = NULL;
-      if (SUCCEEDED(::CreateStreamOnHGlobal(hGlobal, FALSE, &pStm))) {
-        STATSTG st;
-        if (SUCCEEDED(pStm->Stat(&st, STATFLAG_NONAME))) size = st.cbSize;
-        pStm->Release();
-      }
-    }
-    WriteHGlobal(m_ar, hGlobal, (SIZE_T)size.QuadPart);
-    if (hGlobal != NULL) ::GlobalFree(hGlobal);
-    return TRUE;
+    return SaveObject(*ppUnk);
   }
 
 protected:
+  // An object: a flag byte, then the object as OleSaveToStream writes it
+  // (its class ID, then its own IPersistStream data).
+  BOOL SaveObject(LPUNKNOWN pUnk) {
+    LPPERSISTSTREAM pPS = NULL;
+    if (pUnk != NULL && FAILED(pUnk->QueryInterface(IID_IPersistStream, (void**)&pPS)))
+      pPS = NULL;
+    m_ar << (BYTE)(pPS != NULL ? kObjectPresent : kObjectNull);
+    if (pPS == NULL) return pUnk == NULL;
+    CArchiveIStream wrap(&m_ar);
+    HRESULT hr = ::OleSaveToStream(pPS, ArchiveStream(wrap));
+    pPS->Release();
+    if (FAILED(hr)) AfxThrowArchiveException(CArchiveException::genericException);
+    return TRUE;
+  }
+
+  BOOL LoadObject(REFIID iid, LPUNKNOWN* ppUnk) {
+    *ppUnk = NULL;
+    BYTE bFlag;
+    m_ar >> bFlag;
+    if (bFlag != kObjectPresent) return TRUE;
+    CArchiveIStream wrap(&m_ar);
+    HRESULT hr = ::OleLoadFromStream(ArchiveStream(wrap), iid, (void**)ppUnk);
+    if (FAILED(hr)) {
+      *ppUnk = NULL;
+      AfxThrowArchiveException(CArchiveException::badClass);
+    }
+    return TRUE;
+  }
+
+  // The archive's own stream when it has one, so the object can seek in
+  // it; otherwise a stream that reads and writes through the archive.
+  LPSTREAM ArchiveStream(CArchiveIStream& wrap) {
+    CFile* pFile = m_ar.GetFile();
+    if (pFile != NULL && pFile->IsKindOf(RUNTIME_CLASS(COleStreamFile)) &&
+        ((COleStreamFile*)pFile)->GetStream() != NULL) {
+      m_ar.Flush();
+      return ((COleStreamFile*)pFile)->GetStream();
+    }
+    return &wrap;
+  }
+
   CArchive& m_ar;
 };
 
@@ -400,7 +531,8 @@ public:
   virtual BOOL ExchangeProp(LPCTSTR pszPropName, VARTYPE vtProp, void* pvProp,
                             const void* pvDefault) {
     CStringW strName(pszPropName);
-    VARTYPE vt = vtProp == VT_BOOL ? VT_BOOL : vtProp;
+    // Unsigned values go in the bag as their signed types.
+    VARTYPE vt = vtProp == VT_UI2 ? VT_I2 : vtProp == VT_UI4 ? VT_I4 : vtProp;
     if (m_bLoading) {
       VARIANT var;
       ::VariantInit(&var);
@@ -415,9 +547,9 @@ public:
       }
       switch (vtProp) {
         case VT_I2: *(short*)pvProp = var.iVal; break;
-        case VT_UI2: *(USHORT*)pvProp = var.uiVal; break;
+        case VT_UI2: *(USHORT*)pvProp = (USHORT)var.iVal; break;
         case VT_I4: *(long*)pvProp = var.lVal; break;
-        case VT_UI4: *(ULONG*)pvProp = var.ulVal; break;
+        case VT_UI4: *(ULONG*)pvProp = (ULONG)var.lVal; break;
         case VT_BOOL: *(BOOL*)pvProp = var.boolVal != VARIANT_FALSE; break;
         case VT_BSTR: *(CString*)pvProp = var.bstrVal; break;
         case VT_R4: *(float*)pvProp = var.fltVal; break;
@@ -434,9 +566,9 @@ public:
     var.vt = vt;
     switch (vtProp) {
       case VT_I2: var.iVal = *(short*)pvProp; break;
-      case VT_UI2: var.uiVal = *(USHORT*)pvProp; break;
+      case VT_UI2: var.iVal = (short)*(USHORT*)pvProp; break;
       case VT_I4: var.lVal = *(long*)pvProp; break;
-      case VT_UI4: var.ulVal = *(ULONG*)pvProp; break;
+      case VT_UI4: var.lVal = (long)*(ULONG*)pvProp; break;
       case VT_BOOL: var.boolVal = *(BOOL*)pvProp ? VARIANT_TRUE : VARIANT_FALSE; break;
       case VT_BSTR: var.bstrVal = ((CString*)pvProp)->AllocSysString(); break;
       case VT_R4: var.fltVal = *(float*)pvProp; break;
@@ -449,49 +581,53 @@ public:
     return SUCCEEDED(hr);
   }
 
+  // A blob is an object in the bag (CBlobObject). A byte array is taken
+  // too.
   virtual BOOL ExchangeBlobProp(LPCTSTR pszPropName, HGLOBAL* phBlob, HGLOBAL hBlobDefault) {
     CStringW strName(pszPropName);
     if (m_bLoading) {
+      // The bag is handed an empty blob object to load, as Visual C++
+      // MFC does; it may answer with another object or a byte array.
       VARIANT var;
       ::VariantInit(&var);
-      var.vt = VT_ARRAY | VT_UI1;
+      var.vt = VT_UNKNOWN;
+      var.punkVal = new CBlobObject(NULL);
       HRESULT hr = m_pPropBag->Read(strName, &var, m_pErrorLog);
-      if (FAILED(hr) || var.vt != (VT_ARRAY | VT_UI1) || var.parray == NULL) {
-        ::VariantClear(&var);
+      HGLOBAL hNew = NULL;
+      BOOL bFound = FALSE;
+      if (SUCCEEDED(hr) && (var.vt == VT_UNKNOWN || var.vt == VT_DISPATCH)) {
+        bFound = TRUE;
+        if (var.punkVal != NULL) hNew = BlobFromObject(var.punkVal);
+      } else if (SUCCEEDED(hr) && var.vt == (VT_ARRAY | VT_UI1) && var.parray != NULL) {
+        bFound = TRUE;
+        LONG lLower = 0, lUpper = -1;
+        ::SafeArrayGetLBound(var.parray, 1, &lLower);
+        ::SafeArrayGetUBound(var.parray, 1, &lUpper);
+        SIZE_T cb = (SIZE_T)(lUpper - lLower + 1);
+        if (cb != 0 && (hNew = ::GlobalAlloc(GMEM_MOVEABLE, cb)) != NULL) {
+          void* pData = NULL;
+          ::SafeArrayAccessData(var.parray, &pData);
+          memcpy(::GlobalLock(hNew), pData, cb);
+          ::GlobalUnlock(hNew);
+          ::SafeArrayUnaccessData(var.parray);
+        }
+      }
+      ::VariantClear(&var);
+      if (!bFound) {
         CResetPropExchange reset;
         return reset.ExchangeBlobProp(pszPropName, phBlob, hBlobDefault);
       }
       if (*phBlob != NULL) ::GlobalFree(*phBlob);
-      LONG lLower = 0, lUpper = -1;
-      ::SafeArrayGetLBound(var.parray, 1, &lLower);
-      ::SafeArrayGetUBound(var.parray, 1, &lUpper);
-      SIZE_T cb = (SIZE_T)(lUpper - lLower + 1);
-      *phBlob = cb != 0 ? ::GlobalAlloc(GMEM_MOVEABLE, cb) : NULL;
-      if (*phBlob != NULL) {
-        void* pData = NULL;
-        ::SafeArrayAccessData(var.parray, &pData);
-        memcpy(::GlobalLock(*phBlob), pData, cb);
-        ::GlobalUnlock(*phBlob);
-        ::SafeArrayUnaccessData(var.parray);
-      }
-      ::VariantClear(&var);
+      *phBlob = hNew;
       return TRUE;
     }
-    SIZE_T cb = *phBlob != NULL ? ::GlobalSize(*phBlob) : 0;
+    CBlobObject* pBlob = new CBlobObject(*phBlob);
     VARIANT var;
     ::VariantInit(&var);
-    var.vt = VT_ARRAY | VT_UI1;
-    var.parray = ::SafeArrayCreateVector(VT_UI1, 0, (ULONG)cb);
-    if (var.parray == NULL) return FALSE;
-    if (cb != 0) {
-      void* pData = NULL;
-      ::SafeArrayAccessData(var.parray, &pData);
-      memcpy(pData, ::GlobalLock(*phBlob), cb);
-      ::GlobalUnlock(*phBlob);
-      ::SafeArrayUnaccessData(var.parray);
-    }
+    var.vt = VT_UNKNOWN;
+    var.punkVal = pBlob;
     HRESULT hr = m_pPropBag->Write(strName, &var);
-    ::VariantClear(&var);
+    pBlob->Release();
     return SUCCEEDED(hr);
   }
 
@@ -651,8 +787,7 @@ BOOL COleControl::ExchangeExtent(CPropExchange* pPX) {
   // Saved always, like the size of a control in an HTML page; a missing
   // one keeps the current size.
   long cx = m_cxExtent, cy = m_cyExtent;
-  BOOL bOK = PX_Long(pPX, _T("_ExtentX"), cx);
-  bOK = PX_Long(pPX, _T("_ExtentY"), cy) && bOK;
+  BOOL bOK = PX_Long(pPX, _T("_ExtentX"), cx) && PX_Long(pPX, _T("_ExtentY"), cy);
   if (pPX->IsLoading()) {
     m_cxExtent = cx;
     m_cyExtent = cy;
@@ -660,24 +795,39 @@ BOOL COleControl::ExchangeExtent(CPropExchange* pPX) {
   return bOK;
 }
 
+// The stock properties: a mask of the ones saved, then each of them.
 void COleControl::ExchangeStockProps(CPropExchange* pPX) {
   DWORD dwMask = GetStockPropMask();
-  if (dwMask == 0) return;
   BOOL bLoading = pPX->IsLoading();
-  if (dwMask & STOCKPROP_BACKCOLOR) PX_Color(pPX, _T("BackColor"), m_clrBackColor, AmbientBackColor());
-  if (dwMask & STOCKPROP_FORECOLOR) PX_Color(pPX, _T("ForeColor"), m_clrForeColor, AmbientForeColor());
-  if (dwMask & STOCKPROP_CAPTION)
-    PX_String(pPX, _T("Caption"), m_strText, _T(""));
-  else if (dwMask & STOCKPROP_TEXT)
-    PX_String(pPX, _T("Text"), m_strText, _T(""));
-  if (dwMask & STOCKPROP_BORDERSTYLE) PX_Short(pPX, _T("BorderStyle"), m_sBorderStyle, (short)0);
-  if (dwMask & STOCKPROP_APPEARANCE) PX_Short(pPX, _T("Appearance"), m_sAppearance, (short)0);
-  if (dwMask & STOCKPROP_ENABLED) PX_Bool(pPX, _T("Enabled"), m_bEnabled, TRUE);
+  long lSaved = (long)dwMask;
+  PX_Long(pPX, _T("_StockProps"), lSaved);
+  // Loading takes the ones the data has; the others take their defaults.
+  DWORD dwSaved = bLoading ? (DWORD)lSaved & dwMask : dwMask;
+  CResetPropExchange reset;
+  if (dwMask & (STOCKPROP_CAPTION | STOCKPROP_TEXT)) {
+    LPCTSTR pszName = (dwMask & STOCKPROP_CAPTION) ? _T("Caption") : _T("Text");
+    PX_String((dwSaved & (STOCKPROP_CAPTION | STOCKPROP_TEXT)) ? pPX : &reset, pszName,
+              m_strText, _T(""));
+  }
+  if (dwMask & STOCKPROP_FORECOLOR)
+    PX_Color((dwSaved & STOCKPROP_FORECOLOR) ? pPX : &reset, _T("ForeColor"), m_clrForeColor,
+             AmbientForeColor());
+  if (dwMask & STOCKPROP_BACKCOLOR)
+    PX_Color((dwSaved & STOCKPROP_BACKCOLOR) ? pPX : &reset, _T("BackColor"), m_clrBackColor,
+             AmbientBackColor());
   if (dwMask & STOCKPROP_FONT) {
     LPFONTDISP pAmbient = AmbientFont();
-    PX_Font(pPX, _T("Font"), m_font, NULL, pAmbient);
+    PX_Font((dwSaved & STOCKPROP_FONT) ? pPX : &reset, _T("Font"), m_font, NULL, pAmbient);
     if (pAmbient != NULL) pAmbient->Release();
   }
+  if (dwMask & STOCKPROP_BORDERSTYLE)
+    PX_Short((dwSaved & STOCKPROP_BORDERSTYLE) ? pPX : &reset, _T("BorderStyle"),
+             m_sBorderStyle, (short)0);
+  if (dwMask & STOCKPROP_ENABLED)
+    PX_Bool((dwSaved & STOCKPROP_ENABLED) ? pPX : &reset, _T("Enabled"), m_bEnabled, TRUE);
+  if (dwMask & STOCKPROP_APPEARANCE)
+    PX_Short((dwSaved & STOCKPROP_APPEARANCE) ? pPX : &reset, _T("Appearance"), m_sAppearance,
+             (short)0);
   if (bLoading && m_hWnd != NULL) {
     // The window shows what was loaded.
     if (dwMask & (STOCKPROP_CAPTION | STOCKPROP_TEXT))
@@ -771,7 +921,11 @@ STDMETHODIMP COleControl::XPersistStreamInit::Load(LPSTREAM pStm) {
   METHOD_PROLOGUE(COleControl, PersistStreamInit);
   if (pStm == NULL) return E_POINTER;
   HRESULT hr = LoadFromStream(pThis, pStm);
-  if (FAILED(hr)) return hr;
+  if (FAILED(hr)) {
+    // Data that does not load leaves the control as new.
+    pThis->OnResetState();
+    return hr;
+  }
   pThis->m_bInitialized = TRUE;
   pThis->m_bModified = FALSE;
   pThis->InvalidateControl();
@@ -841,7 +995,10 @@ STDMETHODIMP COleControl::XPersistStorage::Load(LPSTORAGE pStg) {
   if (FAILED(hr)) return hr;
   hr = LoadFromStream(pThis, pStm);
   pStm->Release();
-  if (FAILED(hr)) return hr;
+  if (FAILED(hr)) {
+    pThis->OnResetState();
+    return hr;
+  }
   pThis->m_bInitialized = TRUE;
   pThis->m_bModified = FALSE;
   pThis->InvalidateControl();

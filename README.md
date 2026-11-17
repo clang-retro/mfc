@@ -684,10 +684,16 @@ request with the stock MinGW-w64 toolchain.
   control's property frame do not change the control; Windows applies
   the pages.
 * A control's binary stream (IPersistStreamInit, IPersistStorage, DLGINIT
-  data) has this library's own format, not the one Visual C++ MFC
-  writes; property bags hold the same names and values.
-* COleDocument saves its items in its own format,
-  which is not the one Visual C++ MFC writes. Wine's
+  data) and its property bag entries are the ones Visual C++ MFC
+  writes: the tests load a stream that MFC 4.2 saved and save it back
+  byte for byte. Fonts, pictures and other objects in the stream carry
+  their own data, so a font saved on another system may name the face
+  that system used.
+* COleDocument's "Contents" stream and its "Embedding N" storages are
+  laid out as Visual C++ MFC lays them out, for compound and flat
+  files. An item's record holds three fixed values whose meaning is not
+  known; they are written as Visual C++ MFC writes them for embedded and
+  static items and ignored when loading. Wine's
   OleCreateStaticFromData makes objects without IOleObject, so static
   items cannot be created under Wine.
 * Under Wine, a container's OLERENDER_DRAW cache never takes a picture
