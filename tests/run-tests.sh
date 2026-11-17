@@ -83,66 +83,112 @@ if [ $NATIVE = 1 ]; then
     { kill $watchdog && wait $watchdog; } 2>/dev/null
     return $status
   }
-  for v in a u; do
+  # Builds and runs one test; with shared=1 against the shared libraries
+  # (_AFXDLL), its output then in $T/sa or $T/su.
+  native_test() {  # name v shared
+    name=$1 v=$2 shared=$3
     flags=
     lib=-lmfc
     [ $v = u ] && flags="-DUNICODE -D_UNICODE" && lib=-lmfcu
-    for name in $TESTS; do
-      exe=$T/$name-$v
-      srcs=tests/$name.cpp
-      # Resources become C++ that registers them as the program starts.
-      if [ -f tests/$name.rc ]; then
+    if [ $shared = 1 ]; then
+      outdir=$T/s$v label=$name-shared exe=$T/$name-shared-$v
+      flags="$flags -D_AFXDLL"
+      # libmfcs.a (libmfcus.a): the program's own part, main among it.
+      libs="-L$OUT/shared -L$OUT ${lib}s $lib -lwinport"
+      rpath="-Wl,-rpath,$SHARED_ABS -Wl,-rpath,$T_ABS"
+    else
+      outdir=$T/$v label=$name exe=$T/$name-$v
+      libs="-L$OUT $lib -lwinport"
+      rpath=
+    fi
+    mkdir -p "$outdir"
+    srcs=tests/$name.cpp
+    # Resources become C++ that registers them as the program starts.
+    if [ -f tests/$name.rc ]; then
+      CXX="$CXX" RC="$RC_NATIVE" python3 port/tools/res2cpp.py -I include -I tests -I "$T" \
+        tests/$name.rc -o "$T/$name-res.cpp" 2>"$T/$name-rc.log" || {
+        echo "FAIL   $label-$v (resources)"; cat "$T/$name-rc.log"; nfail=$((nfail + 1)); return; }
+      srcs="$srcs $T/$name-res.cpp"
+    fi
+    # A test with a DLL of its own, tests/NAME-dll.cpp, gets it as a
+    # shared library named as on Windows, next to the program. A regular
+    # DLL (with a .def) exports only what the .def names (and DllMain),
+    # and the program loads it; with the static library it has its own
+    # copy, and the layer comes from the program, which exports it. An
+    # extension DLL (no .def; only with the shared library) exports its
+    # classes, and the program links with it.
+    exeflags=
+    if [ -f tests/$name-dll.cpp ]; then
+      dllsrcs=tests/$name-dll.cpp
+      if [ -f tests/$name-dll.rc ]; then
         CXX="$CXX" RC="$RC_NATIVE" python3 port/tools/res2cpp.py -I include -I tests -I "$T" \
-          tests/$name.rc -o "$T/$name-res.cpp" 2>"$T/$name-rc.log" || {
-          echo "FAIL   $name-$v (resources)"; cat "$T/$name-rc.log"; nfail=$((nfail + 1)); continue; }
-        srcs="$srcs $T/$name-res.cpp"
+          tests/$name-dll.rc -o "$T/$name-dll-res.cpp" 2>"$T/$name-dll-rc.log" || {
+          echo "FAIL   $label-$v (DLL resources)"; cat "$T/$name-dll-rc.log"; nfail=$((nfail + 1)); return; }
+        dllsrcs="$dllsrcs $T/$name-dll-res.cpp"
       fi
-      # A test with a regular DLL of its own (tests/NAME-dll.cpp with a .def)
-      # gets it as a shared library, named as on Windows, next to the
-      # program. It has its own copy of the library and exports only what
-      # the .def names (and DllMain); the layer comes from the program,
-      # which exports it.
-      exeflags=
-      if [ -f tests/$name-dll.cpp ] && [ -f tests/$name-dll.def ]; then
-        dllsrcs=tests/$name-dll.cpp
-        if [ -f tests/$name-dll.rc ]; then
-          CXX="$CXX" RC="$RC_NATIVE" python3 port/tools/res2cpp.py -I include -I tests -I "$T" \
-            tests/$name-dll.rc -o "$T/$name-dll-res.cpp" 2>"$T/$name-dll-rc.log" || {
-            echo "FAIL   $name-$v (DLL resources)"; cat "$T/$name-dll-rc.log"; nfail=$((nfail + 1)); continue; }
-          dllsrcs="$dllsrcs $T/$name-dll-res.cpp"
-        fi
+      dll=$T/$name-dll-$v.dll
+      case $TARGET in
+        *apple* | *darwin*) dllflags="-dynamiclib -Wl,-install_name,@rpath/$(basename "$dll")" ;;
+        *) dllflags="-shared -Wl,-soname,$(basename "$dll")" ;;
+      esac
+      if [ -f tests/$name-dll.def ]; then
         exports=$(sed -n '/^EXPORTS/,$p' tests/$name-dll.def | sed '1d' | awk '{split($1, a, "="); print a[1]}')
         case $TARGET in
           *apple* | *darwin*)
             for e in DllMain $exports; do echo "_$e"; done > "$T/$name-dll.exp"
-            dllflags="-dynamiclib -undefined dynamic_lookup -Wl,-exported_symbols_list,$T/$name-dll.exp" ;;
+            dllflags="$dllflags -Wl,-exported_symbols_list,$T/$name-dll.exp"
+            [ $shared = 0 ] && dllflags="$dllflags -undefined dynamic_lookup" ;;
           *)
             { echo "{ global:"; for e in DllMain $exports; do echo "  $e;"; done; echo "local: *; };"; } \
               > "$T/$name-dll.map"
-            dllflags="-shared -fPIC -Wl,--version-script=$T/$name-dll.map"
-            exeflags=-rdynamic ;;
+            dllflags="$dllflags -Wl,--version-script=$T/$name-dll.map"
+            [ $shared = 0 ] && exeflags=-rdynamic ;;
         esac
-        # shellcheck disable=SC2086
-        "$CXX" $CXXFLAGS $flags -fPIC -D_USRDLL $dllsrcs -L"$OUT" $LDFLAGS $lib $dllflags \
-          -o "$T/$name-dll-$v.dll" 2>"$T/$name-dll-$v-build.log" || {
-          echo "FAIL   $name-$v (DLL build)"; cat "$T/$name-dll-$v-build.log"; nfail=$((nfail + 1)); continue; }
+        dlllibs="-L$OUT $lib"
+        [ $shared = 1 ] && dlllibs="$libs $SYSLIBS $rpath"
+        dllflags="$dllflags -D_USRDLL"
+      elif [ $shared = 1 ]; then
+        dlllibs="$libs $SYSLIBS $rpath"
+        srcs="$srcs $dll"
+      else
+        echo "skip   $label-$v (an extension DLL needs the shared library)"
+        return
       fi
       # shellcheck disable=SC2086
-      "$CXX" $CXXFLAGS $flags $exeflags $srcs -L"$OUT" $LDFLAGS $lib -lwinport $SYSLIBS -o "$exe" \
-        2>"$T/$name-$v-build.log" || {
-        echo "FAIL   $name-$v (build)"; cat "$T/$name-$v-build.log"; nfail=$((nfail + 1)); continue; }
-      # The tests that close their own message boxes want them as windows.
-      box=
-      case $name in rvtest) box=window ;; esac
-      export WINPORT_MESSAGEBOX=$box MFC_TEST_OUT="$T/$v" WINPORT_BACKEND=${WINPORT_BACKEND:-headless}
-      export WINPORT_REGISTRY="$T/$v/registry.reg"
-      if run_limited "$T/$v/$name.log" "$exe"; then
-        echo "PASS   $name-$v"; npass=$((npass + 1))
-      else
-        echo "FAIL   $name-$v"; sed 's/^/       /' "$T/$v/$name.log"; nfail=$((nfail + 1))
-      fi
+      "$CXX" $CXXFLAGS $flags -fPIC $dllsrcs $LDFLAGS $dlllibs $dllflags -o "$dll" \
+        2>"$T/$label-dll-$v-build.log" || {
+        echo "FAIL   $label-$v (DLL build)"; cat "$T/$label-dll-$v-build.log"; nfail=$((nfail + 1)); return; }
+    fi
+    # shellcheck disable=SC2086
+    "$CXX" $CXXFLAGS $flags $exeflags $srcs $LDFLAGS $libs $SYSLIBS $rpath -o "$exe" \
+      2>"$T/$label-$v-build.log" || {
+      echo "FAIL   $label-$v (build)"; cat "$T/$label-$v-build.log"; nfail=$((nfail + 1)); return; }
+    # The tests that close their own message boxes want them as windows.
+    box=
+    case $name in rvtest) box=window ;; esac
+    export WINPORT_MESSAGEBOX=$box MFC_TEST_OUT="$outdir" WINPORT_BACKEND=${WINPORT_BACKEND:-headless}
+    export WINPORT_REGISTRY="$outdir/registry.reg"
+    if run_limited "$outdir/$name.log" "$exe"; then
+      echo "PASS   $label-$v"; npass=$((npass + 1))
+    else
+      echo "FAIL   $label-$v"; sed 's/^/       /' "$outdir/$name.log"; nfail=$((nfail + 1))
+    fi
+  }
+  for v in a u; do
+    for name in $TESTS; do
+      native_test "$name" $v 0
     done
   done
+  # The shared libraries, when they are built (make all).
+  if [ -n "$SHARED_TESTS" ] && [ -f "$OUT/libmfcs.a" ] && [ -d "$OUT/shared" ]; then
+    SHARED_ABS=$(cd "$OUT/shared" && pwd)
+    T_ABS=$(cd "$T" && pwd)
+    for v in a u; do
+      for name in $SHARED_TESTS; do
+        native_test "$name" $v 1
+      done
+    done
+  fi
   echo "$npass passed, $nfail failed"
   [ $nfail = 0 ]
   exit

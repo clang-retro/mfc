@@ -130,8 +130,24 @@ the default printer. `WINPORT_PRINTERS=pdf` leaves CUPS out.
 A regular DLL builds as a shared library (`-shared`, exporting
 `DllMain` and the `.def` file's names; the program links with
 `-rdynamic` on Linux, and the library with `-undefined dynamic_lookup`
-on macOS), and `LoadLibrary` calls its `DllMain`. The shared MFC
-library (`_AFXDLL`) is not built for these targets yet.
+on macOS), and `LoadLibrary` calls its `DllMain`.
+
+The shared libraries build too (`make all`; `make static` leaves them
+out). They go in `build/<target>/shared` under the static libraries'
+names, `libmfc.so`, `libmfcu.so` and `libwinport.so` (`.dylib` on
+macOS), so a program built with `_AFXDLL` picks them with that
+directory first, and links `libmfcs.a` (`libmfcus.a`) for its own part:
+
+```sh
+clang++ -std=c++17 -D_AFXDLL -Ipath/to/mfc/port/include -Ipath/to/mfc/include app.cpp \
+  -Lpath/to/build/x86_64-linux-gnu/shared -Lpath/to/build/x86_64-linux-gnu \
+  -lmfcs -lmfc -lwinport -ldl -lpthread -Wl,-rpath,path/to/build/x86_64-linux-gnu/shared -o app
+```
+
+Extension DLLs (`_AFXEXT`) and regular DLLs that share the library work
+as on Windows: the program's startup calls the `DllMain` of each
+library it links with, and a regular DLL keeps a module state of its
+own.
 
 The common controls are all there: besides the bars, list and tree
 views, tabs and the rest, the rebar, pager, SysLink, IP address,
@@ -209,7 +225,9 @@ in `tests/` in ANSI and Unicode and runs them under Wine, starting Xvfb
 when there is no display. For a Linux or macOS target it builds `core`,
 `memtest`, `wintest`, `disptest`, `isapitest`, `dlgtest`, `sditest`,
 `mditest`, `cmntest`, `splittest`, `docktest`, `dbtest`, `rvtest`,
-`socktest`, `occtest`, `dlltest` and `inettest` against the portable layer and runs them directly; `NATIVE_TESTS` names others to try.
+`socktest`, `occtest`, `dlltest` and `inettest` against the portable layer,
+and `exttest`, `core`, `sditest`, `dlgtest` and `dlltest` again with the
+shared libraries (`SHARED_TESTS`), and runs them directly; `NATIVE_TESTS` names others to try.
 
 * `core`: CString, collections, CFile, CArchive and serialization,
   CTime, exceptions and run-time classes, on the console.

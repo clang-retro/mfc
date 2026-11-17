@@ -13,7 +13,9 @@
 #include "afximpl.h"
 #include <new>
 
-#if defined(_AFXDLL) && !defined(_AFX_BUILDING_DLL)
+// Linux and macOS have one global operator delete for the whole process,
+// the library's, so modules need none of their own there.
+#if defined(_AFXDLL) && !defined(_AFX_BUILDING_DLL) && !defined(_WINPORT)
 
 extern "C" void AFXAPI _AfxDllDelete(void* p);
 extern "C" void AFXAPI _AfxNoteForeignDelete();

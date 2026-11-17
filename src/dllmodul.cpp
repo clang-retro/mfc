@@ -69,14 +69,22 @@ extern "C" BOOL WINAPI _AfxDllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID l
 
 #if defined(_AFXDLL) && !defined(_AFX_BUILDING_DLL)  // libmfcs.a
 
-extern "C" IMAGE_DOS_HEADER __ImageBase;
-
 static AFX_MODULE_STATE g_dllModuleState;
 static AFX_MODULE_STATE* g_pStateBefore;  // the state before the DLL's set-up
 
 // Whether this copy of the file is in a DLL rather than the program
 // (which links it when it calls AfxGetStaticModuleState).
+#ifdef _WINPORT
+static BOOL IsInDll() {
+  HMODULE hModule = NULL;
+  ::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       (LPCSTR)&g_dllModuleState, &hModule);
+  return hModule != ::GetModuleHandle(NULL);
+}
+#else
+extern "C" IMAGE_DOS_HEADER __ImageBase;
 static BOOL IsInDll() { return (HMODULE)&__ImageBase != ::GetModuleHandle(NULL); }
+#endif
 
 AFX_MODULE_STATE* AFXAPI AfxGetStaticModuleState() {
   return IsInDll() ? &g_dllModuleState : AfxGetAppModuleState();

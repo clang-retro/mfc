@@ -12,6 +12,9 @@
 #ifndef _AFX_BUILDING_DLL  // not in mfc.dll: each program has its own main, from libmfcs.a
 
 int main() {
+#ifdef _WINPORT
+  _WinportAttachLinkedLibraries();  // the DllMains Windows calls before this
+#endif
   LPTSTR p = ::GetCommandLine();
   if (*p == _T('"')) {
     for (p++; *p != _T('\0') && *p != _T('"'); p++) {}

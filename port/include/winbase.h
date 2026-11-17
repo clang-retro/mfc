@@ -459,6 +459,14 @@ UINT WINAPI WinExec(LPCSTR, UINT);
 #define DLL_THREAD_DETACH 3
 HMODULE WINAPI GetModuleHandleA(LPCSTR);
 HMODULE WINAPI GetModuleHandleW(LPCWSTR);
+#define GET_MODULE_HANDLE_EX_FLAG_PIN 0x00000001
+#define GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT 0x00000002
+#define GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS 0x00000004
+BOOL WINAPI GetModuleHandleExA(DWORD, LPCSTR, HMODULE*);
+BOOL WINAPI GetModuleHandleExW(DWORD, LPCWSTR, HMODULE*);
+// Calls the DllMain of each library the program links with (the
+// program's startup does).
+void WINAPI _WinportAttachLinkedLibraries(void);
 DWORD WINAPI GetModuleFileNameA(HMODULE, LPSTR, DWORD);
 DWORD WINAPI GetModuleFileNameW(HMODULE, LPWSTR, DWORD);
 HMODULE WINAPI LoadLibraryA(LPCSTR);
@@ -682,6 +690,7 @@ int WINAPI lstrcmpiW(LPCWSTR, LPCWSTR);
 #define GetCommandLine __WINPORT_AW(GetCommandLine)
 #define MAKEINTRESOURCE __WINPORT_AW(MAKEINTRESOURCE)
 #define GetModuleHandle __WINPORT_AW(GetModuleHandle)
+#define GetModuleHandleEx __WINPORT_AW(GetModuleHandleEx)
 #define GetModuleFileName __WINPORT_AW(GetModuleFileName)
 #define LoadLibrary __WINPORT_AW(LoadLibrary)
 #define LoadLibraryEx __WINPORT_AW(LoadLibraryEx)
