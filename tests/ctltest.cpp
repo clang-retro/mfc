@@ -436,6 +436,114 @@ IMPLEMENT_OLECREATE_EX(CDataCtrl, "CtlTest.DataCtrl.1", 0x6a1d3f52, 0x0e4b, 0x4d
                        0x8b, 0x5e, 0x1c, 0xad, 0x4f, 0x66)
 BOOL CDataCtrl::CDataCtrlFactory::UpdateRegistry(BOOL) { return TRUE; }
 
+// A control with every kind of property, for the saved formats. Its
+// values and the bytes it must give come from the same control built with
+// Visual C++ and its MFC.
+class CFmtCtrl : public COleControl {
+  DECLARE_DYNCREATE(CFmtCtrl)
+  DECLARE_OLECREATE_EX(CFmtCtrl)
+  DECLARE_DISPATCH_MAP()
+public:
+  static CFmtCtrl* s_pLast;
+  BOOL m_bBool;
+  short m_nShort;
+  USHORT m_nUShort;
+  long m_nLong;
+  ULONG m_nULong;
+  float m_fFloat;
+  double m_dDouble;
+  CY m_cy;
+  CString m_str;
+  OLE_COLOR m_clr;
+  CFontHolder m_fontProp;
+  HGLOBAL m_hBlob;
+
+  virtual UINT GetUserTypeNameID() { return IDS_TESTCTL; }
+  virtual DWORD GetMiscStatus() { return kMiscStatus; }
+
+  CFmtCtrl() : m_fontProp(NULL), m_hBlob(NULL) {
+    InitializeIIDs(&IID_DTestCtrl, &IID_DTestCtrlEvents);
+    SetInitialSize(100, 50);
+    s_pLast = this;
+  }
+  virtual ~CFmtCtrl() {
+    if (m_hBlob != NULL) ::GlobalFree(m_hBlob);
+    if (s_pLast == this) s_pLast = NULL;
+  }
+  static void ArialBold12(FONTDESC* pfd) {
+    memset(pfd, 0, sizeof(*pfd));
+    pfd->cbSizeofstruct = sizeof(*pfd);
+    pfd->lpstrName = (LPOLESTR)L"Arial";
+    pfd->cySize.Lo = 120000;
+    pfd->sWeight = FW_BOLD;
+  }
+  virtual void DoPropExchange(CPropExchange* pPX) {
+    ExchangeVersion(pPX, MAKELONG(1, 2));
+    COleControl::DoPropExchange(pPX);
+    CY cyZero;
+    cyZero.int64 = 0;
+    PX_Bool(pPX, _T("BoolProp"), m_bBool, FALSE);
+    PX_Short(pPX, _T("ShortProp"), m_nShort, (short)0);
+    PX_UShort(pPX, _T("UShortProp"), m_nUShort, (USHORT)0);
+    PX_Long(pPX, _T("LongProp"), m_nLong, 0L);
+    PX_ULong(pPX, _T("ULongProp"), m_nULong, 0UL);
+    PX_Float(pPX, _T("FloatProp"), m_fFloat, 0.0f);
+    PX_Double(pPX, _T("DoubleProp"), m_dDouble, 0.0);
+    PX_Currency(pPX, _T("CurrencyProp"), m_cy, cyZero);
+    PX_String(pPX, _T("StringProp"), m_str, _T(""));
+    PX_Color(pPX, _T("ColorProp"), m_clr, (OLE_COLOR)0);
+    static FONTDESC fdDefault = {sizeof(FONTDESC), (LPOLESTR)L"MS Sans Serif", {{80000, 0}},
+                                 FW_NORMAL, DEFAULT_CHARSET, FALSE, FALSE, FALSE};
+    PX_Font(pPX, _T("FontProp"), m_fontProp, &fdDefault);
+    PX_Blob(pPX, _T("BlobProp"), m_hBlob);
+  }
+  virtual void OnResetState() {
+    COleControl::OnResetState();
+    m_bBool = TRUE;
+    m_nShort = -1234;
+    m_nUShort = 0xBEEF;
+    m_nLong = 0x12345678;
+    m_nULong = 0xCAFEBABE;
+    m_fFloat = 1.5f;
+    m_dDouble = 3.25;
+    m_cy.int64 = 123456789;
+    m_str = _T("Hello MFC");
+    m_clr = RGB(0x11, 0x22, 0x33);
+    FONTDESC fd;
+    ArialBold12(&fd);
+    m_fontProp.InitializeFont(&fd, NULL);
+    static const BYTE kBlob[] = {0xDE, 0xAD, 0xBE, 0xEF, 1, 2, 3};
+    if (m_hBlob != NULL) ::GlobalFree(m_hBlob);
+    m_hBlob = ::GlobalAlloc(GMEM_MOVEABLE, sizeof(kBlob));
+    memcpy(::GlobalLock(m_hBlob), kBlob, sizeof(kBlob));
+    ::GlobalUnlock(m_hBlob);
+    SetBackColor(RGB(0x10, 0x20, 0x30));
+    SetForeColor(RGB(0x40, 0x50, 0x60));
+    SetText(_T("StockCaption"));
+    SetEnabled(FALSE);
+    SetBorderStyle(1);
+    SetAppearance(1);
+    InternalGetFont().InitializeFont(&fd, NULL);
+  }
+};
+
+CFmtCtrl* CFmtCtrl::s_pLast = NULL;
+IMPLEMENT_DYNCREATE(CFmtCtrl, COleControl)
+// {6A1D3F52-0E4B-4D7A-9F23-8B5E1CAD4F67}
+IMPLEMENT_OLECREATE_EX(CFmtCtrl, "CtlTest.FmtCtrl.1", 0x6a1d3f52, 0x0e4b, 0x4d7a, 0x9f, 0x23,
+                       0x8b, 0x5e, 0x1c, 0xad, 0x4f, 0x67)
+BOOL CFmtCtrl::CFmtCtrlFactory::UpdateRegistry(BOOL) { return TRUE; }
+
+BEGIN_DISPATCH_MAP(CFmtCtrl, COleControl)
+  DISP_STOCKPROP_BACKCOLOR()
+  DISP_STOCKPROP_FORECOLOR()
+  DISP_STOCKPROP_CAPTION()
+  DISP_STOCKPROP_FONT()
+  DISP_STOCKPROP_ENABLED()
+  DISP_STOCKPROP_BORDERSTYLE()
+  DISP_STOCKPROP_APPEARANCE()
+END_DISPATCH_MAP()
+
 int CTestPropPage::s_nAlive = 0;
 CTestPropPage* CTestPropPage::s_pLast = NULL;
 BOOL CTestPropPage::s_bDirtyAtEnd = FALSE;
@@ -1126,6 +1234,277 @@ static LPUNKNOWN NewControl(CTestCtrl** ppCtl) {
   CHECK(SUCCEEDED(hr) && pUnk != NULL);
   *ppCtl = CTestCtrl::s_pLast;
   return pUnk;
+}
+
+// The saved formats, against the bytes Visual C++ MFC gave for CFmtCtrl
+// (an ANSI build's stream, saved under Wine, so its fonts are named
+// Liberation Sans).
+static const BYTE kVcStream[] = {
+    0x01, 0x00, 0x02, 0x00, 0x56, 0x0a, 0x00, 0x00, 0x2b, 0x05, 0x00, 0x00,
+    0xef, 0x00, 0x00, 0x00, 0x0c, 0x53, 0x74, 0x6f, 0x63, 0x6b, 0x43, 0x61,
+    0x70, 0x74, 0x69, 0x6f, 0x6e, 0x40, 0x50, 0x60, 0x00, 0x10, 0x20, 0x30,
+    0x00, 0x00, 0x03, 0x52, 0xe3, 0x0b, 0x91, 0x8f, 0xce, 0x11, 0x9d, 0xe3,
+    0x00, 0xaa, 0x00, 0x4b, 0xb8, 0x51, 0x01, 0x00, 0x00, 0x00, 0xbc, 0x02,
+    0xc0, 0xd4, 0x01, 0x00, 0x0f, 0x4c, 0x69, 0x62, 0x65, 0x72, 0x61, 0x74,
+    0x69, 0x6f, 0x6e, 0x20, 0x53, 0x61, 0x6e, 0x73, 0x01, 0x00, 0x00, 0x01,
+    0x00, 0x01, 0x2e, 0xfb, 0xef, 0xbe, 0x78, 0x56, 0x34, 0x12, 0xbe, 0xba,
+    0xfe, 0xca, 0x00, 0x00, 0xc0, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x0a, 0x40, 0x15, 0xcd, 0x5b, 0x07, 0x00, 0x00, 0x00, 0x00, 0x09, 0x48,
+    0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x4d, 0x46, 0x43, 0x11, 0x22, 0x33, 0x00,
+    0x00, 0x03, 0x52, 0xe3, 0x0b, 0x91, 0x8f, 0xce, 0x11, 0x9d, 0xe3, 0x00,
+    0xaa, 0x00, 0x4b, 0xb8, 0x51, 0x01, 0x00, 0x00, 0x00, 0xbc, 0x02, 0xc0,
+    0xd4, 0x01, 0x00, 0x0f, 0x4c, 0x69, 0x62, 0x65, 0x72, 0x61, 0x74, 0x69,
+    0x6f, 0x6e, 0x20, 0x53, 0x61, 0x6e, 0x73, 0x07, 0x00, 0x00, 0x00, 0xde,
+    0xad, 0xbe, 0xef, 0x01, 0x02, 0x03,
+};
+
+static CByteArray* StreamBytes(LPSTREAM pStm) {
+  CByteArray* pBytes = new CByteArray;
+  STATSTG st;
+  if (FAILED(pStm->Stat(&st, STATFLAG_NONAME))) return pBytes;
+  pBytes->SetSize((INT_PTR)st.cbSize.QuadPart);
+  LARGE_INTEGER li;
+  li.QuadPart = 0;
+  pStm->Seek(li, STREAM_SEEK_SET, NULL);
+  ULONG n = 0;
+  if (pBytes->GetSize() > 0) pStm->Read(pBytes->GetData(), (ULONG)pBytes->GetSize(), &n);
+  return pBytes;
+}
+
+static void LogBytes(LPCSTR pszWhat, const CByteArray& bytes) {
+  CStringA str;
+  for (INT_PTR i = 0; i < bytes.GetSize(); i++) {
+    CStringA strByte;
+    strByte.Format("%02x", bytes[i]);
+    str += strByte;
+  }
+  TestLog("%s (%d bytes): %s", pszWhat, (int)bytes.GetSize(), (LPCSTR)str);
+}
+
+// A string as CArchive writes it: a Unicode build marks its strings
+// with FF FE FF, then the length and UTF-16 text.
+static void AppendArchiveString(CByteArray& bytes, LPCSTR psz) {
+  BYTE n = (BYTE)strlen(psz);
+#ifdef _UNICODE
+  bytes.Add(0xFF);
+  bytes.Add(0xFE);
+  bytes.Add(0xFF);
+#endif
+  bytes.Add(n);
+  for (BYTE i = 0; i < n; i++) {
+    bytes.Add((BYTE)psz[i]);
+#ifdef _UNICODE
+    bytes.Add(0);
+#endif
+  }
+}
+
+// CFmtCtrl's stream in this build, with the given font data.
+static void ExpectedFmtStream(CByteArray& expected, const CByteArray& vc, const CByteArray& font) {
+  expected.RemoveAll();
+  for (int i = 0; i < 0x10; i++) expected.Add(vc[i]);
+  AppendArchiveString(expected, "StockCaption");
+  for (int i = 0x1d; i < 0x36; i++) expected.Add(vc[i]);
+  expected.Append(font);
+  for (int i = 0x50; i < 0x76; i++) expected.Add(vc[i]);
+  AppendArchiveString(expected, "Hello MFC");
+  for (int i = 0x80; i < 0x95; i++) expected.Add(vc[i]);
+  expected.Append(font);
+  for (int i = 0xaf; i < (int)vc.GetSize(); i++) expected.Add(vc[i]);
+}
+
+static LPUNKNOWN NewFmtControl(CFmtCtrl** ppCtl) {
+  LPUNKNOWN pUnk = NULL;
+  HRESULT hr = ::CoCreateInstance(CFmtCtrl::guid, NULL, CLSCTX_INPROC_SERVER, IID_IUnknown,
+                                  (void**)&pUnk);
+  CHECK(SUCCEEDED(hr) && pUnk != NULL);
+  *ppCtl = CFmtCtrl::s_pLast;
+  return pUnk;
+}
+
+// Saves a control through IPersistStreamInit into a new stream.
+static CByteArray* SaveFmt(LPUNKNOWN pUnk) {
+  LPPERSISTSTREAMINIT pPSI = NULL;
+  pUnk->QueryInterface(IID_IPersistStreamInit, (void**)&pPSI);
+  LPSTREAM pStm = NULL;
+  ::CreateStreamOnHGlobal(NULL, TRUE, &pStm);
+  CHECK(pPSI != NULL && pStm != NULL && pPSI->Save(pStm, TRUE) == S_OK);
+  CByteArray* pBytes = StreamBytes(pStm);
+  pStm->Release();
+  if (pPSI != NULL) pPSI->Release();
+  return pBytes;
+}
+
+static void TestFormats() {
+  TestLog("formats");
+  CByteArray vc;
+  vc.SetSize(sizeof(kVcStream));
+  memcpy(vc.GetData(), kVcStream, sizeof(kVcStream));
+
+  // Visual C++'s bytes load, and save again the same.
+  CFmtCtrl* pCtl = NULL;
+  LPUNKNOWN pUnk = NewFmtControl(&pCtl);
+  if (pUnk == NULL || pCtl == NULL) return;
+  LPPERSISTSTREAMINIT pPSI = NULL;
+  pUnk->QueryInterface(IID_IPersistStreamInit, (void**)&pPSI);
+  LPSTREAM pStm = NULL;
+  ::CreateStreamOnHGlobal(NULL, TRUE, &pStm);
+  pStm->Write(kVcStream, sizeof(kVcStream), NULL);
+  LARGE_INTEGER li;
+  li.QuadPart = 0;
+  pStm->Seek(li, STREAM_SEEK_SET, NULL);
+  CHECK(pPSI != NULL && pPSI->Load(pStm) == S_OK);
+  CHECK(pCtl->m_bBool && pCtl->m_nShort == -1234 && pCtl->m_nUShort == 0xBEEF);
+  CHECK(pCtl->m_nLong == 0x12345678 && pCtl->m_nULong == 0xCAFEBABE);
+  CHECK(pCtl->m_fFloat == 1.5f && pCtl->m_dDouble == 3.25 && pCtl->m_cy.int64 == 123456789);
+  CHECK(pCtl->m_str == _T("Hello MFC") && pCtl->m_clr == RGB(0x11, 0x22, 0x33));
+  CHECK(pCtl->InternalGetText() == _T("StockCaption"));
+  CHECK(pCtl->GetBackColor() == RGB(0x10, 0x20, 0x30) && pCtl->GetForeColor() == RGB(0x40, 0x50, 0x60));
+  CHECK(!pCtl->GetEnabled() && pCtl->GetBorderStyle() == 1 && pCtl->GetAppearance() == 1);
+  CString strFace;
+  CHECK(pCtl->m_fontProp.GetDisplayString(strFace) && strFace == _T("Liberation Sans"));
+  CHECK(pCtl->m_hBlob != NULL && ::GlobalSize(pCtl->m_hBlob) == 7);
+  CHECK(pStm->Seek(li, STREAM_SEEK_CUR, NULL) == S_OK);
+  ULARGE_INTEGER pos;
+  pStm->Seek(li, STREAM_SEEK_CUR, &pos);
+  CHECK(pos.QuadPart == sizeof(kVcStream));
+  pStm->Release();
+  if (pPSI != NULL) pPSI->Release();
+  CByteArray* pAgain = SaveFmt(pUnk);
+  LogBytes("resaved", *pAgain);
+  CByteArray vcFont, expected;
+  for (int i = 0x36; i < 0x50; i++) vcFont.Add(vc[i]);
+  ExpectedFmtStream(expected, vc, vcFont);
+  CHECK(pAgain->GetSize() == expected.GetSize() &&
+        memcmp(pAgain->GetData(), expected.GetData(), expected.GetSize()) == 0);
+  delete pAgain;
+  pUnk->Release();
+
+  // A new control saves the same bytes, with this system's font data.
+  pUnk = NewFmtControl(&pCtl);
+  if (pUnk == NULL || pCtl == NULL) return;
+  pUnk->QueryInterface(IID_IPersistStreamInit, (void**)&pPSI);
+  CHECK(pPSI != NULL && pPSI->InitNew() == S_OK);
+  if (pPSI != NULL) pPSI->Release();
+  CByteArray font;
+  {
+    LPPERSISTSTREAM pPS = NULL;
+    pCtl->m_fontProp.m_pFont->QueryInterface(IID_IPersistStream, (void**)&pPS);
+    LPSTREAM pFontStm = NULL;
+    ::CreateStreamOnHGlobal(NULL, TRUE, &pFontStm);
+    CHECK(pPS != NULL && pPS->Save(pFontStm, TRUE) == S_OK);
+    CByteArray* p = StreamBytes(pFontStm);
+    font.Copy(*p);
+    delete p;
+    pFontStm->Release();
+    if (pPS != NULL) pPS->Release();
+  }
+  ExpectedFmtStream(expected, vc, font);
+  CByteArray* pNew = SaveFmt(pUnk);
+  LogBytes("new", *pNew);
+  CHECK(pNew->GetSize() == expected.GetSize() &&
+        memcmp(pNew->GetData(), expected.GetData(), expected.GetSize()) == 0);
+
+  // A storage: one "Contents" stream with the same bytes, and no class.
+  LPLOCKBYTES pLock = NULL;
+  LPSTORAGE pStg = NULL;
+  ::CreateILockBytesOnHGlobal(NULL, TRUE, &pLock);
+  ::StgCreateDocfileOnILockBytes(pLock, STGM_CREATE | STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0,
+                                 &pStg);
+  LPPERSISTSTORAGE pPStg = NULL;
+  pUnk->QueryInterface(IID_IPersistStorage, (void**)&pPStg);
+  if (pStg != NULL && pPStg != NULL) {
+    CHECK(pPStg->Save(pStg, FALSE) == S_OK);
+    pPStg->SaveCompleted(NULL);
+    STATSTG st;
+    CHECK(pStg->Stat(&st, STATFLAG_NONAME) == S_OK && st.clsid == CLSID_NULL);
+    LPENUMSTATSTG pEnum = NULL;
+    int nElements = 0;
+    if (SUCCEEDED(pStg->EnumElements(0, NULL, 0, &pEnum))) {
+      STATSTG el;
+      while (pEnum->Next(1, &el, NULL) == S_OK) {
+        nElements++;
+        CHECK(el.type == STGTY_STREAM && wcscmp(el.pwcsName, L"Contents") == 0);
+        ::CoTaskMemFree(el.pwcsName);
+      }
+      pEnum->Release();
+    }
+    CHECK(nElements == 1);
+    LPSTREAM pContents = NULL;
+    CHECK(pStg->OpenStream(L"Contents", NULL, STGM_READ | STGM_SHARE_EXCLUSIVE, 0, &pContents) ==
+          S_OK);
+    if (pContents != NULL) {
+      CByteArray* p = StreamBytes(pContents);
+      CHECK(p->GetSize() == pNew->GetSize() &&
+            memcmp(p->GetData(), pNew->GetData(), p->GetSize()) == 0);
+      delete p;
+      pContents->Release();
+    }
+  }
+  if (pPStg != NULL) pPStg->Release();
+  if (pStg != NULL) pStg->Release();
+  if (pLock != NULL) pLock->Release();
+  delete pNew;
+
+  // A property bag, saving everything: each property by name, in order,
+  // with Visual C++'s types; fonts and the blob are objects.
+  CTestPropBag bag;
+  LPPERSISTPROPERTYBAG pPPB = NULL;
+  pUnk->QueryInterface(IID_IPersistPropertyBag, (void**)&pPPB);
+  CHECK(pPPB != NULL && pPPB->Save(&bag, TRUE, TRUE) == S_OK);
+  static const struct {
+    LPCTSTR pszName;
+    VARTYPE vt;
+  } kBag[] = {
+      {_T("_Version"), VT_I4},      {_T("_ExtentX"), VT_I4},    {_T("_ExtentY"), VT_I4},
+      {_T("_StockProps"), VT_I4},   {_T("Caption"), VT_BSTR},   {_T("ForeColor"), VT_I4},
+      {_T("BackColor"), VT_I4},     {_T("Font"), VT_UNKNOWN},   {_T("BorderStyle"), VT_I2},
+      {_T("Enabled"), VT_BOOL},     {_T("Appearance"), VT_I2},  {_T("BoolProp"), VT_BOOL},
+      {_T("ShortProp"), VT_I2},     {_T("UShortProp"), VT_I2},  {_T("LongProp"), VT_I4},
+      {_T("ULongProp"), VT_I4},     {_T("FloatProp"), VT_R4},   {_T("DoubleProp"), VT_R8},
+      {_T("CurrencyProp"), VT_CY},  {_T("StringProp"), VT_BSTR}, {_T("ColorProp"), VT_I4},
+      {_T("FontProp"), VT_UNKNOWN}, {_T("BlobProp"), VT_UNKNOWN},
+  };
+  CHECK(bag.m_names.GetSize() == _countof(kBag));
+  for (int i = 0; i < _countof(kBag) && i < bag.m_names.GetSize(); i++) {
+    if (bag.m_names[i] != kBag[i].pszName || bag.m_values[i].vt != kBag[i].vt)
+      TestLog("bag entry %d: %s vt %d", i, (LPCTSTR)bag.m_names[i], bag.m_values[i].vt);
+    CHECK(bag.m_names[i] == kBag[i].pszName && bag.m_values[i].vt == kBag[i].vt);
+  }
+  int iVer = bag.Find(L"_Version");
+  CHECK(iVer >= 0 && bag.m_values[iVer].lVal == 0x00020001);
+  int iMask = bag.Find(L"_StockProps");
+  CHECK(iMask >= 0 && bag.m_values[iMask].lVal == 0xEF);
+  int iUShort = bag.Find(L"UShortProp");
+  CHECK(iUShort >= 0 && bag.m_values[iUShort].iVal == (short)0xBEEF);
+  int iBlob = bag.Find(L"BlobProp");
+  if (iBlob >= 0 && bag.m_values[iBlob].vt == VT_UNKNOWN) {
+    LPPERSISTSTREAM pPS = NULL;
+    bag.m_values[iBlob].punkVal->QueryInterface(IID_IPersistStream, (void**)&pPS);
+    LPSTREAM pBlobStm = NULL;
+    ::CreateStreamOnHGlobal(NULL, TRUE, &pBlobStm);
+    CHECK(pPS != NULL && pPS->Save(pBlobStm, TRUE) == S_OK);
+    CByteArray* p = StreamBytes(pBlobStm);
+    static const BYTE kBlobData[] = {7, 0, 0, 0, 0xDE, 0xAD, 0xBE, 0xEF, 1, 2, 3};
+    CHECK(p->GetSize() == sizeof(kBlobData) && memcmp(p->GetData(), kBlobData, sizeof(kBlobData)) == 0);
+    delete p;
+    pBlobStm->Release();
+    if (pPS != NULL) pPS->Release();
+  }
+  if (pPPB != NULL) pPPB->Release();
+  pUnk->Release();
+
+  // And back from the bag.
+  pUnk = NewFmtControl(&pCtl);
+  if (pUnk == NULL || pCtl == NULL) return;
+  pUnk->QueryInterface(IID_IPersistPropertyBag, (void**)&pPPB);
+  CHECK(pPPB != NULL && pPPB->Load(&bag, NULL) == S_OK);
+  CHECK(pCtl->m_nUShort == 0xBEEF && pCtl->m_nULong == 0xCAFEBABE && pCtl->m_bBool);
+  CHECK(pCtl->m_hBlob != NULL && ::GlobalSize(pCtl->m_hBlob) == 7);
+  CHECK(pCtl->InternalGetText() == _T("StockCaption") && !pCtl->GetEnabled());
+  CHECK(pCtl->m_fontProp.m_pFont != NULL);
+  if (pPPB != NULL) pPPB->Release();
+  pUnk->Release();
 }
 
 void CMainFrame::TestPersistence() {
@@ -2168,6 +2547,7 @@ void CMainFrame::RunTests() {
   TestLicensing();
   TestDataPath();
   TestPersistence();
+  TestFormats();
   TestRegistry();
 }
 

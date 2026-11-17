@@ -1956,82 +1956,22 @@ CCmdTarget* COleTemplateServer::OnCreateObject() {
   return pDoc;
 }
 
-static BOOL SetClassKey(LPCTSTR lpszKey, LPCTSTR lpszValue, LPCTSTR lpszValueName = NULL) {
-  HKEY hKey;
-  if (::RegCreateKeyEx(HKEY_CLASSES_ROOT, lpszKey, 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) !=
-      ERROR_SUCCESS)
-    return FALSE;
-  LONG l = ::RegSetValueEx(hKey, lpszValueName, 0, REG_SZ, (const BYTE*)lpszValue,
-                           (DWORD)((lstrlen(lpszValue) + 1) * sizeof(TCHAR)));
-  ::RegCloseKey(hKey);
-  return l == ERROR_SUCCESS;
-}
-
-static void DeleteClassTree(HKEY hParent, LPCTSTR lpszKey) {
-  HKEY hKey;
-  if (::RegOpenKeyEx(hParent, lpszKey, 0, KEY_READ | KEY_WRITE, &hKey) != ERROR_SUCCESS) return;
-  TCHAR szName[256];
-  while (::RegEnumKey(hKey, 0, szName, _countof(szName)) == ERROR_SUCCESS)
-    DeleteClassTree(hKey, szName);
-  ::RegCloseKey(hKey);
-  ::RegDeleteKey(hParent, lpszKey);
-}
-
-static CString ClassIDString(REFCLSID clsid) {
-  LPOLESTR psz = NULL;
-  if (FAILED(::StringFromCLSID(clsid, &psz))) return CString();
-  CString str(psz);
-  ::CoTaskMemFree(psz);
-  return str;
-}
-
-void COleTemplateServer::UpdateRegistry(OLE_APPTYPE nAppType, LPCTSTR*, LPCTSTR*,
-                                        BOOL bRegister) {
+void COleTemplateServer::UpdateRegistry(OLE_APPTYPE nAppType, LPCTSTR* rglpszRegister,
+                                        LPCTSTR* rglpszOverwrite, BOOL bRegister) {
   m_nAppType = nAppType;
   if (!bRegister) {
     Unregister();
     return;
   }
   if (m_pDocTemplate == NULL) return;
-  CString strClsid = ClassIDString(m_clsid);
-  if (strClsid.IsEmpty()) return;
-
   CString strProgID, strName, strShort;
   m_pDocTemplate->GetDocString(strProgID, CDocTemplate::regFileTypeId);
   m_pDocTemplate->GetDocString(strName, CDocTemplate::regFileTypeName);
   m_pDocTemplate->GetDocString(strShort, CDocTemplate::fileNewName);
   if (strName.IsEmpty()) strName = strProgID;
   if (strShort.IsEmpty()) strShort = strName;
-
-  TCHAR szPath[MAX_PATH];
-  ::GetModuleFileName(AfxGetInstanceHandle(), szPath, MAX_PATH);
-  CString strPath = szPath;
-  if (strPath.Find(_T(' ')) >= 0) strPath = _T("\"") + strPath + _T("\"");
-  BOOL bServer = nAppType == OAT_INPLACE_SERVER || nAppType == OAT_SERVER ||
-                 nAppType == OAT_DOC_OBJECT_SERVER;
-
-  CString strKey = _T("CLSID\\") + strClsid;
-  SetClassKey(strKey, strName);
-  if (!strProgID.IsEmpty()) {
-    SetClassKey(strProgID, strName);
-    SetClassKey(strProgID + _T("\\CLSID"), strClsid);
-    SetClassKey(strKey + _T("\\ProgID"), strProgID);
-    if (bServer) SetClassKey(strProgID + _T("\\Insertable"), _T(""));
-  }
-  SetClassKey(strKey + _T("\\LocalServer32"),
-              nAppType == OAT_DISPATCH_OBJECT ? strPath + _T(" /Automation") : strPath);
-  if (nAppType == OAT_DISPATCH_OBJECT) return;
-  SetClassKey(strKey + _T("\\InprocHandler32"), _T("ole32.dll"));
-  SetClassKey(strKey + _T("\\DefaultIcon"), strPath + _T(",0"));
-  SetClassKey(strKey + _T("\\AuxUserType\\2"), strShort);
-  SetClassKey(strKey + _T("\\AuxUserType\\3"), AfxGetAppName());
-  if (!bServer) return;
-  SetClassKey(strKey + _T("\\Insertable"), _T(""));
-  SetClassKey(strKey + _T("\\MiscStatus"), _T("32"));  // OLEMISC_RECOMPOSEONRESIZE
-  SetClassKey(strKey + _T("\\verb\\0"), _T("&Edit,0,2"));
-  if (nAppType != OAT_SERVER) SetClassKey(strKey + _T("\\verb\\1"), _T("&Open,0,2"));
-  // A DocObject server's class says so, for containers that show it whole.
-  if (nAppType == OAT_DOC_OBJECT_SERVER) SetClassKey(strKey + _T("\\DocObject"), _T("0"));
+  AfxOleRegisterServerClass(m_clsid, strProgID, strShort, strName, nAppType, rglpszRegister,
+                            rglpszOverwrite);
 }
 
 BOOL COleTemplateServer::UpdateRegistry(BOOL bRegister) {
@@ -2042,13 +1982,7 @@ BOOL COleTemplateServer::UpdateRegistry(BOOL bRegister) {
 }
 
 BOOL COleTemplateServer::Unregister() {
-  CString strClsid = ClassIDString(m_clsid);
-  if (strClsid.IsEmpty()) return FALSE;
-  DeleteClassTree(HKEY_CLASSES_ROOT, _T("CLSID\\") + strClsid);
-  if (m_pDocTemplate != NULL) {
-    CString strProgID;
-    m_pDocTemplate->GetDocString(strProgID, CDocTemplate::regFileTypeId);
-    if (!strProgID.IsEmpty()) DeleteClassTree(HKEY_CLASSES_ROOT, strProgID);
-  }
-  return TRUE;
+  CString strProgID;
+  if (m_pDocTemplate != NULL) m_pDocTemplate->GetDocString(strProgID, CDocTemplate::regFileTypeId);
+  return AfxOleUnregisterServerClass(m_clsid, strProgID, NULL, NULL, m_nAppType);
 }

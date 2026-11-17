@@ -282,7 +282,41 @@ public:
       if (pSub != NULL) pSub->Release();
       LPSTREAM pStm = NULL;
       CHECK(pStg->OpenStream(L"Contents", NULL, STGM_READ | STGM_SHARE_EXCLUSIVE, 0, &pStm) == S_OK);
-      if (pStm != NULL) pStm->Release();
+      if (pStm != NULL) {
+        // Visual C++ MFC's layout: the document's data, the item count,
+        // the item's class, its record (item number 1, aspect 1), then
+        // the item's own data.
+        CByteArray expected;
+        static const char kNote[] = "compound";
+#ifdef _UNICODE
+        static const BYTE kMark[] = {0xFF, 0xFE, 0xFF};
+        for (BYTE b : kMark) expected.Add(b);
+#endif
+        expected.Add((BYTE)strlen(kNote));
+        for (const char* p = kNote; *p != 0; p++) {
+          expected.Add((BYTE)*p);
+#ifdef _UNICODE
+          expected.Add(0);
+#endif
+        }
+        static const BYTE kItem[] = {
+            1, 0, 0, 0,                                        // one item
+            0xFF, 0xFF, 0, 0, 9, 0, 'C', 'T', 'e', 's', 't', 'I', 't', 'e', 'm',
+            0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0,  // the record
+        };
+        for (BYTE b : kItem) expected.Add(b);
+        const CRect& rc = pDoc->Item(0)->m_rect;
+        const LONG kRect[] = {rc.left, rc.top, rc.right, rc.bottom};
+        for (LONG l : kRect)
+          for (int i = 0; i < 4; i++) expected.Add((BYTE)(l >> (8 * i)));
+        BYTE buf[256];
+        ULONG cb = 0;
+        pStm->Read(buf, sizeof(buf), &cb);
+        CHECK(cb == (ULONG)expected.GetSize() && memcmp(buf, expected.GetData(), cb) == 0);
+        STATSTG st;
+        CHECK(pStg->Stat(&st, STATFLAG_NONAME) == S_OK && st.clsid == CLSID_NULL);
+        pStm->Release();
+      }
       pStg->Release();
     }
 
