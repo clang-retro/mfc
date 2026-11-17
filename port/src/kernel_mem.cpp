@@ -43,8 +43,8 @@ std::mutex& BlockLock() {
 }
 
 std::unordered_set<Block*>& Blocks() {
-  static std::unordered_set<Block*> s;
-  return s;
+  static auto* s = new std::unordered_set<Block*>;  // never destroyed, like BlockLock
+  return *s;
 }
 
 void* NewData(Block* b, SIZE_T size, bool zero) {
@@ -285,8 +285,8 @@ std::mutex& RegionLock() {
   return *m;
 }
 std::map<char*, SIZE_T>& Regions() {
-  static std::map<char*, SIZE_T> m;
-  return m;
+  static auto* m = new std::map<char*, SIZE_T>;  // never destroyed, like BlockLock
+  return *m;
 }
 int Prot(DWORD p) {
   switch (p & 0xff) {
