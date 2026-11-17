@@ -1,0 +1,27 @@
+HKCR
+{
+	AtlTest.Thing.1 = s 'ATL test thing'
+	{
+		CLSID = s '{1DF77E1F-DA45-421A-BABF-24B927659DF9}'
+	}
+	AtlTest.Thing = s 'ATL test thing'
+	{
+		CLSID = s '{1DF77E1F-DA45-421A-BABF-24B927659DF9}'
+		CurVer = s 'AtlTest.Thing.1'
+		NoRemove Kept = s 'stays'
+	}
+	NoRemove CLSID
+	{
+		ForceRemove {1DF77E1F-DA45-421A-BABF-24B927659DF9} = s 'ATL test thing'
+		{
+			ProgID = s 'AtlTest.Thing.1'
+			VersionIndependentProgID = s 'AtlTest.Thing'
+			InprocServer32 = s '%MODULE%'
+			{
+				val ThreadingModel = s 'Apartment'
+			}
+			'TypeLib' = s '{B0378114-0AD3-4EBE-AC9F-E195A42D4E79}'
+			val Flags = d '%FLAGS%'
+		}
+	}
+}

@@ -111,6 +111,19 @@ public:
   }
 };
 
+// CComQIPtr<IUnknown>: any pointer is already an IUnknown.
+template <>
+class CComQIPtr<IUnknown, &__uuidof(IUnknown)> : public CComPtr<IUnknown> {
+public:
+  CComQIPtr() {}
+  CComQIPtr(IUnknown* lp) : CComPtr<IUnknown>(lp) {}
+  CComQIPtr(const CComQIPtr<IUnknown, &__uuidof(IUnknown)>& lp) : CComPtr<IUnknown>(lp.p) {}
+  IUnknown* operator=(IUnknown* lp) { return CComPtr<IUnknown>::operator=(lp); }
+  IUnknown* operator=(const CComQIPtr<IUnknown, &__uuidof(IUnknown)>& lp) {
+    return CComPtr<IUnknown>::operator=(lp.p);
+  }
+};
+
 class CComBSTR {
 public:
   BSTR m_str;
