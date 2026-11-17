@@ -196,7 +196,65 @@ HRESULT WINAPI CoLockObjectExternal(LPUNKNOWN unk, BOOL lock, BOOL) {
   return S_OK;
 }
 BOOL WINAPI CoIsHandlerConnected(LPUNKNOWN) { return TRUE; }
-void WINAPI CoFreeUnusedLibraries(void) {}
+
+// The in-process servers COM has loaded (InprocServer32), until they say
+// they can go (DllCanUnloadNow).
+static std::mutex g_inprocLock;
+static std::vector<HMODULE>& InprocServers() {
+  static auto* v = new std::vector<HMODULE>;
+  return *v;
+}
+
+typedef HRESULT(STDAPICALLTYPE* DllGetClassObjectProc)(REFCLSID, REFIID, LPVOID*);
+typedef HRESULT(STDAPICALLTYPE* DllCanUnloadNowProc)(void);
+
+static HRESULT GetInprocClassObject(REFCLSID clsid, REFIID riid, LPVOID* out) {
+  WCHAR guid[40], path[1024];
+  StringFromGUID2(clsid, guid, 40);
+  std::wstring key = std::wstring(L"CLSID\\") + guid + L"\\InprocServer32";
+  LONG cb = sizeof(path);
+  if (RegQueryValueW(HKEY_CLASSES_ROOT, key.c_str(), path, &cb) != ERROR_SUCCESS || !path[0])
+    return REGDB_E_CLASSNOTREG;
+  HMODULE h = LoadLibraryW(path);
+  if (h == NULL) return CO_E_DLLNOTFOUND;
+  DllGetClassObjectProc get = (DllGetClassObjectProc)GetProcAddress(h, "DllGetClassObject");
+  if (get == NULL) {
+    FreeLibrary(h);
+    return CO_E_ERRORINDLL;
+  }
+  HRESULT hr = get(clsid, riid, out);
+  if (FAILED(hr)) {
+    FreeLibrary(h);
+    return hr;
+  }
+  std::lock_guard<std::mutex> g(g_inprocLock);
+  for (HMODULE m : InprocServers())
+    if (m == h) {
+      FreeLibrary(h);  // loaded already: one load is enough
+      return hr;
+    }
+  InprocServers().push_back(h);
+  return hr;
+}
+
+void WINAPI CoFreeUnusedLibraries(void) {
+  std::vector<HMODULE> unload;
+  {
+    std::lock_guard<std::mutex> g(g_inprocLock);
+    auto& v = InprocServers();
+    for (size_t i = 0; i < v.size();) {
+      DllCanUnloadNowProc can = (DllCanUnloadNowProc)GetProcAddress(v[i], "DllCanUnloadNow");
+      if (can != NULL && can() == S_OK) {
+        unload.push_back(v[i]);
+        v.erase(v.begin() + i);
+      } else {
+        i++;
+      }
+    }
+  }
+  for (HMODULE h : unload) FreeLibrary(h);
+}
+void WINAPI CoFreeUnusedLibrariesEx(DWORD, DWORD) { CoFreeUnusedLibraries(); }
 
 HRESULT WINAPI CoGetTreatAsClass(REFCLSID old, LPCLSID out) {
   if (out == NULL) return E_INVALIDARG;
@@ -221,7 +279,10 @@ HRESULT WINAPI CoGetClassObject(REFCLSID clsid, DWORD context, LPVOID, REFIID ri
       }
     }
   }
-  if (unk == NULL) return REGDB_E_CLASSNOTREG;
+  if (unk == NULL) {
+    if (context & CLSCTX_INPROC_SERVER) return GetInprocClassObject(clsid, riid, out);
+    return REGDB_E_CLASSNOTREG;
+  }
   HRESULT hr = unk->QueryInterface(riid, out);
   unk->Release();
   return hr;

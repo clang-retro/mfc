@@ -1232,7 +1232,12 @@ static void VariantFromC(CDBVariant& var, SQLSMALLINT nCType, const BYTE* p, INT
     break;
   case SQL_C_SLONG:
     var.m_dwType = DBVT_LONG;
-    memcpy(&var.m_lVal, p, sizeof(long));
+    {
+      // SQL_C_SLONG has 32 bits, whatever the size of long.
+      SQLINTEGER n32 = 0;
+      memcpy(&n32, p, sizeof(n32));
+      var.m_lVal = n32;
+    }
     break;
   case SQL_C_FLOAT:
     var.m_dwType = DBVT_SINGLE;
@@ -1317,6 +1322,10 @@ void CRecordset::GetFieldValue(short nIndex, CDBVariant& varValue, short nFieldT
       } else if (field.nKind == _AFX_RFX_POD && field.nSqlType == SQL_BIT) {
         varValue.m_dwType = DBVT_BOOL;
         varValue.m_boolVal = *(const BOOL*)bytes.GetData() != 0;
+      } else if (field.nKind == _AFX_RFX_POD && field.nSqlType == SQL_INTEGER && field.nCType == SQL_C_SBIGINT) {
+        // RFX_Long's field where long has 64 bits.
+        varValue.m_dwType = DBVT_LONG;
+        memcpy(&varValue.m_lVal, bytes.GetData(), sizeof(long));
       } else {
         VariantFromC(varValue, field.nCType, bytes.GetData(), bytes.GetSize());
       }

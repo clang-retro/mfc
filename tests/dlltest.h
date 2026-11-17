@@ -20,7 +20,7 @@ struct DLLTESTINFO {
   HINSTANCE hResource;    // AfxGetResourceHandle in the DLL
   BOOL bAppIsModule;      // AfxGetApp() is its COleControlModule
   TCHAR szString[64];     // IDS_FROMDLL, loaded in the DLL
-  TCHAR szClass[64];      // the window class of its last control
+  TCHAR szClass[128];     // the window class of its last control (an Afx: name is long with 64-bit handles)
 };
 typedef void(WINAPI* PFNDLLTESTINFO)(DLLTESTINFO*);
 typedef HWND(WINAPI* PFNDLLTESTDIALOG)(HWND hWndParent);

@@ -211,6 +211,26 @@ HCURSOR WINAPI OleIconToCursor(HINSTANCE hinstExe, HICON hIcon);
 #define OCM_PARENTNOTIFY (OCM__BASE + WM_PARENTNOTIFY)
 #define OCM_NOTIFY (OCM__BASE + WM_NOTIFY)
 
+// The variant types of the standard control property types.
+#define VT_STREAMED_PROPSET 73
+#define VT_STORED_PROPSET 74
+#define VT_BLOB_PROPSET 75
+#define VT_VERBOSE_ENUM 76
+#define VT_COLOR VT_I4
+#define VT_XPOS_PIXELS VT_I4
+#define VT_YPOS_PIXELS VT_I4
+#define VT_XSIZE_PIXELS VT_I4
+#define VT_YSIZE_PIXELS VT_I4
+#define VT_XPOS_HIMETRIC VT_I4
+#define VT_YPOS_HIMETRIC VT_I4
+#define VT_XSIZE_HIMETRIC VT_I4
+#define VT_YSIZE_HIMETRIC VT_I4
+#define VT_TRISTATE VT_I2
+#define VT_OPTEXCLUSIVE VT_BOOL
+#define VT_FONT VT_DISPATCH
+#define VT_PICTURE VT_DISPATCH
+#define VT_HANDLE VT_I4
+
 }  // extern "C"
 
 #endif

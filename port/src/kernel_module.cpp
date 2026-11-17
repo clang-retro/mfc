@@ -290,7 +290,14 @@ HMODULE WINAPI GetModuleHandleA(LPCSTR name) {
   std::lock_guard<std::recursive_mutex> g(ModuleLock());
   for (Module* p : Modules()) {
     std::string b = Lower(StripExt(BaseName(p->path)));
-    if (b == want || (b.compare(0, 3, "lib") == 0 && b.substr(3) == want)) return (HMODULE)p;
+    if (b != want && !(b.compare(0, 3, "lib") == 0 && b.substr(3) == want)) continue;
+    if (!p->dl) {
+      // Known from its resources, or freed: only if it is still loaded.
+      void* h = dlopen(p->path.c_str(), RTLD_NOW | RTLD_NOLOAD);
+      if (!h) continue;
+      dlclose(h);
+    }
+    return (HMODULE)p;
   }
   SetLastError(ERROR_MOD_NOT_FOUND);
   return NULL;
@@ -334,6 +341,17 @@ DWORD WINAPI GetModuleFileNameW(HMODULE h, LPWSTR buf, DWORD n) {
   }
   wmemcpy(buf, w.c_str(), k + 1);
   return k;
+}
+
+// Calls the library's own DllMain, if it has one (not one it gets from
+// another library or the program).
+typedef BOOL(WINAPI* DllMainProc)(HINSTANCE, DWORD, LPVOID);
+static BOOL CallDllMain(Module* m, DWORD reason) {
+  void* p = dlsym(m->dl, "DllMain");
+  if (!p) return TRUE;
+  Dl_info info;
+  if (!dladdr(p, &info) || RealPath(info.dli_fname) != m->path) return TRUE;
+  return ((DllMainProc)p)((HINSTANCE)m, reason, NULL);
 }
 
 HMODULE WINAPI LoadLibraryExA(LPCSTR name, HANDLE, DWORD) {
@@ -388,21 +406,34 @@ HMODULE WINAPI LoadLibraryExA(LPCSTR name, HANDLE, DWORD) {
     }
   }
   // The library's own resources registered it by path when it loaded.
-  for (Module* m : Modules()) {
-    if (!m->dl && !m->path.empty()) {
-      void* h = dlopen(m->path.c_str(), RTLD_NOW | RTLD_NOLOAD);
+  Module* m = NULL;
+  for (Module* r : Modules()) {
+    if (!r->dl && !r->path.empty()) {
+      void* h = dlopen(r->path.c_str(), RTLD_NOW | RTLD_NOLOAD);
       if (h) dlclose(h);
       if (h == dl) {
+        m = r;
         m->dl = dl;
         m->loads = 1;
-        return (HMODULE)m;
+        break;
       }
     }
   }
-  Module* m = new Module;
-  m->dl = dl;
-  m->path = RealPath(got.c_str());
-  Modules().push_back(m);
+  if (!m) {
+    m = new Module;
+    m->dl = dl;
+    m->path = RealPath(got.c_str());
+    Modules().push_back(m);
+  }
+  // A Windows-style library's DllMain (an MFC regular DLL has one) runs
+  // as it would on Windows.
+  if (!CallDllMain(m, DLL_PROCESS_ATTACH)) {
+    dlclose(dl);
+    m->dl = NULL;
+    m->loads = 0;
+    SetLastError(ERROR_DLL_INIT_FAILED);
+    return NULL;
+  }
   return (HMODULE)m;
 }
 
@@ -421,7 +452,10 @@ BOOL WINAPI FreeLibrary(HMODULE h) {
   if (m->system || m == MainModule()) return TRUE;
   std::lock_guard<std::recursive_mutex> g(ModuleLock());
   if (--m->loads <= 0 && m->dl) {
+    CallDllMain(m, DLL_PROCESS_DETACH);
     dlclose(m->dl);
+    // Its resources went with it; they register again if it comes back.
+    m->res.clear();
     m->dl = NULL;
     m->loads = 0;
   }

@@ -118,7 +118,7 @@ __asm__(".section .drectve,\"yn\"\n"
 // which calls AfxInitExtensionModule. A regular DLL that shares mfc.dll
 // (_AFXDLL with _USRDLL or _WINDLL, without _AFXEXT) takes its DllMain
 // from libmfcs.a, which gives the DLL its own module state.
-#if !defined(_AFX_NO_DLLMAIN) && defined(_WIN32) && \
+#if !defined(_AFX_NO_DLLMAIN) && (defined(_WIN32) || defined(_WINPORT)) && \
     (!defined(_AFXDLL) || (!defined(_AFXEXT) && (defined(_USRDLL) || defined(_WINDLL))))
 extern "C" BOOL WINAPI _AfxDllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved);
 extern "C" __attribute__((used)) inline BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason,

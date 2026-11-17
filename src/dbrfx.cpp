@@ -376,7 +376,10 @@ void AFXAPI RFX_Int(CFieldExchange* pFX, LPCTSTR szName, int& value) {
 
 void AFXAPI RFX_Long(CFieldExchange* pFX, LPCTSTR szName, long& value) {
   long lPseudo = AFX_RFX_LONG_PSEUDO_NULL;
-  RfxField(pFX, szName, &value, _AFX_RFX_POD, SQL_C_SLONG, SQL_INTEGER, sizeof(long), 10, 0,
+  // Where long has 64 bits (Linux and macOS), the driver converts to a
+  // 64-bit integer; SQL_C_SLONG would fill only half of it.
+  const SQLSMALLINT nCType = sizeof(long) == 8 ? SQL_C_SBIGINT : SQL_C_SLONG;
+  RfxField(pFX, szName, &value, _AFX_RFX_POD, nCType, SQL_INTEGER, sizeof(long), 10, 0,
            &lPseudo, sizeof(lPseudo));
 }
 

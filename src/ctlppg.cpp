@@ -221,7 +221,7 @@ HGLOBAL COlePropertyPage::MakeChildTemplate(SIZE* pSize) {
       q = SkipSzOrOrd(q);  // caption
       WORD wPoint = *(const WORD*)q;
       q += bEx ? 6 : 2;  // point size, then weight, italic and charset in EX
-      CString strFace((LPCWSTR)q);
+      CString strFace(_AfxTemplateString((const WORD*)q));
       HDC hdc = ::GetDC(NULL);
       LOGFONT lf;
       memset(&lf, 0, sizeof(lf));

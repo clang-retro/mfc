@@ -211,6 +211,7 @@ inline void WriteParam(Stmt* stmt, int n, const Value& v) {
     break;
   }
   case SQL_C_SLONG: case SQL_C_LONG: *(int*)prm.p = (int)v.i; len = 4; break;
+  case SQL_C_SBIGINT: *(long long*)prm.p = (long long)v.i; len = 8; break;
   case SQL_C_DOUBLE: *(double*)prm.p = v.kind == kReal ? v.d : (double)v.i; len = 8; break;
   default: return;
   }
@@ -903,7 +904,7 @@ SQLRETURN SQL_API SQLGetData(SQLHSTMT hstmt, SQLUSMALLINT Col, SQLSMALLINT Targe
   case SQL_C_WCHAR:
   case SQL_C_BINARY: {
     std::string s = v.kind == mock::kBinary ? v.s : v.Str();
-    size_t unit = TargetType == SQL_C_WCHAR ? 2 : 1;
+    size_t unit = TargetType == SQL_C_WCHAR ? sizeof(WCHAR) : 1;
     size_t term = TargetType == SQL_C_BINARY ? 0 : unit;
     size_t total = s.size() * unit;
     if (stmt->offset > 0 && stmt->offset >= total) return SQL_NO_DATA;
@@ -914,7 +915,7 @@ SQLRETURN SQL_API SQLGetData(SQLHSTMT hstmt, SQLUSMALLINT Col, SQLSMALLINT Targe
     BYTE* out = (BYTE*)TargetValue;
     for (size_t k = 0; k < n / unit; k++) {
       unsigned char ch = (unsigned char)s[stmt->offset / unit + k];
-      if (unit == 2) ((WCHAR*)out)[k] = ch;
+      if (unit == sizeof(WCHAR)) ((WCHAR*)out)[k] = ch;
       else out[k] = ch;
     }
     if (term) memset(out + n, 0, term);

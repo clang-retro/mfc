@@ -7,28 +7,30 @@
 #include <stdint.h>
 
 // No headers: each placeholder only needs the right name and a result
-// in the return register, whatever its declared arguments.
+// in the return register, whatever its declared arguments. They are
+// weak, so that a program's own definition (a test's mock ODBC driver,
+// say) takes their place.
 extern "C" void _WinportStub(const char* name, bool* reported);
 
 #define STUB_ZERO(f)                  \
-  extern "C" intptr_t f(void) {      \
+  extern "C" __attribute__((weak)) intptr_t f(void) { \
     static bool reported;             \
     _WinportStub(#f, &reported);      \
     return 0;                         \
   }
 #define STUB_VOID(f)                  \
-  extern "C" void f(void) {          \
+  extern "C" __attribute__((weak)) void f(void) { \
     static bool reported;             \
     _WinportStub(#f, &reported);      \
   }
 #define STUB_HRESULT(f)               \
-  extern "C" int32_t f(void) {       \
+  extern "C" __attribute__((weak)) int32_t f(void) { \
     static bool reported;             \
     _WinportStub(#f, &reported);      \
     return (int32_t)0x80004001;       \
   }
 #define STUB_SQL(f)                   \
-  extern "C" int16_t f(void) {       \
+  extern "C" __attribute__((weak)) int16_t f(void) { \
     static bool reported;             \
     _WinportStub(#f, &reported);      \
     return -1;                        \
@@ -160,7 +162,6 @@ STUB_HRESULT(StgCreateDocfileOnILockBytes)
 STUB_HRESULT(StgOpenStorage)
 STUB_HRESULT(StgOpenStorageOnILockBytes)
 STUB_HRESULT(UnRegisterTypeLib)
-STUB_ZERO(WSAAsyncSelect)
 STUB_ZERO(WinHelpA)
 STUB_ZERO(WinHelpW)
 STUB_HRESULT(WriteClassStg)

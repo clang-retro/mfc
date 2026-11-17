@@ -131,7 +131,6 @@ StgCreateDocfileOnILockBytes
 StgOpenStorage
 StgOpenStorageOnILockBytes
 UnRegisterTypeLib
-WSAAsyncSelect
 WinHelpA
 WinHelpW
 WriteClassStg
