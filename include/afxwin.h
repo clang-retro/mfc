@@ -3275,4 +3275,7 @@ inline UINT _AfxCtlType(UINT msg) {
 
 #include <afxdll_.h>
 
+// CTaskDialog comes with the windows, as in MFC 10.
+#include <afxtaskdialog.h>
+
 #endif // __AFXWIN_H__

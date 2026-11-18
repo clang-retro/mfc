@@ -376,6 +376,71 @@ HDC CPrintDialog::CreatePrinterDC() {
 }
 
 // ---------------------------------------------------------------------
+// CPrintDialogEx
+
+IMPLEMENT_DYNAMIC(CPrintDialogEx, CCommonDialog)
+
+CPrintDialogEx::CPrintDialogEx(DWORD dwFlags, CWnd* pParentWnd) : CCommonDialog(pParentWnd) {
+  memset(&m_pdex, 0, sizeof(m_pdex));
+  m_pdex.lStructSize = sizeof(m_pdex);
+  m_pdex.Flags = dwFlags | PD_RETURNDC;
+  m_pdex.nCopies = 1;
+  m_pdex.nStartPage = START_PAGE_GENERAL;
+  m_pdex.nMinPage = 1;
+  m_pdex.nMaxPage = 0xFFFF;
+}
+
+CPrintDialogEx::~CPrintDialogEx() {
+  if (m_pdex.hDC != NULL) ::DeleteDC(m_pdex.hDC);
+}
+
+INT_PTR CPrintDialogEx::DoModal() {
+  // PrintDlgEx needs an owner window, and runs its own modal loop.
+  HWND hWndTop = NULL;
+  m_pdex.hwndOwner = _AfxGetSafeOwner(m_pParentWnd->GetSafeHwnd(), &hWndTop);
+  if (m_pdex.hwndOwner == NULL) m_pdex.hwndOwner = ::GetDesktopWindow();
+  HRESULT hr = ::PrintDlgEx(&m_pdex);
+  if (hWndTop != NULL) ::EnableWindow(hWndTop, TRUE);
+  return hr;
+}
+
+BOOL CPrintDialogEx::GetDefaults() {
+  DWORD dwFlags = m_pdex.Flags;
+  m_pdex.Flags |= PD_RETURNDEFAULT;
+  m_pdex.Flags &= ~PD_RETURNDC;
+  if (m_pdex.hwndOwner == NULL) m_pdex.hwndOwner = ::GetDesktopWindow();
+  HRESULT hr = ::PrintDlgEx(&m_pdex);
+  m_pdex.Flags = dwFlags;
+  if (FAILED(hr) || m_pdex.hDevNames == NULL) return FALSE;
+  if (dwFlags & PD_RETURNDC) CreatePrinterDC();
+  return TRUE;
+}
+
+int CPrintDialogEx::GetCopies() const {
+  if (m_pdex.Flags & PD_USEDEVMODECOPIES) {
+    LPDEVMODE lpDevMode = GetDevMode();
+    int nCopies = lpDevMode != NULL ? lpDevMode->dmCopies : 1;
+    if (m_pdex.hDevMode != NULL) ::GlobalUnlock(m_pdex.hDevMode);
+    return nCopies;
+  }
+  return m_pdex.nCopies;
+}
+
+LPDEVMODE CPrintDialogEx::GetDevMode() const {
+  return m_pdex.hDevMode != NULL ? (LPDEVMODE)::GlobalLock(m_pdex.hDevMode) : NULL;
+}
+
+CString CPrintDialogEx::GetDriverName() const { return _AfxDevNamesString(m_pdex.hDevNames, 0); }
+CString CPrintDialogEx::GetDeviceName() const { return _AfxDevNamesString(m_pdex.hDevNames, 1); }
+CString CPrintDialogEx::GetPortName() const { return _AfxDevNamesString(m_pdex.hDevNames, 2); }
+
+HDC CPrintDialogEx::CreatePrinterDC() {
+  if (m_pdex.hDC != NULL) ::DeleteDC(m_pdex.hDC);
+  m_pdex.hDC = _AfxCreateDC(m_pdex.hDevNames, m_pdex.hDevMode);
+  return m_pdex.hDC;
+}
+
+// ---------------------------------------------------------------------
 // CPageSetupDialog
 
 IMPLEMENT_DYNAMIC(CPageSetupDialog, CCommonDialog)

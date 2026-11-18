@@ -654,83 +654,9 @@ public:
 };
 
 // ---------------------------------------------------------------------
-// CTimeSpan and CTime
+// CTimeSpan and CTime (and CFileTime and CFileTimeSpan), from ATL's header
 
-class CTimeSpan {
-public:
-  CTimeSpan() : m_timeSpan(0) {}
-  CTimeSpan(__time64_t time) : m_timeSpan(time) {}
-  CTimeSpan(LONG lDays, int nHours, int nMins, int nSecs)
-      : m_timeSpan(nSecs + 60 * (nMins + 60 * (nHours + (__time64_t)24 * lDays))) {}
-  LONGLONG GetDays() const { return m_timeSpan / (24 * 3600); }
-  LONGLONG GetTotalHours() const { return m_timeSpan / 3600; }
-  LONG GetHours() const { return (LONG)(GetTotalHours() - GetDays() * 24); }
-  LONGLONG GetTotalMinutes() const { return m_timeSpan / 60; }
-  LONG GetMinutes() const { return (LONG)(GetTotalMinutes() - GetTotalHours() * 60); }
-  LONGLONG GetTotalSeconds() const { return m_timeSpan; }
-  LONG GetSeconds() const { return (LONG)(GetTotalSeconds() - GetTotalMinutes() * 60); }
-  __time64_t GetTimeSpan() const { return m_timeSpan; }
-  CTimeSpan operator+(CTimeSpan s) const { return CTimeSpan(m_timeSpan + s.m_timeSpan); }
-  CTimeSpan operator-(CTimeSpan s) const { return CTimeSpan(m_timeSpan - s.m_timeSpan); }
-  CTimeSpan& operator+=(CTimeSpan s) { m_timeSpan += s.m_timeSpan; return *this; }
-  CTimeSpan& operator-=(CTimeSpan s) { m_timeSpan -= s.m_timeSpan; return *this; }
-  bool operator==(CTimeSpan s) const { return m_timeSpan == s.m_timeSpan; }
-  bool operator!=(CTimeSpan s) const { return m_timeSpan != s.m_timeSpan; }
-  bool operator<(CTimeSpan s) const { return m_timeSpan < s.m_timeSpan; }
-  bool operator>(CTimeSpan s) const { return m_timeSpan > s.m_timeSpan; }
-  bool operator<=(CTimeSpan s) const { return m_timeSpan <= s.m_timeSpan; }
-  bool operator>=(CTimeSpan s) const { return m_timeSpan >= s.m_timeSpan; }
-  CString Format(LPCTSTR pFormat) const;
-  CString Format(UINT nID) const;
-
-private:
-  __time64_t m_timeSpan;
-};
-
-class CTime {
-public:
-  static CTime PASCAL GetCurrentTime();
-  static BOOL PASCAL IsValidFILETIME(const FILETIME& ft);
-  CTime() : m_time(0) {}
-  CTime(__time64_t time) : m_time(time) {}
-  CTime(int nYear, int nMonth, int nDay, int nHour, int nMin, int nSec,
-        int nDST = -1);
-  CTime(WORD wDosDate, WORD wDosTime, int nDST = -1);
-  CTime(const SYSTEMTIME& st, int nDST = -1);
-  CTime(const FILETIME& ft, int nDST = -1);
-
-  CTime& operator=(__time64_t time) { m_time = time; return *this; }
-  CTime& operator+=(CTimeSpan s) { m_time += s.GetTimeSpan(); return *this; }
-  CTime& operator-=(CTimeSpan s) { m_time -= s.GetTimeSpan(); return *this; }
-  CTimeSpan operator-(CTime t) const { return CTimeSpan(m_time - t.m_time); }
-  CTime operator-(CTimeSpan s) const { return CTime(m_time - s.GetTimeSpan()); }
-  CTime operator+(CTimeSpan s) const { return CTime(m_time + s.GetTimeSpan()); }
-  bool operator==(CTime t) const { return m_time == t.m_time; }
-  bool operator!=(CTime t) const { return m_time != t.m_time; }
-  bool operator<(CTime t) const { return m_time < t.m_time; }
-  bool operator>(CTime t) const { return m_time > t.m_time; }
-  bool operator<=(CTime t) const { return m_time <= t.m_time; }
-  bool operator>=(CTime t) const { return m_time >= t.m_time; }
-
-  struct tm* GetGmtTm(struct tm* ptm) const;
-  struct tm* GetLocalTm(struct tm* ptm) const;
-  bool GetAsSystemTime(SYSTEMTIME& st) const;
-  __time64_t GetTime() const { return m_time; }
-  int GetYear() const;
-  int GetMonth() const;
-  int GetDay() const;
-  int GetHour() const;
-  int GetMinute() const;
-  int GetSecond() const;
-  int GetDayOfWeek() const;
-  CString Format(LPCTSTR pszFormat) const;
-  CString FormatGmt(LPCTSTR pszFormat) const;
-  CString Format(UINT nFormatID) const;
-  CString FormatGmt(UINT nFormatID) const;
-
-private:
-  __time64_t m_time;
-};
+#include "atltime.h"
 
 // ---------------------------------------------------------------------
 // Files

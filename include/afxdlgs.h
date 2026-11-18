@@ -137,6 +137,35 @@ public:
   PRINTDLG m_pdActual;
 };
 
+// The Windows 2000 print dialog (PrintDlgEx), with its General page.
+// DoModal returns the HRESULT PrintDlgEx gives; m_pdex.dwResultAction
+// says whether the user printed, applied or cancelled.
+class CPrintDialogEx : public CCommonDialog {
+  DECLARE_DYNAMIC(CPrintDialogEx)
+public:
+  PRINTDLGEX m_pdex;
+  explicit CPrintDialogEx(DWORD dwFlags = PD_ALLPAGES | PD_USEDEVMODECOPIES | PD_NOPAGENUMS |
+                                          PD_HIDEPRINTTOFILE | PD_NOSELECTION |
+                                          PD_NOCURRENTPAGE,
+                          CWnd* pParentWnd = NULL);
+  virtual ~CPrintDialogEx();
+
+  virtual INT_PTR DoModal();
+  BOOL GetDefaults();
+  int GetCopies() const;
+  BOOL PrintCollate() const { return (m_pdex.Flags & PD_COLLATE) != 0; }
+  BOOL PrintSelection() const { return (m_pdex.Flags & PD_SELECTION) != 0; }
+  BOOL PrintCurrentPage() const { return (m_pdex.Flags & PD_CURRENTPAGE) != 0; }
+  BOOL PrintRange() const { return (m_pdex.Flags & PD_PAGENUMS) != 0; }
+  BOOL PrintAll() const { return !PrintRange() && !PrintSelection() && !PrintCurrentPage(); }
+  LPDEVMODE GetDevMode() const;
+  CString GetDriverName() const;
+  CString GetDeviceName() const;
+  CString GetPortName() const;
+  HDC GetPrinterDC() const { return m_pdex.hDC; }
+  HDC CreatePrinterDC();
+};
+
 class CPageSetupDialog : public CCommonDialog {
   DECLARE_DYNAMIC(CPageSetupDialog)
 public:
@@ -196,9 +225,18 @@ public:
   CPropertyPage();
   explicit CPropertyPage(UINT nIDTemplate, UINT nIDCaption = 0, DWORD dwSize = 0);
   explicit CPropertyPage(LPCTSTR lpszTemplateName, UINT nIDCaption = 0, DWORD dwSize = 0);
+  // With a Wizard97 header's title and subtitle (MFC 7).
+  CPropertyPage(UINT nIDTemplate, UINT nIDCaption, UINT nIDHeaderTitle,
+                UINT nIDHeaderSubTitle = 0, DWORD dwSize = 0);
+  CPropertyPage(LPCTSTR lpszTemplateName, UINT nIDCaption, UINT nIDHeaderTitle,
+                UINT nIDHeaderSubTitle = 0, DWORD dwSize = 0);
   virtual ~CPropertyPage();
   void Construct(UINT nIDTemplate, UINT nIDCaption = 0);
   void Construct(LPCTSTR lpszTemplateName, UINT nIDCaption = 0);
+  void Construct(UINT nIDTemplate, UINT nIDCaption, UINT nIDHeaderTitle,
+                 UINT nIDHeaderSubTitle = 0);
+  void Construct(LPCTSTR lpszTemplateName, UINT nIDCaption, UINT nIDHeaderTitle,
+                 UINT nIDHeaderSubTitle = 0);
 
   PROPSHEETPAGE& GetPSP() { return m_psp; }
   void CancelToClose();
@@ -221,6 +259,8 @@ public:
   virtual BOOL PreTranslateMessage(MSG* pMsg);
 
   CString m_strCaption;
+  CString m_strHeaderTitle;
+  CString m_strHeaderSubTitle;
   BOOL m_bFirstSetActive;
   CPropertySheet* GetParentSheet();
 
@@ -235,9 +275,18 @@ public:
   CPropertySheet();
   explicit CPropertySheet(UINT nIDCaption, CWnd* pParentWnd = NULL, UINT iSelectPage = 0);
   explicit CPropertySheet(LPCTSTR pszCaption, CWnd* pParentWnd = NULL, UINT iSelectPage = 0);
+  // With a Wizard97 watermark and header bitmap (MFC 7).
+  CPropertySheet(UINT nIDCaption, CWnd* pParentWnd, UINT iSelectPage, HBITMAP hbmWatermark,
+                 HPALETTE hpalWatermark = NULL, HBITMAP hbmHeader = NULL);
+  CPropertySheet(LPCTSTR pszCaption, CWnd* pParentWnd, UINT iSelectPage, HBITMAP hbmWatermark,
+                 HPALETTE hpalWatermark = NULL, HBITMAP hbmHeader = NULL);
   virtual ~CPropertySheet();
   void Construct(UINT nIDCaption, CWnd* pParentWnd = NULL, UINT iSelectPage = 0);
   void Construct(LPCTSTR pszCaption, CWnd* pParentWnd = NULL, UINT iSelectPage = 0);
+  void Construct(UINT nIDCaption, CWnd* pParentWnd, UINT iSelectPage, HBITMAP hbmWatermark,
+                 HPALETTE hpalWatermark = NULL, HBITMAP hbmHeader = NULL);
+  void Construct(LPCTSTR pszCaption, CWnd* pParentWnd, UINT iSelectPage, HBITMAP hbmWatermark,
+                 HPALETTE hpalWatermark = NULL, HBITMAP hbmHeader = NULL);
 
   virtual INT_PTR DoModal();
   virtual BOOL Create(CWnd* pParentWnd = NULL, DWORD dwStyle = (DWORD)-1, DWORD dwExStyle = 0);
@@ -260,7 +309,9 @@ public:
   void EnableStackedTabs(BOOL bStacked) { m_bStacked = bStacked; }
   void PressButton(int nButton);
   void EndDialog(int nEndID);
-  BOOL IsWizard() const { return (m_psh.dwFlags & (PSH_WIZARD | 0x00004000)) != 0; }
+  BOOL IsWizard() const {
+    return (m_psh.dwFlags & (PSH_WIZARD | PSH_WIZARD97 | 0x00004000)) != 0;
+  }
   PROPSHEETHEADER& GetPSH() { return m_psh; }
 
   virtual BOOL OnInitDialog();
@@ -281,6 +332,60 @@ public:
   HPROPSHEETPAGE* m_phpage;
 
   DECLARE_MESSAGE_MAP()
+
+private:
+  void _SetWatermark(HBITMAP hbmWatermark, HPALETTE hpalWatermark, HBITMAP hbmHeader);
+};
+
+// The Wizard97 pages and sheets as Visual C++ 6 has them; MFC 7's
+// CPropertyPage and CPropertySheet take the same arguments.
+class CPropertyPageEx : public CPropertyPage {
+  DECLARE_DYNAMIC(CPropertyPageEx)
+public:
+  CPropertyPageEx() {}
+  explicit CPropertyPageEx(UINT nIDTemplate, UINT nIDCaption = 0, UINT nIDHeaderTitle = 0,
+                           UINT nIDHeaderSubTitle = 0)
+      : CPropertyPage(nIDTemplate, nIDCaption, nIDHeaderTitle, nIDHeaderSubTitle) {}
+  explicit CPropertyPageEx(LPCTSTR lpszTemplateName, UINT nIDCaption = 0,
+                           UINT nIDHeaderTitle = 0, UINT nIDHeaderSubTitle = 0)
+      : CPropertyPage(lpszTemplateName, nIDCaption, nIDHeaderTitle, nIDHeaderSubTitle) {}
+  void Construct(UINT nIDTemplate, UINT nIDCaption = 0, UINT nIDHeaderTitle = 0,
+                 UINT nIDHeaderSubTitle = 0) {
+    CPropertyPage::Construct(nIDTemplate, nIDCaption, nIDHeaderTitle, nIDHeaderSubTitle);
+  }
+  void Construct(LPCTSTR lpszTemplateName, UINT nIDCaption = 0, UINT nIDHeaderTitle = 0,
+                 UINT nIDHeaderSubTitle = 0) {
+    CPropertyPage::Construct(lpszTemplateName, nIDCaption, nIDHeaderTitle, nIDHeaderSubTitle);
+  }
+};
+
+class CPropertySheetEx : public CPropertySheet {
+  DECLARE_DYNAMIC(CPropertySheetEx)
+public:
+  CPropertySheetEx() {}
+  explicit CPropertySheetEx(UINT nIDCaption, CWnd* pParentWnd = NULL, UINT iSelectPage = 0,
+                            HBITMAP hbmWatermark = NULL, HPALETTE hpalWatermark = NULL,
+                            HBITMAP hbmHeader = NULL)
+      : CPropertySheet(nIDCaption, pParentWnd, iSelectPage, hbmWatermark, hpalWatermark,
+                       hbmHeader) {}
+  explicit CPropertySheetEx(LPCTSTR pszCaption, CWnd* pParentWnd = NULL, UINT iSelectPage = 0,
+                            HBITMAP hbmWatermark = NULL, HPALETTE hpalWatermark = NULL,
+                            HBITMAP hbmHeader = NULL)
+      : CPropertySheet(pszCaption, pParentWnd, iSelectPage, hbmWatermark, hpalWatermark,
+                       hbmHeader) {}
+  void Construct(UINT nIDCaption, CWnd* pParentWnd = NULL, UINT iSelectPage = 0,
+                 HBITMAP hbmWatermark = NULL, HPALETTE hpalWatermark = NULL,
+                 HBITMAP hbmHeader = NULL) {
+    CPropertySheet::Construct(nIDCaption, pParentWnd, iSelectPage, hbmWatermark,
+                              hpalWatermark, hbmHeader);
+  }
+  void Construct(LPCTSTR pszCaption, CWnd* pParentWnd = NULL, UINT iSelectPage = 0,
+                 HBITMAP hbmWatermark = NULL, HPALETTE hpalWatermark = NULL,
+                 HBITMAP hbmHeader = NULL) {
+    CPropertySheet::Construct(pszCaption, pParentWnd, iSelectPage, hbmWatermark, hpalWatermark,
+                              hbmHeader);
+  }
+  void AddPage(CPropertyPageEx* pPage) { CPropertySheet::AddPage(pPage); }
 };
 
 #endif  // __AFXDLGS_H__

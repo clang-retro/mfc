@@ -198,7 +198,8 @@ reach a `catch` in another.
 An extension DLL is built with `_AFXDLL` and `_AFXEXT` and shares the
 program's `mfc.dll`: its classes, marked `AFX_EXT_CLASS` (functions
 `AFX_EXT_API`), are part of the program, and its resources are found
-after the program's own. Its `DllMain` registers it:
+after the program's own. Its `DllMain` registers it (AppWizard's
+`#include <afxdllx.h>` before it is accepted and does nothing more):
 
 ```cpp
 static AFX_EXTENSION_MODULE extDLL = {NULL, NULL};
@@ -311,7 +312,12 @@ them directly; `NATIVE_TESTS` names others to try.
   (enabling, checks, handlers), CHtmlEditDoc saving, a new document and
   opening a URL, and CHtmlEditCtrl.
 * `dlgtest`: a dialog with data exchange and validation, common
-  controls, and a property sheet.
+  controls, and a property sheet; a Wizard97 wizard (CPropertySheetEx
+  with a watermark and header bitmap, CPropertyPageEx with header
+  titles); CPrintDialogEx's defaults; CDialogEx's background color and
+  tiled bitmap, read back from the screen; and a CTaskDialog that drives
+  itself from its timer (command links, radio buttons, the check box,
+  the progress bar, a click refused by OnCommandControlClick).
 * `sditest`: a single-document program with a toolbar, a status bar and
   an edit view; idle command updates, tooltips, saving and loading.
 * `mditest`: a multiple-document program whose child frames are split
@@ -463,7 +469,12 @@ them directly; `NATIVE_TESTS` names others to try.
   and lists of CAutoPtr and interface pointers; CHeapPtr, CComHeapPtr,
   CTempBuffer, CAutoPtr, CHandle; AtlThrow; CComSafeArray of numbers,
   BSTRs and VARIANTs, in one and two dimensions; CComDispatchDriver;
-  CAtlFile, CAtlTemporaryFile and CAtlFileMapping; CPath; CSid and the
+  CAtlFile, CAtlTemporaryFile and CAtlFileMapping; CTime, CTimeSpan,
+  CFileTime and CFileTimeSpan without MFC; CImage (a 32-bit image with
+  alpha through PNG and back and drawn with AlphaBlend, 24 bits through
+  BMP, JPEG and a stream, an 8-bit image's color table, SetPixelIndexed
+  and a transparent color, a device-dependent bitmap saved, and the file
+  dialogs' filter strings); CPath; CSid and the
   well-known SIDs, CDacl, CSecurityDesc to SDDL and back, an event created
   through CSecurityAttributes and its DACL read and replaced, a file's
   owner and DACL, and the process's CAccessToken; and CAtlServiceModuleT,
@@ -538,7 +549,8 @@ request with the stock MinGW-w64 toolchain.
 * Core (`afx.h`, `afxcoll.h`, `afxtempl.h`, `afxstr.h`): CObject and
   CRuntimeClass with dynamic creation and serialization, CString
   (CStringA/CStringW), the collection classes and templates, CFile,
-  CStdioFile, CMemFile, CArchive, CTime, CTimeSpan, exceptions, and
+  CStdioFile, CMemFile, CArchive, CTime and CTimeSpan (from
+  `atltime.h`, as in MFC 7, with CFileTime and CFileTimeSpan), exceptions, and
   the memory diagnostics (CMemoryState, AfxCheckMemory, afxMemDF,
   AfxSetAllocHook, AfxDoForAllObjects and the leak report at exit).
 * Windows (`afxwin.h`): CWinApp, CWinThread, CWnd and message maps,
@@ -648,7 +660,15 @@ request with the stock MinGW-w64 toolchain.
   refused call of the program's own is retried, then the Server Busy or
   Not Responding dialog lets the user decide.
 * `afxdlgs.h`: the common dialogs (file, color, font, print, page setup,
-  find/replace) and CPropertySheet/CPropertyPage, wizards included.
+  find/replace), CPrintDialogEx (PrintDlgEx), and
+  CPropertySheet/CPropertyPage, wizards included; Wizard97's watermark,
+  header bitmap and header titles, through CPropertySheetEx and
+  CPropertyPageEx or MFC 7's constructors on the base classes.
+* `afxdialogex.h`: CDialogEx, with a background color or bitmap.
+  `afxtaskdialog.h` (from `afxwin.h`): CTaskDialog over comctl32 6's
+  TaskDialogIndirect, found when it runs, so the program still starts
+  on Windows 2000 and XP; there (CTaskDialog::IsSupported is FALSE)
+  DoModal shows the text in a message box with the common buttons.
 * `afxcmn.h`, `afxcview.h`: the common controls (CReBarCtrl,
   CLinkCtrl, CPagerCtrl and CDragListBox among them), CImageList,
   CListView, CTreeView. `afxmt.h`: synchronization objects.
@@ -714,7 +734,12 @@ request with the stock MinGW-w64 toolchain.
   which throws MFC's exceptions when MFC is in use); `atlsafe.h`
   (CComSafeArray, CComSafeArrayBound); `atlfile.h` (CAtlFile,
   CAtlTemporaryFile, CAtlFileMapping); CComPtr<IDispatch>'s helpers and
-  CComDispatchDriver; `atlpath.h` (CPath, CPathA, CPathW and the
+  CComDispatchDriver; `atltime.h` (CTime, CTimeSpan, CFileTime,
+  CFileTimeSpan); `atlimage.h` (CImage: DIB sections made, attached and
+  drawn with BitBlt, StretchBlt, AlphaBlend, TransparentBlt, MaskBlt and
+  PlgBlt, and BMP, GIF, JPEG, PNG and TIFF read and written through
+  GDI+, which starts on first use; an image with an alpha channel keeps
+  it unpremultiplied, as Visual C++'s does); `atlpath.h` (CPath, CPathA, CPathW and the
   ATLPath functions over shlwapi); `atlsecurity.h` (CSid and Sids, CAcl,
   CDacl, CSacl, CSecurityDesc, CSecurityAttributes, CAccessToken, and
   AtlGetDacl, AtlSetDacl, AtlGetOwnerSid and AtlSetOwnerSid); and
@@ -956,6 +981,11 @@ ATLVERIFY, ATLENSURE and ATLTRY, the trace categories (CTraceCategory,
 * `llvm-rc` (and `llvm-windres`, which uses it) has no `TOOLBAR`
   statement yet; write toolbar resources as raw resource type 241, as
   `tests/sditest.rc` does.
+* CImage::SetTransparentColor takes an index into the color table for
+  an indexed image, as with Visual C++, and an RGB value (a COLORREF)
+  for any other image.
+* CTaskDialog on a system without the task dialog shows a message box
+  rather than asserting.
 
 ## Plans
 

@@ -387,6 +387,66 @@ typedef struct tagPDW {
 #define PD_USELARGETEMPLATE 0x10000000
 BOOL WINAPI PrintDlgA(LPPRINTDLGA);
 BOOL WINAPI PrintDlgW(LPPRINTDLGW);
+// The Windows 2000 print dialog (PrintDlgEx): here the print dialog,
+// with one page range and the result as dwResultAction.
+typedef struct tagPRINTPAGERANGE {
+  DWORD nFromPage;
+  DWORD nToPage;
+} PRINTPAGERANGE, *LPPRINTPAGERANGE;
+typedef struct tagPDEXA {
+  DWORD lStructSize;
+  HWND hwndOwner;
+  HGLOBAL hDevMode;
+  HGLOBAL hDevNames;
+  HDC hDC;
+  DWORD Flags;
+  DWORD Flags2;
+  DWORD ExclusionFlags;
+  DWORD nPageRanges;
+  DWORD nMaxPageRanges;
+  LPPRINTPAGERANGE lpPageRanges;
+  DWORD nMinPage;
+  DWORD nMaxPage;
+  DWORD nCopies;
+  HINSTANCE hInstance;
+  LPCSTR lpPrintTemplateName;
+  struct IUnknown* lpCallback;
+  DWORD nPropertyPages;
+  HPROPSHEETPAGE* lphPropertyPages;
+  DWORD nStartPage;
+  DWORD dwResultAction;
+} PRINTDLGEXA, *LPPRINTDLGEXA;
+typedef struct tagPDEXW {
+  DWORD lStructSize;
+  HWND hwndOwner;
+  HGLOBAL hDevMode;
+  HGLOBAL hDevNames;
+  HDC hDC;
+  DWORD Flags;
+  DWORD Flags2;
+  DWORD ExclusionFlags;
+  DWORD nPageRanges;
+  DWORD nMaxPageRanges;
+  LPPRINTPAGERANGE lpPageRanges;
+  DWORD nMinPage;
+  DWORD nMaxPage;
+  DWORD nCopies;
+  HINSTANCE hInstance;
+  LPCWSTR lpPrintTemplateName;
+  struct IUnknown* lpCallback;
+  DWORD nPropertyPages;
+  HPROPSHEETPAGE* lphPropertyPages;
+  DWORD nStartPage;
+  DWORD dwResultAction;
+} PRINTDLGEXW, *LPPRINTDLGEXW;
+#define START_PAGE_GENERAL 0xffffffff
+#define PD_RESULT_CANCEL 0
+#define PD_RESULT_PRINT 1
+#define PD_RESULT_APPLY 2
+#define PD_EXCL_COPIESANDCOLLATE (DM_COPIES | DM_COLLATE)
+HRESULT WINAPI PrintDlgExA(LPPRINTDLGEXA);
+HRESULT WINAPI PrintDlgExW(LPPRINTDLGEXW);
+
 typedef struct tagDEVNAMES {
   WORD wDriverOffset;
   WORD wDeviceOffset;
@@ -519,6 +579,9 @@ DWORD WINAPI CommDlgExtendedError(void);
 #define ReplaceText __WINPORT_AW(ReplaceText)
 #define ChooseFont __WINPORT_AW(ChooseFont)
 #define PrintDlg __WINPORT_AW(PrintDlg)
+#define PRINTDLGEX __WINPORT_AW(PRINTDLGEX)
+#define LPPRINTDLGEX __WINPORT_AW(LPPRINTDLGEX)
+#define PrintDlgEx __WINPORT_AW(PrintDlgEx)
 #define PageSetupDlg __WINPORT_AW(PageSetupDlg)
 
 }  // extern "C"

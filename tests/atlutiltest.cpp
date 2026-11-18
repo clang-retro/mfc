@@ -23,6 +23,8 @@
 #include <atlfile.h>
 #include <atlpath.h>
 #include <atlsecurity.h>
+#include <atltime.h>
+#include <atlimage.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include "atlutiltest.h"
@@ -992,6 +994,169 @@ static void TestSecurity() {
   ::DeleteFile(szFile);
 }
 
+static void TestTime() {
+  // CTime and CTimeSpan without MFC, and ATL's names for them.
+  ATL::CTime t(2003, 7, 15, 13, 45, 30);
+  CHECK(t.GetYear() == 2003 && t.GetMonth() == 7 && t.GetDay() == 15);
+  CHECK(t.GetHour() == 13 && t.GetMinute() == 45 && t.GetSecond() == 30);
+  CHECK(t.GetDayOfWeek() == 3);  // a Tuesday
+  CHECK(t.Format(_T("%Y-%m-%d %H:%M:%S")) == _T("2003-07-15 13:45:30"));
+  CHECK(t.Format(_T("%A, %B %#d")) == _T("Tuesday, July 15"));
+  CTimeSpan span(1, 2, 3, 4);
+  CHECK(span.GetTotalSeconds() == 93784);
+  CHECK(span.Format(_T("%D:%H:%M:%S")) == _T("1:02:03:04"));
+  CTime u = t + span;
+  CHECK(u - t == span);
+  CHECK(u.GetDay() == 16 && u.GetHour() == 15);
+  CHECK(CTime::GetCurrentTime() > t);
+
+  // CFileTime: 100-nanosecond units, and spans of them.
+  CFileTime ft(t.GetTime() * CFileTime::Second + 116444736000000000ULL);
+  CHECK(CTime(ft).GetTime() == t.GetTime());  // a FILETIME, so CTime takes it
+  CFileTime ft2 = ft + CFileTimeSpan(CFileTime::Day + 5 * CFileTime::Millisecond);
+  CHECK((ft2 - ft).GetTimeSpan() == (LONGLONG)(CFileTime::Day + 50000));
+  CHECK(ft2 > ft && ft != ft2);
+  ft2 -= CFileTimeSpan(CFileTime::Day);
+  CHECK(ft2.GetTime() == ft.GetTime() + 50000);
+  CHECK(ft.UTCToLocal().LocalToUTC() == ft);
+  CFileTime now = CFileTime::GetCurrentTime();
+  CHECK(now > ft);
+  CHECK(CFileTime::Week == 7 * 24 * 3600 * 10000000ULL);
+  ATL::CFileTime copy = now;
+  CHECK(copy == now);
+  SYSTEMTIME st;
+  CHECK(::FileTimeToSystemTime(&ft, &st) && st.wYear == 2003);
+}
+
+static void TestImage() {
+  TCHAR szDir[MAX_PATH], szPng[MAX_PATH], szBmp[MAX_PATH], szJpg[MAX_PATH];
+  ::GetTempPath(MAX_PATH, szDir);
+  wsprintf(szPng, TEXT("%satlimg.png"), szDir);
+  wsprintf(szBmp, TEXT("%satlimg.bmp"), szDir);
+  wsprintf(szJpg, TEXT("%satlimg.jpg"), szDir);
+
+  // A 32-bit image with an alpha channel, through PNG and back.
+  CImage img;
+  CHECK(img.IsNull());
+  CHECK(img.Create(8, 6, 32, CImage::createAlphaChannel));
+  CHECK(!img.IsNull() && img.IsDIBSection() && !img.IsIndexed());
+  CHECK(img.GetWidth() == 8 && img.GetHeight() == 6 && img.GetBPP() == 32);
+  CHECK(img.GetPitch() == -32);  // bottom-up: GetBits is the top row
+  for (int y = 0; y < 6; y++)
+    for (int x = 0; x < 8; x++)
+      *(DWORD*)img.GetPixelAddress(x, y) = (x < 4 ? 0xFF000000u : 0x80000000u) |
+                                           (DWORD)(x * 30) << 16 | (DWORD)(y * 40) << 8 | 0x11;
+  CHECK((img.GetPixel(2, 3) & 0xFFFFFF) == RGB(60, 120, 0x11));
+  CHECK(SUCCEEDED(img.Save(szPng)));  // the format from the extension
+  CImage png;
+  CHECK(SUCCEEDED(png.Load(szPng)));
+  CHECK(png.GetWidth() == 8 && png.GetHeight() == 6 && png.GetBPP() == 32);
+  CHECK(*(DWORD*)png.GetPixelAddress(2, 3) == *(DWORD*)img.GetPixelAddress(2, 3));
+  CHECK(*(DWORD*)png.GetPixelAddress(6, 5) == *(DWORD*)img.GetPixelAddress(6, 5));
+  CHECK((*(DWORD*)png.GetPixelAddress(6, 5) >> 24) == 0x80);  // alpha kept, unpremultiplied
+
+  // Drawn onto white: the opaque half as it is, the other half blended.
+  CImage dest;
+  CHECK(dest.Create(8, 6, 24));
+  HDC hdc = dest.GetDC();
+  RECT rc = {0, 0, 8, 6};
+  ::FillRect(hdc, &rc, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  CHECK(png.Draw(hdc, 0, 0));
+  dest.ReleaseDC();
+  CHECK(dest.GetPixel(1, 1) == RGB(30, 40, 0x11));
+  // At (5, 0), (150, 0, 0x11) at alpha 0x80: AlphaBlend takes the pixels
+  // as premultiplied, so white shows through by half. (Red, 150 + 127,
+  // is out of range, as it is for unpremultiplied pixels on Windows.)
+  COLORREF c = dest.GetPixel(5, 0);
+  CHECK(GetGValue(c) >= 0x7E && GetGValue(c) <= 0x80);
+  CHECK(GetBValue(c) >= 0x8F && GetBValue(c) <= 0x91);
+
+  // 24 bits, through BMP and JPEG, saved by GUID; a stream too.
+  CImage rgb;
+  CHECK(rgb.Create(5, -4, 24));  // top-down
+  CHECK(rgb.GetPitch() == 16);
+  rgb.SetPixelRGB(1, 2, 10, 200, 30);
+  CHECK(rgb.GetPixel(1, 2) == RGB(10, 200, 30));
+  CHECK(SUCCEEDED(rgb.Save(szBmp, Gdiplus::ImageFormatBMP)));
+  CHECK(SUCCEEDED(rgb.Save(szJpg, Gdiplus::ImageFormatJPEG)));
+  CImage bmp;
+  CHECK(SUCCEEDED(bmp.Load(szBmp)));
+  CHECK(bmp.GetBPP() == 24 && bmp.GetPixel(1, 2) == RGB(10, 200, 30));
+  CImage jpg;
+  CHECK(SUCCEEDED(jpg.Load(szJpg)) && jpg.GetWidth() == 5 && jpg.GetHeight() == 4);
+  IStream* pStream = NULL;
+  CHECK(SUCCEEDED(::CreateStreamOnHGlobal(NULL, TRUE, &pStream)));
+  CHECK(SUCCEEDED(rgb.Save(pStream, Gdiplus::ImageFormatPNG)));
+  LARGE_INTEGER zero = {};
+  pStream->Seek(zero, STREAM_SEEK_SET, NULL);
+  CImage fromStream;
+  CHECK(SUCCEEDED(fromStream.Load(pStream)));
+  CHECK(fromStream.GetPixel(1, 2) == RGB(10, 200, 30));
+  pStream->Release();
+  CHECK(FAILED(fromStream.Save(szPng, GUID_NULL)) == false);
+  CImage missing;
+  CHECK(FAILED(missing.Load(TEXT("no such file.png"))) && missing.IsNull());
+
+  // An 8-bit indexed image: its color table, SetPixelIndexed, and a
+  // transparent color for Draw.
+  CImage ind;
+  CHECK(ind.Create(4, 4, 8));
+  CHECK(ind.IsIndexed() && ind.GetMaxColorTableEntries() == 256);
+  RGBQUAD q[2] = {{0, 0, 0xFF, 0}, {0xFF, 0, 0, 0}};  // red, blue
+  ind.SetColorTable(0, 2, q);
+  RGBQUAD back[2];
+  ind.GetColorTable(0, 2, back);
+  CHECK(back[0].rgbRed == 0xFF && back[1].rgbBlue == 0xFF);
+  for (int y = 0; y < 4; y++)
+    for (int x = 0; x < 4; x++) ind.SetPixelIndexed(x, y, x < 2 ? 0 : 1);
+  CHECK(ind.GetPixel(0, 0) == RGB(0xFF, 0, 0) && ind.GetPixel(3, 3) == RGB(0, 0, 0xFF));
+  CHECK(ind.SetTransparentColor(0) == -1 && ind.GetTransparentColor() == 0);
+  CImage canvas;
+  CHECK(canvas.Create(4, 4, 24));
+  hdc = canvas.GetDC();
+  RECT rc4 = {0, 0, 4, 4};
+  ::FillRect(hdc, &rc4, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  CHECK(ind.Draw(hdc, 0, 0));
+  canvas.ReleaseDC();
+  CHECK(canvas.GetPixel(0, 0) == RGB(0xFF, 0xFF, 0xFF));  // red was transparent
+  CHECK(canvas.GetPixel(3, 0) == RGB(0, 0, 0xFF));
+  CHECK(SUCCEEDED(ind.Save(szBmp)));
+  CImage ind2;
+  CHECK(SUCCEEDED(ind2.Load(szBmp)) && ind2.GetBPP() == 8);
+  CHECK(ind2.GetPixel(3, 3) == RGB(0, 0, 0xFF));
+
+  // Attach and Detach, and a bitmap that is not a DIB section.
+  HBITMAP h = img.Detach();
+  CHECK(img.IsNull() && h != NULL);
+  img.Attach(h);
+  CHECK(img.GetWidth() == 8 && img.GetPitch() == -32);
+  HDC hScreen = ::GetDC(NULL);
+  HBITMAP hddb = ::CreateCompatibleBitmap(hScreen, 3, 3);
+  ::ReleaseDC(NULL, hScreen);
+  CImage ddb;
+  ddb.Attach(hddb);
+  CHECK(!ddb.IsDIBSection() && ddb.GetWidth() == 3 && ddb.GetBits() == NULL);
+  CHECK(SUCCEEDED(ddb.Save(szBmp)));
+
+  // The file dialogs' filter strings.
+  CString strFilter;
+  CSimpleArray<GUID> guids;
+  CHECK(SUCCEEDED(CImage::GetImporterFilterString(strFilter, guids, TEXT("All Image Files"))));
+  CHECK(strFilter.Find(TEXT("All Image Files (")) == 0);
+  CHECK(strFilter.Find(TEXT("*.PNG")) > 0 && strFilter.Right(2) == TEXT("||"));
+  CHECK(guids.GetSize() > 4 && guids[0] == GUID_NULL);
+  CString strSave;
+  CSimpleArray<GUID> saveGuids;
+  CHECK(SUCCEEDED(CImage::GetExporterFilterString(strSave, saveGuids, NULL,
+                                                  CImage::excludeDefaultSave | CImage::excludeGIF)));
+  CHECK(strSave.Find(TEXT("GIF")) < 0 && strSave.Find(TEXT("*.BMP")) >= 0);
+  CHECK(saveGuids.Find(Gdiplus::ImageFormatPNG) >= 0);
+
+  ::DeleteFile(szPng);
+  ::DeleteFile(szBmp);
+  ::DeleteFile(szJpg);
+}
+
 int main() {
   // Started by the service control manager: be the service.
   if (_tcsstr(::GetCommandLine(), TEXT("-AsService")) != NULL) return _AtlModule.WinMain(SW_HIDE);
@@ -1017,6 +1182,10 @@ int main() {
   Log("memory, safe arrays, dispatch: %d failure(s) so far", g_nFailures);
   TestFiles();
   Log("files: %d failure(s) so far", g_nFailures);
+  TestTime();
+  Log("times: %d failure(s) so far", g_nFailures);
+  TestImage();
+  Log("images: %d failure(s) so far", g_nFailures);
   TestPath();
   Log("paths: %d failure(s) so far", g_nFailures);
   TestSecurity();

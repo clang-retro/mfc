@@ -9,6 +9,7 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "winport.h"
+#include <shellapi.h>
 
 #include <dlfcn.h>
 #include <errno.h>
@@ -1039,3 +1040,35 @@ BOOL WINAPI GetExitCodeProcess(HANDLE h, LPDWORD code) {
 void WINAPI ExitProcess(UINT code) { exit((int)code); }
 
 }  // extern "C"
+
+// ShellExecute: the desktop's opener (open on macOS, xdg-open elsewhere)
+// for a document or link, which is what the "open" verb asks for. The
+// opener runs on its own; a child that has ended is reaped as SIGCHLD's
+// default would leave it.
+static HINSTANCE ShellExecuteCore(const std::string& verb, const std::string& file) {
+  if (!verb.empty() && verb != "open") return (HINSTANCE)(intptr_t)SE_ERR_NOASSOC;
+  if (file.empty()) return (HINSTANCE)(intptr_t)ERROR_FILE_NOT_FOUND;
+#if defined(__APPLE__)
+  const char* opener = "open";
+#else
+  const char* opener = "xdg-open";
+#endif
+  bool isLink = file.find("://") != std::string::npos || file.compare(0, 7, "mailto:") == 0;
+  std::string target = isLink ? file : PosixPath(file.c_str());
+  char* argv[] = {(char*)opener, (char*)target.c_str(), NULL};
+  pid_t pid;
+  if (posix_spawnp(&pid, opener, NULL, NULL, argv, environ) != 0)
+    return (HINSTANCE)(intptr_t)ERROR_FILE_NOT_FOUND;
+  int status;
+  waitpid(pid, &status, WNOHANG);
+  return (HINSTANCE)(intptr_t)42;
+}
+
+extern "C" HINSTANCE WINAPI ShellExecuteA(HWND, LPCSTR verb, LPCSTR file, LPCSTR, LPCSTR, INT) {
+  return ShellExecuteCore(verb ? verb : "", file ? file : "");
+}
+
+extern "C" HINSTANCE WINAPI ShellExecuteW(HWND, LPCWSTR verb, LPCWSTR file, LPCWSTR, LPCWSTR,
+                                          INT) {
+  return ShellExecuteCore(verb ? Narrow(verb) : std::string(), file ? Narrow(file) : std::string());
+}
