@@ -300,9 +300,13 @@ public:                                                                         
   ;                                                     \
   return _entries;                                      \
   }                                                     \
-  virtual ULONG STDMETHODCALLTYPE AddRef() override = 0;  \
-  virtual ULONG STDMETHODCALLTYPE Release() override = 0; \
-  STDMETHOD(QueryInterface)(REFIID, void**) override = 0;
+  _Pragma("clang diagnostic push")                                    \
+  _Pragma("clang diagnostic ignored \"-Winconsistent-missing-override\"") \
+  _Pragma("clang diagnostic ignored \"-Wsuggest-override\"")             \
+  virtual ULONG STDMETHODCALLTYPE AddRef() = 0;                       \
+  virtual ULONG STDMETHODCALLTYPE Release() = 0;                      \
+  STDMETHOD(QueryInterface)(REFIID, void**) = 0;                      \
+  _Pragma("clang diagnostic pop")
 
 // The place of a member (offsetof, which a class with virtual functions
 // does not allow).
@@ -368,7 +372,7 @@ public:
   typedef Base _BaseClass;
   CComObject(void* = NULL) { _pAtlModule->Lock(); }
   virtual ~CComObject() {
-    this->m_dwRef = -(LONG_MAX / 2);
+    this->m_dwRef = -(LONG)(0x7FFFFFFF / 2);
     this->FinalRelease();
     this->_AtlFinalRelease();
     _pAtlModule->Unlock();
@@ -421,7 +425,7 @@ public:
   typedef Base _BaseClass;
   CComObjectNoLock(void* = NULL) {}
   virtual ~CComObjectNoLock() {
-    this->m_dwRef = -(LONG_MAX / 2);
+    this->m_dwRef = -(LONG)(0x7FFFFFFF / 2);
     this->FinalRelease();
     this->_AtlFinalRelease();
   }
@@ -443,7 +447,7 @@ public:
   typedef Base _BaseClass;
   CComObjectCached(void* = NULL) {}
   virtual ~CComObjectCached() {
-    this->m_dwRef = -(LONG_MAX / 2);
+    this->m_dwRef = -(LONG)(0x7FFFFFFF / 2);
     this->FinalRelease();
     this->_AtlFinalRelease();
   }
@@ -556,7 +560,7 @@ public:
 
   CComAggObject(void* pv) : m_contained(pv) { _pAtlModule->Lock(); }
   virtual ~CComAggObject() {
-    this->m_dwRef = -(LONG_MAX / 2);
+    this->m_dwRef = -(LONG)(0x7FFFFFFF / 2);
     FinalRelease();
     _pAtlModule->Unlock();
   }
@@ -625,7 +629,7 @@ public:
 
   CComPolyObject(void* pv) : m_contained(pv != NULL ? pv : (void*)static_cast<IUnknown*>(this)) { _pAtlModule->Lock(); }
   virtual ~CComPolyObject() {
-    this->m_dwRef = -(LONG_MAX / 2);
+    this->m_dwRef = -(LONG)(0x7FFFFFFF / 2);
     FinalRelease();
     _pAtlModule->Unlock();
   }
@@ -707,7 +711,7 @@ public:
     this->m_pOwner->GetUnknown()->AddRef();
   }
   virtual ~CComTearOffObject() {
-    this->m_dwRef = -(LONG_MAX / 2);
+    this->m_dwRef = -(LONG)(0x7FFFFFFF / 2);
     this->FinalRelease();
     this->_AtlFinalRelease();
     this->m_pOwner->GetUnknown()->Release();
@@ -744,7 +748,7 @@ public:
     m_contained.m_pOwner = reinterpret_cast<typename contained::_OwnerClass*>(pv);
   }
   virtual ~CComCachedTearOffObject() {
-    this->m_dwRef = -(LONG_MAX / 2);
+    this->m_dwRef = -(LONG)(0x7FFFFFFF / 2);
     m_contained.FinalRelease();
     m_contained._AtlFinalRelease();
   }
@@ -1925,6 +1929,937 @@ public:
     return S_OK;
   }
 };
+
+
+// ---------------------------------------------------------------------
+// Property maps: the properties an object saves and loads, and its
+// property pages.
+
+struct ATL_PROPMAP_ENTRY {
+  LPCOLESTR szDesc;
+  DISPID dispid;
+  const CLSID* pclsidPropPage;
+  const IID* piidDispatch;
+  DWORD dwOffsetData;  // a data member's place and size (PROP_DATA_ENTRY)
+  DWORD dwSizeData;
+  VARTYPE vt;
+};
+
+#define BEGIN_PROP_MAP(theClass)                                     \
+  typedef theClass _PropMapClass;                                    \
+  static const ATL::ATL_PROPMAP_ENTRY* GetPropertyMap() {            \
+    static const ATL::ATL_PROPMAP_ENTRY pPropMap[] = {
+// The same, starting with the control's extent.
+#define BEGIN_PROPERTY_MAP(theClass)          \
+  BEGIN_PROP_MAP(theClass)                    \
+  PROP_DATA_ENTRY("_cx", m_sizeExtent.cx, VT_UI4) \
+  PROP_DATA_ENTRY("_cy", m_sizeExtent.cy, VT_UI4)
+#define PROP_ENTRY(szDesc, dispid, clsid) \
+  {OLESTR(szDesc), dispid, &clsid, &IID_IDispatch, 0, 0, VT_EMPTY},
+#define PROP_ENTRY_EX(szDesc, dispid, clsid, iidDispatch) \
+  {OLESTR(szDesc), dispid, &clsid, &iidDispatch, 0, 0, VT_EMPTY},
+#define PROP_ENTRY_TYPE(szDesc, dispid, clsid, vt) \
+  {OLESTR(szDesc), dispid, &clsid, &IID_IDispatch, 0, 0, vt},
+#define PROP_ENTRY_TYPE_EX(szDesc, dispid, clsid, iidDispatch, vt) \
+  {OLESTR(szDesc), dispid, &clsid, &iidDispatch, 0, 0, vt},
+#define PROP_PAGE(clsid) {NULL, 0, &clsid, &IID_NULL, 0, 0, VT_EMPTY},
+#define PROP_DATA_ENTRY(szDesc, member, vt)                                     \
+  {OLESTR(szDesc), 0, &CLSID_NULL, NULL,                                        \
+   (DWORD)_ATL_MEMBER_OFFSET_CONST(_PropMapClass, member),                      \
+   (DWORD)sizeof(((_PropMapClass*)0)->member), vt},
+#define END_PROP_MAP()                            \
+  {NULL, 0, NULL, &IID_NULL, 0, 0, VT_EMPTY}      \
+  }                                               \
+  ;                                               \
+  return pPropMap;                                \
+  }
+#define END_PROPERTY_MAP() END_PROP_MAP()
+
+inline bool _AtlPropMapEnd(const ATL_PROPMAP_ENTRY* p) {
+  return p->szDesc == NULL && p->pclsidPropPage == NULL;
+}
+
+// A property through IDispatch.
+inline HRESULT _AtlGetProperty(IDispatch* pDisp, DISPID dispid, VARIANT* pVar) {
+  DISPPARAMS dp = {NULL, NULL, 0, 0};
+  return pDisp->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET, &dp, pVar,
+                       NULL, NULL);
+}
+inline HRESULT _AtlPutProperty(IDispatch* pDisp, DISPID dispid, VARIANT* pVar) {
+  DISPID dispidPut = DISPID_PROPERTYPUT;
+  DISPPARAMS dp = {pVar, &dispidPut, 1, 1};
+  HRESULT hr = pDisp->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUT, &dp,
+                             NULL, NULL, NULL);
+  if (FAILED(hr) && (pVar->vt == VT_DISPATCH || pVar->vt == VT_UNKNOWN))
+    hr = pDisp->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUTREF, &dp, NULL,
+                       NULL, NULL);
+  return hr;
+}
+
+// The dispatch interface an entry's property is reached through.
+inline HRESULT _AtlPropMapDispatch(IUnknown* pUnk, const ATL_PROPMAP_ENTRY* pEntry,
+                                   IDispatch** ppDisp) {
+  *ppDisp = NULL;
+  const IID& iid = pEntry->piidDispatch != NULL ? *pEntry->piidDispatch : IID_IDispatch;
+  return pUnk->QueryInterface(iid, (void**)ppDisp);
+}
+
+// A data entry's value as a VARIANT of its type, and back.
+inline HRESULT _AtlDataEntryToVariant(const ATL_PROPMAP_ENTRY* pEntry, void* pThis, VARIANT* pVar) {
+  BYTE* pData = (BYTE*)pThis + pEntry->dwOffsetData;
+  VariantInit(pVar);
+  if (pEntry->vt == VT_BSTR) {
+    BSTR b = *(BSTR*)pData;
+    pVar->vt = VT_BSTR;
+    pVar->bstrVal = ::SysAllocStringLen(b, ::SysStringLen(b));
+    return b != NULL && pVar->bstrVal == NULL ? E_OUTOFMEMORY : S_OK;
+  }
+  if (pEntry->dwSizeData > sizeof(pVar->llVal) * 2) return E_FAIL;
+  pVar->vt = pEntry->vt;
+  memcpy(&pVar->llVal, pData, pEntry->dwSizeData);
+  return S_OK;
+}
+inline HRESULT _AtlVariantToDataEntry(const ATL_PROPMAP_ENTRY* pEntry, void* pThis, VARIANT* pVar) {
+  BYTE* pData = (BYTE*)pThis + pEntry->dwOffsetData;
+  if (pVar->vt != pEntry->vt) {
+    HRESULT hr = VariantChangeType(pVar, pVar, 0, pEntry->vt);
+    if (FAILED(hr)) return hr;
+  }
+  if (pEntry->vt == VT_BSTR) {
+    // A BSTR or CComBSTR member.
+    BSTR* pb = (BSTR*)pData;
+    ::SysFreeString(*pb);
+    *pb = ::SysAllocStringLen(pVar->bstrVal, ::SysStringLen(pVar->bstrVal));
+    return S_OK;
+  }
+  if (pEntry->dwSizeData > sizeof(pVar->llVal) * 2) return E_FAIL;
+  memcpy(pData, &pVar->llVal, pEntry->dwSizeData);
+  return S_OK;
+}
+
+// The stream form: the ATL version, then each entry in the map's order,
+// a data member's bytes or a property as CComVariant writes it.
+inline HRESULT AtlIPersistStreamInit_Save(LPSTREAM pStm, BOOL /*fClearDirty*/,
+                                          const ATL_PROPMAP_ENTRY* pMap, void* pThis,
+                                          IUnknown* pUnk) {
+  if (pStm == NULL || pMap == NULL) return E_POINTER;
+  DWORD dwVer = _ATL_VER;
+  HRESULT hr = pStm->Write(&dwVer, sizeof(dwVer), NULL);
+  for (; SUCCEEDED(hr) && !_AtlPropMapEnd(pMap); pMap++) {
+    if (pMap->szDesc == NULL) continue;  // a property page
+    if (pMap->dwSizeData != 0) {
+      if (pMap->vt == VT_BSTR) {
+        CComBSTR s(*(BSTR*)((BYTE*)pThis + pMap->dwOffsetData));
+        hr = s.WriteToStream(pStm);
+      } else {
+        hr = pStm->Write((BYTE*)pThis + pMap->dwOffsetData, pMap->dwSizeData, NULL);
+      }
+      continue;
+    }
+    IDispatch* pDisp = NULL;
+    hr = _AtlPropMapDispatch(pUnk, pMap, &pDisp);
+    if (FAILED(hr)) break;
+    CComVariant var;
+    hr = _AtlGetProperty(pDisp, pMap->dispid, &var);
+    pDisp->Release();
+    if (SUCCEEDED(hr)) hr = var.WriteToStream(pStm);
+  }
+  return hr;
+}
+
+inline HRESULT AtlIPersistStreamInit_Load(LPSTREAM pStm, const ATL_PROPMAP_ENTRY* pMap,
+                                          void* pThis, IUnknown* pUnk) {
+  if (pStm == NULL || pMap == NULL) return E_POINTER;
+  DWORD dwVer = 0;
+  ULONG cbRead = 0;
+  HRESULT hr = pStm->Read(&dwVer, sizeof(dwVer), &cbRead);
+  if (SUCCEEDED(hr) && cbRead != sizeof(dwVer)) hr = E_FAIL;
+  for (; SUCCEEDED(hr) && !_AtlPropMapEnd(pMap); pMap++) {
+    if (pMap->szDesc == NULL) continue;
+    if (pMap->dwSizeData != 0) {
+      if (pMap->vt == VT_BSTR) {
+        CComBSTR s;
+        hr = s.ReadFromStream(pStm);
+        if (SUCCEEDED(hr)) {
+          BSTR* pb = (BSTR*)((BYTE*)pThis + pMap->dwOffsetData);
+          ::SysFreeString(*pb);
+          *pb = s.Detach();
+        }
+      } else {
+        hr = pStm->Read((BYTE*)pThis + pMap->dwOffsetData, pMap->dwSizeData, &cbRead);
+        if (SUCCEEDED(hr) && cbRead != pMap->dwSizeData) hr = E_FAIL;
+      }
+      continue;
+    }
+    CComVariant var;
+    hr = var.ReadFromStream(pStm);
+    if (FAILED(hr)) break;
+    if (pMap->vt != VT_EMPTY && var.vt != pMap->vt) var.ChangeType(pMap->vt);
+    IDispatch* pDisp = NULL;
+    if (SUCCEEDED(_AtlPropMapDispatch(pUnk, pMap, &pDisp))) {
+      _AtlPutProperty(pDisp, pMap->dispid, &var);  // a property it will not take is skipped
+      pDisp->Release();
+    }
+  }
+  return hr;
+}
+
+inline HRESULT AtlIPersistPropertyBag_Load(LPPROPERTYBAG pPropBag, LPERRORLOG pErrorLog,
+                                           const ATL_PROPMAP_ENTRY* pMap, void* pThis,
+                                           IUnknown* pUnk) {
+  if (pPropBag == NULL || pMap == NULL) return E_POINTER;
+  for (; !_AtlPropMapEnd(pMap); pMap++) {
+    if (pMap->szDesc == NULL) continue;
+    CComVariant var;
+    if (pMap->dwSizeData != 0) {
+      var.vt = pMap->vt;
+      if (FAILED(pPropBag->Read(pMap->szDesc, &var, pErrorLog))) continue;  // not saved
+      HRESULT hr = _AtlVariantToDataEntry(pMap, pThis, &var);
+      if (FAILED(hr)) return hr;
+      continue;
+    }
+    IDispatch* pDisp = NULL;
+    HRESULT hr = _AtlPropMapDispatch(pUnk, pMap, &pDisp);
+    if (FAILED(hr)) return hr;
+    // The type the property has now, unless the map gives it.
+    VARTYPE vt = pMap->vt;
+    if (vt == VT_EMPTY) {
+      CComVariant cur;
+      if (SUCCEEDED(_AtlGetProperty(pDisp, pMap->dispid, &cur))) vt = cur.vt;
+    }
+    var.vt = vt;
+    if (SUCCEEDED(pPropBag->Read(pMap->szDesc, &var, pErrorLog))) {
+      if (vt != VT_EMPTY && var.vt != vt) var.ChangeType(vt);
+      _AtlPutProperty(pDisp, pMap->dispid, &var);
+    }
+    pDisp->Release();
+  }
+  return S_OK;
+}
+
+inline HRESULT AtlIPersistPropertyBag_Save(LPPROPERTYBAG pPropBag, BOOL /*fClearDirty*/,
+                                           BOOL /*fSaveAllProperties*/,
+                                           const ATL_PROPMAP_ENTRY* pMap, void* pThis,
+                                           IUnknown* pUnk) {
+  if (pPropBag == NULL || pMap == NULL) return E_POINTER;
+  for (; !_AtlPropMapEnd(pMap); pMap++) {
+    if (pMap->szDesc == NULL) continue;
+    CComVariant var;
+    HRESULT hr;
+    if (pMap->dwSizeData != 0) {
+      hr = _AtlDataEntryToVariant(pMap, pThis, &var);
+    } else {
+      IDispatch* pDisp = NULL;
+      hr = _AtlPropMapDispatch(pUnk, pMap, &pDisp);
+      if (SUCCEEDED(hr)) {
+        hr = _AtlGetProperty(pDisp, pMap->dispid, &var);
+        pDisp->Release();
+      }
+    }
+    if (FAILED(hr)) return hr;
+    hr = pPropBag->Write(pMap->szDesc, &var);
+    if (FAILED(hr)) return hr;
+  }
+  return S_OK;
+}
+
+// IPersistStreamInit over the property map; T has m_bRequiresSave.
+template <class T>
+class ATL_NO_VTABLE IPersistStreamInitImpl : public IPersistStreamInit {
+public:
+  STDMETHOD(GetClassID)(CLSID* pClassID) override {
+    if (pClassID == NULL) return E_POINTER;
+    *pClassID = T::GetObjectCLSID();
+    return S_OK;
+  }
+  STDMETHOD(IsDirty)() override { return static_cast<T*>(this)->m_bRequiresSave ? S_OK : S_FALSE; }
+  STDMETHOD(Load)(LPSTREAM pStm) override {
+    T* pT = static_cast<T*>(this);
+    HRESULT hr = pT->IPersistStreamInit_Load(pStm, T::GetPropertyMap());
+    if (SUCCEEDED(hr)) pT->m_bRequiresSave = FALSE;
+    return hr;
+  }
+  STDMETHOD(Save)(LPSTREAM pStm, BOOL fClearDirty) override {
+    T* pT = static_cast<T*>(this);
+    HRESULT hr = pT->IPersistStreamInit_Save(pStm, fClearDirty, T::GetPropertyMap());
+    if (SUCCEEDED(hr) && fClearDirty) pT->m_bRequiresSave = FALSE;
+    return hr;
+  }
+  STDMETHOD(GetSizeMax)(ULARGE_INTEGER* pcbSize) override {
+    if (pcbSize != NULL) pcbSize->QuadPart = 0;
+    return E_NOTIMPL;
+  }
+  STDMETHOD(InitNew)() override {
+    static_cast<T*>(this)->m_bRequiresSave = TRUE;
+    return S_OK;
+  }
+
+  // The class may replace these.
+  HRESULT IPersistStreamInit_Load(LPSTREAM pStm, const ATL_PROPMAP_ENTRY* pMap) {
+    T* pT = static_cast<T*>(this);
+    return AtlIPersistStreamInit_Load(pStm, pMap, pT, pT->GetUnknown());
+  }
+  HRESULT IPersistStreamInit_Save(LPSTREAM pStm, BOOL fClearDirty, const ATL_PROPMAP_ENTRY* pMap) {
+    T* pT = static_cast<T*>(this);
+    return AtlIPersistStreamInit_Save(pStm, fClearDirty, pMap, pT, pT->GetUnknown());
+  }
+};
+
+// IPersistStorage: the stream form in a "Contents" stream.
+template <class T>
+class ATL_NO_VTABLE IPersistStorageImpl : public IPersistStorage {
+public:
+  STDMETHOD(GetClassID)(CLSID* pClassID) override {
+    if (pClassID == NULL) return E_POINTER;
+    *pClassID = T::GetObjectCLSID();
+    return S_OK;
+  }
+  STDMETHOD(IsDirty)() override {
+    CComPtr<IPersistStreamInit> p;
+    if (FAILED(_GetPSI(&p))) return S_FALSE;
+    return p->IsDirty();
+  }
+  STDMETHOD(InitNew)(IStorage*) override {
+    CComPtr<IPersistStreamInit> p;
+    HRESULT hr = _GetPSI(&p);
+    return SUCCEEDED(hr) ? p->InitNew() : hr;
+  }
+  STDMETHOD(Load)(IStorage* pStorage) override {
+    if (pStorage == NULL) return E_POINTER;
+    CComPtr<IPersistStreamInit> p;
+    HRESULT hr = _GetPSI(&p);
+    if (FAILED(hr)) return hr;
+    CComPtr<IStream> spStream;
+    hr = pStorage->OpenStream(L"Contents", NULL, STGM_DIRECT | STGM_SHARE_EXCLUSIVE | STGM_READ, 0,
+                              &spStream);
+    return SUCCEEDED(hr) ? p->Load(spStream) : hr;
+  }
+  STDMETHOD(Save)(IStorage* pStorage, BOOL fSameAsLoad) override {
+    if (pStorage == NULL) return E_POINTER;
+    CComPtr<IPersistStreamInit> p;
+    HRESULT hr = _GetPSI(&p);
+    if (FAILED(hr)) return hr;
+    CComPtr<IStream> spStream;
+    hr = pStorage->CreateStream(L"Contents",
+                                STGM_DIRECT | STGM_SHARE_EXCLUSIVE | STGM_WRITE | STGM_CREATE, 0, 0,
+                                &spStream);
+    return SUCCEEDED(hr) ? p->Save(spStream, fSameAsLoad) : hr;
+  }
+  STDMETHOD(SaveCompleted)(IStorage*) override { return S_OK; }
+  STDMETHOD(HandsOffStorage)() override { return S_OK; }
+
+private:
+  HRESULT _GetPSI(IPersistStreamInit** pp) {
+    return static_cast<T*>(this)->GetUnknown()->QueryInterface(IID_IPersistStreamInit, (void**)pp);
+  }
+};
+
+// IPersistPropertyBag over the property map, by the entries' names.
+template <class T>
+class ATL_NO_VTABLE IPersistPropertyBagImpl : public IPersistPropertyBag {
+public:
+  STDMETHOD(GetClassID)(CLSID* pClassID) override {
+    if (pClassID == NULL) return E_POINTER;
+    *pClassID = T::GetObjectCLSID();
+    return S_OK;
+  }
+  STDMETHOD(InitNew)() override {
+    static_cast<T*>(this)->m_bRequiresSave = TRUE;
+    return S_OK;
+  }
+  STDMETHOD(Load)(LPPROPERTYBAG pPropBag, LPERRORLOG pErrorLog) override {
+    T* pT = static_cast<T*>(this);
+    HRESULT hr = pT->IPersistPropertyBag_Load(pPropBag, pErrorLog, T::GetPropertyMap());
+    if (SUCCEEDED(hr)) pT->m_bRequiresSave = FALSE;
+    return hr;
+  }
+  STDMETHOD(Save)(LPPROPERTYBAG pPropBag, BOOL fClearDirty, BOOL fSaveAllProperties) override {
+    T* pT = static_cast<T*>(this);
+    HRESULT hr = pT->IPersistPropertyBag_Save(pPropBag, fClearDirty, fSaveAllProperties,
+                                              T::GetPropertyMap());
+    if (SUCCEEDED(hr) && fClearDirty) pT->m_bRequiresSave = FALSE;
+    return hr;
+  }
+
+  HRESULT IPersistPropertyBag_Load(LPPROPERTYBAG pPropBag, LPERRORLOG pErrorLog,
+                                   const ATL_PROPMAP_ENTRY* pMap) {
+    T* pT = static_cast<T*>(this);
+    return AtlIPersistPropertyBag_Load(pPropBag, pErrorLog, pMap, pT, pT->GetUnknown());
+  }
+  HRESULT IPersistPropertyBag_Save(LPPROPERTYBAG pPropBag, BOOL fClearDirty,
+                                   BOOL fSaveAllProperties, const ATL_PROPMAP_ENTRY* pMap) {
+    T* pT = static_cast<T*>(this);
+    return AtlIPersistPropertyBag_Save(pPropBag, fClearDirty, fSaveAllProperties, pMap, pT,
+                                       pT->GetUnknown());
+  }
+};
+
+// ISpecifyPropertyPages: the pages the property map names, each once.
+template <class T>
+class ATL_NO_VTABLE ISpecifyPropertyPagesImpl : public ISpecifyPropertyPages {
+public:
+  STDMETHOD(GetPages)(CAUUID* pPages) override {
+    if (pPages == NULL) return E_POINTER;
+    pPages->cElems = 0;
+    pPages->pElems = NULL;
+    const ATL_PROPMAP_ENTRY* pMap = T::GetPropertyMap();
+    int n = 0;
+    for (const ATL_PROPMAP_ENTRY* p = pMap; !_AtlPropMapEnd(p); p++) n++;
+    if (n == 0) return S_OK;
+    GUID* pElems = (GUID*)::CoTaskMemAlloc(sizeof(GUID) * n);
+    if (pElems == NULL) return E_OUTOFMEMORY;
+    ULONG c = 0;
+    for (const ATL_PROPMAP_ENTRY* p = pMap; !_AtlPropMapEnd(p); p++) {
+      if (p->pclsidPropPage == NULL || InlineIsEqualGUID(*p->pclsidPropPage, CLSID_NULL)) continue;
+      bool bSeen = false;
+      for (ULONG i = 0; i < c; i++)
+        if (InlineIsEqualGUID(pElems[i], *p->pclsidPropPage)) bSeen = true;
+      if (!bSeen) pElems[c++] = *p->pclsidPropPage;
+    }
+    if (c == 0) {
+      ::CoTaskMemFree(pElems);
+      pElems = NULL;
+    }
+    pPages->cElems = c;
+    pPages->pElems = pElems;
+    return S_OK;
+  }
+};
+
+// ---------------------------------------------------------------------
+// Event sinks: a class takes an object's events (a dispinterface) as
+// calls to its own __stdcall member functions, named in a sink map.
+
+#ifndef _ATL_MAX_VARTYPES
+#define _ATL_MAX_VARTYPES 8
+#endif
+
+// How a handler is called: its convention, return type and parameters.
+struct _ATL_FUNC_INFO {
+  CALLCONV cc;
+  VARTYPE vtReturn;
+  SHORT nParams;
+  VARTYPE pVarTypes[_ATL_MAX_VARTYPES];
+};
+
+// The object's source interface: its libid, its default source
+// dispinterface and the type library's version, from its class info.
+inline HRESULT WINAPI AtlGetObjectSourceInterface(IUnknown* punkObj, GUID* plibid, IID* piid,
+                                                  unsigned short* pdwMajor, unsigned short* pdwMinor) {
+  if (punkObj == NULL || plibid == NULL || piid == NULL || pdwMajor == NULL || pdwMinor == NULL)
+    return E_POINTER;
+  *plibid = GUID_NULL;
+  *piid = IID_NULL;
+  *pdwMajor = *pdwMinor = 0;
+  ITypeInfo* pClass = NULL;
+  HRESULT hr = E_NOINTERFACE;
+  IProvideClassInfo2* pPCI2 = NULL;
+  if (SUCCEEDED(punkObj->QueryInterface(IID_IProvideClassInfo2, (void**)&pPCI2))) {
+    hr = pPCI2->GetGUID(GUIDKIND_DEFAULT_SOURCE_DISP_IID, piid);
+    if (SUCCEEDED(hr)) hr = pPCI2->GetClassInfo(&pClass);
+    pPCI2->Release();
+  } else {
+    IProvideClassInfo* pPCI = NULL;
+    if (SUCCEEDED(punkObj->QueryInterface(IID_IProvideClassInfo, (void**)&pPCI))) {
+      hr = pPCI->GetClassInfo(&pClass);
+      pPCI->Release();
+      // The coclass's default source interface.
+      TYPEATTR* pAttr = NULL;
+      if (SUCCEEDED(hr) && SUCCEEDED(hr = pClass->GetTypeAttr(&pAttr))) {
+        hr = E_FAIL;
+        for (UINT i = 0; i < pAttr->cImplTypes; i++) {
+          int nFlags = 0;
+          HREFTYPE hRef;
+          ITypeInfo* pTI = NULL;
+          if (FAILED(pClass->GetImplTypeFlags(i, &nFlags))) continue;
+          if ((nFlags & (IMPLTYPEFLAG_FDEFAULT | IMPLTYPEFLAG_FSOURCE)) !=
+              (IMPLTYPEFLAG_FDEFAULT | IMPLTYPEFLAG_FSOURCE))
+            continue;
+          if (SUCCEEDED(pClass->GetRefTypeOfImplType(i, &hRef)) &&
+              SUCCEEDED(pClass->GetRefTypeInfo(hRef, &pTI))) {
+            TYPEATTR* pa = NULL;
+            if (SUCCEEDED(pTI->GetTypeAttr(&pa))) {
+              *piid = pa->guid;
+              pTI->ReleaseTypeAttr(pa);
+              hr = S_OK;
+            }
+            pTI->Release();
+          }
+          break;
+        }
+        pClass->ReleaseTypeAttr(pAttr);
+      }
+    }
+  }
+  if (pClass != NULL) {
+    ITypeLib* pLib = NULL;
+    UINT nIndex;
+    if (SUCCEEDED(hr) && SUCCEEDED(hr = pClass->GetContainingTypeLib(&pLib, &nIndex))) {
+      TLIBATTR* pla = NULL;
+      if (SUCCEEDED(hr = pLib->GetLibAttr(&pla))) {
+        *plibid = pla->guid;
+        *pdwMajor = pla->wMajorVerNum;
+        *pdwMinor = pla->wMinorVerNum;
+        pLib->ReleaseTLibAttr(pla);
+      }
+      pLib->Release();
+    }
+    pClass->Release();
+  }
+  return hr;
+}
+
+// One sink map entry: the control (or other source) by its id, the
+// source interface, where the sink's base class sits in the class, the
+// event's dispid and the handler.
+template <class T>
+struct _ATL_EVENT_ENTRY {
+  UINT nControlID;
+  const IID* piid;
+  int nOffset;
+  DISPID dispid;
+  void(__stdcall T::*pfn)();
+  _ATL_FUNC_INFO* pInfo;
+};
+
+// What every sink shares, at the start of its vtable the IUnknown
+// methods of the dispinterface it is advised as.
+class ATL_NO_VTABLE _IDispEvent {
+public:
+  _IDispEvent()
+      : m_libid(GUID_NULL), m_iid(IID_NULL), m_wMajorVerNum(0), m_wMinorVerNum(0),
+        m_dwEventCookie(0xFEFEFEFE) {}
+  STDMETHOD(_LocDEQueryInterface)(REFIID riid, void** ppvObject) = 0;
+  virtual ULONG STDMETHODCALLTYPE AddRef() = 0;
+  virtual ULONG STDMETHODCALLTYPE Release() = 0;
+
+  GUID m_libid;
+  IID m_iid;
+  unsigned short m_wMajorVerNum;
+  unsigned short m_wMinorVerNum;
+  DWORD m_dwEventCookie;
+
+  HRESULT DispEventAdvise(IUnknown* pUnk, const IID* piid) {
+    if (pUnk == NULL || piid == NULL) return E_POINTER;
+    if (InlineIsEqualGUID(*piid, IID_NULL)) {
+      // The object's default source interface.
+      HRESULT hr = AtlGetObjectSourceInterface(pUnk, &m_libid, &m_iid, &m_wMajorVerNum,
+                                               &m_wMinorVerNum);
+      if (FAILED(hr)) return hr;
+    } else if (piid != &m_iid) {
+      m_iid = *piid;
+    }
+    return AtlAdvise(pUnk, (IUnknown*)this, m_iid, &m_dwEventCookie);
+  }
+  HRESULT DispEventUnadvise(IUnknown* pUnk, const IID* piid) {
+    if (pUnk == NULL) return E_POINTER;
+    const IID& iid = (piid == NULL || InlineIsEqualGUID(*piid, IID_NULL)) ? m_iid : *piid;
+    HRESULT hr = AtlUnadvise(pUnk, iid, m_dwEventCookie);
+    m_dwEventCookie = 0xFEFEFEFE;
+    return hr;
+  }
+};
+
+// A base of its own for each (source id, interface) pair, so that one
+// class can sink several sources.
+template <UINT nID, const IID* piid>
+class ATL_NO_VTABLE _IDispEventLocator : public _IDispEvent {};
+
+// The handler's address and the object it is called on, from a pointer
+// to member (the Itanium C++ ABI: {address or 1 + vtable offset,
+// this adjustment}; ARM keeps the virtual flag in the adjustment).
+inline void _AtlResolveMemberFn(void* pObj, const void* pmf, size_t cb, void** ppThis,
+                                void** ppfn) {
+  struct _PMF {
+    UINT_PTR ptr;
+    INT_PTR adj;
+  } mp = {0, 0};
+  memcpy(&mp, pmf, cb < sizeof(mp) ? cb : sizeof(mp));
+#if defined(__arm__) || defined(__aarch64__)
+  bool bVirtual = (mp.adj & 1) != 0;
+  char* p = (char*)pObj + (mp.adj >> 1);
+  UINT_PTR nVOffset = mp.ptr;
+#else
+  bool bVirtual = (mp.ptr & 1) != 0;
+  char* p = (char*)pObj + mp.adj;
+  UINT_PTR nVOffset = mp.ptr - 1;
+#endif
+  *ppThis = p;
+  if (bVirtual)
+    *ppfn = *(void**)(*(char**)p + nVOffset);
+  else
+    *ppfn = (void*)mp.ptr;
+}
+
+// A sink whose handlers' types the sink map gives (SINK_ENTRY_INFO).
+template <UINT nID, class T, const IID* pdiid>
+class ATL_NO_VTABLE IDispEventSimpleImpl : public _IDispEventLocator<nID, pdiid> {
+public:
+  STDMETHOD(_LocDEQueryInterface)(REFIID riid, void** ppvObject) override {
+    if (ppvObject == NULL) return E_POINTER;
+    *ppvObject = NULL;
+    if (InlineIsEqualGUID(riid, IID_IUnknown) || InlineIsEqualGUID(riid, IID_IDispatch) ||
+        InlineIsEqualGUID(riid, *pdiid) || InlineIsEqualGUID(riid, this->m_iid)) {
+      *ppvObject = this;
+      AddRef();
+      return S_OK;
+    }
+    return E_NOINTERFACE;
+  }
+  // The sink lives as long as its class: no counting.
+  virtual ULONG STDMETHODCALLTYPE AddRef() override { return 1; }
+  virtual ULONG STDMETHODCALLTYPE Release() override { return 1; }
+
+  // The rest of IDispatch's vtable.
+  STDMETHOD(GetTypeInfoCount)(UINT* pctinfo) {
+    if (pctinfo != NULL) *pctinfo = 0;
+    return E_NOTIMPL;
+  }
+  STDMETHOD(GetTypeInfo)(UINT, LCID, ITypeInfo** pptinfo) {
+    if (pptinfo != NULL) *pptinfo = NULL;
+    return E_NOTIMPL;
+  }
+  STDMETHOD(GetIDsOfNames)(REFIID, LPOLESTR*, UINT, LCID, DISPID*) { return E_NOTIMPL; }
+  STDMETHOD(Invoke)(DISPID dispidMember, REFIID, LCID lcid, WORD, DISPPARAMS* pdispparams,
+                    VARIANT* pvarResult, EXCEPINFO*, UINT*) {
+    const _ATL_EVENT_ENTRY<T>* pMap = T::_GetSinkMap();
+    DISPPARAMS dpEmpty = {NULL, NULL, 0, 0};
+    if (pdispparams == NULL) pdispparams = &dpEmpty;
+    for (; pMap->piid != NULL; pMap++) {
+      if (pMap->nControlID != nID || pMap->dispid != dispidMember ||
+          !InlineIsEqualGUID(*pMap->piid, *pdiid))
+        continue;
+      _ATL_FUNC_INFO info;
+      _ATL_FUNC_INFO* pInfo = pMap->pInfo;
+      if (pInfo == NULL) {
+        if (FAILED(GetFuncInfoFromId(this->m_iid, dispidMember, lcid, info))) continue;
+        pInfo = &info;
+      }
+      InvokeFromFuncInfo(pMap->pfn, *pInfo, pdispparams, pvarResult);
+    }
+    return S_OK;
+  }
+
+  // The handler's types for an event; IDispEventImpl reads them from
+  // the type library.
+  virtual HRESULT GetFuncInfoFromId(const IID&, DISPID, LCID, _ATL_FUNC_INFO&) {
+    return E_NOTIMPL;
+  }
+
+  // Calls the handler with the event's arguments, converted to the types
+  // it takes.
+  HRESULT InvokeFromFuncInfo(void(__stdcall T::*pEvent)(), _ATL_FUNC_INFO& info,
+                             DISPPARAMS* pdispparams, VARIANT* pvarResult) {
+    T* pT = static_cast<T*>(this);
+    void* pThis = NULL;
+    void* pfn = NULL;
+    _AtlResolveMemberFn(pT, &pEvent, sizeof(pEvent), &pThis, &pfn);
+    int nParams = info.nParams;
+    if (nParams < 0 || nParams > _ATL_MAX_VARTYPES) return E_INVALIDARG;
+    if ((int)pdispparams->cArgs < nParams) return DISP_E_BADPARAMCOUNT;
+    VARIANT vThis;
+    VariantInit(&vThis);
+    if (sizeof(void*) == 8) {
+      vThis.vt = VT_I8;
+      vThis.llVal = (LONGLONG)(INT_PTR)pThis;
+    } else {
+      vThis.vt = VT_I4;
+      vThis.lVal = (LONG)(INT_PTR)pThis;
+    }
+    VARIANT tmp[_ATL_MAX_VARTYPES];
+    VARIANTARG* rgpv[_ATL_MAX_VARTYPES + 1];
+    VARTYPE rgvt[_ATL_MAX_VARTYPES + 1];
+    rgpv[0] = &vThis;
+    rgvt[0] = vThis.vt;
+    HRESULT hr = S_OK;
+    int i;
+    for (i = 0; i < nParams; i++) VariantInit(&tmp[i]);
+    for (i = 0; i < nParams && SUCCEEDED(hr); i++) {
+      // The arguments come last first.
+      VARIANT* pArg = &pdispparams->rgvarg[pdispparams->cArgs - 1 - i];
+      VARTYPE vt = info.pVarTypes[i];
+      rgvt[i + 1] = vt;
+      rgpv[i + 1] = pArg;
+      if (pArg->vt == vt) continue;
+      if (vt == VT_VARIANT) {
+        // A VARIANT by value: the argument itself, or what it refers to.
+        if (pArg->vt == (VT_VARIANT | VT_BYREF) && pArg->pvarVal != NULL) rgpv[i + 1] = pArg->pvarVal;
+      } else if (vt == (VT_VARIANT | VT_BYREF)) {
+        tmp[i].vt = VT_VARIANT | VT_BYREF;
+        tmp[i].pvarVal = pArg;
+        rgpv[i + 1] = &tmp[i];
+      } else if (vt & VT_BYREF) {
+        hr = DISP_E_TYPEMISMATCH;
+      } else {
+        hr = VariantChangeType(&tmp[i], pArg, 0, vt);
+        rgpv[i + 1] = &tmp[i];
+      }
+    }
+    if (SUCCEEDED(hr)) {
+      VARIANT vRet;
+      VariantInit(&vRet);
+      hr = DispCallFunc(NULL, (ULONG_PTR)pfn, info.cc, info.vtReturn, nParams + 1, rgvt, rgpv,
+                        &vRet);
+      if (info.vtReturn == VT_EMPTY || info.vtReturn == VT_VOID) vRet.vt = VT_EMPTY;
+      if (SUCCEEDED(hr) && pvarResult != NULL) {
+        VariantClear(pvarResult);
+        *pvarResult = vRet;
+      } else {
+        VariantClear(&vRet);
+      }
+    }
+    for (i = 0; i < nParams; i++)
+      if (tmp[i].vt != (VT_VARIANT | VT_BYREF)) VariantClear(&tmp[i]);
+    return hr;
+  }
+
+  HRESULT DispEventAdvise(IUnknown* pUnk, const IID* piid) {
+    return _IDispEvent::DispEventAdvise(pUnk, piid);
+  }
+  HRESULT DispEventUnadvise(IUnknown* pUnk, const IID* piid) {
+    return _IDispEvent::DispEventUnadvise(pUnk, piid);
+  }
+  HRESULT DispEventAdvise(IUnknown* pUnk) { return _IDispEvent::DispEventAdvise(pUnk, pdiid); }
+  HRESULT DispEventUnadvise(IUnknown* pUnk) { return _IDispEvent::DispEventUnadvise(pUnk, pdiid); }
+};
+
+// A sink whose handlers' types come from the type library that
+// describes the source interface (SINK_ENTRY, SINK_ENTRY_EX).
+template <UINT nID, class T, const IID* pdiid = &IID_NULL, const GUID* plibid = &GUID_NULL,
+          WORD wMajor = 0, WORD wMinor = 0, class tihclass = CComTypeInfoHolder>
+class ATL_NO_VTABLE IDispEventImpl : public IDispEventSimpleImpl<nID, T, pdiid> {
+public:
+  typedef tihclass _tihclass;
+  ITypeInfo* m_pTypeInfo;
+
+  IDispEventImpl() : m_pTypeInfo(NULL) {
+    this->m_libid = *plibid;
+    this->m_iid = *pdiid;
+    this->m_wMajorVerNum = wMajor;
+    this->m_wMinorVerNum = wMinor;
+  }
+  ~IDispEventImpl() {
+    if (m_pTypeInfo != NULL) m_pTypeInfo->Release();
+  }
+
+  STDMETHOD(GetTypeInfoCount)(UINT* pctinfo) override {
+    if (pctinfo == NULL) return E_POINTER;
+    *pctinfo = 1;
+    return S_OK;
+  }
+  STDMETHOD(GetTypeInfo)(UINT itinfo, LCID lcid, ITypeInfo** pptinfo) override {
+    if (pptinfo == NULL) return E_POINTER;
+    *pptinfo = NULL;
+    if (itinfo != 0) return DISP_E_BADINDEX;
+    HRESULT hr = GetEventTypeInfo(lcid);
+    if (SUCCEEDED(hr)) {
+      *pptinfo = m_pTypeInfo;
+      m_pTypeInfo->AddRef();
+    }
+    return hr;
+  }
+  STDMETHOD(GetIDsOfNames)(REFIID, LPOLESTR* rgszNames, UINT cNames, LCID lcid,
+                           DISPID* rgdispid) override {
+    HRESULT hr = GetEventTypeInfo(lcid);
+    if (FAILED(hr)) return hr;
+    return m_pTypeInfo->GetIDsOfNames(rgszNames, cNames, rgdispid);
+  }
+
+  // Advising on the object's default source interface when the class
+  // names none (IID_NULL).
+  HRESULT DispEventAdvise(IUnknown* pUnk, const IID* piid) {
+    if (pUnk == NULL) return E_POINTER;
+    if (piid == NULL || InlineIsEqualGUID(*piid, IID_NULL) || InlineIsEqualGUID(this->m_iid, IID_NULL)) {
+      // Keep the source's own type information when it gives it.
+      AtlGetObjectSourceInterface(pUnk, &this->m_libid, &this->m_iid, &this->m_wMajorVerNum,
+                                  &this->m_wMinorVerNum);
+      _KeepSourceTypeInfo(pUnk);
+      if (InlineIsEqualGUID(this->m_iid, IID_NULL)) return E_FAIL;
+      return _IDispEvent::DispEventAdvise(pUnk, &this->m_iid);
+    }
+    return _IDispEvent::DispEventAdvise(pUnk, piid);
+  }
+  HRESULT DispEventAdvise(IUnknown* pUnk) { return DispEventAdvise(pUnk, pdiid); }
+  HRESULT DispEventUnadvise(IUnknown* pUnk, const IID* piid) {
+    return _IDispEvent::DispEventUnadvise(pUnk, piid);
+  }
+  HRESULT DispEventUnadvise(IUnknown* pUnk) { return _IDispEvent::DispEventUnadvise(pUnk, pdiid); }
+
+  // The source interface's description: the source's own, else the
+  // registered type library, else this module's.
+  HRESULT GetEventTypeInfo(LCID lcid) {
+    if (m_pTypeInfo != NULL) return S_OK;
+    ITypeLib* pLib = NULL;
+    HRESULT hr = E_FAIL;
+    if (!InlineIsEqualGUID(this->m_libid, GUID_NULL)) {
+      WORD wMaj = this->m_wMajorVerNum, wMin = this->m_wMinorVerNum;
+      if (wMaj == 0 && wMin == 0) wMaj = 1;
+      hr = ::LoadRegTypeLib(this->m_libid, wMaj, wMin, lcid, &pLib);
+    }
+    if (FAILED(hr)) {
+      BSTR bstrPath = NULL;
+      hr = AtlLoadTypeLib(_AtlBaseModule.GetModuleInstance(), NULL, &bstrPath, &pLib);
+      ::SysFreeString(bstrPath);
+    }
+    if (FAILED(hr)) return hr;
+    hr = pLib->GetTypeInfoOfGuid(this->m_iid, &m_pTypeInfo);
+    pLib->Release();
+    return hr;
+  }
+
+  virtual HRESULT GetFuncInfoFromId(const IID&, DISPID dispidMember, LCID lcid,
+                                    _ATL_FUNC_INFO& info) override {
+    HRESULT hr = GetEventTypeInfo(lcid);
+    if (FAILED(hr)) return hr;
+    TYPEATTR* pAttr = NULL;
+    hr = m_pTypeInfo->GetTypeAttr(&pAttr);
+    if (FAILED(hr)) return hr;
+    UINT cFuncs = pAttr->cFuncs;
+    m_pTypeInfo->ReleaseTypeAttr(pAttr);
+    hr = DISP_E_MEMBERNOTFOUND;
+    for (UINT i = 0; i < cFuncs; i++) {
+      FUNCDESC* pfd = NULL;
+      if (FAILED(m_pTypeInfo->GetFuncDesc(i, &pfd))) continue;
+      if (pfd->memid == dispidMember) {
+        if (pfd->cParams > _ATL_MAX_VARTYPES) {
+          hr = E_FAIL;
+        } else {
+          info.cc = CC_STDCALL;
+          info.vtReturn = _VarTypeOf(pfd->elemdescFunc.tdesc);
+          if (info.vtReturn == VT_HRESULT) info.vtReturn = VT_ERROR;
+          info.nParams = pfd->cParams;
+          for (int j = 0; j < pfd->cParams; j++)
+            info.pVarTypes[j] = _VarTypeOf(pfd->lprgelemdescParam[j].tdesc);
+          hr = S_OK;
+        }
+        m_pTypeInfo->ReleaseFuncDesc(pfd);
+        break;
+      }
+      m_pTypeInfo->ReleaseFuncDesc(pfd);
+    }
+    return hr;
+  }
+
+protected:
+  void _KeepSourceTypeInfo(IUnknown* pUnk) {
+    IProvideClassInfo* pPCI = NULL;
+    if (m_pTypeInfo != NULL || FAILED(pUnk->QueryInterface(IID_IProvideClassInfo, (void**)&pPCI)))
+      return;
+    ITypeInfo* pClass = NULL;
+    if (SUCCEEDED(pPCI->GetClassInfo(&pClass))) {
+      ITypeLib* pLib = NULL;
+      UINT n;
+      if (SUCCEEDED(pClass->GetContainingTypeLib(&pLib, &n))) {
+        pLib->GetTypeInfoOfGuid(this->m_iid, &m_pTypeInfo);
+        pLib->Release();
+      }
+      pClass->Release();
+    }
+    pPCI->Release();
+  }
+  // The VARTYPE a handler takes for a type description.
+  VARTYPE _VarTypeOf(const TYPEDESC& td) {
+    if (td.vt == VT_PTR && td.lptdesc != NULL) return (VARTYPE)(_VarTypeOf(*td.lptdesc) | VT_BYREF);
+    if (td.vt == VT_SAFEARRAY) return VT_ARRAY | (td.lptdesc != NULL ? td.lptdesc->vt : VT_VARIANT);
+    if (td.vt == VT_USERDEFINED) {
+      VARTYPE vt = VT_I4;
+      ITypeInfo* pRef = NULL;
+      if (SUCCEEDED(m_pTypeInfo->GetRefTypeInfo(td.hreftype, &pRef))) {
+        TYPEATTR* pa = NULL;
+        if (SUCCEEDED(pRef->GetTypeAttr(&pa))) {
+          switch (pa->typekind) {
+          case TKIND_ALIAS:
+            vt = pa->tdescAlias.vt == VT_USERDEFINED ? VT_I4 : pa->tdescAlias.vt;
+            break;
+          case TKIND_DISPATCH: vt = VT_DISPATCH; break;
+          case TKIND_INTERFACE: case TKIND_COCLASS: vt = VT_UNKNOWN; break;
+          case TKIND_RECORD: vt = VT_RECORD; break;
+          default: vt = VT_I4; break;
+          }
+          pRef->ReleaseTypeAttr(pa);
+        }
+        pRef->Release();
+      }
+      return vt;
+    }
+    if (td.vt == VT_INT) return VT_I4;
+    if (td.vt == VT_UINT) return VT_UI4;
+    return td.vt;
+  }
+};
+
+// The sink map: the events a class takes, by source id and dispid. A
+// handler is named by pointer to member (&CMyDlg::OnClick); with
+// clang-retro's compiler, which tells the two apart
+// (__starts_with_ampersand), also by its plain name (OnClick), as
+// Visual C++ 6 code writes it.
+#ifdef __starts_with_ampersand
+#define _ATL_SINK_PMF(f) _ATL_SINK_PMF_CAT(_ATL_SINK_PMF_, __starts_with_ampersand(f))(f)
+#define _ATL_SINK_PMF_CAT(a, b) _ATL_SINK_PMF_CAT2(a, b)
+#define _ATL_SINK_PMF_CAT2(a, b) a##b
+#define _ATL_SINK_PMF_0(f) &_atl_event_classtype::f
+#define _ATL_SINK_PMF_1(f) f
+#else
+#define _ATL_SINK_PMF(f) f
+#endif
+#define BEGIN_SINK_MAP(_class)                                           \
+  typedef _class _GetSinkMapFinder;                                      \
+  static const ATL::_ATL_EVENT_ENTRY<_class>* _GetSinkMap() {            \
+    typedef _class _atl_event_classtype;                                 \
+    static const ATL::_ATL_EVENT_ENTRY<_class> map[] = {
+#define SINK_ENTRY_INFO(id, iid, dispid, fn, info)                                         \
+  {id, &iid,                                                                               \
+   (int)((INT_PTR)(static_cast<ATL::_IDispEventLocator<id, &iid>*>((_atl_event_classtype*)8)) - 8), \
+   dispid, (void(__stdcall _atl_event_classtype::*)())(_ATL_SINK_PMF(fn)), info},
+#define SINK_ENTRY_EX(id, iid, dispid, fn) SINK_ENTRY_INFO(id, iid, dispid, fn, NULL)
+#define SINK_ENTRY(id, dispid, fn) SINK_ENTRY_EX(id, IID_NULL, dispid, fn)
+#define END_SINK_MAP()          \
+  {0, NULL, 0, 0, NULL, NULL}   \
+  }                             \
+  ;                             \
+  return map;                   \
+  }
+
+// The control in a window that hosts one (atlhost.h).
+inline HRESULT WINAPI AtlAxGetControl(HWND h, IUnknown** pp);
+
+// Advises (or unadvises) each sink in T's map on the control with that
+// id among T's child windows.
+template <class T>
+inline HRESULT AtlAdviseSinkMap(T* pT, bool bAdvise) {
+  const _ATL_EVENT_ENTRY<T>* pEntries = T::_GetSinkMap();
+  HRESULT hr = S_OK;
+  for (const _ATL_EVENT_ENTRY<T>* pEntry = pEntries; pEntry->piid != NULL; pEntry++) {
+    // Each sink once.
+    bool bSeen = false;
+    for (const _ATL_EVENT_ENTRY<T>* p = pEntries; p < pEntry; p++)
+      if (p->nControlID == pEntry->nControlID && p->nOffset == pEntry->nOffset) bSeen = true;
+    if (bSeen) continue;
+    _IDispEvent* pDE = (_IDispEvent*)((DWORD_PTR)pT + pEntry->nOffset);
+    HWND h = ::GetDlgItem(pT->m_hWnd, pEntry->nControlID);
+    if (h == NULL) continue;
+    IUnknown* pUnk = NULL;
+    if (FAILED(AtlAxGetControl(h, &pUnk)) || pUnk == NULL) continue;
+    HRESULT hr2;
+    // Each sink advised once, whichever of the map's users asks.
+    if (bAdvise == (pDE->m_dwEventCookie != 0xFEFEFEFE)) {
+      pUnk->Release();
+      continue;
+    }
+    if (bAdvise) {
+      if (InlineIsEqualGUID(*pEntry->piid, IID_NULL) && InlineIsEqualGUID(pDE->m_iid, IID_NULL))
+        AtlGetObjectSourceInterface(pUnk, &pDE->m_libid, &pDE->m_iid, &pDE->m_wMajorVerNum,
+                                    &pDE->m_wMinorVerNum);
+      const IID* piid = InlineIsEqualGUID(*pEntry->piid, IID_NULL) ? &pDE->m_iid : pEntry->piid;
+      hr2 = pDE->DispEventAdvise(pUnk, piid);
+    } else {
+      hr2 = pDE->DispEventUnadvise(pUnk, &pDE->m_iid);
+    }
+    if (FAILED(hr2)) hr = hr2;
+    pUnk->Release();
+  }
+  return hr;
+}
 
 }  // namespace ATL
 

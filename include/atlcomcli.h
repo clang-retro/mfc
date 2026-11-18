@@ -10,6 +10,11 @@
 #include <ole2.h>
 #include <oleauto.h>
 
+#ifndef _WINPORT
+// The image that holds the code (CComBSTR::LoadString).
+extern "C" IMAGE_DOS_HEADER __ImageBase;
+#endif
+
 namespace ATL {
 
 template <class T>
@@ -209,6 +214,103 @@ public:
     return wcscmp(m_str, lpsz) == 0;
   }
   bool operator!=(LPCOLESTR lpsz) const { return !(*this == lpsz); }
+  bool operator==(const CComBSTR& src) const {
+    UINT n = Length();
+    return n == src.Length() && (n == 0 || memcmp(m_str, src.m_str, n * sizeof(OLECHAR)) == 0);
+  }
+  bool operator!=(const CComBSTR& src) const { return !(*this == src); }
+  bool operator<(const CComBSTR& src) const {
+    if (m_str == NULL) return src.m_str != NULL;
+    if (src.m_str == NULL) return false;
+    return wcscmp(m_str, src.m_str) < 0;
+  }
+
+  unsigned int ByteLength() const { return m_str != NULL ? ::SysStringByteLen(m_str) : 0; }
+  HRESULT AppendBSTR(BSTR p) { return Append(p, (int)::SysStringLen(p)); }
+  HRESULT Append(OLECHAR ch) { return Append(&ch, 1); }
+  HRESULT Append(char ch) {
+    OLECHAR w = (OLECHAR)(unsigned char)ch;
+    return Append(&w, 1);
+  }
+  HRESULT Append(LPCSTR lpsz) {
+    CComBSTR s(lpsz);
+    return Append(s);
+  }
+  HRESULT AppendBytes(const char* lpsz, int nLen) {
+    if (lpsz == NULL || nLen == 0) return S_OK;
+    UINT n1 = ByteLength();
+    BSTR b = ::SysAllocStringByteLen(NULL, n1 + (UINT)nLen);
+    if (b == NULL) return E_OUTOFMEMORY;
+    if (n1 != 0) memcpy(b, m_str, n1);
+    memcpy((char*)b + n1, lpsz, (size_t)nLen);
+    ::SysFreeString(m_str);
+    m_str = b;
+    return S_OK;
+  }
+  CComBSTR& operator+=(LPCSTR lpsz) {
+    Append(lpsz);
+    return *this;
+  }
+  HRESULT ToLower() {
+    if (m_str != NULL) ::CharLowerBuffW(m_str, Length());
+    return S_OK;
+  }
+  HRESULT ToUpper() {
+    if (m_str != NULL) ::CharUpperBuffW(m_str, Length());
+    return S_OK;
+  }
+  // A string resource of the module (or of hInst).
+  bool LoadString(HINSTANCE hInst, UINT nID) {
+    Empty();
+    WCHAR sz[1024];
+    int n = ::LoadStringW(hInst, nID, sz, 1024);
+    if (n <= 0) return false;
+    m_str = ::SysAllocStringLen(sz, (UINT)n);
+    return m_str != NULL;
+  }
+  bool LoadString(UINT nID) { return LoadString(_AtlComCliResourceInstance(), nID); }
+
+  // The string in a stream: its size in bytes with the terminating nul
+  // (0 for no string), then its characters and the nul.
+  HRESULT WriteToStream(IStream* pStream) {
+    if (pStream == NULL) return E_INVALIDARG;
+    ULONG cb = m_str != NULL ? ::SysStringByteLen(m_str) + (ULONG)sizeof(OLECHAR) : 0;
+    HRESULT hr = pStream->Write(&cb, sizeof(cb), NULL);
+    if (SUCCEEDED(hr) && cb != 0) hr = pStream->Write(m_str, cb, NULL);
+    return hr;
+  }
+  HRESULT ReadFromStream(IStream* pStream) {
+    if (pStream == NULL) return E_INVALIDARG;
+    Empty();
+    ULONG cb = 0, cbRead = 0;
+    HRESULT hr = pStream->Read(&cb, sizeof(cb), &cbRead);
+    if (FAILED(hr)) return hr;
+    if (cbRead != sizeof(cb)) return E_FAIL;
+    if (cb == 0) return S_OK;
+    if (cb < sizeof(OLECHAR)) return E_FAIL;
+    m_str = ::SysAllocStringByteLen(NULL, cb - (ULONG)sizeof(OLECHAR));
+    if (m_str == NULL) return E_OUTOFMEMORY;
+    hr = pStream->Read(m_str, cb, &cbRead);
+    if (SUCCEEDED(hr) && cbRead != cb) hr = E_FAIL;
+    if (FAILED(hr)) Empty();
+    return hr;
+  }
+
+private:
+  // The image that holds this code: the portable layer finds it from an
+  // address in it.
+  static HINSTANCE _AtlComCliResourceInstance() {
+#ifdef _WINPORT
+    static const char marker = 0;
+    HMODULE h = NULL;
+    ::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                             GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                         &marker, &h);
+    return (HINSTANCE)h;
+#else
+    return (HINSTANCE)&__ImageBase;
+#endif
+  }
 };
 
 class CComVariant : public tagVARIANT {
@@ -251,8 +353,373 @@ public:
     pdispVal = pSrc;
     if (pSrc != NULL) pSrc->AddRef();
   }
+  CComVariant(IUnknown* pSrc) {
+    vt = VT_UNKNOWN;
+    punkVal = pSrc;
+    if (pSrc != NULL) pSrc->AddRef();
+  }
+  CComVariant(LPCSTR lpszSrc) {
+    ::VariantInit(this);
+    CComBSTR s(lpszSrc);
+    vt = VT_BSTR;
+    bstrVal = s.Detach();
+  }
+  CComVariant(const CComBSTR& bstrSrc) {
+    vt = VT_BSTR;
+    bstrVal = bstrSrc.Copy();
+  }
+  CComVariant(long nSrc, VARTYPE vtSrc) {
+    vt = vtSrc == VT_ERROR ? VT_ERROR : VT_I4;
+    lVal = (LONG)nSrc;
+  }
+  CComVariant(BYTE nSrc) {
+    vt = VT_UI1;
+    bVal = nSrc;
+  }
+  CComVariant(char cSrc) {
+    vt = VT_I1;
+    cVal = cSrc;
+  }
+  CComVariant(unsigned short nSrc) {
+    vt = VT_UI2;
+    uiVal = nSrc;
+  }
+  CComVariant(unsigned int nSrc, VARTYPE vtSrc = VT_UI4) {
+    vt = vtSrc == VT_UINT ? VT_UINT : VT_UI4;
+    ulVal = nSrc;
+  }
+  CComVariant(unsigned long nSrc) {
+    vt = VT_UI4;
+    ulVal = (ULONG)nSrc;
+  }
+  CComVariant(LONGLONG nSrc) {
+    vt = VT_I8;
+    llVal = nSrc;
+  }
+  CComVariant(ULONGLONG nSrc) {
+    vt = VT_UI8;
+    ullVal = nSrc;
+  }
+  CComVariant(float fltSrc) {
+    vt = VT_R4;
+    fltVal = fltSrc;
+  }
+  CComVariant(double dblSrc, VARTYPE vtSrc) {
+    vt = vtSrc == VT_DATE ? VT_DATE : VT_R8;
+    dblVal = dblSrc;
+  }
+  CComVariant(CY cySrc) {
+    vt = VT_CY;
+    cyVal = cySrc;
+  }
   ~CComVariant() { ::VariantClear(this); }
 
+  CComVariant& operator=(LPCOLESTR lpszSrc) {
+    Clear();
+    vt = VT_BSTR;
+    bstrVal = ::SysAllocString(lpszSrc);
+    return *this;
+  }
+  CComVariant& operator=(LPCSTR lpszSrc) {
+    Clear();
+    CComBSTR s(lpszSrc);
+    vt = VT_BSTR;
+    bstrVal = s.Detach();
+    return *this;
+  }
+  CComVariant& operator=(const CComBSTR& bstrSrc) {
+    Clear();
+    vt = VT_BSTR;
+    bstrVal = bstrSrc.Copy();
+    return *this;
+  }
+  CComVariant& operator=(bool bSrc) {
+    Clear();
+    vt = VT_BOOL;
+    boolVal = bSrc ? VARIANT_TRUE : VARIANT_FALSE;
+    return *this;
+  }
+  CComVariant& operator=(int nSrc) {
+    Clear();
+    vt = VT_I4;
+    lVal = nSrc;
+    return *this;
+  }
+  CComVariant& operator=(long nSrc) {
+    Clear();
+    vt = VT_I4;
+    lVal = (LONG)nSrc;
+    return *this;
+  }
+  CComVariant& operator=(short nSrc) {
+    Clear();
+    vt = VT_I2;
+    iVal = nSrc;
+    return *this;
+  }
+  CComVariant& operator=(BYTE nSrc) {
+    Clear();
+    vt = VT_UI1;
+    bVal = nSrc;
+    return *this;
+  }
+  CComVariant& operator=(unsigned long nSrc) {
+    Clear();
+    vt = VT_UI4;
+    ulVal = (ULONG)nSrc;
+    return *this;
+  }
+  CComVariant& operator=(float fltSrc) {
+    Clear();
+    vt = VT_R4;
+    fltVal = fltSrc;
+    return *this;
+  }
+  CComVariant& operator=(double dblSrc) {
+    Clear();
+    vt = VT_R8;
+    dblVal = dblSrc;
+    return *this;
+  }
+  CComVariant& operator=(IDispatch* pSrc) {
+    if (pSrc != NULL) pSrc->AddRef();
+    Clear();
+    vt = VT_DISPATCH;
+    pdispVal = pSrc;
+    return *this;
+  }
+  CComVariant& operator=(IUnknown* pSrc) {
+    if (pSrc != NULL) pSrc->AddRef();
+    Clear();
+    vt = VT_UNKNOWN;
+    punkVal = pSrc;
+    return *this;
+  }
+
+  // Equal by type and value (VarCmp for those it compares).
+  bool operator==(const VARIANT& varSrc) const {
+    if (this == &varSrc) return true;
+    if (vt != varSrc.vt) return false;
+    if (vt == VT_EMPTY || vt == VT_NULL) return true;
+    if (vt == VT_UNKNOWN || vt == VT_DISPATCH) return punkVal == varSrc.punkVal;
+    return _Cmp(varSrc) == 1;
+  }
+  bool operator!=(const VARIANT& varSrc) const { return !(*this == varSrc); }
+  bool operator<(const VARIANT& varSrc) const { return _Cmp(varSrc) == 0; }
+  bool operator>(const VARIANT& varSrc) const { return _Cmp(varSrc) == 2; }
+
+private:
+  // VarCmp's answer: 0 less, 1 equal, 2 greater, 3 not comparable.
+#ifdef VARCMP_EQ
+  int _Cmp(const VARIANT& varSrc) const {
+    HRESULT hr = ::VarCmp(const_cast<CComVariant*>(this), const_cast<VARIANT*>(&varSrc),
+                          LOCALE_USER_DEFAULT, 0);
+    return hr == (HRESULT)VARCMP_LT ? 0 : hr == (HRESULT)VARCMP_EQ ? 1 : hr == (HRESULT)VARCMP_GT ? 2 : 3;
+  }
+#else
+  // Without VarCmp (the portable layer): strings by their characters,
+  // the rest as numbers.
+  int _Cmp(const VARIANT& varSrc) const {
+    if (vt == VT_BSTR && varSrc.vt == VT_BSTR) {
+      UINT n1 = ::SysStringLen(bstrVal), n2 = ::SysStringLen(varSrc.bstrVal);
+      for (UINT i = 0; i < n1 && i < n2; i++)
+        if (bstrVal[i] != varSrc.bstrVal[i]) return bstrVal[i] < varSrc.bstrVal[i] ? 0 : 2;
+      return n1 < n2 ? 0 : n1 == n2 ? 1 : 2;
+    }
+    VARIANT v1, v2;
+    ::VariantInit(&v1);
+    ::VariantInit(&v2);
+    int r = 3;
+    if (SUCCEEDED(::VariantChangeType(&v1, const_cast<CComVariant*>(this), 0, VT_R8)) &&
+        SUCCEEDED(::VariantChangeType(&v2, const_cast<VARIANT*>(&varSrc), 0, VT_R8)))
+      r = v1.dblVal < v2.dblVal ? 0 : v1.dblVal == v2.dblVal ? 1 : 2;
+    ::VariantClear(&v1);
+    ::VariantClear(&v2);
+    return r;
+  }
+#endif
+
+public:
+
+  HRESULT Attach(VARIANT* pSrc) {
+    if (pSrc == NULL) return E_INVALIDARG;
+    HRESULT hr = Clear();
+    if (SUCCEEDED(hr)) {
+      memcpy((VARIANT*)this, pSrc, sizeof(VARIANT));
+      pSrc->vt = VT_EMPTY;
+    }
+    return hr;
+  }
+  HRESULT CopyTo(BSTR* pstrDest) const {
+    if (pstrDest == NULL) return E_POINTER;
+    *pstrDest = NULL;
+    if (vt == VT_BSTR) {
+      *pstrDest = ::SysAllocStringByteLen((const char*)bstrVal, ::SysStringByteLen(bstrVal));
+      return *pstrDest != NULL || bstrVal == NULL ? S_OK : E_OUTOFMEMORY;
+    }
+    CComVariant v;
+    HRESULT hr = ::VariantChangeType(&v, const_cast<CComVariant*>(this), 0, VT_BSTR);
+    if (SUCCEEDED(hr)) {
+      *pstrDest = v.bstrVal;
+      v.vt = VT_EMPTY;
+    }
+    return hr;
+  }
+  template <typename T>
+  void SetByRef(T* pT);
+
+  // The variant in a stream: its type, then its value (a string as
+  // CComBSTR writes it, an object by OleSaveToStream: its CLSID and its
+  // state).
+  HRESULT WriteToStream(IStream* pStream) {
+    if (pStream == NULL) return E_INVALIDARG;
+    HRESULT hr = pStream->Write(&vt, sizeof(VARTYPE), NULL);
+    if (FAILED(hr)) return hr;
+    int cb = _FixedSize(vt);
+    if (cb > 0) return pStream->Write(&bVal, (ULONG)cb, NULL);
+    switch (vt) {
+    case VT_EMPTY:
+    case VT_NULL:
+      return S_OK;
+    case VT_BSTR: {
+      CComBSTR s;
+      s.m_str = bstrVal;
+      hr = s.WriteToStream(pStream);
+      s.m_str = NULL;
+      return hr;
+    }
+    case VT_UNKNOWN:
+    case VT_DISPATCH: {
+      if (punkVal == NULL) return ::WriteClassStm(pStream, _NullClsid());
+      IPersistStream* pPersist = NULL;
+      hr = punkVal->QueryInterface(IID_IPersistStream, (void**)&pPersist);
+      if (FAILED(hr)) {
+        IPersistStreamInit* pInit = NULL;
+        hr = punkVal->QueryInterface(IID_IPersistStreamInit, (void**)&pInit);
+        if (FAILED(hr)) return hr;
+        pPersist = (IPersistStream*)pInit;  // the same vtable up to Save
+      }
+      hr = ::OleSaveToStream(pPersist, pStream);
+      pPersist->Release();
+      return hr;
+    }
+    default:
+      return DISP_E_BADVARTYPE;
+    }
+  }
+  HRESULT ReadFromStream(IStream* pStream) {
+    if (pStream == NULL) return E_INVALIDARG;
+    HRESULT hr = Clear();
+    if (FAILED(hr)) return hr;
+    VARTYPE vtRead = VT_EMPTY;
+    ULONG cbRead = 0;
+    hr = pStream->Read(&vtRead, sizeof(VARTYPE), &cbRead);
+    if (FAILED(hr)) return hr;
+    if (cbRead != sizeof(VARTYPE)) return E_FAIL;
+    int cb = _FixedSize(vtRead);
+    if (cb > 0) {
+      vt = vtRead;
+      hr = pStream->Read(&bVal, (ULONG)cb, &cbRead);
+      if (SUCCEEDED(hr) && cbRead != (ULONG)cb) hr = E_FAIL;
+      if (FAILED(hr)) vt = VT_EMPTY;
+      return hr;
+    }
+    switch (vtRead) {
+    case VT_EMPTY:
+    case VT_NULL:
+      vt = vtRead;
+      return S_OK;
+    case VT_BSTR: {
+      CComBSTR s;
+      hr = s.ReadFromStream(pStream);
+      if (SUCCEEDED(hr)) {
+        vt = VT_BSTR;
+        bstrVal = s.Detach();
+      }
+      return hr;
+    }
+    case VT_UNKNOWN:
+    case VT_DISPATCH: {
+      CLSID clsid;
+      hr = ::ReadClassStm(pStream, &clsid);
+      if (FAILED(hr)) return hr;
+      vt = vtRead;
+      punkVal = NULL;
+      if (memcmp(&clsid, &_NullClsid(), sizeof(CLSID)) == 0) return S_OK;
+      IUnknown* pUnk = NULL;
+      hr = ::CoCreateInstance(clsid, NULL, CLSCTX_ALL, IID_IUnknown, (void**)&pUnk);
+      if (FAILED(hr)) {
+        vt = VT_EMPTY;
+        return hr;
+      }
+      IPersistStream* pPersist = NULL;
+      hr = pUnk->QueryInterface(IID_IPersistStream, (void**)&pPersist);
+      if (FAILED(hr)) hr = pUnk->QueryInterface(IID_IPersistStreamInit, (void**)&pPersist);
+      if (SUCCEEDED(hr)) {
+        hr = pPersist->Load(pStream);
+        pPersist->Release();
+      }
+      if (SUCCEEDED(hr) && vtRead == VT_DISPATCH) {
+        IDispatch* pDisp = NULL;
+        hr = pUnk->QueryInterface(IID_IDispatch, (void**)&pDisp);
+        pUnk->Release();
+        pUnk = pDisp;
+      }
+      if (FAILED(hr)) {
+        if (pUnk != NULL) pUnk->Release();
+        vt = VT_EMPTY;
+        return hr;
+      }
+      punkVal = pUnk;
+      return S_OK;
+    }
+    default:
+      return DISP_E_BADVARTYPE;
+    }
+  }
+  // The size WriteToStream writes.
+  ULONG GetSize() const {
+    int cb = _FixedSize(vt);
+    if (cb > 0) return sizeof(VARTYPE) + (ULONG)cb;
+    if (vt == VT_BSTR)
+      return sizeof(VARTYPE) + sizeof(ULONG) +
+             (bstrVal != NULL ? ::SysStringByteLen(bstrVal) + (ULONG)sizeof(OLECHAR) : 0);
+    return sizeof(VARTYPE);
+  }
+
+private:
+  static int _FixedSize(VARTYPE v) {
+    switch (v) {
+    case VT_UI1:
+    case VT_I1:
+      return 1;
+    case VT_I2:
+    case VT_UI2:
+    case VT_BOOL:
+      return 2;
+    case VT_I4:
+    case VT_UI4:
+    case VT_R4:
+    case VT_INT:
+    case VT_UINT:
+    case VT_ERROR:
+      return 4;
+    case VT_R8:
+    case VT_CY:
+    case VT_DATE:
+    case VT_I8:
+    case VT_UI8:
+      return 8;
+    default:
+      return 0;
+    }
+  }
+  static const CLSID& _NullClsid() {
+    static const CLSID c = {0, 0, 0, {0, 0, 0, 0, 0, 0, 0, 0}};
+    return c;
+  }
+
+public:
   CComVariant& operator=(const CComVariant& varSrc) {
     if (this != &varSrc) ::VariantCopy(this, const_cast<CComVariant*>(&varSrc));
     return *this;
@@ -278,6 +745,36 @@ public:
     return ::VariantChangeType(this, pVar, 0, vtNew);
   }
 };
+
+// A reference to a value of the caller's: VT_BYREF and the type of *pT.
+template <typename T> struct _AtlVarTypeOf;
+#define _ATL_VARTYPE_OF(t, v) \
+  template <> struct _AtlVarTypeOf<t> { static const VARTYPE vt = v; };
+_ATL_VARTYPE_OF(BYTE, VT_UI1)
+_ATL_VARTYPE_OF(char, VT_I1)
+_ATL_VARTYPE_OF(short, VT_I2)
+_ATL_VARTYPE_OF(unsigned short, VT_UI2)
+_ATL_VARTYPE_OF(int, VT_INT)
+_ATL_VARTYPE_OF(unsigned int, VT_UINT)
+_ATL_VARTYPE_OF(long, VT_I4)
+_ATL_VARTYPE_OF(unsigned long, VT_UI4)
+_ATL_VARTYPE_OF(LONGLONG, VT_I8)
+_ATL_VARTYPE_OF(ULONGLONG, VT_UI8)
+_ATL_VARTYPE_OF(float, VT_R4)
+_ATL_VARTYPE_OF(double, VT_R8)
+_ATL_VARTYPE_OF(CY, VT_CY)
+_ATL_VARTYPE_OF(BSTR, VT_BSTR)
+_ATL_VARTYPE_OF(IUnknown*, VT_UNKNOWN)
+_ATL_VARTYPE_OF(IDispatch*, VT_DISPATCH)
+_ATL_VARTYPE_OF(VARIANT, VT_VARIANT)
+#undef _ATL_VARTYPE_OF
+
+template <typename T>
+inline void CComVariant::SetByRef(T* pT) {
+  Clear();
+  vt = (VARTYPE)(_AtlVarTypeOf<T>::vt | VT_BYREF);
+  byref = (void*)pT;
+}
 
 }  // namespace ATL
 
