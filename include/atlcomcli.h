@@ -9,6 +9,7 @@
 
 #include <ole2.h>
 #include <oleauto.h>
+#include <ocidl.h>
 
 #ifndef _WINPORT
 // The image that holds the code (CComBSTR::LoadString).
@@ -17,8 +18,93 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 namespace ATL {
 
+// What CComPtr<IDispatch> adds: calls through IDispatch by DISPID or by
+// name (CComDispatchDriver is the same, asking for IDispatch when given
+// another interface).
+template <class T, class Derived>
+class _CComPtrDispatch {};
+
+template <class Derived>
+class _CComPtrDispatch<IDispatch, Derived> {
+  IDispatch* _Disp() const { return static_cast<const Derived*>(this)->p; }
+
+public:
+  HRESULT GetIDOfName(LPCOLESTR lpsz, DISPID* pdispid) {
+    return _Disp()->GetIDsOfNames(IID_NULL, const_cast<LPOLESTR*>(&lpsz), 1, LOCALE_USER_DEFAULT,
+                                  pdispid);
+  }
+  HRESULT GetProperty(DISPID dwDispID, VARIANT* pVar) { return GetProperty(_Disp(), dwDispID, pVar); }
+  HRESULT GetPropertyByName(LPCOLESTR lpsz, VARIANT* pVar) {
+    DISPID dispid;
+    HRESULT hr = GetIDOfName(lpsz, &dispid);
+    return SUCCEEDED(hr) ? GetProperty(dispid, pVar) : hr;
+  }
+  HRESULT PutProperty(DISPID dwDispID, VARIANT* pVar) { return PutProperty(_Disp(), dwDispID, pVar); }
+  HRESULT PutPropertyByName(LPCOLESTR lpsz, VARIANT* pVar) {
+    DISPID dispid;
+    HRESULT hr = GetIDOfName(lpsz, &dispid);
+    return SUCCEEDED(hr) ? PutProperty(dispid, pVar) : hr;
+  }
+  HRESULT Invoke0(DISPID dispid, VARIANT* pvarRet = NULL) { return InvokeN(dispid, NULL, 0, pvarRet); }
+  HRESULT Invoke0(LPCOLESTR lpszName, VARIANT* pvarRet = NULL) {
+    return InvokeN(lpszName, NULL, 0, pvarRet);
+  }
+  HRESULT Invoke1(DISPID dispid, VARIANT* pvarParam1, VARIANT* pvarRet = NULL) {
+    return InvokeN(dispid, pvarParam1, 1, pvarRet);
+  }
+  HRESULT Invoke1(LPCOLESTR lpszName, VARIANT* pvarParam1, VARIANT* pvarRet = NULL) {
+    return InvokeN(lpszName, pvarParam1, 1, pvarRet);
+  }
+  // The arguments go last first, as IDispatch takes them.
+  HRESULT Invoke2(DISPID dispid, VARIANT* pvarParam1, VARIANT* pvarParam2, VARIANT* pvarRet = NULL) {
+    if (pvarParam1 == NULL || pvarParam2 == NULL) return E_INVALIDARG;
+    VARIANT args[2];
+    args[0] = *pvarParam2;
+    args[1] = *pvarParam1;
+    return InvokeN(dispid, args, 2, pvarRet);
+  }
+  HRESULT Invoke2(LPCOLESTR lpszName, VARIANT* pvarParam1, VARIANT* pvarParam2,
+                  VARIANT* pvarRet = NULL) {
+    DISPID dispid;
+    HRESULT hr = GetIDOfName(lpszName, &dispid);
+    return SUCCEEDED(hr) ? Invoke2(dispid, pvarParam1, pvarParam2, pvarRet) : hr;
+  }
+  // pvarParams in IDispatch's order: the last argument first.
+  HRESULT InvokeN(DISPID dispid, VARIANT* pvarParams, int nParams, VARIANT* pvarRet = NULL) {
+    DISPPARAMS dp = {pvarParams, NULL, (UINT)nParams, 0};
+    return _Disp()->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &dp, pvarRet,
+                           NULL, NULL);
+  }
+  HRESULT InvokeN(LPCOLESTR lpszName, VARIANT* pvarParams, int nParams, VARIANT* pvarRet = NULL) {
+    DISPID dispid;
+    HRESULT hr = GetIDOfName(lpszName, &dispid);
+    return SUCCEEDED(hr) ? InvokeN(dispid, pvarParams, nParams, pvarRet) : hr;
+  }
+
+  static HRESULT GetProperty(IDispatch* pDisp, DISPID dwDispID, VARIANT* pVar) {
+    if (pDisp == NULL || pVar == NULL) return E_POINTER;
+    DISPPARAMS dp = {NULL, NULL, 0, 0};
+    return pDisp->Invoke(dwDispID, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET, &dp, pVar,
+                         NULL, NULL);
+  }
+  // An object, an array or a reference is put by reference first.
+  static HRESULT PutProperty(IDispatch* pDisp, DISPID dwDispID, VARIANT* pVar) {
+    if (pDisp == NULL || pVar == NULL) return E_POINTER;
+    DISPID dispidPut = DISPID_PROPERTYPUT;
+    DISPPARAMS dp = {pVar, &dispidPut, 1, 1};
+    if (pVar->vt == VT_UNKNOWN || pVar->vt == VT_DISPATCH || (pVar->vt & VT_ARRAY) != 0 ||
+        (pVar->vt & VT_BYREF) != 0) {
+      HRESULT hr = pDisp->Invoke(dwDispID, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUTREF,
+                                 &dp, NULL, NULL, NULL);
+      if (SUCCEEDED(hr)) return hr;
+    }
+    return pDisp->Invoke(dwDispID, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUT, &dp, NULL,
+                         NULL, NULL);
+  }
+};
+
 template <class T>
-class CComPtr {
+class CComPtr : public _CComPtrDispatch<T, CComPtr<T>> {
 public:
   T* p;
 
@@ -80,6 +166,25 @@ public:
                            DWORD dwClsContext = CLSCTX_ALL) {
     return ::CoCreateInstance(rclsid, pUnkOuter, dwClsContext, __uuidof(T), (void**)&p);
   }
+  HRESULT CoCreateInstance(LPCOLESTR szProgID, LPUNKNOWN pUnkOuter = NULL,
+                           DWORD dwClsContext = CLSCTX_ALL) {
+    CLSID clsid;
+    HRESULT hr = ::CLSIDFromProgID(szProgID, &clsid);
+    if (SUCCEEDED(hr)) hr = ::CoCreateInstance(clsid, pUnkOuter, dwClsContext, __uuidof(T), (void**)&p);
+    return hr;
+  }
+  bool operator<(T* pT) const { return p < pT; }
+  // Connects pUnk to the object's connection point for iid.
+  HRESULT Advise(IUnknown* pUnk, const IID& iid, LPDWORD pdw);
+  HRESULT SetSite(IUnknown* punkParent) {
+    IObjectWithSite* pSite = NULL;
+    HRESULT hr = p->QueryInterface(IID_IObjectWithSite, (void**)&pSite);
+    if (SUCCEEDED(hr)) {
+      hr = pSite->SetSite(punkParent);
+      pSite->Release();
+    }
+    return hr;
+  }
   // Two pointers name the same object when their IUnknowns match.
   bool IsEqualObject(IUnknown* pOther) {
     if (p == NULL && pOther == NULL) return true;
@@ -128,6 +233,9 @@ public:
     return CComPtr<IUnknown>::operator=(lp.p);
   }
 };
+
+// IDispatch's helpers on any interface pointer it is given.
+typedef CComQIPtr<IDispatch, &__uuidof(IDispatch)> CComDispatchDriver;
 
 class CComBSTR {
 public:
