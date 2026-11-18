@@ -4,6 +4,7 @@
 #define _AFXEXT
 #include <afxwin.h>
 #include <afxext.h>
+#include <afxdllx.h>
 #include "exttest.h"
 
 static AFX_EXTENSION_MODULE extDLL = {NULL, NULL};

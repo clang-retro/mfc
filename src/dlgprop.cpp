@@ -10,6 +10,20 @@
 #define _AFX_PSP_SIZE PROPSHEETPAGE_V1_SIZE
 #define _AFX_PSH_SIZE PROPSHEETHEADER_V1_SIZE
 
+// A page or sheet that uses the Wizard97 fields needs the longer form,
+// even when a program set the flags in m_psp or m_psh itself.
+static DWORD _AfxPageSize(PROPSHEETPAGE& psp) {
+  if ((psp.dwFlags & (PSP_USEHEADERTITLE | PSP_USEHEADERSUBTITLE)) &&
+      psp.dwSize < PROPSHEETPAGE_V2_SIZE)
+    psp.dwSize = PROPSHEETPAGE_V2_SIZE;
+  return psp.dwSize;
+}
+
+static void _AfxSheetSize(PROPSHEETHEADER& psh) {
+  if (psh.dwFlags & (PSH_WIZARD97 | PSH_WATERMARK | PSH_HEADER | PSH_USEHPLWATERMARK))
+    psh.dwSize = sizeof(PROPSHEETHEADER);
+}
+
 // ---------------------------------------------------------------------
 // CPropertyPage
 
@@ -40,7 +54,42 @@ CPropertyPage::CPropertyPage(LPCTSTR lpszTemplateName, UINT nIDCaption, DWORD dw
   Construct(lpszTemplateName, nIDCaption);
 }
 
+CPropertyPage::CPropertyPage(UINT nIDTemplate, UINT nIDCaption, UINT nIDHeaderTitle,
+                             UINT nIDHeaderSubTitle, DWORD dwSize) {
+  (void)dwSize;
+  Construct(nIDTemplate, nIDCaption, nIDHeaderTitle, nIDHeaderSubTitle);
+}
+
+CPropertyPage::CPropertyPage(LPCTSTR lpszTemplateName, UINT nIDCaption, UINT nIDHeaderTitle,
+                             UINT nIDHeaderSubTitle, DWORD dwSize) {
+  (void)dwSize;
+  Construct(lpszTemplateName, nIDCaption, nIDHeaderTitle, nIDHeaderSubTitle);
+}
+
 CPropertyPage::~CPropertyPage() {}
+
+void CPropertyPage::Construct(UINT nIDTemplate, UINT nIDCaption, UINT nIDHeaderTitle,
+                              UINT nIDHeaderSubTitle) {
+  Construct(MAKEINTRESOURCE(nIDTemplate), nIDCaption, nIDHeaderTitle, nIDHeaderSubTitle);
+}
+
+// A page with a Wizard97 header is the longer, Internet Explorer 5 form.
+void CPropertyPage::Construct(LPCTSTR lpszTemplateName, UINT nIDCaption, UINT nIDHeaderTitle,
+                              UINT nIDHeaderSubTitle) {
+  Construct(lpszTemplateName, nIDCaption);
+  if (nIDHeaderTitle != 0) {
+    m_strHeaderTitle.LoadString(nIDHeaderTitle);
+    m_psp.pszHeaderTitle = m_strHeaderTitle;
+    m_psp.dwFlags |= PSP_USEHEADERTITLE;
+    m_psp.dwSize = PROPSHEETPAGE_V2_SIZE;
+  }
+  if (nIDHeaderSubTitle != 0) {
+    m_strHeaderSubTitle.LoadString(nIDHeaderSubTitle);
+    m_psp.pszHeaderSubTitle = m_strHeaderSubTitle;
+    m_psp.dwFlags |= PSP_USEHEADERSUBTITLE;
+    m_psp.dwSize = PROPSHEETPAGE_V2_SIZE;
+  }
+}
 
 void CPropertyPage::Construct(UINT nIDTemplate, UINT nIDCaption) {
   Construct(MAKEINTRESOURCE(nIDTemplate), nIDCaption);
@@ -173,6 +222,8 @@ BOOL CPropertyPage::PreTranslateMessage(MSG* pMsg) {
 // CPropertySheet
 
 IMPLEMENT_DYNAMIC(CPropertySheet, CWnd)
+IMPLEMENT_DYNAMIC(CPropertyPageEx, CPropertyPage)
+IMPLEMENT_DYNAMIC(CPropertySheetEx, CPropertySheet)
 
 BEGIN_MESSAGE_MAP(CPropertySheet, CWnd)
   ON_MESSAGE(WM_INITDIALOG, HandleInitDialog)
@@ -186,6 +237,48 @@ CPropertySheet::CPropertySheet(UINT nIDCaption, CWnd* pParentWnd, UINT iSelectPa
 
 CPropertySheet::CPropertySheet(LPCTSTR pszCaption, CWnd* pParentWnd, UINT iSelectPage) {
   Construct(pszCaption, pParentWnd, iSelectPage);
+}
+
+CPropertySheet::CPropertySheet(UINT nIDCaption, CWnd* pParentWnd, UINT iSelectPage,
+                               HBITMAP hbmWatermark, HPALETTE hpalWatermark, HBITMAP hbmHeader) {
+  Construct(nIDCaption, pParentWnd, iSelectPage, hbmWatermark, hpalWatermark, hbmHeader);
+}
+
+CPropertySheet::CPropertySheet(LPCTSTR pszCaption, CWnd* pParentWnd, UINT iSelectPage,
+                               HBITMAP hbmWatermark, HPALETTE hpalWatermark, HBITMAP hbmHeader) {
+  Construct(pszCaption, pParentWnd, iSelectPage, hbmWatermark, hpalWatermark, hbmHeader);
+}
+
+void CPropertySheet::Construct(UINT nIDCaption, CWnd* pParentWnd, UINT iSelectPage,
+                               HBITMAP hbmWatermark, HPALETTE hpalWatermark, HBITMAP hbmHeader) {
+  Construct(nIDCaption, pParentWnd, iSelectPage);
+  _SetWatermark(hbmWatermark, hpalWatermark, hbmHeader);
+}
+
+void CPropertySheet::Construct(LPCTSTR pszCaption, CWnd* pParentWnd, UINT iSelectPage,
+                               HBITMAP hbmWatermark, HPALETTE hpalWatermark, HBITMAP hbmHeader) {
+  Construct(pszCaption, pParentWnd, iSelectPage);
+  _SetWatermark(hbmWatermark, hpalWatermark, hbmHeader);
+}
+
+// The bitmaps make the header the longer, Internet Explorer 5 form.
+void CPropertySheet::_SetWatermark(HBITMAP hbmWatermark, HPALETTE hpalWatermark,
+                                   HBITMAP hbmHeader) {
+  if (hbmWatermark != NULL) {
+    m_psh.hbmWatermark = hbmWatermark;
+    m_psh.dwFlags |= PSH_WATERMARK | PSH_USEHBMWATERMARK;
+    m_psh.dwSize = sizeof(PROPSHEETHEADER);
+  }
+  if (hpalWatermark != NULL) {
+    m_psh.hplWatermark = hpalWatermark;
+    m_psh.dwFlags |= PSH_USEHPLWATERMARK;
+    m_psh.dwSize = sizeof(PROPSHEETHEADER);
+  }
+  if (hbmHeader != NULL) {
+    m_psh.hbmHeader = hbmHeader;
+    m_psh.dwFlags |= PSH_HEADER | PSH_USEHBMHEADER;
+    m_psh.dwSize = sizeof(PROPSHEETHEADER);
+  }
 }
 
 CPropertySheet::~CPropertySheet() { delete[] (BYTE*)m_phpage; }
@@ -212,22 +305,27 @@ void CPropertySheet::Construct(LPCTSTR pszCaption, CWnd* pParentWnd, UINT iSelec
 }
 
 void CPropertySheet::BuildPropPageArray() {
-  // The sheet steps through the array by each page's dwSize, so pack the
-  // short Windows 95 form of each page.
+  // The sheet steps through the array by each page's dwSize, so pack each
+  // page in its own form: the short Windows 95 one, or the longer one of a
+  // page with a Wizard97 header.
   delete[] (BYTE*)m_phpage;
   int nPages = (int)m_pages.GetCount();
-  BYTE* pBuf = new BYTE[nPages * _AFX_PSP_SIZE + 1];
-  BYTE* p = pBuf;
+  size_t cb = 0;
   POSITION pos = m_pages.GetHeadPosition();
+  while (pos != NULL) cb += _AfxPageSize(((CPropertyPage*)m_pages.GetNext(pos))->m_psp);
+  BYTE* pBuf = new BYTE[cb + 1];
+  BYTE* p = pBuf;
+  pos = m_pages.GetHeadPosition();
   while (pos != NULL) {
     CPropertyPage* pPage = (CPropertyPage*)m_pages.GetNext(pos);
-    memcpy(p, &pPage->m_psp, _AFX_PSP_SIZE);
-    p += _AFX_PSP_SIZE;
+    memcpy(p, &pPage->m_psp, pPage->m_psp.dwSize);
+    p += pPage->m_psp.dwSize;
   }
   m_phpage = (HPROPSHEETPAGE*)pBuf;
   m_psh.ppsp = (LPCPROPSHEETPAGE)pBuf;
   m_psh.nPages = nPages;
   m_psh.pszCaption = m_strCaption;
+  _AfxSheetSize(m_psh);
 }
 
 INT_PTR CPropertySheet::DoModal() {
@@ -300,8 +398,8 @@ void CPropertySheet::AddPage(CPropertyPage* pPage) {
   m_pages.AddTail(pPage);
   if (m_hWnd != NULL) {
     PROPSHEETPAGE psp;
+    _AfxPageSize(pPage->m_psp);
     memcpy(&psp, &pPage->m_psp, sizeof(psp));
-    psp.dwSize = _AFX_PSP_SIZE;
     HPROPSHEETPAGE hPage = ::CreatePropertySheetPage(&psp);
     if (hPage != NULL) ::SendMessage(m_hWnd, PSM_ADDPAGE, 0, (LPARAM)hPage);
   }

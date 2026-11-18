@@ -1401,6 +1401,52 @@ BOOL WINAPI PrintDlgA(LPPRINTDLGA pd) {
   return r;
 }
 
+// PrintDlgEx through the print dialog: its one page range, and the
+// result as an action rather than a BOOL.
+static HRESULT PrintDlgExCore(PRINTDLGEXW* pdx, bool ansi) {
+  if (pdx == NULL) return E_INVALIDARG;
+  PRINTDLGW pd;
+  memset(&pd, 0, sizeof(pd));
+  pd.lStructSize = sizeof(pd);
+  pd.hwndOwner = pdx->hwndOwner;
+  pd.hDevMode = pdx->hDevMode;
+  pd.hDevNames = pdx->hDevNames;
+  pd.Flags = pdx->Flags & ~(PD_CURRENTPAGE | PD_NOCURRENTPAGE | PD_EXCLUSIONFLAGS);
+  pd.nCopies = (WORD)(pdx->nCopies ? pdx->nCopies : 1);
+  pd.nMinPage = (WORD)pdx->nMinPage;
+  pd.nMaxPage = (WORD)pdx->nMaxPage;
+  if (pdx->nPageRanges > 0 && pdx->lpPageRanges != NULL) {
+    pd.nFromPage = (WORD)pdx->lpPageRanges[0].nFromPage;
+    pd.nToPage = (WORD)pdx->lpPageRanges[0].nToPage;
+  } else {
+    pd.nFromPage = pd.nToPage = (WORD)pdx->nMinPage;
+  }
+  pd.hInstance = pdx->hInstance;
+  BOOL ok = PrintDlgCore(&pd, ansi);
+  pdx->hDevMode = pd.hDevMode;
+  pdx->hDevNames = pd.hDevNames;
+  pdx->hDC = pd.hDC;
+  if (!ok) {
+    pdx->dwResultAction = PD_RESULT_CANCEL;
+    return CommDlgExtendedError() == 0 ? S_OK : E_FAIL;
+  }
+  pdx->Flags = (pdx->Flags & (PD_CURRENTPAGE | PD_NOCURRENTPAGE | PD_EXCLUSIONFLAGS)) | pd.Flags;
+  pdx->nCopies = pd.nCopies;
+  if ((pd.Flags & PD_PAGENUMS) && pdx->nMaxPageRanges > 0 && pdx->lpPageRanges != NULL) {
+    pdx->nPageRanges = 1;
+    pdx->lpPageRanges[0].nFromPage = pd.nFromPage;
+    pdx->lpPageRanges[0].nToPage = pd.nToPage;
+  }
+  pdx->dwResultAction = (pdx->Flags & PD_RETURNDEFAULT) ? PD_RESULT_CANCEL : PD_RESULT_PRINT;
+  return S_OK;
+}
+
+HRESULT WINAPI PrintDlgExW(LPPRINTDLGEXW pdx) { return PrintDlgExCore(pdx, false); }
+HRESULT WINAPI PrintDlgExA(LPPRINTDLGEXA pdx) {
+  // The two structures differ only in the template name's type.
+  return PrintDlgExCore((PRINTDLGEXW*)pdx, true);
+}
+
 BOOL WINAPI PageSetupDlgW(LPPAGESETUPDLGW psd) { return PageSetupDlgCore(psd, false); }
 BOOL WINAPI PageSetupDlgA(LPPAGESETUPDLGA psd) {
   if (psd && psd->lStructSize != sizeof(PAGESETUPDLGA)) {
