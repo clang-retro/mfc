@@ -13,6 +13,14 @@
 #include <oleauto.h>
 #include <dbdaoid.h>
 
+// Some interfaces go by a name with an underscore, as in Windows' header.
+#define DAODBEngine _DAODBEngine
+#define DAOTableDef _DAOTableDef
+#define DAOQueryDef _DAOQueryDef
+#define DAOField _DAOField
+#define DAOIndex _DAOIndex
+#define DAORelation _DAORelation
+
 interface DAOError;
 interface DAOErrors;
 interface DAOProperty;
@@ -207,6 +215,11 @@ interface DAORecordset : public _DAO {
   STDMETHOD(FillCache)(VARIANT Rows, VARIANT StartBookmark) = 0;
   STDMETHOD(GetRows)(VARIANT NumRows, VARIANT* pvar) = 0;
   STDMETHOD(Update)(LONG UpdateType, VARIANT_BOOL Force) = 0;
+  // DAO 3.0's forms, and a field's value by name or number.
+  STDMETHOD(_30_CancelUpdate)() = 0;
+  STDMETHOD(_30_MoveLast)() = 0;
+  STDMETHOD(_30_Update)() = 0;
+  STDMETHOD(get_Collect)(VARIANT Item, VARIANT* pvar) = 0;
 };
 interface DAOQueryDef : public _DAO {
   STDMETHOD(get_DateCreated)(VARIANT* pDateCreated) = 0;
@@ -356,6 +369,12 @@ interface DAODBEngine : public _DAO {
 };
 
 // Constants
+#define dbParamInput 1
+#define dbParamOutput 2
+#define dbParamInputOutput 3
+#define dbParamReturnValue 4
+#define dbSortNeutral 0x400
+#define dbSortGeneral 0x409
 #define dbOpenTable 1
 #define dbOpenDynaset 2
 #define dbOpenSnapshot 4

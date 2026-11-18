@@ -136,17 +136,17 @@ struct Stub_DAODBEngine : public _DAODBEngine {
   STDMETHOD(CreateDatabase)(BSTR Name,BSTR Locale,VARIANT Option, struct DAODatabase **ppdb) { return E_NOTIMPL; }
   STDMETHOD(FreeLocks)() { return E_NOTIMPL; }
   STDMETHOD(BeginTrans)() { return E_NOTIMPL; }
-  STDMETHOD(CommitTrans)(__LONG32 Option) { return E_NOTIMPL; }
+  STDMETHOD(CommitTrans)(LONG Option) { return E_NOTIMPL; }
   STDMETHOD(Rollback)() { return E_NOTIMPL; }
   STDMETHOD(SetDefaultWorkspace)(BSTR Name,BSTR Password) { return E_NOTIMPL; }
   STDMETHOD(SetDataAccessOption)(short Option,VARIANT Value) { return E_NOTIMPL; }
-  STDMETHOD(ISAMStats)(__LONG32 StatNum,VARIANT Reset,__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(ISAMStats)(LONG StatNum,VARIANT Reset,LONG *pl) { return E_NOTIMPL; }
   STDMETHOD(get_SystemDB)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(put_SystemDB)(BSTR SystemDBPath) { return E_NOTIMPL; }
   STDMETHOD(CreateWorkspace)(BSTR Name,BSTR UserName,BSTR Password,VARIANT UseType, struct DAOWorkspace **ppwrk) { return E_NOTIMPL; }
   STDMETHOD(OpenConnection)(BSTR Name,VARIANT Options,VARIANT ReadOnly,VARIANT Connect, struct DAOConnection **ppconn) { return E_NOTIMPL; }
-  STDMETHOD(get_DefaultType)(__LONG32 *Option) { return E_NOTIMPL; }
-  STDMETHOD(put_DefaultType)(__LONG32 Option) { return E_NOTIMPL; }
+  STDMETHOD(get_DefaultType)(LONG *Option) { return E_NOTIMPL; }
+  STDMETHOD(put_DefaultType)(LONG Option) { return E_NOTIMPL; }
   STDMETHOD(SetOption)(LONG Option,VARIANT Value) { return E_NOTIMPL; }
   STDMETHOD(DumpObjects)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(DebugPrint)(BSTR bstr) { return E_NOTIMPL; }
@@ -177,11 +177,11 @@ struct StubDAOError : public DAOError {
   STDMETHOD(Invoke)(DISPID, REFIID, LCID, WORD, DISPPARAMS*, VARIANT*, EXCEPINFO*, UINT*) {
     return E_NOTIMPL;
   }
-  STDMETHOD(get_Number)(__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(get_Number)(LONG *pl) { return E_NOTIMPL; }
   STDMETHOD(get_Source)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(get_Description)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(get_HelpFile)(BSTR *pbstr) { return E_NOTIMPL; }
-  STDMETHOD(get_HelpContext)(__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(get_HelpContext)(LONG *pl) { return E_NOTIMPL; }
 };
 
 struct StubDAOErrors : public DAOErrors {
@@ -320,7 +320,7 @@ struct StubDAOWorkspace : public DAOWorkspace {
   STDMETHOD(get_Users)(struct DAOUsers **ppusrs) { return E_NOTIMPL; }
   STDMETHOD(get_Groups)(struct DAOGroups **ppgrps) { return E_NOTIMPL; }
   STDMETHOD(BeginTrans)() { return E_NOTIMPL; }
-  STDMETHOD(CommitTrans)(__LONG32 Options) { return E_NOTIMPL; }
+  STDMETHOD(CommitTrans)(LONG Options) { return E_NOTIMPL; }
   STDMETHOD(Close)() { return E_NOTIMPL; }
   STDMETHOD(Rollback)() { return E_NOTIMPL; }
   STDMETHOD(OpenDatabase)(BSTR Name,VARIANT Options,VARIANT ReadOnly,VARIANT Connect, struct DAODatabase **ppdb) { return E_NOTIMPL; }
@@ -328,10 +328,10 @@ struct StubDAOWorkspace : public DAOWorkspace {
   STDMETHOD(CreateUser)(VARIANT Name,VARIANT PID,VARIANT Password, struct DAOUser **ppusr) { return E_NOTIMPL; }
   STDMETHOD(CreateGroup)(VARIANT Name,VARIANT PID, struct DAOGroup **ppgrp) { return E_NOTIMPL; }
   STDMETHOD(OpenConnection)(BSTR Name,VARIANT Options,VARIANT ReadOnly,VARIANT Connect, struct DAOConnection **ppconn) { return E_NOTIMPL; }
-  STDMETHOD(get_LoginTimeout)(__LONG32 *pTimeout) { return E_NOTIMPL; }
-  STDMETHOD(put_LoginTimeout)(__LONG32 Timeout) { return E_NOTIMPL; }
-  STDMETHOD(get_DefaultCursorDriver)(__LONG32 *pCursorType) { return E_NOTIMPL; }
-  STDMETHOD(put_DefaultCursorDriver)(__LONG32 CursorType) { return E_NOTIMPL; }
+  STDMETHOD(get_LoginTimeout)(LONG *pTimeout) { return E_NOTIMPL; }
+  STDMETHOD(put_LoginTimeout)(LONG Timeout) { return E_NOTIMPL; }
+  STDMETHOD(get_DefaultCursorDriver)(LONG *pCursorType) { return E_NOTIMPL; }
+  STDMETHOD(put_DefaultCursorDriver)(LONG CursorType) { return E_NOTIMPL; }
   STDMETHOD(get_hEnv)(LONG *phEnv) { return E_NOTIMPL; }
   STDMETHOD(get_Type)(LONG *ptype) { return E_NOTIMPL; }
   STDMETHOD(get_Connections)(struct DAOConnections **ppcns) { return E_NOTIMPL; }
@@ -479,7 +479,7 @@ struct StubDAODatabase : public DAODatabase {
   STDMETHOD(get_Transactions)(VARIANT_BOOL *pb) { return E_NOTIMPL; }
   STDMETHOD(get_Updatable)(VARIANT_BOOL *pb) { return E_NOTIMPL; }
   STDMETHOD(get_Version)(BSTR *pbstr) { return E_NOTIMPL; }
-  STDMETHOD(get_RecordsAffected)(__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(get_RecordsAffected)(LONG *pl) { return E_NOTIMPL; }
   STDMETHOD(get_TableDefs)(struct DAOTableDefs **pptdfs) { return E_NOTIMPL; }
   STDMETHOD(get_QueryDefs)(struct DAOQueryDefs **ppqdfs) { return E_NOTIMPL; }
   STDMETHOD(get_Relations)(struct DAORelations **pprls) { return E_NOTIMPL; }
@@ -492,13 +492,13 @@ struct StubDAODatabase : public DAODatabase {
   STDMETHOD(CreateRelation)(VARIANT Name,VARIANT Table,VARIANT ForeignTable,VARIANT Attributes, struct DAORelation **pprel) { return E_NOTIMPL; }
   STDMETHOD(CreateTableDef)(VARIANT Name,VARIANT Attributes,VARIANT SourceTablename,VARIANT Connect, struct DAOTableDef **pptdf) { return E_NOTIMPL; }
   STDMETHOD(BeginTrans)() { return E_NOTIMPL; }
-  STDMETHOD(CommitTrans)(__LONG32 Options) { return E_NOTIMPL; }
+  STDMETHOD(CommitTrans)(LONG Options) { return E_NOTIMPL; }
   STDMETHOD(Rollback)() { return E_NOTIMPL; }
   STDMETHOD(CreateDynaset)(BSTR Name,VARIANT Options,VARIANT Inconsistent, struct DAORecordset **pprst) { return E_NOTIMPL; }
   STDMETHOD(CreateQueryDef)(VARIANT Name,VARIANT SQLText, struct DAOQueryDef **ppqdf) { return E_NOTIMPL; }
   STDMETHOD(CreateSnapshot)(BSTR Source,VARIANT Options, struct DAORecordset **pprst) { return E_NOTIMPL; }
   STDMETHOD(DeleteQueryDef)(BSTR Name) { return E_NOTIMPL; }
-  STDMETHOD(ExecuteSQL)(BSTR SQL,__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(ExecuteSQL)(BSTR SQL,LONG *pl) { return E_NOTIMPL; }
   STDMETHOD(ListFields)(BSTR Name, struct DAORecordset **pprst) { return E_NOTIMPL; }
   STDMETHOD(ListTables)(struct DAORecordset **pprst) { return E_NOTIMPL; }
   STDMETHOD(OpenQueryDef)(BSTR Name, struct DAOQueryDef **ppqdf) { return E_NOTIMPL; }
@@ -572,8 +572,8 @@ struct Stub_DAOTableDef : public _DAOTableDef {
     return E_NOTIMPL;
   }
   STDMETHOD(get_Properties)(struct DAOProperties **ppprops) { return E_NOTIMPL; }
-  STDMETHOD(get_Attributes)(__LONG32 *pl) { return E_NOTIMPL; }
-  STDMETHOD(put_Attributes)(__LONG32 Attributes) { return E_NOTIMPL; }
+  STDMETHOD(get_Attributes)(LONG *pl) { return E_NOTIMPL; }
+  STDMETHOD(put_Attributes)(LONG Attributes) { return E_NOTIMPL; }
   STDMETHOD(get_Connect)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(put_Connect)(BSTR Connection) { return E_NOTIMPL; }
   STDMETHOD(get_DateCreated)(VARIANT *pvar) { return E_NOTIMPL; }
@@ -587,7 +587,7 @@ struct Stub_DAOTableDef : public _DAOTableDef {
   STDMETHOD(put_ValidationText)(BSTR bstr) { return E_NOTIMPL; }
   STDMETHOD(get_ValidationRule)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(put_ValidationRule)(BSTR bstr) { return E_NOTIMPL; }
-  STDMETHOD(get_RecordCount)(__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(get_RecordCount)(LONG *pl) { return E_NOTIMPL; }
   STDMETHOD(get_Fields)(struct DAOFields **ppflds) { return E_NOTIMPL; }
   STDMETHOD(get_Indexes)(struct DAOIndexes **ppidxs) { return E_NOTIMPL; }
   STDMETHOD(OpenRecordset)(VARIANT Type,VARIANT Options, struct DAORecordset **pprst) { return E_NOTIMPL; }
@@ -673,7 +673,7 @@ struct Stub_DAOQueryDef : public _DAOQueryDef {
   STDMETHOD(put_Connect)(BSTR bstr) { return E_NOTIMPL; }
   STDMETHOD(get_ReturnsRecords)(VARIANT_BOOL *pb) { return E_NOTIMPL; }
   STDMETHOD(put_ReturnsRecords)(VARIANT_BOOL f) { return E_NOTIMPL; }
-  STDMETHOD(get_RecordsAffected)(__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(get_RecordsAffected)(LONG *pl) { return E_NOTIMPL; }
   STDMETHOD(get_Fields)(struct DAOFields **ppflds) { return E_NOTIMPL; }
   STDMETHOD(get_Parameters)(struct DAOParameters **ppprms) { return E_NOTIMPL; }
   STDMETHOD(Close)() { return E_NOTIMPL; }
@@ -693,8 +693,8 @@ struct Stub_DAOQueryDef : public _DAOQueryDef {
   STDMETHOD(get_MaxRecords)(LONG *pMxRecs) { return E_NOTIMPL; }
   STDMETHOD(put_MaxRecords)(LONG MxRecs) { return E_NOTIMPL; }
   STDMETHOD(get_StillExecuting)(VARIANT_BOOL *pStillExec) { return E_NOTIMPL; }
-  STDMETHOD(get_CacheSize)(__LONG32 *lCacheSize) { return E_NOTIMPL; }
-  STDMETHOD(put_CacheSize)(__LONG32 lCacheSize) { return E_NOTIMPL; }
+  STDMETHOD(get_CacheSize)(LONG *lCacheSize) { return E_NOTIMPL; }
+  STDMETHOD(put_CacheSize)(LONG lCacheSize) { return E_NOTIMPL; }
   STDMETHOD(get_Prepare)(VARIANT *pb) { return E_NOTIMPL; }
   STDMETHOD(put_Prepare)(VARIANT f) { return E_NOTIMPL; }
 };
@@ -778,22 +778,22 @@ struct StubDAORecordset : public DAORecordset {
   STDMETHOD(put_Sort)(BSTR Sort) { return E_NOTIMPL; }
   STDMETHOD(get_Transactions)(VARIANT_BOOL *pb) { return E_NOTIMPL; }
   STDMETHOD(get_Type)(short *ps) { return E_NOTIMPL; }
-  STDMETHOD(get_RecordCount)(__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(get_RecordCount)(LONG *pl) { return E_NOTIMPL; }
   STDMETHOD(get_Updatable)(VARIANT_BOOL *pb) { return E_NOTIMPL; }
   STDMETHOD(get_Restartable)(VARIANT_BOOL *pb) { return E_NOTIMPL; }
   STDMETHOD(get_ValidationText)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(get_ValidationRule)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(get_CacheStart)(SAFEARRAY **ppsa) { return E_NOTIMPL; }
   STDMETHOD(put_CacheStart)(SAFEARRAY **psa) { return E_NOTIMPL; }
-  STDMETHOD(get_CacheSize)(__LONG32 *pl) { return E_NOTIMPL; }
-  STDMETHOD(put_CacheSize)(__LONG32 CacheSize) { return E_NOTIMPL; }
+  STDMETHOD(get_CacheSize)(LONG *pl) { return E_NOTIMPL; }
+  STDMETHOD(put_CacheSize)(LONG CacheSize) { return E_NOTIMPL; }
   STDMETHOD(get_PercentPosition)(float *pd) { return E_NOTIMPL; }
   STDMETHOD(put_PercentPosition)(float Position) { return E_NOTIMPL; }
-  STDMETHOD(get_AbsolutePosition)(__LONG32 *pl) { return E_NOTIMPL; }
-  STDMETHOD(put_AbsolutePosition)(__LONG32 Position) { return E_NOTIMPL; }
+  STDMETHOD(get_AbsolutePosition)(LONG *pl) { return E_NOTIMPL; }
+  STDMETHOD(put_AbsolutePosition)(LONG Position) { return E_NOTIMPL; }
   STDMETHOD(get_EditMode)(short *pi) { return E_NOTIMPL; }
-  STDMETHOD(get_ODBCFetchCount)(__LONG32 *pl) { return E_NOTIMPL; }
-  STDMETHOD(get_ODBCFetchDelay)(__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(get_ODBCFetchCount)(LONG *pl) { return E_NOTIMPL; }
+  STDMETHOD(get_ODBCFetchDelay)(LONG *pl) { return E_NOTIMPL; }
   STDMETHOD(get_Parent)(DAODatabase **pdb) { return E_NOTIMPL; }
   STDMETHOD(get_Fields)(struct DAOFields **ppflds) { return E_NOTIMPL; }
   STDMETHOD(get_Indexes)(struct DAOIndexes **ppidxs) { return E_NOTIMPL; }
@@ -815,7 +815,7 @@ struct StubDAORecordset : public DAORecordset {
   STDMETHOD(_30_Update)() { return E_NOTIMPL; }
   STDMETHOD(Clone)(DAORecordset **pprst) { return E_NOTIMPL; }
   STDMETHOD(Requery)(VARIANT NewQueryDef) { return E_NOTIMPL; }
-  STDMETHOD(Move)(__LONG32 Rows,VARIANT StartBookmark) { return E_NOTIMPL; }
+  STDMETHOD(Move)(LONG Rows,VARIANT StartBookmark) { return E_NOTIMPL; }
   STDMETHOD(FillCache)(VARIANT Rows,VARIANT StartBookmark) { return E_NOTIMPL; }
   STDMETHOD(CreateDynaset)(VARIANT Options,VARIANT Inconsistent,DAORecordset **pprst) { return E_NOTIMPL; }
   STDMETHOD(CreateSnapshot)(VARIANT Options,DAORecordset **pprst) { return E_NOTIMPL; }
@@ -829,18 +829,18 @@ struct StubDAORecordset : public DAORecordset {
   STDMETHOD(NextRecordset)(VARIANT_BOOL *pb) { return E_NOTIMPL; }
   STDMETHOD(get_hStmt)(LONG *phStmt) { return E_NOTIMPL; }
   STDMETHOD(get_StillExecuting)(VARIANT_BOOL *pStillExec) { return E_NOTIMPL; }
-  STDMETHOD(get_BatchSize)(__LONG32 *pl) { return E_NOTIMPL; }
-  STDMETHOD(put_BatchSize)(__LONG32 BatchSize) { return E_NOTIMPL; }
-  STDMETHOD(get_BatchCollisionCount)(__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(get_BatchSize)(LONG *pl) { return E_NOTIMPL; }
+  STDMETHOD(put_BatchSize)(LONG BatchSize) { return E_NOTIMPL; }
+  STDMETHOD(get_BatchCollisionCount)(LONG *pl) { return E_NOTIMPL; }
   STDMETHOD(get_BatchCollisions)(VARIANT *pvar) { return E_NOTIMPL; }
   STDMETHOD(get_Connection)(DAOConnection **ppCn) { return E_NOTIMPL; }
   STDMETHOD(putref_Connection)(DAOConnection *pNewCn) { return E_NOTIMPL; }
   STDMETHOD(get_RecordStatus)(short *pi) { return E_NOTIMPL; }
-  STDMETHOD(get_UpdateOptions)(__LONG32 *pl) { return E_NOTIMPL; }
-  STDMETHOD(put_UpdateOptions)(__LONG32 l) { return E_NOTIMPL; }
-  STDMETHOD(CancelUpdate)(__LONG32 UpdateType) { return E_NOTIMPL; }
-  STDMETHOD(Update)(__LONG32 UpdateType,VARIANT_BOOL Force) { return E_NOTIMPL; }
-  STDMETHOD(MoveLast)(__LONG32 Options) { return E_NOTIMPL; }
+  STDMETHOD(get_UpdateOptions)(LONG *pl) { return E_NOTIMPL; }
+  STDMETHOD(put_UpdateOptions)(LONG l) { return E_NOTIMPL; }
+  STDMETHOD(CancelUpdate)(LONG UpdateType) { return E_NOTIMPL; }
+  STDMETHOD(Update)(LONG UpdateType,VARIANT_BOOL Force) { return E_NOTIMPL; }
+  STDMETHOD(MoveLast)(LONG Options) { return E_NOTIMPL; }
 };
 
 struct StubDAORecordsets : public DAORecordsets {
@@ -900,19 +900,19 @@ struct Stub_DAOField : public _DAOField {
     return E_NOTIMPL;
   }
   STDMETHOD(get_Properties)(struct DAOProperties **ppprops) { return E_NOTIMPL; }
-  STDMETHOD(get_CollatingOrder)(__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(get_CollatingOrder)(LONG *pl) { return E_NOTIMPL; }
   STDMETHOD(get_Type)(short *ps) { return E_NOTIMPL; }
   STDMETHOD(put_Type)(short Type) { return E_NOTIMPL; }
   STDMETHOD(get_Name)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(put_Name)(BSTR Name) { return E_NOTIMPL; }
-  STDMETHOD(get_Size)(__LONG32 *pl) { return E_NOTIMPL; }
-  STDMETHOD(put_Size)(__LONG32 Size) { return E_NOTIMPL; }
+  STDMETHOD(get_Size)(LONG *pl) { return E_NOTIMPL; }
+  STDMETHOD(put_Size)(LONG Size) { return E_NOTIMPL; }
   STDMETHOD(get_SourceField)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(get_SourceTable)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(get_Value)(VARIANT *pvar) { return E_NOTIMPL; }
   STDMETHOD(put_Value)(VARIANT Val) { return E_NOTIMPL; }
-  STDMETHOD(get_Attributes)(__LONG32 *pl) { return E_NOTIMPL; }
-  STDMETHOD(put_Attributes)(__LONG32 Attr) { return E_NOTIMPL; }
+  STDMETHOD(get_Attributes)(LONG *pl) { return E_NOTIMPL; }
+  STDMETHOD(put_Attributes)(LONG Attr) { return E_NOTIMPL; }
   STDMETHOD(get_OrdinalPosition)(short *ps) { return E_NOTIMPL; }
   STDMETHOD(put_OrdinalPosition)(short Pos) { return E_NOTIMPL; }
   STDMETHOD(get_ValidationText)(BSTR *pbstr) { return E_NOTIMPL; }
@@ -931,13 +931,13 @@ struct Stub_DAOField : public _DAOField {
   STDMETHOD(get_ForeignName)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(put_ForeignName)(BSTR bstr) { return E_NOTIMPL; }
   STDMETHOD(AppendChunk)(VARIANT Val) { return E_NOTIMPL; }
-  STDMETHOD(GetChunk)(__LONG32 Offset,__LONG32 Bytes,VARIANT *pvar) { return E_NOTIMPL; }
-  STDMETHOD(_30_FieldSize)(__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(GetChunk)(LONG Offset,LONG Bytes,VARIANT *pvar) { return E_NOTIMPL; }
+  STDMETHOD(_30_FieldSize)(LONG *pl) { return E_NOTIMPL; }
   STDMETHOD(CreateProperty)(VARIANT Name,VARIANT Type,VARIANT Value,VARIANT DDL,DAOProperty **pprp) { return E_NOTIMPL; }
   STDMETHOD(get_CollectionIndex)(short *i) { return E_NOTIMPL; }
   STDMETHOD(get_OriginalValue)(VARIANT *pvar) { return E_NOTIMPL; }
   STDMETHOD(get_VisibleValue)(VARIANT *pvar) { return E_NOTIMPL; }
-  STDMETHOD(get_FieldSize)(__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(get_FieldSize)(LONG *pl) { return E_NOTIMPL; }
 };
 
 struct StubDAOFields : public DAOFields {
@@ -1012,7 +1012,7 @@ struct Stub_DAOIndex : public _DAOIndex {
   STDMETHOD(put_IgnoreNulls)(VARIANT_BOOL fIgnoreNulls) { return E_NOTIMPL; }
   STDMETHOD(get_Primary)(VARIANT_BOOL *pb) { return E_NOTIMPL; }
   STDMETHOD(put_Primary)(VARIANT_BOOL fPrimary) { return E_NOTIMPL; }
-  STDMETHOD(get_DistinctCount)(__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(get_DistinctCount)(LONG *pl) { return E_NOTIMPL; }
   STDMETHOD(get_Fields)(VARIANT *pv) { return E_NOTIMPL; }
   STDMETHOD(put_Fields)(VARIANT v) { return E_NOTIMPL; }
   STDMETHOD(CreateField)(VARIANT Name,VARIANT Type,VARIANT Size,DAOField **ppfld) { return E_NOTIMPL; }
@@ -1284,8 +1284,8 @@ struct Stub_DAORelation : public _DAORelation {
   STDMETHOD(put_Table)(BSTR bstr) { return E_NOTIMPL; }
   STDMETHOD(get_ForeignTable)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(put_ForeignTable)(BSTR bstr) { return E_NOTIMPL; }
-  STDMETHOD(get_Attributes)(__LONG32 *pl) { return E_NOTIMPL; }
-  STDMETHOD(put_Attributes)(__LONG32 attr) { return E_NOTIMPL; }
+  STDMETHOD(get_Attributes)(LONG *pl) { return E_NOTIMPL; }
+  STDMETHOD(put_Attributes)(LONG attr) { return E_NOTIMPL; }
   STDMETHOD(get_Fields)(DAOFields **ppflds) { return E_NOTIMPL; }
   STDMETHOD(CreateField)(VARIANT Name,VARIANT Type,VARIANT Size,DAOField **ppfld) { return E_NOTIMPL; }
   STDMETHOD(get_PartialReplica)(VARIANT_BOOL *pfPartialReplica) { return E_NOTIMPL; }
@@ -1356,12 +1356,12 @@ struct StubDAOContainer : public DAOContainer {
   STDMETHOD(put_Owner)(BSTR bstr) { return E_NOTIMPL; }
   STDMETHOD(get_UserName)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(put_UserName)(BSTR bstr) { return E_NOTIMPL; }
-  STDMETHOD(get_Permissions)(__LONG32 *pl) { return E_NOTIMPL; }
-  STDMETHOD(put_Permissions)(__LONG32 permissions) { return E_NOTIMPL; }
+  STDMETHOD(get_Permissions)(LONG *pl) { return E_NOTIMPL; }
+  STDMETHOD(put_Permissions)(LONG permissions) { return E_NOTIMPL; }
   STDMETHOD(get_Inherit)(VARIANT_BOOL *pb) { return E_NOTIMPL; }
   STDMETHOD(put_Inherit)(VARIANT_BOOL fInherit) { return E_NOTIMPL; }
   STDMETHOD(get_Documents)(struct DAODocuments **ppdocs) { return E_NOTIMPL; }
-  STDMETHOD(get_AllPermissions)(__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(get_AllPermissions)(LONG *pl) { return E_NOTIMPL; }
 };
 
 struct StubDAOContainers : public DAOContainers {
@@ -1427,11 +1427,11 @@ struct StubDAODocument : public DAODocument {
   STDMETHOD(get_Container)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(get_UserName)(BSTR *pbstr) { return E_NOTIMPL; }
   STDMETHOD(put_UserName)(BSTR bstr) { return E_NOTIMPL; }
-  STDMETHOD(get_Permissions)(__LONG32 *pl) { return E_NOTIMPL; }
-  STDMETHOD(put_Permissions)(__LONG32 permissions) { return E_NOTIMPL; }
+  STDMETHOD(get_Permissions)(LONG *pl) { return E_NOTIMPL; }
+  STDMETHOD(put_Permissions)(LONG permissions) { return E_NOTIMPL; }
   STDMETHOD(get_DateCreated)(VARIANT *pvar) { return E_NOTIMPL; }
   STDMETHOD(get_LastUpdated)(VARIANT *pvar) { return E_NOTIMPL; }
-  STDMETHOD(get_AllPermissions)(__LONG32 *pl) { return E_NOTIMPL; }
+  STDMETHOD(get_AllPermissions)(LONG *pl) { return E_NOTIMPL; }
   STDMETHOD(CreateProperty)(VARIANT Name,VARIANT Type,VARIANT Value,VARIANT DDL,DAOProperty **pprp) { return E_NOTIMPL; }
 };
 

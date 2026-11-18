@@ -5,6 +5,10 @@ bases', down to IDispatch) all return E_NOTIMPL. The test's fakes derive
 from these and answer only what CDHtmlDialog asks.
 
 Usage: gen-html-stubs.py <mshtml.h> > tests/htmlstubs.h
+       gen-html-stubs.py port/include/mshtml.h > tests/htmlstubs-port.h
+
+The second is the portable layer's header, which declares its
+interfaces as C++ classes ("interface X : public Y").
 """
 import re
 import sys
@@ -14,7 +18,22 @@ INTERFACES = ["IHTMLDocument2", "IHTMLElement", "IHTMLElementCollection", "IHTML
 text = open(sys.argv[1]).read()
 
 
+def port_interface(name):
+    m = re.search(r"\ninterface " + name + r" : public (\w+) \{(.*?)\n\};", text, re.S)
+    if not m:
+        sys.exit("no interface " + name)
+    base, body = m.group(1), m.group(2)
+    methods = []
+    for mm in re.finditer(r"STDMETHOD(?:_\(\s*(\w+)\s*,\s*(\w+)\s*\)|\((\w+)\))\s*\((.*?)\)\s*=\s*0;",
+                          body, re.S):
+        ret, mname = (mm.group(1), mm.group(2)) if mm.group(1) else ("HRESULT", mm.group(3))
+        methods.append("%s STDMETHODCALLTYPE %s(%s)" % (ret, mname, " ".join(mm.group(4).split())))
+    return base, methods
+
+
 def interface(name):
+    if "MIDL_INTERFACE" not in text:
+        return port_interface(name)
     m = re.search(r"MIDL_INTERFACE\(\"[^\"]+\"\)\s*\n" + name + r" : public (\w+)\s*\{(.*?)\n\};",
                   text, re.S)
     if not m:

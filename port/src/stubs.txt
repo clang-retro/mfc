@@ -9,7 +9,6 @@ ChooseColorA
 ChooseColorW
 ChooseFontA
 ChooseFontW
-DoDragDrop
 DragFinish
 DragQueryFileA
 DragQueryFileW
@@ -35,10 +34,8 @@ OleUIConvertA
 OleUIConvertW
 OleUIUpdateLinksA
 OleUIUpdateLinksW
-RegisterDragDrop
 ReplaceTextA
 ReplaceTextW
-RevokeDragDrop
 SQLAllocHandle
 SQLBindParameter
 SQLCancel

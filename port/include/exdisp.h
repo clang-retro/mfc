@@ -29,6 +29,13 @@ typedef enum BrowserNavConstants {
   navEnforceRestricted = 0x80
 } BrowserNavConstants;
 
+// What a CommandStateChange event is about.
+typedef enum CommandStateChangeConstants {
+  CSC_UPDATECOMMANDS = -1,
+  CSC_NAVIGATEFORWARD = 1,
+  CSC_NAVIGATEBACK = 2
+} CommandStateChangeConstants;
+
 typedef enum RefreshConstants {
   REFRESH_NORMAL = 0,
   REFRESH_IFEXPIRED = 1,
