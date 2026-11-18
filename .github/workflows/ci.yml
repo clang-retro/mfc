@@ -24,6 +24,17 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      # The .debs are cached as in mingw-wine; that job's cache, which has
+      # Wine in it too, does when this one has none yet.
+      - name: Restore the package cache
+        id: apt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/apt-cache
+          key: apt-dos-v1-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: |
+            apt-dos-v1-${{ runner.os }}-
+            apt-v1-${{ runner.os }}-
       # Unpacks the nightly, puts its bin on PATH and sets $CLANG_DOS.
       - uses: clang-retro/dos-sdk/.github/actions/setup-toolchain@main
       - name: Install Wine and Xvfb
@@ -31,7 +42,18 @@ jobs:
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
+          if [ -d ~/apt-cache ]; then
+            sudo cp ~/apt-cache/*.deb /var/cache/apt/archives/ 2>/dev/null || true
+          fi
           sudo apt-get install -y --no-install-recommends wine wine32:i386 xvfb xauth imagemagick python3
+          mkdir -p ~/apt-cache
+          cp /var/cache/apt/archives/*.deb ~/apt-cache/ 2>/dev/null || true
+      - name: Save the package cache
+        if: steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/apt-cache
+          key: apt-dos-v1-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
       - name: Find the Wine version
         id: wine
         run: echo "version=$(wine --version)" >> "$GITHUB_OUTPUT"
