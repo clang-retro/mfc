@@ -137,6 +137,7 @@ typedef float FLOAT;
 typedef double DOUBLE;
 typedef wchar_t WCHAR;
 typedef WCHAR OLECHAR;
+#define OLESTR(s) L##s
 
 typedef intptr_t INT_PTR;
 typedef intptr_t LONG_PTR;

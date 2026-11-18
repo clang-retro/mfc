@@ -18,7 +18,7 @@ interface IEnumVARIANT;
 extern "C" {
 extern const IID IID_IDispatch, IID_ITypeInfo, IID_ITypeInfo2, IID_ITypeLib, IID_ITypeLib2, IID_ITypeComp,
     IID_IEnumVARIANT, IID_IErrorInfo, IID_ICreateErrorInfo, IID_ISupportErrorInfo, IID_IRecordInfo,
-    IID_ICreateTypeInfo, IID_ICreateTypeLib, IID_ICreateTypeLib2, IID_ITypeChangeEvents, IID_IErrorLog,
+    IID_ICreateTypeInfo, IID_ICreateTypeInfo2, IID_ICreateTypeLib, IID_ICreateTypeLib2, IID_ITypeChangeEvents, IID_IErrorLog,
     IID_IPropertyBag;
 }
 
@@ -225,6 +225,7 @@ typedef struct tagEXCEPINFO {
 } EXCEPINFO, *LPEXCEPINFO;
 
 #define DISPID_UNKNOWN (-1)
+#define MEMBERID_NIL DISPID_UNKNOWN
 #define DISPID_VALUE 0
 #define DISPID_PROPERTYPUT (-3)
 #define DISPID_NEWENUM (-4)
@@ -550,10 +551,81 @@ interface IRecordInfo : public IUnknown {
   STDMETHOD(RecordDestroy)(PVOID pvRecord) = 0;
 };
 
+// Making a type library: its types (ICreateTypeInfo) and itself
+// (ICreateTypeLib), saved to the file CreateTypeLib2 was given.
+interface ICreateTypeInfo : public IUnknown {
+  STDMETHOD(SetGuid)(REFGUID guid) = 0;
+  STDMETHOD(SetTypeFlags)(UINT uTypeFlags) = 0;
+  STDMETHOD(SetDocString)(LPOLESTR pStrDoc) = 0;
+  STDMETHOD(SetHelpContext)(DWORD dwHelpContext) = 0;
+  STDMETHOD(SetVersion)(WORD wMajorVerNum, WORD wMinorVerNum) = 0;
+  STDMETHOD(AddRefTypeInfo)(ITypeInfo* pTInfo, HREFTYPE* phRefType) = 0;
+  STDMETHOD(AddFuncDesc)(UINT index, FUNCDESC* pFuncDesc) = 0;
+  STDMETHOD(AddImplType)(UINT index, HREFTYPE hRefType) = 0;
+  STDMETHOD(SetImplTypeFlags)(UINT index, INT implTypeFlags) = 0;
+  STDMETHOD(SetAlignment)(WORD cbAlignment) = 0;
+  STDMETHOD(SetSchema)(LPOLESTR pStrSchema) = 0;
+  STDMETHOD(AddVarDesc)(UINT index, VARDESC* pVarDesc) = 0;
+  STDMETHOD(SetFuncAndParamNames)(UINT index, LPOLESTR* rgszNames, UINT cNames) = 0;
+  STDMETHOD(SetVarName)(UINT index, LPOLESTR szName) = 0;
+  STDMETHOD(SetTypeDescAlias)(TYPEDESC* pTDescAlias) = 0;
+  STDMETHOD(DefineFuncAsDllEntry)(UINT index, LPOLESTR szDllName, LPOLESTR szProcName) = 0;
+  STDMETHOD(SetFuncDocString)(UINT index, LPOLESTR szDocString) = 0;
+  STDMETHOD(SetVarDocString)(UINT index, LPOLESTR szDocString) = 0;
+  STDMETHOD(SetFuncHelpContext)(UINT index, DWORD dwHelpContext) = 0;
+  STDMETHOD(SetVarHelpContext)(UINT index, DWORD dwHelpContext) = 0;
+  STDMETHOD(SetMops)(UINT index, BSTR bstrMops) = 0;
+  STDMETHOD(SetTypeIdldesc)(IDLDESC* pIdlDesc) = 0;
+  STDMETHOD(LayOut)() = 0;
+};
+typedef ICreateTypeInfo* LPCREATETYPEINFO;
+interface ICreateTypeInfo2 : public ICreateTypeInfo {
+  STDMETHOD(DeleteFuncDesc)(UINT index) = 0;
+  STDMETHOD(DeleteFuncDescByMemId)(MEMBERID memid, INVOKEKIND invKind) = 0;
+  STDMETHOD(DeleteVarDesc)(UINT index) = 0;
+  STDMETHOD(DeleteVarDescByMemId)(MEMBERID memid) = 0;
+  STDMETHOD(DeleteImplType)(UINT index) = 0;
+  STDMETHOD(SetCustData)(REFGUID guid, VARIANT* pVarVal) = 0;
+  STDMETHOD(SetFuncCustData)(UINT index, REFGUID guid, VARIANT* pVarVal) = 0;
+  STDMETHOD(SetParamCustData)(UINT indexFunc, UINT indexParam, REFGUID guid, VARIANT* pVarVal) = 0;
+  STDMETHOD(SetVarCustData)(UINT index, REFGUID guid, VARIANT* pVarVal) = 0;
+  STDMETHOD(SetImplTypeCustData)(UINT index, REFGUID guid, VARIANT* pVarVal) = 0;
+  STDMETHOD(SetHelpStringContext)(ULONG dwHelpStringContext) = 0;
+  STDMETHOD(SetFuncHelpStringContext)(UINT index, ULONG dwHelpStringContext) = 0;
+  STDMETHOD(SetVarHelpStringContext)(UINT index, ULONG dwHelpStringContext) = 0;
+  STDMETHOD(Invalidate)() = 0;
+  STDMETHOD(SetName)(LPOLESTR szName) = 0;
+};
+typedef ICreateTypeInfo2* LPCREATETYPEINFO2;
+interface ICreateTypeLib : public IUnknown {
+  STDMETHOD(CreateTypeInfo)(LPOLESTR szName, TYPEKIND tkind, ICreateTypeInfo** ppCTInfo) = 0;
+  STDMETHOD(SetName)(LPOLESTR szName) = 0;
+  STDMETHOD(SetVersion)(WORD wMajorVerNum, WORD wMinorVerNum) = 0;
+  STDMETHOD(SetGuid)(REFGUID guid) = 0;
+  STDMETHOD(SetDocString)(LPOLESTR szDoc) = 0;
+  STDMETHOD(SetHelpFileName)(LPOLESTR szHelpFileName) = 0;
+  STDMETHOD(SetHelpContext)(DWORD dwHelpContext) = 0;
+  STDMETHOD(SetLcid)(LCID lcid) = 0;
+  STDMETHOD(SetLibFlags)(UINT uLibFlags) = 0;
+  STDMETHOD(SaveAllChanges)() = 0;
+};
+typedef ICreateTypeLib* LPCREATETYPELIB;
+interface ICreateTypeLib2 : public ICreateTypeLib {
+  STDMETHOD(DeleteTypeInfo)(LPOLESTR szName) = 0;
+  STDMETHOD(SetCustData)(REFGUID guid, VARIANT* pVarVal) = 0;
+  STDMETHOD(SetHelpStringContext)(ULONG dwHelpStringContext) = 0;
+  STDMETHOD(SetHelpStringDll)(LPOLESTR szFileName) = 0;
+};
+typedef ICreateTypeLib2* LPCREATETYPELIB2;
+
 WINPORT_UUIDOF(IDispatch)
 WINPORT_UUIDOF(ITypeComp)
 WINPORT_UUIDOF(ITypeInfo)
 WINPORT_UUIDOF(ITypeLib)
+WINPORT_UUIDOF(ICreateTypeInfo)
+WINPORT_UUIDOF(ICreateTypeInfo2)
+WINPORT_UUIDOF(ICreateTypeLib)
+WINPORT_UUIDOF(ICreateTypeLib2)
 WINPORT_UUIDOF(IEnumVARIANT)
 WINPORT_UUIDOF(IErrorInfo)
 WINPORT_UUIDOF(ICreateErrorInfo)
