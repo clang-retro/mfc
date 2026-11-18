@@ -9,6 +9,9 @@
 //   - CComSafeArray, one- and two-dimensional;
 //   - CComDispatchDriver over an IDispatch of the test's own;
 //   - CAtlFile, CAtlTemporaryFile and CAtlFileMapping;
+//   - CPath from atlpath.h;
+//   - atlsecurity.h: CSid, CDacl, CSecurityDesc, CSecurityAttributes,
+//     AtlGetDacl/AtlSetDacl and CAccessToken;
 //   - CAtlServiceModuleT: /Service, the service started by the service
 //     control manager and stopped, and /UnregServer. The service is this
 //     program again, started with -AsService.
@@ -18,6 +21,8 @@
 #include <atlcoll.h>
 #include <atlsafe.h>
 #include <atlfile.h>
+#include <atlpath.h>
+#include <atlsecurity.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include "atlutiltest.h"
@@ -802,6 +807,191 @@ static void TestService() {
   RegDeleteKey(HKEY_LOCAL_MACHINE, STATE_KEY);
 }
 
+// ---------------------------------------------------------------------
+// CPath.
+
+static void TestPath() {
+  CPath p(_T("C:\\dir"));
+  p.Append(_T("sub\\file.txt"));
+  CHECK(CString((LPCTSTR)p) == _T("C:\\dir\\sub\\file.txt"));
+  CHECK(p.FindExtension() == 15);  // indexes, as in ATL
+  CHECK(p.GetExtension() == _T(".txt"));
+  CHECK(p.FindFileName() == 11);
+  CHECK(p.MatchSpec(_T("*.txt")));
+  CHECK(!p.MatchSpec(_T("*.doc")));
+  CHECK(!p.IsRelative());
+  CHECK(p.GetDriveNumber() == 2);
+  CHECK(p.RenameExtension(_T(".log")));
+  CHECK(CString(p.m_strPath) == _T("C:\\dir\\sub\\file.log"));
+  p.RemoveExtension();
+  CHECK(p.m_strPath == _T("C:\\dir\\sub\\file"));
+  p.AddExtension(_T(".bak"));
+  CHECK(p.m_strPath == _T("C:\\dir\\sub\\file.bak"));
+  CHECK(p.RemoveFileSpec());
+  CHECK(p.m_strPath == _T("C:\\dir\\sub"));
+  p.AddBackslash();
+  CHECK(p.m_strPath == _T("C:\\dir\\sub\\"));
+  p.RemoveBackslash();
+  CHECK(p.m_strPath == _T("C:\\dir\\sub"));
+  p.StripToRoot();
+  CHECK(p.m_strPath == _T("C:\\"));
+  CHECK(p.IsRoot());
+
+  CPath q(_T("C:\\a\\.\\b\\..\\c.txt"));
+  q.Canonicalize();
+  CHECK(q.m_strPath == _T("C:\\a\\c.txt"));
+  CPath r(_T("rel\\x"));
+  CHECK(r.IsRelative());
+  CPath c;
+  c.Combine(_T("C:\\one"), _T("two.txt"));
+  CHECK(c.m_strPath == _T("C:\\one\\two.txt"));
+  CPath s(_T("C:\\with space\\x"));
+  s.QuoteSpaces();
+  CHECK(s.m_strPath == _T("\"C:\\with space\\x\""));
+  s.UnquoteSpaces();
+  CHECK(s.m_strPath == _T("C:\\with space\\x"));
+  CPath f(_T("C:\\dir\\name.ext"));
+  f.StripPath();
+  CHECK(f.m_strPath == _T("name.ext"));
+  CHECK(f.IsFileSpec());
+  CHECK(CPath(_T("\\\\server\\share")).IsUNCServerShare());
+  CHECK(CPath(_T("C:\\a\\b")).CommonPrefix(_T("C:\\a\\c")).m_strPath == _T("C:\\a"));
+  CPath rel;
+  CHECK(rel.RelativePathTo(_T("C:\\a\\b"), FILE_ATTRIBUTE_DIRECTORY, _T("C:\\a\\c\\d.txt"), 0));
+  CHECK(rel.m_strPath == _T("..\\c\\d.txt"));
+
+  TCHAR szWin[MAX_PATH];
+  ::GetWindowsDirectory(szWin, MAX_PATH);
+  CPath w(szWin);
+  CHECK(w.FileExists());
+  CHECK(w.IsDirectory());
+  w.Append(_T("no-such-file.xyz"));
+  CHECK(!w.FileExists());
+
+  // The ANSI and Unicode forms, whatever TCHAR is.
+  CPathA pa("x\\y.c");
+  CHECK(pa.FindExtension() == 3 && pa.GetExtension() == ".c");
+  CPathW pw(L"x\\y.c");
+  CHECK(pw.FindExtension() == 3 && pw.GetExtension() == L".c");
+}
+
+// ---------------------------------------------------------------------
+// atlsecurity.h.
+
+static void TestSecurity() {
+  // Well-known SIDs, their string forms and comparisons.
+  CHECK(CString(Sids::World().Sid()) == _T("S-1-1-0"));
+  CHECK(CString(Sids::System().Sid()) == _T("S-1-5-18"));
+  CHECK(CString(Sids::Admins().Sid()) == _T("S-1-5-32-544"));
+  CHECK(Sids::Admins() == Sids::Admins());
+  CHECK(Sids::Admins() != Sids::Users());
+  CHECK(Sids::Admins().EqualPrefix(Sids::Users()));
+  CHECK(Sids::Users().GetSubAuthority(1) == DOMAIN_ALIAS_RID_USERS);
+  CHECK(Sids::World().IsValid());
+  SID_IDENTIFIER_AUTHORITY nt = SECURITY_NT_AUTHORITY;
+  CSid admins(nt, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS);
+  CHECK(admins == Sids::Admins());
+
+  // CSid in an ATL collection.
+  CAtlMap<CSid, int> map;
+  map[Sids::World()] = 1;
+  map[Sids::Admins()] = 2;
+  int n = 0;
+  CHECK(map.Lookup(Sids::Admins(), n) && n == 2);
+
+  // The process token: its user, a SID that round-trips through a name.
+  CAccessToken tok;
+  CHECK(tok.GetProcessToken(TOKEN_QUERY));
+  CSid user;
+  CHECK(tok.GetUser(&user));
+  CHECK(user.IsValid());
+  Log("token user %s\\%s (%s)", (const char*)CStringA(user.Domain()),
+      (const char*)CStringA(user.AccountName()), (const char*)CStringA(user.Sid()));
+  CHECK(*user.AccountName() != 0);
+  CSid byName;
+  CString strFull = CString(user.Domain()) + _T("\\") + user.AccountName();
+  CHECK(byName.LoadAccount(strFull));
+  CHECK(byName == user);
+  CSid::CSidArray groups;
+  CHECK(tok.GetGroups(&groups));
+  CHECK(groups.GetCount() > 0);
+  TOKEN_TYPE type;
+  CHECK(tok.GetType(&type) && type == TokenPrimary);
+
+  // A DACL: the denied entry goes first, whatever the order of adds.
+  CDacl dacl;
+  CHECK(dacl.IsEmpty());
+  CHECK(dacl.AddAllowedAce(Sids::World(), GENERIC_READ));
+  CHECK(dacl.AddAllowedAce(user, GENERIC_ALL));
+  CHECK(dacl.AddDeniedAce(Sids::Guests(), GENERIC_WRITE));
+  CHECK(dacl.GetAceCount() == 3);
+  CSid sid0;
+  ACCESS_MASK mask0 = 0;
+  BYTE type0 = 0;
+  dacl.GetAclEntry(0, &sid0, &mask0, &type0);
+  CHECK(sid0 == Sids::Guests() && type0 == ACCESS_DENIED_ACE_TYPE && mask0 == GENERIC_WRITE);
+  CHECK(::IsValidAcl((PACL)dacl.GetPACL()));
+  dacl.RemoveAces(Sids::Guests());
+  CHECK(dacl.GetAceCount() == 2);
+
+  // A security descriptor: built, to SDDL and back.
+  CSecurityDesc sd;
+  sd.SetOwner(Sids::Admins());
+  sd.SetGroup(Sids::System());
+  sd.SetDacl(dacl);
+  CString strSddl;
+  CHECK(sd.ToString(&strSddl));
+  Log("sddl %s", (const char*)CStringA(strSddl));
+  CHECK(strSddl.Find(_T("O:BA")) == 0);
+  CHECK(strSddl.Find(_T("G:SY")) > 0);
+  CHECK(strSddl.Find(_T("D:")) > 0);
+  CSecurityDesc sd2;
+  CHECK(sd2.FromString(strSddl));
+  CSid owner;
+  CHECK(sd2.GetOwner(&owner) && owner == Sids::Admins());
+  CDacl dacl2;
+  bool bPresent = false;
+  CHECK(sd2.GetDacl(&dacl2, &bPresent) && bPresent);
+  CHECK(dacl2.GetAceCount() == 2);
+  CHECK(::IsValidSecurityDescriptor((PSECURITY_DESCRIPTOR)sd2.GetPSECURITY_DESCRIPTOR()));
+  CSecurityDesc sd3;
+  CHECK(sd3.FromString(_T("D:(A;;GA;;;WD)")));
+  CDacl dacl3;
+  CHECK(sd3.GetDacl(&dacl3) && dacl3.GetAceCount() == 1);
+
+  // An event created with the descriptor; its DACL read back, and replaced.
+  CSecurityAttributes sa(sd);
+  HANDLE hEvent = ::CreateEvent(&sa, TRUE, FALSE, NULL);
+  CHECK(hEvent != NULL);
+  if (hEvent != NULL) {
+    CDacl got;
+    CHECK(AtlGetDacl(hEvent, SE_KERNEL_OBJECT, &got));
+    CHECK(got.GetAceCount() == 2);
+    CDacl one;
+    one.AddAllowedAce(user, EVENT_ALL_ACCESS);
+    CHECK(AtlSetDacl(hEvent, SE_KERNEL_OBJECT, one));
+    CHECK(AtlGetDacl(hEvent, SE_KERNEL_OBJECT, &got));
+    CHECK(got.GetAceCount() == 1);
+    ::CloseHandle(hEvent);
+  }
+
+  // A file's owner and DACL, by name.
+  TCHAR szTmp[MAX_PATH], szFile[MAX_PATH];
+  ::GetTempPath(MAX_PATH, szTmp);
+  ::GetTempFileName(szTmp, _T("sec"), 0, szFile);
+  CSid fileOwner;
+  CHECK(AtlGetOwnerSid(szFile, SE_FILE_OBJECT, &fileOwner));
+  CHECK(fileOwner.IsValid());
+  CDacl fileDacl;
+  fileDacl.AddAllowedAce(user, FILE_ALL_ACCESS);
+  fileDacl.AddAllowedAce(Sids::World(), FILE_GENERIC_READ);
+  CHECK(AtlSetDacl(szFile, SE_FILE_OBJECT, fileDacl));
+  CDacl fileDacl2;
+  CHECK(AtlGetDacl(szFile, SE_FILE_OBJECT, &fileDacl2));
+  CHECK(fileDacl2.GetAceCount() >= 2);
+  ::DeleteFile(szFile);
+}
+
 int main() {
   // Started by the service control manager: be the service.
   if (_tcsstr(::GetCommandLine(), TEXT("-AsService")) != NULL) return _AtlModule.WinMain(SW_HIDE);
@@ -827,6 +1017,10 @@ int main() {
   Log("memory, safe arrays, dispatch: %d failure(s) so far", g_nFailures);
   TestFiles();
   Log("files: %d failure(s) so far", g_nFailures);
+  TestPath();
+  Log("paths: %d failure(s) so far", g_nFailures);
+  TestSecurity();
+  Log("security: %d failure(s) so far", g_nFailures);
   TestService();
   Log("service: %d failure(s) so far", g_nFailures);
 

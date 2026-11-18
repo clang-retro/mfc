@@ -463,7 +463,10 @@ them directly; `NATIVE_TESTS` names others to try.
   and lists of CAutoPtr and interface pointers; CHeapPtr, CComHeapPtr,
   CTempBuffer, CAutoPtr, CHandle; AtlThrow; CComSafeArray of numbers,
   BSTRs and VARIANTs, in one and two dimensions; CComDispatchDriver;
-  CAtlFile, CAtlTemporaryFile and CAtlFileMapping; and CAtlServiceModuleT,
+  CAtlFile, CAtlTemporaryFile and CAtlFileMapping; CPath; CSid and the
+  well-known SIDs, CDacl, CSecurityDesc to SDDL and back, an event created
+  through CSecurityAttributes and its DACL read and replaced, a file's
+  owner and DACL, and the process's CAccessToken; and CAtlServiceModuleT,
   installed with /Service, started and stopped by the service control
   manager, and removed with /UnregServer.
 * `ctltest`: writing a control with COleControl, the test being both
@@ -702,8 +705,11 @@ request with the stock MinGW-w64 toolchain.
   which throws MFC's exceptions when MFC is in use); `atlsafe.h`
   (CComSafeArray, CComSafeArrayBound); `atlfile.h` (CAtlFile,
   CAtlTemporaryFile, CAtlFileMapping); CComPtr<IDispatch>'s helpers and
-  CComDispatchDriver; and CAtlServiceModuleT, a service that is also a
-  COM server.
+  CComDispatchDriver; `atlpath.h` (CPath, CPathA, CPathW and the
+  ATLPath functions over shlwapi); `atlsecurity.h` (CSid and Sids, CAcl,
+  CDacl, CSacl, CSecurityDesc, CSecurityAttributes, CAccessToken, and
+  AtlGetDacl, AtlSetDacl, AtlGetOwnerSid and AtlSetOwnerSid); and
+  CAtlServiceModuleT, a service that is also a COM server.
 * ATL's controls (`atlctl.h`): CComControl and CComControlBase
   (windowed and windowless, in-place activation, drawing through
   OnDraw, ambient properties, FireOnChanged and FireOnRequestEdit,
