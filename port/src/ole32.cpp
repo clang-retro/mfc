@@ -1,13 +1,15 @@
-// ole32.cpp - the COM library within one process: initialization, task
-// memory, GUIDs as text, class objects registered by the program, and
-// streams and byte arrays over global memory.
+// ole32.cpp - the COM library: initialization, task memory, GUIDs as
+// text, class objects registered by the program, and streams and byte
+// arrays over global memory.
 //
-// There is no out-of-process COM: CoCreateInstance finds the classes the
-// program itself registered with CoRegisterClassObject.
+// CoCreateInstance finds the classes the program itself registered with
+// CoRegisterClassObject, in-process servers (InprocServer32), and other
+// programs' servers through com_remote.cpp.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "winport.h"
+#include "com.h"
 
 #include <objbase.h>
 #include <ole2.h>
@@ -164,22 +166,30 @@ HRESULT WINAPI CoRegisterClassObject(REFCLSID clsid, LPUNKNOWN unk, DWORD contex
   ClassEntry e = {clsid, unk, context, flags, g_nextCookie++, false};
   g_classes.push_back(e);
   *cookie = e.cookie;
+  if (context & CLSCTX_LOCAL_SERVER) winport::com::PublishClass(clsid);
   return S_OK;
 }
 
 HRESULT WINAPI CoRevokeClassObject(DWORD cookie) {
   IUnknown* unk = NULL;
+  CLSID clsid = CLSID_NULL;
+  bool others = false, local = false;
   {
     std::lock_guard<std::mutex> g(g_classLock);
     for (size_t i = 0; i < g_classes.size(); i++) {
       if (g_classes[i].cookie == cookie) {
         unk = g_classes[i].unk;
+        clsid = g_classes[i].clsid;
+        local = (g_classes[i].context & CLSCTX_LOCAL_SERVER) != 0;
         g_classes.erase(g_classes.begin() + i);
         break;
       }
     }
+    for (const ClassEntry& e : g_classes)
+      if (IsEqualGUID(e.clsid, clsid) && (e.context & CLSCTX_LOCAL_SERVER) && !e.used) others = true;
   }
   if (unk == NULL) return E_INVALIDARG;
+  if (local && !others) winport::com::UnpublishClass(clsid);
   unk->Release();
   return S_OK;
 }
@@ -188,7 +198,10 @@ HRESULT WINAPI CoResumeClassObjects(void) { return S_OK; }
 HRESULT WINAPI CoSuspendClassObjects(void) { return S_OK; }
 ULONG WINAPI CoAddRefServerProcess(void) { return 1; }
 ULONG WINAPI CoReleaseServerProcess(void) { return 0; }
-HRESULT WINAPI CoDisconnectObject(LPUNKNOWN, DWORD) { return S_OK; }
+HRESULT WINAPI CoDisconnectObject(LPUNKNOWN unk, DWORD) {
+  winport::com::DisconnectObject(unk);
+  return S_OK;
+}
 HRESULT WINAPI CoLockObjectExternal(LPUNKNOWN unk, BOOL lock, BOOL) {
   if (unk == NULL) return E_INVALIDARG;
   if (lock) unk->AddRef();
@@ -263,6 +276,30 @@ HRESULT WINAPI CoGetTreatAsClass(REFCLSID old, LPCLSID out) {
 }
 HRESULT WINAPI CoTreatAsClass(REFCLSID, REFCLSID) { return REGDB_E_WRITEREGDB; }
 
+}  // extern "C"
+
+HRESULT winport::com::TakeClassObject(REFCLSID clsid, IUnknown** out, bool* last) {
+  *out = NULL;
+  *last = true;
+  std::lock_guard<std::mutex> g(g_classLock);
+  HRESULT hr = (HRESULT)0x80080008L;  // CO_E_SERVER_STOPPING
+  for (ClassEntry& e : g_classes) {
+    if (!IsEqualGUID(e.clsid, clsid) || !(e.context & CLSCTX_LOCAL_SERVER) || e.used) continue;
+    if (*out == NULL) {
+      *out = e.unk;
+      e.unk->AddRef();
+      if (e.flags == REGCLS_SINGLEUSE) e.used = true;
+      hr = S_OK;
+      if (!e.used) *last = false;
+    } else {
+      *last = false;
+    }
+  }
+  return hr;
+}
+
+extern "C" {
+
 HRESULT WINAPI CoGetClassObject(REFCLSID clsid, DWORD context, LPVOID, REFIID riid, LPVOID* out) {
   if (out == NULL) return E_INVALIDARG;
   *out = NULL;
@@ -283,8 +320,10 @@ HRESULT WINAPI CoGetClassObject(REFCLSID clsid, DWORD context, LPVOID, REFIID ri
     }
   }
   if (unk == NULL) {
-    if (context & CLSCTX_INPROC_SERVER) return GetInprocClassObject(clsid, riid, out);
-    return REGDB_E_CLASSNOTREG;
+    HRESULT hr = REGDB_E_CLASSNOTREG;
+    if (context & CLSCTX_INPROC_SERVER) hr = GetInprocClassObject(clsid, riid, out);
+    if (FAILED(hr) && (context & CLSCTX_LOCAL_SERVER)) hr = winport::com::GetRemoteClassObject(clsid, riid, out);
+    return hr;
   }
   HRESULT hr = unk->QueryInterface(riid, out);
   unk->Release();

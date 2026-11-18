@@ -826,6 +826,13 @@ struct Process : Object {
   bool IsSignaled(DWORD) override { return done; }
 };
 
+// The children this program started, while they run, so that OpenProcess
+// gives one of them the handle its reaper signals. (Guarded by WaitLock.)
+std::vector<Process*>& Children() {
+  static auto* v = new std::vector<Process*>;
+  return *v;
+}
+
 void* Reaper(void* arg) {
   Process* p = (Process*)arg;
   int status = 0;
@@ -834,6 +841,34 @@ void* Reaper(void* arg) {
   pthread_mutex_lock(WaitLock());
   p->done = true;
   p->exitCode = WIFEXITED(status) ? (DWORD)WEXITSTATUS(status) : WIFSIGNALED(status) ? 0xC000013A : 1;
+  auto& kids = Children();
+  for (size_t i = 0; i < kids.size(); i++)
+    if (kids[i] == p) {
+      kids.erase(kids.begin() + i);
+      Release(p);
+      break;
+    }
+  SignalChange();
+  pthread_mutex_unlock(WaitLock());
+  Release(p);
+  return NULL;
+}
+
+// Another program's process cannot be waited for with waitpid: this
+// looks every little while whether it is still there. Its exit code is
+// not known.
+void* Watcher(void* arg) {
+  Process* p = (Process*)arg;
+  while (kill(p->pid, 0) == 0 || errno == EPERM) {
+    pthread_mutex_lock(WaitLock());
+    bool alone = p->refs.load() == 1;  // every handle is closed
+    pthread_mutex_unlock(WaitLock());
+    if (alone) break;
+    usleep(20000);
+  }
+  pthread_mutex_lock(WaitLock());
+  p->done = true;
+  p->exitCode = 0;
   SignalChange();
   pthread_mutex_unlock(WaitLock());
   Release(p);
@@ -903,7 +938,10 @@ BOOL WINAPI CreateProcessA(LPCSTR app, LPSTR cmd, LPSECURITY_ATTRIBUTES, LPSECUR
     return FALSE;
   }
   Process* p = new Process(pid);
-  p->refs++;  // the reaper's
+  p->refs += 2;  // the reaper's, and the list of children's
+  pthread_mutex_lock(WaitLock());
+  Children().push_back(p);
+  pthread_mutex_unlock(WaitLock());
   pthread_t t;
   pthread_create(&t, NULL, Reaper, p);
   pthread_detach(t);
@@ -957,8 +995,21 @@ HANDLE WINAPI OpenProcess(DWORD, BOOL, DWORD pid) {
     SetLastError(ERROR_INVALID_PARAMETER);
     return NULL;
   }
-  // Not a child: it can be ended but not waited for.
-  return NewHandle(new Process((pid_t)pid));
+  pthread_mutex_lock(WaitLock());
+  for (Process* p : Children())
+    if (p->pid == (pid_t)pid) {
+      p->refs++;
+      pthread_mutex_unlock(WaitLock());
+      return NewHandle(p);
+    }
+  pthread_mutex_unlock(WaitLock());
+  // Not a child: a thread watches for its end.
+  Process* p = new Process((pid_t)pid);
+  p->refs++;  // the watcher's
+  pthread_t t;
+  pthread_create(&t, NULL, Watcher, p);
+  pthread_detach(t);
+  return NewHandle(p);
 }
 
 BOOL WINAPI TerminateProcess(HANDLE h, UINT code) {
