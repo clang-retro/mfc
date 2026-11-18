@@ -44,7 +44,9 @@ static UINT_PTR CALLBACK FileHook(HWND hChild, UINT msg, WPARAM, LPARAM lParam) 
       if (g_file.bCancel) {
         ::PostMessage(hDlg, WM_COMMAND, IDCANCEL, 0);
       } else {
-        ::SendMessage(hDlg, CDM_SETCONTROLTEXT, cmb13, (LPARAM)(LPCTSTR)g_file.strText);
+        // The name box is cmb13 in newer dialogs, edt1 in older ones.
+        ::SendMessage(hDlg, CDM_SETCONTROLTEXT, ::GetDlgItem(hDlg, cmb13) ? cmb13 : edt1,
+                      (LPARAM)(LPCTSTR)g_file.strText);
         ::PostMessage(hDlg, WM_COMMAND, IDOK, 0);
       }
       break;
@@ -84,6 +86,7 @@ static void MakeFile(const CString& strPath) {
 }
 
 static void TestFileDialogs() {
+  TestLog("%s...", "file dialogs");
   CString strDir = TestOutPath(_T("cdlg"));
   ::CreateDirectory(strDir, NULL);
   CString strSep = strDir.Find(_T('\\')) >= 0 ? _T("\\") : _T("/");
@@ -195,6 +198,7 @@ static UINT_PTR CALLBACK ColorHook(HWND hDlg, UINT msg, WPARAM, LPARAM) {
 }
 
 static void TestColorDialog() {
+  TestLog("%s...", "color dialog");
   g_msgSetRgb = ::RegisterWindowMessage(SETRGBSTRING);
   CColorDialog dlg(RGB(10, 20, 30), CC_FULLOPEN);
   dlg.m_cc.Flags |= CC_ENABLEHOOK;
@@ -236,6 +240,7 @@ static UINT_PTR CALLBACK FontHook(HWND hDlg, UINT msg, WPARAM, LPARAM) {
 }
 
 static void TestFontDialog() {
+  TestLog("%s...", "font dialog");
   LOGFONT lfFace;
   memset(&lfFace, 0, sizeof(lfFace));
   lfFace.lfCharSet = DEFAULT_CHARSET;
@@ -308,6 +313,7 @@ public:
     ::SendMessage(hDlg, WM_COMMAND, MAKEWPARAM(nID, BN_CLICKED), (LPARAM)::GetDlgItem(hDlg, nID));
   }
   void TestFindReplace() {
+  TestLog("%s...", "find and replace");
     // Replace All, matching case.
     CFindReplaceDialog* pDlg = new CFindReplaceDialog;
     CHECK(pDlg->Create(FALSE, _T("needle"), _T("pin"), FR_DOWN, this));
