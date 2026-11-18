@@ -195,18 +195,6 @@ struct CPushRoutingView {
   ~CPushRoutingView() { pThreadState->m_pRoutingView = pOldRoutingView; }
 };
 
-// A CCmdUI that only records whether the command is enabled. Used to
-// check a menu or accelerator command before running it.
-class CTestCmdUI : public CCmdUI {
-public:
-  BOOL m_bEnabled;
-  CTestCmdUI() : m_bEnabled(TRUE) {}
-  virtual void Enable(BOOL bOn) { m_bEnabled = bOn; m_bEnableChanged = TRUE; }
-  virtual void SetCheck(int) {}
-  virtual void SetRadio(BOOL) {}
-  virtual void SetText(LPCTSTR) {}
-};
-
 // A dialog template's string (16-bit units, whatever the size of wchar_t).
 CStringW AFXAPI _AfxTemplateString(const WORD* p);
 

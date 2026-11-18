@@ -108,6 +108,23 @@ HWND CWnd::UnsubclassWindow() {
   return Detach();
 }
 
+namespace {
+
+// A CCmdUI that only records whether the command is enabled. Used to
+// check a menu or accelerator command before running it. (Programs often
+// have a class of this name of their own, so this one is local.)
+class CTestCmdUI : public CCmdUI {
+public:
+  BOOL m_bEnabled;
+  CTestCmdUI() : m_bEnabled(TRUE) {}
+  virtual void Enable(BOOL bOn) { m_bEnabled = bOn; m_bEnableChanged = TRUE; }
+  virtual void SetCheck(int) {}
+  virtual void SetRadio(BOOL) {}
+  virtual void SetText(LPCTSTR) {}
+};
+
+}  // namespace
+
 // ---------------------------------------------------------------------
 // Creation. A CBT hook attaches the CWnd to its window as soon as the
 // window exists, so that the CWnd sees WM_NCCREATE and WM_CREATE.

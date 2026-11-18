@@ -39,12 +39,6 @@ OleUIChangeIconA
 OleUIChangeIconW
 OleUIConvertA
 OleUIConvertW
-OleUIEditLinksA
-OleUIEditLinksW
-OleUIInsertObjectA
-OleUIInsertObjectW
-OleUIPasteSpecialA
-OleUIPasteSpecialW
 OleUIUpdateLinksA
 OleUIUpdateLinksW
 RegisterDragDrop
