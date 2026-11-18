@@ -21,13 +21,13 @@ permissions:
 jobs:
   clang-dos:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       # Unpacks the nightly, puts its bin on PATH and sets $CLANG_DOS.
       - uses: clang-retro/dos-sdk/.github/actions/setup-toolchain@main
       - name: Install Wine and Xvfb
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
@@ -57,7 +57,7 @@ jobs:
   mingw-wine:
     runs-on: ubuntu-24.04
     # A hung package install or test should fail, not run for hours.
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       # The packages' .debs are cached between runs, so an install only
@@ -72,7 +72,7 @@ jobs:
           restore-keys: apt-v1-${{ runner.os }}-
       - uses: clang-retro/dos-sdk/.github/actions/setup-toolchain@main
       - name: Install MinGW-w64, Wine and Xvfb
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
