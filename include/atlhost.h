@@ -1823,6 +1823,152 @@ inline DLGTEMPLATE* _AtlAxLoadDialog(HINSTANCE hInst, LPCWSTR lpTemplateName,
   if (hInit != NULL) pInit = (const BYTE*)::LockResource(::LoadResource(hInst, hInit));
   return _AtlAxConvertDialog(pTemplate, pInit, bNoItems);
 }
+// The dialog template helpers that WTL and other libraries built on ATL
+// call: the extended template's layout, walking a template's items, a
+// control's DLGINIT data, and a template with its controls taken out (to
+// be created once the dialog exists, as CreateActiveXControls does).
+class _DialogSplitHelper {
+public:
+#pragma pack(push, 2)
+  struct DLGTEMPLATEEX {
+    WORD dlgVer;
+    WORD signature;
+    DWORD helpID;
+    DWORD exStyle;
+    DWORD style;
+    WORD cDlgItems;
+    short x;
+    short y;
+    short cx;
+    short cy;
+  };
+  struct DLGITEMTEMPLATEEX {
+    DWORD helpID;
+    DWORD exStyle;
+    DWORD style;
+    short x;
+    short y;
+    short cx;
+    short cy;
+    DWORD id;
+  };
+#pragma pack(pop)
+
+  static BOOL IsDialogEx(const DLGTEMPLATE* pTemplate) {
+    return ((const DLGTEMPLATEEX*)pTemplate)->signature == 0xFFFF;
+  }
+  static WORD DlgTemplateItemCount(const DLGTEMPLATE* pTemplate) {
+    return IsDialogEx(pTemplate) ? ((const DLGTEMPLATEEX*)pTemplate)->cDlgItems
+                                 : pTemplate->cdit;
+  }
+  static DWORD _Style(const DLGTEMPLATE* pTemplate) {
+    return IsDialogEx(pTemplate) ? ((const DLGTEMPLATEEX*)pTemplate)->style : pTemplate->style;
+  }
+  static DLGITEMTEMPLATE* FindFirstDlgItem(const DLGTEMPLATE* pTemplate) {
+    BOOL bEx = IsDialogEx(pTemplate);
+    const WORD* pw = bEx ? (const WORD*)((const DLGTEMPLATEEX*)pTemplate + 1)
+                         : (const WORD*)(pTemplate + 1);
+    pw = _AtlAxSkipSzOrOrd(pw);  // the menu
+    pw = _AtlAxSkipSzOrOrd(pw);  // the class
+    pw = _AtlAxSkipSzOrOrd(pw);  // the title
+    if (_Style(pTemplate) & DS_SETFONT) {
+      pw += bEx ? 3 : 1;  // the point size (and weight, italic, charset)
+      pw = _AtlAxSkipSzOrOrd(pw);
+    }
+    return (DLGITEMTEMPLATE*)_Align(pw);
+  }
+  static DLGITEMTEMPLATE* FindNextDlgItem(DLGITEMTEMPLATE* pItem, BOOL bDialogEx) {
+    const WORD* pw = bDialogEx ? (const WORD*)((DLGITEMTEMPLATEEX*)pItem + 1)
+                               : (const WORD*)(pItem + 1);
+    pw = _AtlAxSkipSzOrOrd(pw);  // the class
+    pw = _AtlAxSkipSzOrOrd(pw);  // the title
+    WORD cbExtra = *pw++;
+    return (DLGITEMTEMPLATE*)_Align((const BYTE*)pw + cbExtra);
+  }
+  // An item whose class is a "{CLSID}" (or a ProgID the host takes).
+  static BOOL IsActiveXControl(DLGITEMTEMPLATE* pItem, BOOL bDialogEx) {
+    const WORD* pw = bDialogEx ? (const WORD*)((DLGITEMTEMPLATEEX*)pItem + 1)
+                               : (const WORD*)(pItem + 1);
+    return pw[0] == L'{';
+  }
+  // The control's record in the DLGINIT data, and its length (0 for none).
+  static DWORD FindCreateData(DWORD dwID, BYTE* pInitData, BYTE** pData) {
+    *pData = NULL;
+    WORD nMsg = 0;
+    DWORD cb = 0;
+    const BYTE* p = _AtlAxFindDlgInit(pInitData, (WORD)dwID, &nMsg, &cb);
+    if (p == NULL) return 0;
+    *pData = (BYTE*)p;
+    return cb;
+  }
+  // The license key at the front of a control's data; the stream is left
+  // at the control's saved state.
+  static HRESULT ParseInitData(IStream* pStream, BSTR* pLicKey) {
+    *pLicKey = NULL;
+    if (pStream == NULL) return S_OK;
+    ULONG cch = 0;
+    HRESULT hr = pStream->Read(&cch, sizeof(cch), NULL);
+    if (FAILED(hr) || cch == 0) return FAILED(hr) ? hr : S_OK;
+    WORD* pBuf = new (std::nothrow) WORD[cch];
+    if (pBuf == NULL) return E_OUTOFMEMORY;
+    hr = pStream->Read(pBuf, cch * sizeof(WORD), NULL);
+    if (SUCCEEDED(hr)) {
+      *pLicKey = ::SysAllocStringLen(NULL, cch);
+      if (*pLicKey == NULL) {
+        hr = E_OUTOFMEMORY;
+      } else {
+        for (ULONG i = 0; i < cch; i++) (*pLicKey)[i] = (OLECHAR)pBuf[i];
+      }
+    }
+    delete[] pBuf;
+    return hr;
+  }
+  // The template without its controls, in global memory (GMEM_FIXED);
+  // the template itself when it has none.
+  static DLGTEMPLATE* SplitDialogTemplate(DLGTEMPLATE* pTemplate, BYTE* /*pInitData*/) {
+    if (pTemplate == NULL) return NULL;
+    BOOL bEx = IsDialogEx(pTemplate);
+    WORD nItems = DlgTemplateItemCount(pTemplate);
+    DLGITEMTEMPLATE* pFirst = FindFirstDlgItem(pTemplate);
+    DLGITEMTEMPLATE* pItem = pFirst;
+    WORD nControls = 0;
+    for (WORD i = 0; i < nItems; i++) {
+      if (IsActiveXControl(pItem, bEx)) nControls++;
+      pItem = FindNextDlgItem(pItem, bEx);
+    }
+    if (nControls == 0) return pTemplate;
+    size_t cbAll = (BYTE*)pItem - (BYTE*)pTemplate;
+    DLGTEMPLATE* pNew = (DLGTEMPLATE*)::GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, cbAll);
+    if (pNew == NULL) return NULL;
+    size_t cbHead = (BYTE*)pFirst - (BYTE*)pTemplate;
+    memcpy(pNew, pTemplate, cbHead);
+    BYTE* pOut = (BYTE*)pNew + cbHead;
+    pItem = pFirst;
+    for (WORD i = 0; i < nItems; i++) {
+      DLGITEMTEMPLATE* pNext = FindNextDlgItem(pItem, bEx);
+      if (!IsActiveXControl(pItem, bEx)) {
+        // Each item starts on a DWORD boundary, as the source's did.
+        pOut = (BYTE*)pNew + ((pOut - (BYTE*)pNew + 3) & ~(size_t)3);
+        memcpy(pOut, pItem, (BYTE*)pNext - (BYTE*)pItem);
+        pOut += (BYTE*)pNext - (BYTE*)pItem;
+      }
+      pItem = pNext;
+    }
+    WORD nLeft = (WORD)(nItems - nControls);
+    if (bEx)
+      ((DLGTEMPLATEEX*)pNew)->cDlgItems = nLeft;
+    else
+      pNew->cdit = nLeft;
+    return pNew;
+  }
+
+private:
+  template <class P>
+  static const void* _Align(P p) {
+    return (const void*)(((UINT_PTR)p + 3) & ~(UINT_PTR)3);
+  }
+};
+
 inline LPCWSTR _AtlAxTemplateNameW(LPCSTR lpTemplateName, WCHAR* pszBuf, int cch) {
   if (IS_INTRESOURCE(lpTemplateName)) return (LPCWSTR)lpTemplateName;
   ::MultiByteToWideChar(CP_ACP, 0, lpTemplateName, -1, pszBuf, cch);

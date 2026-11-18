@@ -64,6 +64,8 @@ jobs:
           key: wineprefix-v1-${{ runner.os }}-${{ steps.wine.outputs.version }}
       - name: Build
         run: make -j"$(nproc)" BIN="$CLANG_DOS/bin" SYSROOT="$CLANG_DOS/sysroots/win2k-xp"
+      - name: Fetch WTL (for wtltest)
+        run: sh tools/fetch-wtl.sh
       - name: Test
         run: |
           export MFC_TEST_WINEPREFIX="$HOME/wineprefix"
@@ -122,6 +124,8 @@ jobs:
           key: wineprefix-v1-${{ runner.os }}-${{ steps.wine.outputs.version }}
       - name: Build
         run: make -j"$(nproc)" TARGET=i686-w64-mingw32 STDLIB= BIN="$CLANG_DOS/bin"
+      - name: Fetch WTL (for wtltest)
+        run: sh tools/fetch-wtl.sh
       - name: Test
         run: |
           export MFC_TEST_WINEPREFIX="$HOME/wineprefix"

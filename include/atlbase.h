@@ -12,8 +12,11 @@
 #ifndef __ATLBASE_H__
 #define __ATLBASE_H__
 
+// The ATL this is: the module classes, CStringT, the checked functions
+// and the trace categories are those of ATL 8 (Visual C++ 2005), and
+// ATL 3's CComModule is kept. A program may define _ATL_VER itself.
 #ifndef _ATL_VER
-#define _ATL_VER 0x0300
+#define _ATL_VER 0x0800
 #endif
 
 #include <windows.h>
@@ -27,8 +30,12 @@
 #include <tchar.h>
 #include <string.h>
 #include <wchar.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
 
 #include "atlexcept.h"
+#include "atlchecked.h"
 #include "atlalloc.h"
 #include "atlcomcli.h"
 #include "atlsimpcoll.h"
@@ -55,6 +62,48 @@ __asm__(".section .drectve,\"yn\"\n"
 #define ATLTRACE2(...) ((void)0)
 #endif
 #define ATLTRACENOTIMPL(funcname) return E_NOTIMPL
+// ATLVERIFY evaluates its expression in every build.
+#ifndef ATLVERIFY
+#define ATLVERIFY(expr) ((expr) ? (void)0 : (void)ATLASSERT(FALSE))
+#endif
+#ifndef ATLENSURE
+#define ATLENSURE(expr) \
+  do {                  \
+    if (!(expr)) ATL::AtlThrow(E_FAIL); \
+  } while (0)
+#endif
+#ifndef ATLENSURE_RETURN
+#define ATLENSURE_RETURN(expr) \
+  do {                         \
+    if (!(expr)) return E_FAIL; \
+  } while (0)
+#endif
+#ifndef ATLENSURE_RETURN_VAL
+#define ATLENSURE_RETURN_VAL(expr, val) \
+  do {                                  \
+    if (!(expr)) return val;            \
+  } while (0)
+#endif
+// ATLTRY runs a statement and swallows what it throws (an allocation
+// that fails, for one).
+#ifndef ATLTRY
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+#define ATLTRY(x) \
+  try {           \
+    x;            \
+  } catch (...) { \
+  }
+#else
+#define ATLTRY(x) x;
+#endif
+#endif
+#ifndef ATLTRYALLOC
+#define ATLTRYALLOC(x) ATLTRY(x)
+#endif
+// The message a window sends to have another pre-translate a message.
+#ifndef WM_FORWARDMSG
+#define WM_FORWARDMSG 0x037F
+#endif
 #ifndef ATL_NO_VTABLE
 #define ATL_NO_VTABLE
 #endif
@@ -1086,6 +1135,110 @@ public:
   }
 };
 inline CAtlBaseModule _AtlBaseModule;
+
+// The object a window being created belongs to, until its first message.
+struct _AtlCreateWndData {
+  void* m_pThis;
+  DWORD m_dwThreadID;
+  _AtlCreateWndData* m_pNext;
+};
+
+
+// The module's window state: the objects whose windows are being made.
+class CAtlWinModule {
+public:
+  CComCriticalSection m_csWindowCreate;
+  _AtlCreateWndData* m_pCreateWndList;
+  CAtlWinModule() : m_pCreateWndList(NULL) { m_csWindowCreate.Init(); }
+  ~CAtlWinModule() { m_csWindowCreate.Term(); }
+  void AddCreateWndData(_AtlCreateWndData* pData, void* pObject) {
+    pData->m_pThis = pObject;
+    pData->m_dwThreadID = ::GetCurrentThreadId();
+    m_csWindowCreate.Lock();
+    pData->m_pNext = m_pCreateWndList;
+    m_pCreateWndList = pData;
+    m_csWindowCreate.Unlock();
+  }
+  void* ExtractCreateWndData() {
+    void* pv = NULL;
+    m_csWindowCreate.Lock();
+    DWORD dwThreadID = ::GetCurrentThreadId();
+    for (_AtlCreateWndData** pp = &m_pCreateWndList; *pp != NULL; pp = &(*pp)->m_pNext) {
+      if ((*pp)->m_dwThreadID == dwThreadID) {
+        pv = (*pp)->m_pThis;
+        *pp = (*pp)->m_pNext;
+        break;
+      }
+    }
+    m_csWindowCreate.Unlock();
+    return pv;
+  }
+};
+inline CAtlWinModule _AtlWinModule;
+
+// Trace categories, as ATL 7 and later name them. ATLTRACE and ATLTRACE2
+// write nothing, so a category only carries its name and level.
+class CTraceCategory {
+public:
+  explicit CTraceCategory(LPCTSTR pszCategoryName, UINT nStartingLevel = 0)
+      : m_pszName(pszCategoryName), m_nLevel(nStartingLevel) {}
+  UINT GetLevel() const { return m_nLevel; }
+  void SetLevel(UINT nLevel) { m_nLevel = nLevel; }
+  LPCTSTR GetCategoryName() const { return m_pszName; }
+private:
+  LPCTSTR m_pszName;
+  UINT m_nLevel;
+};
+#define DECLARE_TRACE_CATEGORY(name) extern ATL::CTraceCategory name;
+inline CTraceCategory atlTraceGeneral(TEXT("atlTraceGeneral"));
+inline CTraceCategory atlTraceCOM(TEXT("atlTraceCOM"));
+inline CTraceCategory atlTraceQI(TEXT("atlTraceQI"));
+inline CTraceCategory atlTraceRegistrar(TEXT("atlTraceRegistrar"));
+inline CTraceCategory atlTraceRefcount(TEXT("atlTraceRefcount"));
+inline CTraceCategory atlTraceWindowing(TEXT("atlTraceWindowing"));
+inline CTraceCategory atlTraceControls(TEXT("atlTraceControls"));
+inline CTraceCategory atlTraceHosting(TEXT("atlTraceHosting"));
+inline CTraceCategory atlTraceDBClient(TEXT("atlTraceDBClient"));
+inline CTraceCategory atlTraceDBProvider(TEXT("atlTraceDBProvider"));
+inline CTraceCategory atlTraceSnapin(TEXT("atlTraceSnapin"));
+inline CTraceCategory atlTraceNotImpl(TEXT("atlTraceNotImpl"));
+inline CTraceCategory atlTraceAllocation(TEXT("atlTraceAllocation"));
+inline CTraceCategory atlTraceException(TEXT("atlTraceException"));
+inline CTraceCategory atlTraceTime(TEXT("atlTraceTime"));
+inline CTraceCategory atlTraceCache(TEXT("atlTraceCache"));
+inline CTraceCategory atlTraceStencil(TEXT("atlTraceStencil"));
+inline CTraceCategory atlTraceString(TEXT("atlTraceString"));
+inline CTraceCategory atlTraceMap(TEXT("atlTraceMap"));
+inline CTraceCategory atlTraceUtil(TEXT("atlTraceUtil"));
+inline CTraceCategory atlTraceSecurity(TEXT("atlTraceSecurity"));
+inline CTraceCategory atlTraceSync(TEXT("atlTraceSync"));
+inline CTraceCategory atlTraceISAPI(TEXT("atlTraceISAPI"));
+
+// The version of the common controls the program has (5.8, or 6.0 with
+// a manifest), from comctl32's DllGetVersion; 4.0 when it has none.
+inline HRESULT AtlGetCommCtrlVersion(LPDWORD pdwMajor, LPDWORD pdwMinor) {
+  if (pdwMajor == NULL || pdwMinor == NULL) return E_INVALIDARG;
+  struct _DllVersionInfo {
+    DWORD cbSize, dwMajorVersion, dwMinorVersion, dwBuildNumber, dwPlatformID;
+  } dvi = {sizeof(_DllVersionInfo), 0, 0, 0, 0};
+  typedef HRESULT(CALLBACK * PFN)(_DllVersionInfo*);
+  HINSTANCE hComCtl = ::LoadLibrary(TEXT("comctl32.dll"));
+  if (hComCtl == NULL) return AtlHresultFromLastError();
+  HRESULT hr = S_OK;
+  PFN pfn = (PFN)(void*)::GetProcAddress(hComCtl, "DllGetVersion");
+  if (pfn != NULL) {
+    hr = pfn(&dvi);
+    if (SUCCEEDED(hr)) {
+      *pdwMajor = dvi.dwMajorVersion;
+      *pdwMinor = dvi.dwMinorVersion;
+    }
+  } else {
+    *pdwMajor = 4;
+    *pdwMinor = 0;
+  }
+  ::FreeLibrary(hComCtl);
+  return hr;
+}
 
 // The objects that OBJECT_ENTRY_AUTO adds, ATL 7's object map.
 struct _ATL_AUTO_OBJMAP {
