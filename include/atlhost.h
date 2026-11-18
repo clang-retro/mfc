@@ -1286,10 +1286,14 @@ inline LRESULT _AtlAxWindowCreate(HWND hWnd, LPARAM lParam, bool bLic) {
       memcpy(&cch, pData, sizeof(ULONG));
       pData += sizeof(ULONG);
       cbData -= sizeof(ULONG);
-      if (cch * sizeof(OLECHAR) <= cbData) {
-        if (cch > 0) bstrLic = ::SysAllocStringLen((const OLECHAR*)pData, cch);
-        pData += cch * sizeof(OLECHAR);
-        cbData -= cch * sizeof(OLECHAR);
+      // The key is in 16-bit units, as in a dialog resource, whatever
+      // size OLECHAR has.
+      if (cch * 2 <= cbData) {
+        if (cch > 0 && (bstrLic = ::SysAllocStringLen(NULL, cch)) != NULL) {
+          for (ULONG i = 0; i < cch; i++) bstrLic[i] = (OLECHAR)(pData[2 * i] | (pData[2 * i + 1] << 8));
+        }
+        pData += cch * 2;
+        cbData -= cch * 2;
       }
     }
   }
@@ -1631,10 +1635,10 @@ inline void _AtlAxDlgInitData(const BYTE* pInit, WORD nID, _AtlAxBuf* pData, boo
     memcpy(&cchKey, p, sizeof(ULONG));
     p += sizeof(ULONG);
     cb -= sizeof(ULONG);
-    if (cchKey * sizeof(WCHAR) > cb) cchKey = 0;
+    if (cchKey * 2 > cb) cchKey = 0;  // 16-bit units
     pKey = p;
-    p += cchKey * sizeof(WCHAR);
-    cb -= cchKey * sizeof(WCHAR);
+    p += cchKey * 2;
+    cb -= cchKey * 2;
   }
   if ((nMsg == 0x037A || nMsg == 0x037B) && cb >= 3 * sizeof(DWORD)) {
     DWORD cbSection;
@@ -1646,7 +1650,7 @@ inline void _AtlAxDlgInitData(const BYTE* pInit, WORD nID, _AtlAxBuf* pData, boo
   if (cchKey > 0) {
     *pbLic = true;
     pData->Put(&cchKey, sizeof(ULONG));
-    pData->Put(pKey, cchKey * sizeof(WCHAR));
+    pData->Put(pKey, cchKey * 2);
   }
   pData->Put(p, cb);
 }
@@ -1790,12 +1794,9 @@ inline DLGTEMPLATE* _AtlAxConvertDialog(const DLGTEMPLATE* pTemplate, const BYTE
         data.n = 0;
         bLic = false;
       }
-      static const WCHAR szWin[] = L"AtlAxWin";
-      static const WCHAR szWinLic[] = L"AtlAxWinLic";
-      if (bLic)
-        buf.Put(szWinLic, sizeof(szWinLic));
-      else
-        buf.Put(szWin, sizeof(szWin));
+      // The host's class, in the template's 16-bit units.
+      for (const char* pc = bLic ? "AtlAxWinLic" : "AtlAxWin"; *pc != 0; pc++) buf.PutWord((WORD)*pc);
+      buf.PutWord(0);
       buf.Put(pItemClass, (const BYTE*)pItemTitle - (const BYTE*)pItemClass);  // the CLSID
       buf.PutWord((WORD)data.n);
       if (data.n > 0) buf.Put(data.p, data.n);

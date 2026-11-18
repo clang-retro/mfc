@@ -1116,7 +1116,7 @@ int main() {
   char szPath[MAX_PATH];
   DWORD n = ::GetEnvironmentVariableA("MFC_TEST_OUT", szPath, MAX_PATH);
   if (n == 0 || n >= MAX_PATH - 20) lstrcpyA(szPath, ".");
-  lstrcatA(szPath, "\\atlctltest.log");
+  lstrcatA(szPath, "/atlctltest.log");
   g_pLog = fopen(szPath, "w");
   ::OleInitialize(NULL);
   _Module.Init(ObjectMap, ::GetModuleHandle(NULL), &LIBID_AtlCtlLib);

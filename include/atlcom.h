@@ -2005,6 +2005,31 @@ inline HRESULT _AtlPropMapDispatch(IUnknown* pUnk, const ATL_PROPMAP_ENTRY* pEnt
 }
 
 // A data entry's value as a VARIANT of its type, and back.
+// A data member's value has its type's size in a stream or a variant,
+// whatever size the member has: a long member of a VT_I4 entry is 64-bit
+// on Linux and macOS, while the saved form (and VARIANT's lVal) is 32-bit.
+inline ULONG _AtlPropWireSize(VARTYPE vt, ULONG cbData) {
+  switch (vt) {
+    case VT_I1: case VT_UI1: return 1;
+    case VT_I2: case VT_UI2: case VT_BOOL: return 2;
+    case VT_I4: case VT_UI4: case VT_INT: case VT_UINT: case VT_R4: case VT_ERROR: return 4;
+    case VT_I8: case VT_UI8: case VT_R8: case VT_CY: case VT_DATE: return 8;
+    default: return cbData;
+  }
+}
+// Copies a value between sizes, widening by the type's sign.
+inline void _AtlPropCopyScalar(VARTYPE vt, const void* pSrc, ULONG cbSrc, void* pDst, ULONG cbDst) {
+  if (cbSrc == cbDst || cbSrc > 8 || cbDst > 8 || vt == VT_R4 || vt == VT_R8) {
+    memcpy(pDst, pSrc, cbSrc < cbDst ? cbSrc : cbDst);
+    return;
+  }
+  ULONGLONG u = 0;
+  memcpy(&u, pSrc, cbSrc);  // little-endian
+  bool bSigned = vt == VT_I1 || vt == VT_I2 || vt == VT_I4 || vt == VT_INT || vt == VT_I8 || vt == VT_BOOL;
+  if (bSigned && cbSrc < 8 && (u >> (cbSrc * 8 - 1)) & 1) u |= ~0ULL << (cbSrc * 8);
+  memcpy(pDst, &u, cbDst);
+}
+
 inline HRESULT _AtlDataEntryToVariant(const ATL_PROPMAP_ENTRY* pEntry, void* pThis, VARIANT* pVar) {
   BYTE* pData = (BYTE*)pThis + pEntry->dwOffsetData;
   VariantInit(pVar);
@@ -2016,7 +2041,8 @@ inline HRESULT _AtlDataEntryToVariant(const ATL_PROPMAP_ENTRY* pEntry, void* pTh
   }
   if (pEntry->dwSizeData > sizeof(pVar->llVal) * 2) return E_FAIL;
   pVar->vt = pEntry->vt;
-  memcpy(&pVar->llVal, pData, pEntry->dwSizeData);
+  _AtlPropCopyScalar(pEntry->vt, pData, pEntry->dwSizeData, &pVar->llVal,
+                     _AtlPropWireSize(pEntry->vt, pEntry->dwSizeData));
   return S_OK;
 }
 inline HRESULT _AtlVariantToDataEntry(const ATL_PROPMAP_ENTRY* pEntry, void* pThis, VARIANT* pVar) {
@@ -2033,7 +2059,8 @@ inline HRESULT _AtlVariantToDataEntry(const ATL_PROPMAP_ENTRY* pEntry, void* pTh
     return S_OK;
   }
   if (pEntry->dwSizeData > sizeof(pVar->llVal) * 2) return E_FAIL;
-  memcpy(pData, &pVar->llVal, pEntry->dwSizeData);
+  _AtlPropCopyScalar(pEntry->vt, &pVar->llVal, _AtlPropWireSize(pEntry->vt, pEntry->dwSizeData), pData,
+                     pEntry->dwSizeData);
   return S_OK;
 }
 
@@ -2052,7 +2079,14 @@ inline HRESULT AtlIPersistStreamInit_Save(LPSTREAM pStm, BOOL /*fClearDirty*/,
         CComBSTR s(*(BSTR*)((BYTE*)pThis + pMap->dwOffsetData));
         hr = s.WriteToStream(pStm);
       } else {
-        hr = pStm->Write((BYTE*)pThis + pMap->dwOffsetData, pMap->dwSizeData, NULL);
+        BYTE ab[16];
+        ULONG cb = _AtlPropWireSize(pMap->vt, pMap->dwSizeData);
+        if (cb > sizeof(ab) || pMap->dwSizeData > sizeof(ab)) {
+          hr = pStm->Write((BYTE*)pThis + pMap->dwOffsetData, pMap->dwSizeData, NULL);
+        } else {
+          _AtlPropCopyScalar(pMap->vt, (BYTE*)pThis + pMap->dwOffsetData, pMap->dwSizeData, ab, cb);
+          hr = pStm->Write(ab, cb, NULL);
+        }
       }
       continue;
     }
@@ -2086,8 +2120,16 @@ inline HRESULT AtlIPersistStreamInit_Load(LPSTREAM pStm, const ATL_PROPMAP_ENTRY
           *pb = s.Detach();
         }
       } else {
-        hr = pStm->Read((BYTE*)pThis + pMap->dwOffsetData, pMap->dwSizeData, &cbRead);
-        if (SUCCEEDED(hr) && cbRead != pMap->dwSizeData) hr = E_FAIL;
+        BYTE ab[16];
+        ULONG cb = _AtlPropWireSize(pMap->vt, pMap->dwSizeData);
+        if (cb > sizeof(ab) || pMap->dwSizeData > sizeof(ab)) {
+          hr = pStm->Read((BYTE*)pThis + pMap->dwOffsetData, pMap->dwSizeData, &cbRead);
+          if (SUCCEEDED(hr) && cbRead != pMap->dwSizeData) hr = E_FAIL;
+        } else {
+          hr = pStm->Read(ab, cb, &cbRead);
+          if (SUCCEEDED(hr) && cbRead != cb) hr = E_FAIL;
+          if (SUCCEEDED(hr)) _AtlPropCopyScalar(pMap->vt, ab, cb, (BYTE*)pThis + pMap->dwOffsetData, pMap->dwSizeData);
+        }
       }
       continue;
     }
@@ -2110,7 +2152,9 @@ inline HRESULT AtlIPersistPropertyBag_Load(LPPROPERTYBAG pPropBag, LPERRORLOG pE
   if (pPropBag == NULL || pMap == NULL) return E_POINTER;
   for (; !_AtlPropMapEnd(pMap); pMap++) {
     if (pMap->szDesc == NULL) continue;
+    // The type wanted, with nothing in it: a bag may clear it.
     CComVariant var;
+    memset(static_cast<VARIANT*>(&var), 0, sizeof(VARIANT));
     if (pMap->dwSizeData != 0) {
       var.vt = pMap->vt;
       if (FAILED(pPropBag->Read(pMap->szDesc, &var, pErrorLog))) continue;  // not saved
