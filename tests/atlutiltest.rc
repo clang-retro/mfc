@@ -1,0 +1,11 @@
+// atlutiltest.rc - the strings atlutiltest loads: the service's name, and
+// strings for CString::LoadString and Format.
+#include <windows.h>
+#include "atlutiltest.h"
+
+STRINGTABLE
+BEGIN
+  IDS_SERVICENAME "AtlUtilTestSvc"
+  IDS_HELLO "Hello, %s"
+  IDS_LONG "A string longer than the first guess of 256 characters, which LoadString has to read again into a bigger buffer: 0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789 end"
+END

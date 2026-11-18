@@ -246,8 +246,13 @@ public:
       Init();
     }
   }
-  XCHAR GetAt(int i) const { return m_pszData[i]; }
-  XCHAR operator[](int i) const { return m_pszData[i]; }
+  // A character, or the terminating zero; past that an error, as in
+  // MFC 7 and later.
+  XCHAR GetAt(int i) const {
+    if (i < 0 || i > GetLength()) Tr::ThrowInvalidArg();
+    return m_pszData[i];
+  }
+  XCHAR operator[](int i) const { return GetAt(i); }
   void SetAt(int i, XCHAR ch) {
     if (i < 0 || i >= GetLength()) Tr::ThrowInvalidArg();
     PXSTR p = GetBuffer();

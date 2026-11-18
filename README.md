@@ -456,6 +456,16 @@ them directly; `NATIVE_TESTS` names others to try.
   advised with AtlAdviseSinkMap); and CAxDialogImpl over DIALOG and
   DIALOGEX templates that name controls by CLSID, their saved state
   (and a license key) from DLGINIT, as the dialog editor writes them.
+* `atlutiltest`: ATL's utility headers in a program without MFC: CString
+  from `atlstr.h` (formatting, string resources, conversions, errors as
+  CAtlException); CSimpleArray and CSimpleMap; CAtlArray, CAtlList,
+  CAtlMap (rehashing as it grows), CRBMap and CRBMultiMap, and the arrays
+  and lists of CAutoPtr and interface pointers; CHeapPtr, CComHeapPtr,
+  CTempBuffer, CAutoPtr, CHandle; AtlThrow; CComSafeArray of numbers,
+  BSTRs and VARIANTs, in one and two dimensions; CComDispatchDriver;
+  CAtlFile, CAtlTemporaryFile and CAtlFileMapping; and CAtlServiceModuleT,
+  installed with /Service, started and stopped by the service control
+  manager, and removed with /UnregServer.
 * `ctltest`: writing a control with COleControl, the test being both
   its server and its container: stock and custom properties, a method,
   stock and custom events, verbs from its message map (ON_OLEVERB,
@@ -680,6 +690,20 @@ request with the stock MinGW-w64 toolchain.
   (DECLARE_WND_SUPERCLASS), with the window procedure thunks of x86 and
   x86-64, SubclassWindow and OnFinalMessage; the CWinTraits styles;
   CContainedWindow; CDialogImpl and CSimpleDialog.
+* ATL's utilities: `atlstr.h` (CString, CStringA and CStringW for
+  programs without MFC, and CAtlString for any; the same CStringT as
+  MFC's, over string traits of ATL's own); `atlsimpcoll.h` (CSimpleArray,
+  CSimpleValArray, CSimpleMap) and `atlcoll.h` (CAtlArray, CAtlList,
+  CAtlMap, CRBMap, CRBMultiMap, CAutoPtrArray, CAutoPtrList,
+  CInterfaceArray, CInterfaceList and the element traits, CElementTraits
+  and CStringElementTraits among them); `atlalloc.h` (the allocators,
+  CHeapPtr, CComHeapPtr, CTempBuffer, CAutoPtr, CAutoVectorPtr, CHandle,
+  AtlAdd and AtlMultiply); `atlexcept.h` (CAtlException and AtlThrow,
+  which throws MFC's exceptions when MFC is in use); `atlsafe.h`
+  (CComSafeArray, CComSafeArrayBound); `atlfile.h` (CAtlFile,
+  CAtlTemporaryFile, CAtlFileMapping); CComPtr<IDispatch>'s helpers and
+  CComDispatchDriver; and CAtlServiceModuleT, a service that is also a
+  COM server.
 * ATL's controls (`atlctl.h`): CComControl and CComControlBase
   (windowed and windowless, in-place activation, drawing through
   OnDraw, ambient properties, FireOnChanged and FireOnRequestEdit,

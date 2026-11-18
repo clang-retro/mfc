@@ -192,8 +192,10 @@ public:
     if (lIndex < lLBound || lIndex > GetUpperBound()) AtlThrow(E_INVALIDARG);
     return ((T*)m_psa->pvData)[lIndex - lLBound];
   }
-  T& operator[](LONG lIndex) const { return GetAt(lIndex); }
-  T& operator[](int nIndex) const { return GetAt((LONG)nIndex); }
+  template <typename I>
+  T& operator[](I nIndex) const {
+    return GetAt((LONG)nIndex);
+  }
   HRESULT SetAt(LONG lIndex, const T& t, BOOL bCopy = TRUE) {
     if (m_psa == NULL) return E_FAIL;
     LONG lLBound = GetLowerBound();
