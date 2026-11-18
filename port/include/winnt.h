@@ -72,6 +72,7 @@ typedef FMTID* LPFMTID;
 #define REFIID const IID&
 #define REFCLSID const CLSID&
 #define REFFMTID const FMTID&
+#define InlineIsEqualGUID(a, b) IsEqualGUID(a, b)
 inline bool IsEqualGUID(REFGUID a, REFGUID b) {
   const DWORD* x = (const DWORD*)&a;
   const DWORD* y = (const DWORD*)&b;
@@ -201,6 +202,10 @@ extern "C" const GUID IID_NULL;
 #define PAGE_NOACCESS 0x01
 #define PAGE_READONLY 0x02
 #define PAGE_READWRITE 0x04
+#define PAGE_WRITECOPY 0x08
+#define PAGE_EXECUTE 0x10
+#define PAGE_EXECUTE_READ 0x20
+#define PAGE_EXECUTE_READWRITE 0x40
 #define MEM_COMMIT 0x1000
 #define MEM_RESERVE 0x2000
 #define MEM_RELEASE 0x8000
