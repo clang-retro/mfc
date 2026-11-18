@@ -10,6 +10,8 @@
 #include <ole2.h>
 #include <oleauto.h>
 
+#include <new>
+
 #ifndef _WINPORT
 // The image that holds the code (CComBSTR::LoadString).
 extern "C" IMAGE_DOS_HEADER __ImageBase;
@@ -271,12 +273,37 @@ public:
   bool LoadString(UINT nID) { return LoadString(_AtlComCliResourceInstance(), nID); }
 
   // The string in a stream: its size in bytes with the terminating nul
-  // (0 for no string), then its characters and the nul.
+  // (0 for no string), then its characters and the nul, in UTF-16 (which
+  // OLECHAR is on Windows; it has 32 bits on Linux and macOS).
   HRESULT WriteToStream(IStream* pStream) {
     if (pStream == NULL) return E_INVALIDARG;
-    ULONG cb = m_str != NULL ? ::SysStringByteLen(m_str) + (ULONG)sizeof(OLECHAR) : 0;
+    if (sizeof(OLECHAR) == 2 || m_str == NULL) {
+      ULONG cb = m_str != NULL ? ::SysStringByteLen(m_str) + (ULONG)sizeof(OLECHAR) : 0;
+      HRESULT hr = pStream->Write(&cb, sizeof(cb), NULL);
+      if (SUCCEEDED(hr) && cb != 0) hr = pStream->Write(m_str, cb, NULL);
+      return hr;
+    }
+    UINT n = ::SysStringLen(m_str);
+    BYTE* p = new (std::nothrow) BYTE[(n + 1) * 4];
+    if (p == NULL) return E_OUTOFMEMORY;
+    ULONG cb = 0;
+    for (UINT i = 0; i <= n; i++) {
+      unsigned int c = i < n ? (unsigned int)m_str[i] : 0;
+      unsigned int u[2] = {c, 0};
+      int k = 1;
+      if (c >= 0x10000) {
+        u[0] = 0xD800 + ((c - 0x10000) >> 10);
+        u[1] = 0xDC00 + ((c - 0x10000) & 0x3FF);
+        k = 2;
+      }
+      for (int j = 0; j < k; j++) {
+        p[cb++] = (BYTE)u[j];
+        p[cb++] = (BYTE)(u[j] >> 8);
+      }
+    }
     HRESULT hr = pStream->Write(&cb, sizeof(cb), NULL);
-    if (SUCCEEDED(hr) && cb != 0) hr = pStream->Write(m_str, cb, NULL);
+    if (SUCCEEDED(hr)) hr = pStream->Write(p, cb, NULL);
+    delete[] p;
     return hr;
   }
   HRESULT ReadFromStream(IStream* pStream) {
@@ -287,11 +314,44 @@ public:
     if (FAILED(hr)) return hr;
     if (cbRead != sizeof(cb)) return E_FAIL;
     if (cb == 0) return S_OK;
-    if (cb < sizeof(OLECHAR)) return E_FAIL;
-    m_str = ::SysAllocStringByteLen(NULL, cb - (ULONG)sizeof(OLECHAR));
-    if (m_str == NULL) return E_OUTOFMEMORY;
-    hr = pStream->Read(m_str, cb, &cbRead);
+    if (cb < 2) return E_FAIL;
+    if (sizeof(OLECHAR) == 2) {
+      m_str = ::SysAllocStringByteLen(NULL, cb - (ULONG)sizeof(OLECHAR));
+      if (m_str == NULL) return E_OUTOFMEMORY;
+      hr = pStream->Read(m_str, cb, &cbRead);
+      if (SUCCEEDED(hr) && cbRead != cb) hr = E_FAIL;
+      if (FAILED(hr)) Empty();
+      return hr;
+    }
+    BYTE* p = new (std::nothrow) BYTE[cb];
+    if (p == NULL) return E_OUTOFMEMORY;
+    hr = pStream->Read(p, cb, &cbRead);
     if (SUCCEEDED(hr) && cbRead != cb) hr = E_FAIL;
+    if (SUCCEEDED(hr)) {
+      m_str = ::SysAllocStringLen(NULL, cb / 2);
+      if (m_str == NULL) hr = E_OUTOFMEMORY;
+    }
+    if (SUCCEEDED(hr)) {
+      UINT n = 0;
+      for (ULONG i = 0; i + 1 < cb; i += 2) {
+        unsigned int c = p[i] | (p[i + 1] << 8);
+        if (c >= 0xD800 && c < 0xDC00 && i + 3 < cb) {
+          unsigned int lo = p[i + 2] | (p[i + 3] << 8);
+          if (lo >= 0xDC00 && lo < 0xE000) {
+            c = 0x10000 + ((c - 0xD800) << 10) + (lo - 0xDC00);
+            i += 2;
+          }
+        }
+        if (c == 0 && i + 2 >= cb) break;  // the nul
+        m_str[n++] = (OLECHAR)c;
+      }
+      // Its length is what was read.
+      BSTR b = ::SysAllocStringLen(m_str, n);
+      ::SysFreeString(m_str);
+      m_str = b;
+      if (m_str == NULL) hr = E_OUTOFMEMORY;
+    }
+    delete[] p;
     if (FAILED(hr)) Empty();
     return hr;
   }
