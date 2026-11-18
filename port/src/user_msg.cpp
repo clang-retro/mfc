@@ -12,6 +12,7 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "user.h"
+#include "com.h"
 
 #include <string.h>
 #include <chrono>
@@ -606,6 +607,8 @@ BOOL PostCore(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
   if (!h) {
     q = CurrentQueue();
   } else {
+    // Another program's window: the message goes to that program.
+    if (winport::com::IsForeignWindow(h) && GetWindow(h) == NULL) return winport::com::PostForeign(h, msg, wp, lp);
     Window* w = GetWindowOrFail(h);
     if (!w) return FALSE;
     q = QueueFor(w->tid);

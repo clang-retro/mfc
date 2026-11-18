@@ -122,7 +122,8 @@ struct ProxyInfo {
   ProxyBase* (*make)(ProxyManager* pm, IUnknown** itf);
   HRESULT (*stub)(StubCall& call);
 };
-const ProxyInfo* FindProxyInfo(REFIID iid);  // com_proxy.cpp
+const ProxyInfo* FindProxyInfo(REFIID iid);     // com_proxy.cpp
+const ProxyInfo* FindOleProxyInfo(REFIID iid);  // com_ole.cpp: OLE documents' interfaces
 
 // The local stand-in for another program's object: its identity
 // (IUnknown), with a proxy for each interface asked for.

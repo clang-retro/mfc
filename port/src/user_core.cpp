@@ -4,6 +4,7 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "user.h"
+#include "com.h"
 
 #include <string.h>
 
@@ -716,7 +717,11 @@ extern "C" BOOL WINAPI DestroyWindow(HWND h) {
 
 extern "C" {
 
-BOOL WINAPI IsWindow(HWND h) { return GetWindow(h) != NULL; }
+BOOL WINAPI IsWindow(HWND h) {
+  if (GetWindow(h) != NULL) return TRUE;
+  winport::com::WindowInfo info;
+  return winport::com::IsForeignWindow(h) && winport::com::ForeignWindowInfo(h, &info);
+}
 
 HWND WINAPI GetDesktopWindow(void) { return Desktop()->hwnd; }
 
@@ -782,6 +787,9 @@ BOOL WINAPI IsChild(HWND parent, HWND h) {
 }
 
 HWND WINAPI GetWindow(HWND h, UINT cmd) {
+  winport::com::WindowInfo info;
+  if (winport::com::IsForeignWindow(h) && GetWindow(h) == NULL)
+    return winport::com::ForeignWindowInfo(h, &info) && cmd == GW_OWNER ? info.owner : NULL;
   Window* w = GetWindowOrFail(h);
   if (!w) return NULL;
   UserGuard g(UserLock());
@@ -820,6 +828,8 @@ HWND WINAPI GetLastActivePopup(HWND h) {
 
 BOOL WINAPI IsWindowVisible(HWND h) {
   Window* w = GetWindow(h);
+  winport::com::WindowInfo info;
+  if (!w && winport::com::IsForeignWindow(h)) return winport::com::ForeignWindowInfo(h, &info) && info.visible;
   return w && ReallyVisible(w);
 }
 
@@ -862,6 +872,12 @@ BOOL WINAPI EnableWindow(HWND h, BOOL enable) {
 }
 
 DWORD WINAPI GetWindowThreadProcessId(HWND h, LPDWORD pid) {
+  winport::com::WindowInfo info;
+  if (winport::com::IsForeignWindow(h) && GetWindow(h) == NULL) {
+    if (!winport::com::ForeignWindowInfo(h, &info)) return 0;
+    if (pid) *pid = info.pid;
+    return info.tid;
+  }
   Window* w = GetWindowOrFail(h);
   if (!w) return 0;
   if (pid) *pid = GetCurrentProcessId();
@@ -877,7 +893,12 @@ BOOL WINAPI EnumWindows(WNDENUMPROC proc, LPARAM lParam) {
     for (Window* t : TopLevels()) list.push_back(t->hwnd);
   }
   for (HWND h : list)
-    if (IsWindow(h) && !proc(h, lParam)) break;
+    if (IsWindow(h) && !proc(h, lParam)) return TRUE;
+  // Then those of the programs this one talks COM with.
+  list.clear();
+  winport::com::ForeignTopLevels(&list);
+  for (HWND h : list)
+    if (!proc(h, lParam)) break;
   return TRUE;
 }
 
@@ -946,6 +967,11 @@ HWND WINAPI FindWindowA(LPCSTR cls, LPCSTR title) { return FindWindowExA(NULL, N
 // Coordinates
 
 BOOL WINAPI GetWindowRect(HWND h, LPRECT r) {
+  winport::com::WindowInfo info;
+  if (r && winport::com::IsForeignWindow(h) && GetWindow(h) == NULL && winport::com::ForeignWindowInfo(h, &info)) {
+    *r = info.rect;
+    return TRUE;
+  }
   Window* w = GetWindowOrFail(h);
   if (!w || !r) return FALSE;
   UserGuard g(UserLock());
@@ -1438,6 +1464,15 @@ static LONG WindowLong32(Window* w, int index, bool set, LONG value, bool unicod
   return old;
 }
 
+// The style of another program's window.
+static bool ForeignLong(HWND h, int i, LONG* out) {
+  winport::com::WindowInfo info;
+  if (!winport::com::IsForeignWindow(h) || GetWindow(h) != NULL) return false;
+  *out = 0;
+  if (winport::com::ForeignWindowInfo(h, &info)) *out = i == GWL_STYLE ? info.style : i == GWL_EXSTYLE ? info.exStyle : 0;
+  return true;
+}
+
 LONG_PTR WINAPI GetWindowLongPtrW(HWND h, int i) {
   Window* w = GetWindowOrFail(h);
   return w ? WindowLong(w, i, false, 0, true) : 0;
@@ -1455,10 +1490,14 @@ LONG_PTR WINAPI SetWindowLongPtrA(HWND h, int i, LONG_PTR v) {
   return w ? WindowLong(w, i, true, v, false) : 0;
 }
 LONG WINAPI GetWindowLongW(HWND h, int i) {
+  LONG foreign;
+  if (ForeignLong(h, i, &foreign)) return foreign;
   Window* w = GetWindowOrFail(h);
   return w ? WindowLong32(w, i, false, 0, true) : 0;
 }
 LONG WINAPI GetWindowLongA(HWND h, int i) {
+  LONG foreign;
+  if (ForeignLong(h, i, &foreign)) return foreign;
   Window* w = GetWindowOrFail(h);
   return w ? WindowLong32(w, i, false, 0, false) : 0;
 }
@@ -1503,7 +1542,23 @@ HWND WINAPI GetDlgItem(HWND dlg, int id) {
 
 // Text
 
+// The text of another program's window.
+static bool ForeignText(HWND h, std::wstring* out) {
+  winport::com::WindowInfo info;
+  if (!winport::com::IsForeignWindow(h) || GetWindow(h) != NULL) return false;
+  out->clear();
+  if (winport::com::ForeignWindowInfo(h, &info)) *out = info.text;
+  return true;
+}
+
 int WINAPI GetWindowTextW(HWND h, LPWSTR buf, int cch) {
+  std::wstring foreign;
+  if (buf && cch > 0 && ForeignText(h, &foreign)) {
+    size_t n = std::min(foreign.size(), (size_t)cch - 1);
+    wmemcpy(buf, foreign.c_str(), n);
+    buf[n] = 0;
+    return (int)n;
+  }
   Window* w = GetWindowOrFail(h);
   if (!w || !buf || cch <= 0) return 0;
   buf[0] = 0;
@@ -1511,6 +1566,12 @@ int WINAPI GetWindowTextW(HWND h, LPWSTR buf, int cch) {
 }
 
 int WINAPI GetWindowTextA(HWND h, LPSTR buf, int cch) {
+  std::wstring foreign;
+  if (buf && cch > 0 && ForeignText(h, &foreign)) {
+    int n = WideCharToMultiByte(CP_ACP, 0, foreign.c_str(), -1, buf, cch, NULL, NULL);
+    buf[cch - 1] = 0;
+    return n > 0 ? (int)strlen(buf) : 0;
+  }
   Window* w = GetWindowOrFail(h);
   if (!w || !buf || cch <= 0) return 0;
   buf[0] = 0;
@@ -1518,11 +1579,15 @@ int WINAPI GetWindowTextA(HWND h, LPSTR buf, int cch) {
 }
 
 int WINAPI GetWindowTextLengthW(HWND h) {
+  std::wstring foreign;
+  if (ForeignText(h, &foreign)) return (int)foreign.size();
   Window* w = GetWindowOrFail(h);
   return w ? (int)SendTo(w, WM_GETTEXTLENGTH, 0, 0, true) : 0;
 }
 
 int WINAPI GetWindowTextLengthA(HWND h) {
+  std::wstring foreign;
+  if (ForeignText(h, &foreign)) return WideCharToMultiByte(CP_ACP, 0, foreign.c_str(), -1, NULL, 0, NULL, NULL) - 1;
   Window* w = GetWindowOrFail(h);
   return w ? (int)SendTo(w, WM_GETTEXTLENGTH, 0, 0, false) : 0;
 }
@@ -1655,3 +1720,26 @@ BOOL WINAPI AnimateWindow(HWND h, DWORD, DWORD flags) {
 }
 
 }  // extern "C"
+
+// The windows another program asks about (com_remote.cpp).
+void winport::com::LocalTopLevels(std::vector<HWND>* out) {
+  UserGuard g(UserLock());
+  for (Window* t : TopLevels()) out->push_back(t->hwnd);
+}
+
+bool winport::com::LocalWindowInfo(HWND h, WindowInfo* out) {
+  Window* w = GetWindow(h);
+  if (!w) return false;
+  out->pid = GetCurrentProcessId();
+  out->tid = w->tid ? w->tid : GetCurrentThreadId();
+  out->owner = w->owner ? w->owner->hwnd : NULL;
+  out->style = (LONG)w->style;
+  out->exStyle = (LONG)w->exStyle;
+  out->visible = IsWindowVisible(h) != FALSE;
+  GetWindowRect(h, &out->rect);
+  int n = GetWindowTextLengthW(h);
+  std::vector<WCHAR> buf(n + 1);
+  GetWindowTextW(h, buf.data(), n + 1);
+  out->text = buf.data();
+  return true;
+}

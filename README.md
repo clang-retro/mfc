@@ -226,8 +226,8 @@ when there is no display. For a Linux or macOS target it builds `core`,
 `memtest`, `wintest`, `disptest`, `isapitest`, `dlgtest`, `sditest`,
 `mditest`, `cmntest`, `splittest`, `docktest`, `dbtest`, `rvtest`,
 `socktest`, `occtest`, `dlltest`, `inettest`, `oletest`, `iptest`,
-`docobtest`, `linktest`, `bindtest`, `richtest`, `richsrvtest` and
-`autotest` against the portable layer,
+`docobtest`, `linktest`, `bindtest`, `richtest`, `richsrvtest`,
+`autotest` and `srvtest` against the portable layer,
 and `exttest`, `core`, `sditest`, `dlgtest` and `dlltest` again with the
 shared libraries (`SHARED_TESTS`), and runs them directly; `NATIVE_TESTS` names others to try.
 
