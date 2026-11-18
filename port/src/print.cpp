@@ -699,9 +699,10 @@ int WINAPI SetAbortProc(HDC hdc, ABORTPROC proc) {
 // ---------------------------------------------------------------------
 // The dialogs' common parts
 
-namespace {
+// The error CommDlgExtendedError reports, for all the common dialogs.
+thread_local DWORD winport::tlsDlgError = 0;
 
-thread_local DWORD tlsDlgError = 0;
+namespace {
 
 void Label(Template& t, int x, int y, int cx, int id, const wchar_t* text) {
   t.Add(Template::kStatic, SS_LEFT, x, y, cx, 8, id, text);
