@@ -29,6 +29,7 @@
 #include <ole2.h>
 #include <oleauto.h>
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -47,6 +48,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -65,7 +67,17 @@ namespace {
 enum : uint32_t { kHello = 1, kCall = 2, kOneWay = 3, kReply = 4, kGone = 5 };
 
 // The process's own object: oid 0, whose methods these are.
-enum : uint32_t { kGetClassObject = 0, kRemRelease = 1, kRemAddRef = 2, kRemQueryInterface = 3 };
+enum : uint32_t {
+  kGetClassObject = 0,
+  kRemRelease = 1,
+  kRemAddRef = 2,
+  kRemQueryInterface = 3,
+  kWindows = 4,     // its top-level windows
+  kWindowInfo = 5,  // one of them
+  kPostMessage = 6,
+  kGetClipboard = 7,    // its data object on the clipboard
+  kClearClipboard = 8,  // another program's goes there
+};
 
 struct Conn {
   int fd = -1;
@@ -104,6 +116,14 @@ std::map<IUnknown*, uint64_t> g_exportOf;
 uint64_t g_nextOid = 1;
 std::map<std::pair<DWORD, uint64_t>, ProxyManager*> g_proxies;
 std::vector<GUID> g_published;
+std::set<DWORD> g_peersIn;  // the programs that connected to this one
+bool g_ownClipboard = false;
+
+// Stand-in handles for other programs' windows.
+const UINT_PTR kForeignBase = 0x7f000000;
+std::map<std::pair<DWORD, uint64_t>, HWND> g_foreign;
+std::map<HWND, std::pair<DWORD, uint64_t>> g_foreignOf;
+UINT_PTR g_nextForeign = kForeignBase;
 
 DWORD g_aptTid = 0;
 HWND g_wnd = NULL;
@@ -145,6 +165,24 @@ std::string ClassPath(REFCLSID clsid) {
   return s;
 }
 
+bool Alive(DWORD pid);
+
+// The file that names the program whose data object is on the clipboard,
+// kept apart for each registry file as the class files are.
+std::string ClipboardPath() {
+  std::string s = ClassPath(CLSID_NULL);
+  return s.substr(0, s.rfind('/')) + "/clip-" + s.substr(s.rfind('/') + 5, 8);
+}
+
+DWORD ReadPidFile(const std::string& path) {
+  FILE* f = fopen(path.c_str(), "r");
+  if (f == NULL) return 0;
+  unsigned long pid = 0;
+  if (fscanf(f, "%lu", &pid) != 1) pid = 0;
+  fclose(f);
+  return (DWORD)pid;
+}
+
 bool Alive(DWORD pid) { return pid != 0 && (kill((pid_t)pid, 0) == 0 || errno == EPERM); }
 
 DWORD ReadClassFile(REFCLSID clsid) {
@@ -160,6 +198,7 @@ void Cleanup() {
   if (g_listen >= 0) unlink(EndpointPath(Self()).c_str());
   for (const GUID& g : g_published)
     if (ReadClassFile(g) == Self()) unlink(ClassPath(g).c_str());
+  if (g_ownClipboard && ReadPidFile(ClipboardPath()) == Self()) unlink(ClipboardPath().c_str());
 }
 
 // ---------------------------------------------------------------------
@@ -225,6 +264,7 @@ void ReaderLoop(std::shared_ptr<Conn> c) {
     if (head[1] == kHello) {
       Reader r(body);
       c->peer = r.U32();
+      g_peersIn.insert(c->peer);
     } else if (head[1] == kReply) {
       auto it = g_pending.find(head[2]);
       if (it != g_pending.end()) {
@@ -359,6 +399,16 @@ bool StartEndpoint() {
   }
   g_listen = fd;
   atexit(Cleanup);
+  // The sockets of programs that ended without cleaning up (killed).
+  if (DIR* d = opendir(Dir().c_str())) {
+    while (dirent* e = readdir(d)) {
+      unsigned long pid;
+      char rest;
+      if (sscanf(e->d_name, "ep-%lu%c", &pid, &rest) == 1 && !Alive((DWORD)pid))
+        unlink((Dir() + "/" + e->d_name).c_str());
+    }
+    closedir(d);
+  }
   std::thread(ListenLoop, fd).detach();
   return true;
 }
@@ -459,6 +509,11 @@ HRESULT STDMETHODCALLTYPE ProxyManager::QueryInterface(REFIID riid, void** out) 
 }
 
 HRESULT ProxyManager::AddInterface(REFIID riid, void** out) {
+  if (IsEqualIID(riid, IID_IUnknown)) {
+    *out = static_cast<IUnknown*>(this);
+    AddRef();
+    return S_OK;
+  }
   std::lock_guard<std::mutex> g(lock);
   for (auto& i : itfs)
     if (IsEqualIID(i.iid, riid)) {
@@ -636,6 +691,16 @@ bool IsProxy(IUnknown* unk) {
 
 namespace {
 
+void PutWindowInfo(Writer& w, const WindowInfo& i) {
+  w.U32(i.tid);
+  w.U64((uint64_t)(uintptr_t)i.owner);
+  w.U32((uint32_t)i.style);
+  w.U32((uint32_t)i.exStyle);
+  w.U32(i.visible ? 1 : 0);
+  w.Put(&i.rect, sizeof i.rect);
+  w.Str(i.text.c_str());
+}
+
 HRESULT RunProcessMethod(uint32_t method, Reader& in, Writer& out, DWORD peer) {
   switch (method) {
     case kGetClassObject: {
@@ -673,6 +738,50 @@ HRESULT RunProcessMethod(uint32_t method, Reader& in, Writer& out, DWORD peer) {
       if (it == g_exports.end()) return CO_E_OBJNOTCONNECTED;
       it->second.refs[forPid] += n;
       for (LONG i = 0; i < n; i++) it->second.unk->AddRef();
+      return S_OK;
+    }
+    case kWindows: {
+      std::vector<HWND> list;
+      LocalTopLevels(&list);
+      Writer w;
+      uint32_t n = 0;
+      for (HWND h : list) {
+        WindowInfo info;
+        if (!LocalWindowInfo(h, &info)) continue;
+        w.U64((uint64_t)(uintptr_t)h);
+        PutWindowInfo(w, info);
+        n++;
+      }
+      out.U32(n);
+      out.Put(w.b.data(), w.b.size());
+      return S_OK;
+    }
+    case kWindowInfo: {
+      WindowInfo info;
+      if (!LocalWindowInfo((HWND)(uintptr_t)in.U64(), &info)) return E_HANDLE;
+      PutWindowInfo(out, info);
+      return S_OK;
+    }
+    case kPostMessage: {
+      HWND h = (HWND)(uintptr_t)in.U64();
+      UINT msg = in.U32();
+      WPARAM wp = (WPARAM)in.U64();
+      LPARAM lp = (LPARAM)in.U64();
+      return PostMessageW(h, msg, wp, lp) ? S_OK : E_HANDLE;
+    }
+    case kGetClipboard: {
+      IDataObject* d = NULL;
+      HRESULT hr = LocalClipboardObject(&d);
+      if (hr != S_OK) hr = CLIPBRD_E_BAD_DATA;
+      PutInterfaceOut(out, hr, d, IID_IDataObject, peer);
+      return hr;
+    }
+    case kClearClipboard: {
+      IDataObject* d = NULL;
+      if (LocalClipboardObject(&d) == S_OK) {
+        d->Release();
+        OleSetClipboard(NULL);
+      }
       return S_OK;
     }
     case kRemQueryInterface: {
@@ -821,6 +930,144 @@ HRESULT GetRemoteClassObject(REFCLSID clsid, REFIID riid, void** out) {
   }
   CloseHandle(pi.hProcess);
   return hr;
+}
+
+// ---------------------------------------------------------------------
+// Other programs' windows
+
+namespace {
+
+HWND StandIn(DWORD pid, uint64_t remote) {  // with g_mu held
+  if (remote == 0) return NULL;
+  auto key = std::make_pair(pid, remote);
+  auto it = g_foreign.find(key);
+  if (it != g_foreign.end()) return it->second;
+  HWND h = (HWND)g_nextForeign;
+  g_nextForeign += 4;
+  g_foreign[key] = h;
+  g_foreignOf[h] = key;
+  return h;
+}
+
+void ReadWindowInfo(Reader& r, DWORD pid, WindowInfo* i) {
+  i->pid = pid;
+  i->tid = r.U32();
+  uint64_t owner = r.U64();
+  i->style = (LONG)r.U32();
+  i->exStyle = (LONG)r.U32();
+  i->visible = r.U32() != 0;
+  r.Get(&i->rect, sizeof i->rect);
+  i->text = r.Str();
+  std::lock_guard<std::mutex> g(g_mu);
+  i->owner = StandIn(pid, owner);
+}
+
+// The programs this one talks COM with, still running.
+std::vector<DWORD> Peers() {
+  std::set<DWORD> all;
+  {
+    std::lock_guard<std::mutex> g(g_mu);
+    for (auto& o : g_out) all.insert(o.first);
+    all.insert(g_peersIn.begin(), g_peersIn.end());
+  }
+  std::vector<DWORD> v;
+  for (DWORD p : all)
+    if (p != Self() && Alive(p)) v.push_back(p);
+  return v;
+}
+
+bool Remote(HWND h, DWORD* pid, uint64_t* remote) {
+  std::lock_guard<std::mutex> g(g_mu);
+  auto it = g_foreignOf.find(h);
+  if (it == g_foreignOf.end()) return false;
+  *pid = it->second.first;
+  *remote = it->second.second;
+  return true;
+}
+
+}  // namespace
+
+bool IsForeignWindow(HWND h) { return (UINT_PTR)h >= kForeignBase && (UINT_PTR)h < kForeignBase + 0x1000000; }
+
+void ForeignTopLevels(std::vector<HWND>* out) {
+  for (DWORD pid : Peers()) {
+    std::vector<BYTE> reply;
+    if (FAILED(CallObject(pid, 0, IID_NULL, kWindows, Writer(), &reply))) continue;
+    Reader r(reply);
+    uint32_t n = r.U32();
+    for (uint32_t i = 0; i < n && !r.bad; i++) {
+      uint64_t remote = r.U64();
+      WindowInfo info;
+      ReadWindowInfo(r, pid, &info);
+      if (r.bad) break;
+      std::lock_guard<std::mutex> g(g_mu);
+      out->push_back(StandIn(pid, remote));
+    }
+  }
+}
+
+bool ForeignWindowInfo(HWND h, WindowInfo* out) {
+  DWORD pid;
+  uint64_t remote;
+  if (!IsForeignWindow(h) || !Remote(h, &pid, &remote) || !Alive(pid)) return false;
+  Writer w;
+  w.U64(remote);
+  std::vector<BYTE> reply;
+  if (CallObject(pid, 0, IID_NULL, kWindowInfo, w, &reply) != S_OK) return false;
+  Reader r(reply);
+  ReadWindowInfo(r, pid, out);
+  return !r.bad;
+}
+
+bool PostForeign(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  DWORD pid;
+  uint64_t remote;
+  if (!IsForeignWindow(h) || !Remote(h, &pid, &remote)) return false;
+  Writer w;
+  w.U64(remote);
+  w.U32(msg);
+  w.U64((uint64_t)wp);
+  w.U64((uint64_t)lp);
+  return CallObject(pid, 0, IID_NULL, kPostMessage, w, NULL) == S_OK;
+}
+
+// ---------------------------------------------------------------------
+// The clipboard
+
+void OwnClipboard(bool own) {
+  std::string path = ClipboardPath();
+  if (!own) {
+    if (ReadPidFile(path) == Self()) unlink(path.c_str());
+    return;
+  }
+  if (!StartEndpoint()) return;
+  std::string tmp = path + ".tmp" + std::to_string(Self());
+  FILE* f = fopen(tmp.c_str(), "w");
+  if (f == NULL) return;
+  fprintf(f, "%lu\n", (unsigned long)Self());
+  fclose(f);
+  rename(tmp.c_str(), path.c_str());
+  std::lock_guard<std::mutex> g(g_mu);
+  g_ownClipboard = true;
+}
+
+HRESULT ForeignClipboard(IDataObject** out) {
+  *out = NULL;
+  DWORD pid = ReadPidFile(ClipboardPath());
+  if (pid == 0 || pid == Self() || !Alive(pid)) return CLIPBRD_E_BAD_DATA;
+  std::vector<BYTE> reply;
+  HRESULT hr = CallObject(pid, 0, IID_NULL, kGetClipboard, Writer(), &reply);
+  if (FAILED(hr)) return hr;
+  Reader r(reply);
+  HRESULT hr2 = GetInterface(r, (void**)out);
+  if (FAILED(hr2) || *out == NULL) return CLIPBRD_E_BAD_DATA;
+  return S_OK;
+}
+
+void ClearForeignClipboard() {
+  DWORD pid = ReadPidFile(ClipboardPath());
+  if (pid == 0 || pid == Self() || !Alive(pid)) return;
+  CallObject(pid, 0, IID_NULL, kClearClipboard, Writer(), NULL);
 }
 
 void DisconnectObject(IUnknown* unk) {

@@ -537,7 +537,7 @@ const ProxyInfo kProxies[] = {
 const ProxyInfo* FindProxyInfo(REFIID iid) {
   for (const ProxyInfo& p : kProxies)
     if (IsEqualIID(*p.iid, iid)) return &p;
-  return NULL;
+  return FindOleProxyInfo(iid);
 }
 
 }  // namespace com

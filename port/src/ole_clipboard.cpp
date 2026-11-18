@@ -8,9 +8,15 @@
 // still there, otherwise the clipboard's data, with storages and streams
 // made again from their memory.
 //
+// Between programs: the program whose data object is on the clipboard
+// says so (com_remote.cpp), and OleGetClipboard in another program hands
+// out a proxy for that object. Putting something else there, or nothing,
+// makes the program before let its object go.
+//
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "ole.h"
+#include "com.h"
 
 using namespace winport::ole;
 
@@ -238,6 +244,7 @@ bool Offers(IDataObject* d, CLIPFORMAT cf, DWORD tymed) {
 extern "C" {
 
 HRESULT WINAPI OleSetClipboard(LPDATAOBJECT data) {
+  winport::com::ClearForeignClipboard();
   HWND w = ClipWindow();
   if (!w || !OpenClipboard(w)) return CLIPBRD_E_CANT_OPEN;
   EmptyClipboard();  // lets the object before go
@@ -260,11 +267,13 @@ HRESULT WINAPI OleSetClipboard(LPDATAOBJECT data) {
     }
   }
   CloseClipboard();
+  winport::com::OwnClipboard(data != NULL && SUCCEEDED(hr));
   return hr;
 }
 
 HRESULT WINAPI OleGetClipboard(LPDATAOBJECT* out) {
   if (!out) return E_INVALIDARG;
+  if (!OursOnClipboard() && SUCCEEDED(winport::com::ForeignClipboard(out))) return S_OK;
   *out = new ClipboardData;
   return S_OK;
 }
@@ -285,6 +294,7 @@ HRESULT WINAPI OleFlushClipboard(void) {
   g_clip = NULL;
   CloseClipboard();
   SafeRelease(d);
+  winport::com::OwnClipboard(false);  // what was rendered stays in this program
   return S_OK;
 }
 
@@ -340,3 +350,11 @@ HRESULT WINAPI OleCreateFromData(LPDATAOBJECT data, REFIID riid, DWORD render, L
 }
 
 }  // extern "C"
+
+HRESULT winport::com::LocalClipboardObject(IDataObject** out) {
+  *out = NULL;
+  if (!OursOnClipboard()) return S_FALSE;
+  *out = g_clip;
+  g_clip->AddRef();
+  return S_OK;
+}
