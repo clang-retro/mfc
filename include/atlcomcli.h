@@ -10,6 +10,11 @@
 #include <ole2.h>
 #include <oleauto.h>
 
+#ifndef _WINPORT
+// The image that holds the code (CComBSTR::LoadString).
+extern "C" IMAGE_DOS_HEADER __ImageBase;
+#endif
+
 namespace ATL {
 
 template <class T>
@@ -292,9 +297,19 @@ public:
   }
 
 private:
+  // The image that holds this code: the portable layer finds it from an
+  // address in it.
   static HINSTANCE _AtlComCliResourceInstance() {
-    extern IMAGE_DOS_HEADER __ImageBase;
+#ifdef _WINPORT
+    static const char marker = 0;
+    HMODULE h = NULL;
+    ::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                             GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                         &marker, &h);
+    return (HINSTANCE)h;
+#else
     return (HINSTANCE)&__ImageBase;
+#endif
   }
 };
 
@@ -487,18 +502,44 @@ public:
     if (vt != varSrc.vt) return false;
     if (vt == VT_EMPTY || vt == VT_NULL) return true;
     if (vt == VT_UNKNOWN || vt == VT_DISPATCH) return punkVal == varSrc.punkVal;
-    return ::VarCmp(const_cast<CComVariant*>(this), const_cast<VARIANT*>(&varSrc),
-                    LOCALE_USER_DEFAULT, 0) == (HRESULT)VARCMP_EQ;
+    return _Cmp(varSrc) == 1;
   }
   bool operator!=(const VARIANT& varSrc) const { return !(*this == varSrc); }
-  bool operator<(const VARIANT& varSrc) const {
-    return ::VarCmp(const_cast<CComVariant*>(this), const_cast<VARIANT*>(&varSrc),
-                    LOCALE_USER_DEFAULT, 0) == (HRESULT)VARCMP_LT;
+  bool operator<(const VARIANT& varSrc) const { return _Cmp(varSrc) == 0; }
+  bool operator>(const VARIANT& varSrc) const { return _Cmp(varSrc) == 2; }
+
+private:
+  // VarCmp's answer: 0 less, 1 equal, 2 greater, 3 not comparable.
+#ifdef VARCMP_EQ
+  int _Cmp(const VARIANT& varSrc) const {
+    HRESULT hr = ::VarCmp(const_cast<CComVariant*>(this), const_cast<VARIANT*>(&varSrc),
+                          LOCALE_USER_DEFAULT, 0);
+    return hr == (HRESULT)VARCMP_LT ? 0 : hr == (HRESULT)VARCMP_EQ ? 1 : hr == (HRESULT)VARCMP_GT ? 2 : 3;
   }
-  bool operator>(const VARIANT& varSrc) const {
-    return ::VarCmp(const_cast<CComVariant*>(this), const_cast<VARIANT*>(&varSrc),
-                    LOCALE_USER_DEFAULT, 0) == (HRESULT)VARCMP_GT;
+#else
+  // Without VarCmp (the portable layer): strings by their characters,
+  // the rest as numbers.
+  int _Cmp(const VARIANT& varSrc) const {
+    if (vt == VT_BSTR && varSrc.vt == VT_BSTR) {
+      UINT n1 = ::SysStringLen(bstrVal), n2 = ::SysStringLen(varSrc.bstrVal);
+      for (UINT i = 0; i < n1 && i < n2; i++)
+        if (bstrVal[i] != varSrc.bstrVal[i]) return bstrVal[i] < varSrc.bstrVal[i] ? 0 : 2;
+      return n1 < n2 ? 0 : n1 == n2 ? 1 : 2;
+    }
+    VARIANT v1, v2;
+    ::VariantInit(&v1);
+    ::VariantInit(&v2);
+    int r = 3;
+    if (SUCCEEDED(::VariantChangeType(&v1, const_cast<CComVariant*>(this), 0, VT_R8)) &&
+        SUCCEEDED(::VariantChangeType(&v2, const_cast<VARIANT*>(&varSrc), 0, VT_R8)))
+      r = v1.dblVal < v2.dblVal ? 0 : v1.dblVal == v2.dblVal ? 1 : 2;
+    ::VariantClear(&v1);
+    ::VariantClear(&v2);
+    return r;
   }
+#endif
+
+public:
 
   HRESULT Attach(VARIANT* pSrc) {
     if (pSrc == NULL) return E_INVALIDARG;
@@ -678,6 +719,7 @@ private:
     return c;
   }
 
+public:
   CComVariant& operator=(const CComVariant& varSrc) {
     if (this != &varSrc) ::VariantCopy(this, const_cast<CComVariant*>(&varSrc));
     return *this;

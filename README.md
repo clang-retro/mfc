@@ -441,6 +441,19 @@ shared libraries (`SHARED_TESTS`), and runs them directly; `NATIVE_TESTS` names 
   notifications its parent reflects; SubclassWindow and
   UnsubclassWindow; CWindow's wrappers; CDialogImpl, modal and
   modeless, and CSimpleDialog.
+* `atlctltest`: ATL's controls and their host, without MFC: a windowed
+  control (CComControl) with stock and custom properties
+  (CStockPropImpl), a property map saved to and loaded from a stream, a
+  storage and a property bag, events through the connection point and
+  IPropertyNotifySink, IViewObjectEx, IOleObject and IQuickActivate; a
+  windowless one; a licensed one (CComClassFactory2); a composite
+  control (CComCompositeControl) and a property page
+  (IPropertyPageImpl). CAxWindow and AtlAxWin making and attaching
+  controls by CLSID and ProgID; event sinks (IDispEventImpl over the
+  type library, IDispEventSimpleImpl with _ATL_FUNC_INFO, a sink map
+  advised with AtlAdviseSinkMap); and CAxDialogImpl over DIALOG and
+  DIALOGEX templates that name controls by CLSID, their saved state
+  (and a license key) from DLGINIT, as the dialog editor writes them.
 * `ctltest`: writing a control with COleControl, the test being both
   its server and its container: stock and custom properties, a method,
   stock and custom events, verbs from its message map (ON_OLEVERB,
@@ -665,6 +678,33 @@ request with the stock MinGW-w64 toolchain.
   (DECLARE_WND_SUPERCLASS), with the window procedure thunks of x86 and
   x86-64, SubclassWindow and OnFinalMessage; the CWinTraits styles;
   CContainedWindow; CDialogImpl and CSimpleDialog.
+* ATL's controls (`atlctl.h`): CComControl and CComControlBase
+  (windowed and windowless, in-place activation, drawing through
+  OnDraw, ambient properties, FireOnChanged and FireOnRequestEdit,
+  DoVerbProperties); IOleObjectImpl, IOleInPlaceObjectWindowlessImpl,
+  IOleInPlaceActiveObjectImpl, IOleControlImpl, IViewObjectExImpl,
+  IQuickActivateImpl, IDataObjectImpl, IRunnableObjectImpl,
+  IPointerInactiveImpl, IPerPropertyBrowsingImpl,
+  ISpecifyPropertyPagesImpl and IPropertyNotifySinkCP; CStockPropImpl
+  (the stock properties the class has members for); IPropertyPageImpl;
+  CComCompositeControl. The property map (BEGIN_PROP_MAP, PROP_ENTRY,
+  PROP_ENTRY_EX, PROP_DATA_ENTRY, PROP_PAGE) behind IPersistStreamInitImpl,
+  IPersistStorageImpl and IPersistPropertyBagImpl, in ATL's stream
+  format.
+* ATL's event sinks (`atlcom.h`): IDispEventImpl (the handlers' types
+  from the type library) and IDispEventSimpleImpl (from _ATL_FUNC_INFO),
+  BEGIN_SINK_MAP with SINK_ENTRY, SINK_ENTRY_EX and SINK_ENTRY_INFO,
+  AtlAdviseSinkMap. Handlers are named `&CMyDlg::OnClick`; with
+  clang-retro's compiler also by plain name, as Visual C++ 6 code does.
+* ATL's control host (`atlhost.h`, `atliface.h`): the AtlAxWin window
+  classes (and AtlAxWinLic, and the versioned names, AtlAxWin71 to
+  AtlAxWin140), which make a control from a CLSID, a ProgID, a URL (the
+  WebBrowser control) or MSHTML: text; IAxWinHostWindow and
+  IAxWinAmbientDispatch; CAxWindow and CAxWindow2; AtlAxCreateControl
+  and its forms, AtlAxAttachControl, AtlAxGetHost and AtlAxGetControl;
+  AtlAxDialogBox, AtlAxCreateDialog and CAxDialogImpl, which turn a
+  dialog's ActiveX items into host windows and give them their DLGINIT
+  state; CWindow::GetDlgControl and GetDlgHost.
 
 ## Differences from Visual C++ MFC
 

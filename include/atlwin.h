@@ -294,6 +294,21 @@ public:
   int DlgDirList(LPTSTR lpPathSpec, int nIDListBox, int nIDStaticPath, UINT nFileType) {
     return ::DlgDirList(m_hWnd, lpPathSpec, nIDListBox, nIDStaticPath, nFileType);
   }
+  // A dialog item's ActiveX control, or its host (atlhost.h).
+  HRESULT GetDlgControl(int nID, REFIID iid, void** ppCtrl) {
+    return _GetDlgAx(nID, _T("WM_ATLGETCONTROL"), iid, ppCtrl);
+  }
+  HRESULT GetDlgHost(int nID, REFIID iid, void** ppHost) {
+    return _GetDlgAx(nID, _T("WM_ATLGETHOST"), iid, ppHost);
+  }
+  HRESULT _GetDlgAx(int nID, LPCTSTR pszMsg, REFIID iid, void** pp) {
+    if (pp == NULL) return E_POINTER;
+    *pp = NULL;
+    HWND h = ::GetDlgItem(m_hWnd, nID);
+    if (h == NULL) return E_FAIL;
+    IUnknown* p = (IUnknown*)::SendMessage(h, ::RegisterWindowMessage(pszMsg), 0, 0);
+    return p != NULL ? p->QueryInterface(iid, pp) : E_FAIL;
+  }
   UINT GetDlgItemInt(int nID, BOOL* lpTrans = NULL, BOOL bSigned = TRUE) const {
     return ::GetDlgItemInt(m_hWnd, nID, lpTrans, bSigned);
   }

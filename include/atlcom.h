@@ -300,9 +300,13 @@ public:                                                                         
   ;                                                     \
   return _entries;                                      \
   }                                                     \
-  virtual ULONG STDMETHODCALLTYPE AddRef() override = 0;  \
-  virtual ULONG STDMETHODCALLTYPE Release() override = 0; \
-  STDMETHOD(QueryInterface)(REFIID, void**) override = 0;
+  _Pragma("clang diagnostic push")                                    \
+  _Pragma("clang diagnostic ignored \"-Winconsistent-missing-override\"") \
+  _Pragma("clang diagnostic ignored \"-Wsuggest-override\"")             \
+  virtual ULONG STDMETHODCALLTYPE AddRef() = 0;                       \
+  virtual ULONG STDMETHODCALLTYPE Release() = 0;                      \
+  STDMETHOD(QueryInterface)(REFIID, void**) = 0;                      \
+  _Pragma("clang diagnostic pop")
 
 // The place of a member (offsetof, which a class with virtual functions
 // does not allow).
@@ -368,7 +372,7 @@ public:
   typedef Base _BaseClass;
   CComObject(void* = NULL) { _pAtlModule->Lock(); }
   virtual ~CComObject() {
-    this->m_dwRef = -(LONG_MAX / 2);
+    this->m_dwRef = -(LONG)(0x7FFFFFFF / 2);
     this->FinalRelease();
     this->_AtlFinalRelease();
     _pAtlModule->Unlock();
@@ -421,7 +425,7 @@ public:
   typedef Base _BaseClass;
   CComObjectNoLock(void* = NULL) {}
   virtual ~CComObjectNoLock() {
-    this->m_dwRef = -(LONG_MAX / 2);
+    this->m_dwRef = -(LONG)(0x7FFFFFFF / 2);
     this->FinalRelease();
     this->_AtlFinalRelease();
   }
@@ -443,7 +447,7 @@ public:
   typedef Base _BaseClass;
   CComObjectCached(void* = NULL) {}
   virtual ~CComObjectCached() {
-    this->m_dwRef = -(LONG_MAX / 2);
+    this->m_dwRef = -(LONG)(0x7FFFFFFF / 2);
     this->FinalRelease();
     this->_AtlFinalRelease();
   }
@@ -556,7 +560,7 @@ public:
 
   CComAggObject(void* pv) : m_contained(pv) { _pAtlModule->Lock(); }
   virtual ~CComAggObject() {
-    this->m_dwRef = -(LONG_MAX / 2);
+    this->m_dwRef = -(LONG)(0x7FFFFFFF / 2);
     FinalRelease();
     _pAtlModule->Unlock();
   }
@@ -625,7 +629,7 @@ public:
 
   CComPolyObject(void* pv) : m_contained(pv != NULL ? pv : (void*)static_cast<IUnknown*>(this)) { _pAtlModule->Lock(); }
   virtual ~CComPolyObject() {
-    this->m_dwRef = -(LONG_MAX / 2);
+    this->m_dwRef = -(LONG)(0x7FFFFFFF / 2);
     FinalRelease();
     _pAtlModule->Unlock();
   }
@@ -707,7 +711,7 @@ public:
     this->m_pOwner->GetUnknown()->AddRef();
   }
   virtual ~CComTearOffObject() {
-    this->m_dwRef = -(LONG_MAX / 2);
+    this->m_dwRef = -(LONG)(0x7FFFFFFF / 2);
     this->FinalRelease();
     this->_AtlFinalRelease();
     this->m_pOwner->GetUnknown()->Release();
@@ -744,7 +748,7 @@ public:
     m_contained.m_pOwner = reinterpret_cast<typename contained::_OwnerClass*>(pv);
   }
   virtual ~CComCachedTearOffObject() {
-    this->m_dwRef = -(LONG_MAX / 2);
+    this->m_dwRef = -(LONG)(0x7FFFFFFF / 2);
     m_contained.FinalRelease();
     m_contained._AtlFinalRelease();
   }
@@ -1928,6 +1932,401 @@ public:
 
 
 // ---------------------------------------------------------------------
+// Property maps: the properties an object saves and loads, and its
+// property pages.
+
+struct ATL_PROPMAP_ENTRY {
+  LPCOLESTR szDesc;
+  DISPID dispid;
+  const CLSID* pclsidPropPage;
+  const IID* piidDispatch;
+  DWORD dwOffsetData;  // a data member's place and size (PROP_DATA_ENTRY)
+  DWORD dwSizeData;
+  VARTYPE vt;
+};
+
+#define BEGIN_PROP_MAP(theClass)                                     \
+  typedef theClass _PropMapClass;                                    \
+  static const ATL::ATL_PROPMAP_ENTRY* GetPropertyMap() {            \
+    static const ATL::ATL_PROPMAP_ENTRY pPropMap[] = {
+// The same, starting with the control's extent.
+#define BEGIN_PROPERTY_MAP(theClass)          \
+  BEGIN_PROP_MAP(theClass)                    \
+  PROP_DATA_ENTRY("_cx", m_sizeExtent.cx, VT_UI4) \
+  PROP_DATA_ENTRY("_cy", m_sizeExtent.cy, VT_UI4)
+#define PROP_ENTRY(szDesc, dispid, clsid) \
+  {OLESTR(szDesc), dispid, &clsid, &IID_IDispatch, 0, 0, VT_EMPTY},
+#define PROP_ENTRY_EX(szDesc, dispid, clsid, iidDispatch) \
+  {OLESTR(szDesc), dispid, &clsid, &iidDispatch, 0, 0, VT_EMPTY},
+#define PROP_ENTRY_TYPE(szDesc, dispid, clsid, vt) \
+  {OLESTR(szDesc), dispid, &clsid, &IID_IDispatch, 0, 0, vt},
+#define PROP_ENTRY_TYPE_EX(szDesc, dispid, clsid, iidDispatch, vt) \
+  {OLESTR(szDesc), dispid, &clsid, &iidDispatch, 0, 0, vt},
+#define PROP_PAGE(clsid) {NULL, 0, &clsid, &IID_NULL, 0, 0, VT_EMPTY},
+#define PROP_DATA_ENTRY(szDesc, member, vt)                                     \
+  {OLESTR(szDesc), 0, &CLSID_NULL, NULL,                                        \
+   (DWORD)_ATL_MEMBER_OFFSET_CONST(_PropMapClass, member),                      \
+   (DWORD)sizeof(((_PropMapClass*)0)->member), vt},
+#define END_PROP_MAP()                            \
+  {NULL, 0, NULL, &IID_NULL, 0, 0, VT_EMPTY}      \
+  }                                               \
+  ;                                               \
+  return pPropMap;                                \
+  }
+#define END_PROPERTY_MAP() END_PROP_MAP()
+
+inline bool _AtlPropMapEnd(const ATL_PROPMAP_ENTRY* p) {
+  return p->szDesc == NULL && p->pclsidPropPage == NULL;
+}
+
+// A property through IDispatch.
+inline HRESULT _AtlGetProperty(IDispatch* pDisp, DISPID dispid, VARIANT* pVar) {
+  DISPPARAMS dp = {NULL, NULL, 0, 0};
+  return pDisp->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET, &dp, pVar,
+                       NULL, NULL);
+}
+inline HRESULT _AtlPutProperty(IDispatch* pDisp, DISPID dispid, VARIANT* pVar) {
+  DISPID dispidPut = DISPID_PROPERTYPUT;
+  DISPPARAMS dp = {pVar, &dispidPut, 1, 1};
+  HRESULT hr = pDisp->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUT, &dp,
+                             NULL, NULL, NULL);
+  if (FAILED(hr) && (pVar->vt == VT_DISPATCH || pVar->vt == VT_UNKNOWN))
+    hr = pDisp->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUTREF, &dp, NULL,
+                       NULL, NULL);
+  return hr;
+}
+
+// The dispatch interface an entry's property is reached through.
+inline HRESULT _AtlPropMapDispatch(IUnknown* pUnk, const ATL_PROPMAP_ENTRY* pEntry,
+                                   IDispatch** ppDisp) {
+  *ppDisp = NULL;
+  const IID& iid = pEntry->piidDispatch != NULL ? *pEntry->piidDispatch : IID_IDispatch;
+  return pUnk->QueryInterface(iid, (void**)ppDisp);
+}
+
+// A data entry's value as a VARIANT of its type, and back.
+inline HRESULT _AtlDataEntryToVariant(const ATL_PROPMAP_ENTRY* pEntry, void* pThis, VARIANT* pVar) {
+  BYTE* pData = (BYTE*)pThis + pEntry->dwOffsetData;
+  VariantInit(pVar);
+  if (pEntry->vt == VT_BSTR) {
+    BSTR b = *(BSTR*)pData;
+    pVar->vt = VT_BSTR;
+    pVar->bstrVal = ::SysAllocStringLen(b, ::SysStringLen(b));
+    return b != NULL && pVar->bstrVal == NULL ? E_OUTOFMEMORY : S_OK;
+  }
+  if (pEntry->dwSizeData > sizeof(pVar->llVal) * 2) return E_FAIL;
+  pVar->vt = pEntry->vt;
+  memcpy(&pVar->llVal, pData, pEntry->dwSizeData);
+  return S_OK;
+}
+inline HRESULT _AtlVariantToDataEntry(const ATL_PROPMAP_ENTRY* pEntry, void* pThis, VARIANT* pVar) {
+  BYTE* pData = (BYTE*)pThis + pEntry->dwOffsetData;
+  if (pVar->vt != pEntry->vt) {
+    HRESULT hr = VariantChangeType(pVar, pVar, 0, pEntry->vt);
+    if (FAILED(hr)) return hr;
+  }
+  if (pEntry->vt == VT_BSTR) {
+    // A BSTR or CComBSTR member.
+    BSTR* pb = (BSTR*)pData;
+    ::SysFreeString(*pb);
+    *pb = ::SysAllocStringLen(pVar->bstrVal, ::SysStringLen(pVar->bstrVal));
+    return S_OK;
+  }
+  if (pEntry->dwSizeData > sizeof(pVar->llVal) * 2) return E_FAIL;
+  memcpy(pData, &pVar->llVal, pEntry->dwSizeData);
+  return S_OK;
+}
+
+// The stream form: the ATL version, then each entry in the map's order,
+// a data member's bytes or a property as CComVariant writes it.
+inline HRESULT AtlIPersistStreamInit_Save(LPSTREAM pStm, BOOL /*fClearDirty*/,
+                                          const ATL_PROPMAP_ENTRY* pMap, void* pThis,
+                                          IUnknown* pUnk) {
+  if (pStm == NULL || pMap == NULL) return E_POINTER;
+  DWORD dwVer = _ATL_VER;
+  HRESULT hr = pStm->Write(&dwVer, sizeof(dwVer), NULL);
+  for (; SUCCEEDED(hr) && !_AtlPropMapEnd(pMap); pMap++) {
+    if (pMap->szDesc == NULL) continue;  // a property page
+    if (pMap->dwSizeData != 0) {
+      if (pMap->vt == VT_BSTR) {
+        CComBSTR s(*(BSTR*)((BYTE*)pThis + pMap->dwOffsetData));
+        hr = s.WriteToStream(pStm);
+      } else {
+        hr = pStm->Write((BYTE*)pThis + pMap->dwOffsetData, pMap->dwSizeData, NULL);
+      }
+      continue;
+    }
+    IDispatch* pDisp = NULL;
+    hr = _AtlPropMapDispatch(pUnk, pMap, &pDisp);
+    if (FAILED(hr)) break;
+    CComVariant var;
+    hr = _AtlGetProperty(pDisp, pMap->dispid, &var);
+    pDisp->Release();
+    if (SUCCEEDED(hr)) hr = var.WriteToStream(pStm);
+  }
+  return hr;
+}
+
+inline HRESULT AtlIPersistStreamInit_Load(LPSTREAM pStm, const ATL_PROPMAP_ENTRY* pMap,
+                                          void* pThis, IUnknown* pUnk) {
+  if (pStm == NULL || pMap == NULL) return E_POINTER;
+  DWORD dwVer = 0;
+  ULONG cbRead = 0;
+  HRESULT hr = pStm->Read(&dwVer, sizeof(dwVer), &cbRead);
+  if (SUCCEEDED(hr) && cbRead != sizeof(dwVer)) hr = E_FAIL;
+  for (; SUCCEEDED(hr) && !_AtlPropMapEnd(pMap); pMap++) {
+    if (pMap->szDesc == NULL) continue;
+    if (pMap->dwSizeData != 0) {
+      if (pMap->vt == VT_BSTR) {
+        CComBSTR s;
+        hr = s.ReadFromStream(pStm);
+        if (SUCCEEDED(hr)) {
+          BSTR* pb = (BSTR*)((BYTE*)pThis + pMap->dwOffsetData);
+          ::SysFreeString(*pb);
+          *pb = s.Detach();
+        }
+      } else {
+        hr = pStm->Read((BYTE*)pThis + pMap->dwOffsetData, pMap->dwSizeData, &cbRead);
+        if (SUCCEEDED(hr) && cbRead != pMap->dwSizeData) hr = E_FAIL;
+      }
+      continue;
+    }
+    CComVariant var;
+    hr = var.ReadFromStream(pStm);
+    if (FAILED(hr)) break;
+    if (pMap->vt != VT_EMPTY && var.vt != pMap->vt) var.ChangeType(pMap->vt);
+    IDispatch* pDisp = NULL;
+    if (SUCCEEDED(_AtlPropMapDispatch(pUnk, pMap, &pDisp))) {
+      _AtlPutProperty(pDisp, pMap->dispid, &var);  // a property it will not take is skipped
+      pDisp->Release();
+    }
+  }
+  return hr;
+}
+
+inline HRESULT AtlIPersistPropertyBag_Load(LPPROPERTYBAG pPropBag, LPERRORLOG pErrorLog,
+                                           const ATL_PROPMAP_ENTRY* pMap, void* pThis,
+                                           IUnknown* pUnk) {
+  if (pPropBag == NULL || pMap == NULL) return E_POINTER;
+  for (; !_AtlPropMapEnd(pMap); pMap++) {
+    if (pMap->szDesc == NULL) continue;
+    CComVariant var;
+    if (pMap->dwSizeData != 0) {
+      var.vt = pMap->vt;
+      if (FAILED(pPropBag->Read(pMap->szDesc, &var, pErrorLog))) continue;  // not saved
+      HRESULT hr = _AtlVariantToDataEntry(pMap, pThis, &var);
+      if (FAILED(hr)) return hr;
+      continue;
+    }
+    IDispatch* pDisp = NULL;
+    HRESULT hr = _AtlPropMapDispatch(pUnk, pMap, &pDisp);
+    if (FAILED(hr)) return hr;
+    // The type the property has now, unless the map gives it.
+    VARTYPE vt = pMap->vt;
+    if (vt == VT_EMPTY) {
+      CComVariant cur;
+      if (SUCCEEDED(_AtlGetProperty(pDisp, pMap->dispid, &cur))) vt = cur.vt;
+    }
+    var.vt = vt;
+    if (SUCCEEDED(pPropBag->Read(pMap->szDesc, &var, pErrorLog))) {
+      if (vt != VT_EMPTY && var.vt != vt) var.ChangeType(vt);
+      _AtlPutProperty(pDisp, pMap->dispid, &var);
+    }
+    pDisp->Release();
+  }
+  return S_OK;
+}
+
+inline HRESULT AtlIPersistPropertyBag_Save(LPPROPERTYBAG pPropBag, BOOL /*fClearDirty*/,
+                                           BOOL /*fSaveAllProperties*/,
+                                           const ATL_PROPMAP_ENTRY* pMap, void* pThis,
+                                           IUnknown* pUnk) {
+  if (pPropBag == NULL || pMap == NULL) return E_POINTER;
+  for (; !_AtlPropMapEnd(pMap); pMap++) {
+    if (pMap->szDesc == NULL) continue;
+    CComVariant var;
+    HRESULT hr;
+    if (pMap->dwSizeData != 0) {
+      hr = _AtlDataEntryToVariant(pMap, pThis, &var);
+    } else {
+      IDispatch* pDisp = NULL;
+      hr = _AtlPropMapDispatch(pUnk, pMap, &pDisp);
+      if (SUCCEEDED(hr)) {
+        hr = _AtlGetProperty(pDisp, pMap->dispid, &var);
+        pDisp->Release();
+      }
+    }
+    if (FAILED(hr)) return hr;
+    hr = pPropBag->Write(pMap->szDesc, &var);
+    if (FAILED(hr)) return hr;
+  }
+  return S_OK;
+}
+
+// IPersistStreamInit over the property map; T has m_bRequiresSave.
+template <class T>
+class ATL_NO_VTABLE IPersistStreamInitImpl : public IPersistStreamInit {
+public:
+  STDMETHOD(GetClassID)(CLSID* pClassID) override {
+    if (pClassID == NULL) return E_POINTER;
+    *pClassID = T::GetObjectCLSID();
+    return S_OK;
+  }
+  STDMETHOD(IsDirty)() override { return static_cast<T*>(this)->m_bRequiresSave ? S_OK : S_FALSE; }
+  STDMETHOD(Load)(LPSTREAM pStm) override {
+    T* pT = static_cast<T*>(this);
+    HRESULT hr = pT->IPersistStreamInit_Load(pStm, T::GetPropertyMap());
+    if (SUCCEEDED(hr)) pT->m_bRequiresSave = FALSE;
+    return hr;
+  }
+  STDMETHOD(Save)(LPSTREAM pStm, BOOL fClearDirty) override {
+    T* pT = static_cast<T*>(this);
+    HRESULT hr = pT->IPersistStreamInit_Save(pStm, fClearDirty, T::GetPropertyMap());
+    if (SUCCEEDED(hr) && fClearDirty) pT->m_bRequiresSave = FALSE;
+    return hr;
+  }
+  STDMETHOD(GetSizeMax)(ULARGE_INTEGER* pcbSize) override {
+    if (pcbSize != NULL) pcbSize->QuadPart = 0;
+    return E_NOTIMPL;
+  }
+  STDMETHOD(InitNew)() override {
+    static_cast<T*>(this)->m_bRequiresSave = TRUE;
+    return S_OK;
+  }
+
+  // The class may replace these.
+  HRESULT IPersistStreamInit_Load(LPSTREAM pStm, const ATL_PROPMAP_ENTRY* pMap) {
+    T* pT = static_cast<T*>(this);
+    return AtlIPersistStreamInit_Load(pStm, pMap, pT, pT->GetUnknown());
+  }
+  HRESULT IPersistStreamInit_Save(LPSTREAM pStm, BOOL fClearDirty, const ATL_PROPMAP_ENTRY* pMap) {
+    T* pT = static_cast<T*>(this);
+    return AtlIPersistStreamInit_Save(pStm, fClearDirty, pMap, pT, pT->GetUnknown());
+  }
+};
+
+// IPersistStorage: the stream form in a "Contents" stream.
+template <class T>
+class ATL_NO_VTABLE IPersistStorageImpl : public IPersistStorage {
+public:
+  STDMETHOD(GetClassID)(CLSID* pClassID) override {
+    if (pClassID == NULL) return E_POINTER;
+    *pClassID = T::GetObjectCLSID();
+    return S_OK;
+  }
+  STDMETHOD(IsDirty)() override {
+    CComPtr<IPersistStreamInit> p;
+    if (FAILED(_GetPSI(&p))) return S_FALSE;
+    return p->IsDirty();
+  }
+  STDMETHOD(InitNew)(IStorage*) override {
+    CComPtr<IPersistStreamInit> p;
+    HRESULT hr = _GetPSI(&p);
+    return SUCCEEDED(hr) ? p->InitNew() : hr;
+  }
+  STDMETHOD(Load)(IStorage* pStorage) override {
+    if (pStorage == NULL) return E_POINTER;
+    CComPtr<IPersistStreamInit> p;
+    HRESULT hr = _GetPSI(&p);
+    if (FAILED(hr)) return hr;
+    CComPtr<IStream> spStream;
+    hr = pStorage->OpenStream(L"Contents", NULL, STGM_DIRECT | STGM_SHARE_EXCLUSIVE | STGM_READ, 0,
+                              &spStream);
+    return SUCCEEDED(hr) ? p->Load(spStream) : hr;
+  }
+  STDMETHOD(Save)(IStorage* pStorage, BOOL fSameAsLoad) override {
+    if (pStorage == NULL) return E_POINTER;
+    CComPtr<IPersistStreamInit> p;
+    HRESULT hr = _GetPSI(&p);
+    if (FAILED(hr)) return hr;
+    CComPtr<IStream> spStream;
+    hr = pStorage->CreateStream(L"Contents",
+                                STGM_DIRECT | STGM_SHARE_EXCLUSIVE | STGM_WRITE | STGM_CREATE, 0, 0,
+                                &spStream);
+    return SUCCEEDED(hr) ? p->Save(spStream, fSameAsLoad) : hr;
+  }
+  STDMETHOD(SaveCompleted)(IStorage*) override { return S_OK; }
+  STDMETHOD(HandsOffStorage)() override { return S_OK; }
+
+private:
+  HRESULT _GetPSI(IPersistStreamInit** pp) {
+    return static_cast<T*>(this)->GetUnknown()->QueryInterface(IID_IPersistStreamInit, (void**)pp);
+  }
+};
+
+// IPersistPropertyBag over the property map, by the entries' names.
+template <class T>
+class ATL_NO_VTABLE IPersistPropertyBagImpl : public IPersistPropertyBag {
+public:
+  STDMETHOD(GetClassID)(CLSID* pClassID) override {
+    if (pClassID == NULL) return E_POINTER;
+    *pClassID = T::GetObjectCLSID();
+    return S_OK;
+  }
+  STDMETHOD(InitNew)() override {
+    static_cast<T*>(this)->m_bRequiresSave = TRUE;
+    return S_OK;
+  }
+  STDMETHOD(Load)(LPPROPERTYBAG pPropBag, LPERRORLOG pErrorLog) override {
+    T* pT = static_cast<T*>(this);
+    HRESULT hr = pT->IPersistPropertyBag_Load(pPropBag, pErrorLog, T::GetPropertyMap());
+    if (SUCCEEDED(hr)) pT->m_bRequiresSave = FALSE;
+    return hr;
+  }
+  STDMETHOD(Save)(LPPROPERTYBAG pPropBag, BOOL fClearDirty, BOOL fSaveAllProperties) override {
+    T* pT = static_cast<T*>(this);
+    HRESULT hr = pT->IPersistPropertyBag_Save(pPropBag, fClearDirty, fSaveAllProperties,
+                                              T::GetPropertyMap());
+    if (SUCCEEDED(hr) && fClearDirty) pT->m_bRequiresSave = FALSE;
+    return hr;
+  }
+
+  HRESULT IPersistPropertyBag_Load(LPPROPERTYBAG pPropBag, LPERRORLOG pErrorLog,
+                                   const ATL_PROPMAP_ENTRY* pMap) {
+    T* pT = static_cast<T*>(this);
+    return AtlIPersistPropertyBag_Load(pPropBag, pErrorLog, pMap, pT, pT->GetUnknown());
+  }
+  HRESULT IPersistPropertyBag_Save(LPPROPERTYBAG pPropBag, BOOL fClearDirty,
+                                   BOOL fSaveAllProperties, const ATL_PROPMAP_ENTRY* pMap) {
+    T* pT = static_cast<T*>(this);
+    return AtlIPersistPropertyBag_Save(pPropBag, fClearDirty, fSaveAllProperties, pMap, pT,
+                                       pT->GetUnknown());
+  }
+};
+
+// ISpecifyPropertyPages: the pages the property map names, each once.
+template <class T>
+class ATL_NO_VTABLE ISpecifyPropertyPagesImpl : public ISpecifyPropertyPages {
+public:
+  STDMETHOD(GetPages)(CAUUID* pPages) override {
+    if (pPages == NULL) return E_POINTER;
+    pPages->cElems = 0;
+    pPages->pElems = NULL;
+    const ATL_PROPMAP_ENTRY* pMap = T::GetPropertyMap();
+    int n = 0;
+    for (const ATL_PROPMAP_ENTRY* p = pMap; !_AtlPropMapEnd(p); p++) n++;
+    if (n == 0) return S_OK;
+    GUID* pElems = (GUID*)::CoTaskMemAlloc(sizeof(GUID) * n);
+    if (pElems == NULL) return E_OUTOFMEMORY;
+    ULONG c = 0;
+    for (const ATL_PROPMAP_ENTRY* p = pMap; !_AtlPropMapEnd(p); p++) {
+      if (p->pclsidPropPage == NULL || InlineIsEqualGUID(*p->pclsidPropPage, CLSID_NULL)) continue;
+      bool bSeen = false;
+      for (ULONG i = 0; i < c; i++)
+        if (InlineIsEqualGUID(pElems[i], *p->pclsidPropPage)) bSeen = true;
+      if (!bSeen) pElems[c++] = *p->pclsidPropPage;
+    }
+    if (c == 0) {
+      ::CoTaskMemFree(pElems);
+      pElems = NULL;
+    }
+    pPages->cElems = c;
+    pPages->pElems = pElems;
+    return S_OK;
+  }
+};
+
+// ---------------------------------------------------------------------
 // Event sinks: a class takes an object's events (a dispinterface) as
 // calls to its own __stdcall member functions, named in a sink map.
 
@@ -2389,7 +2788,20 @@ protected:
   }
 };
 
-// The sink map: the events a class takes, by source id and dispid.
+// The sink map: the events a class takes, by source id and dispid. A
+// handler is named by pointer to member (&CMyDlg::OnClick); with
+// clang-retro's compiler, which tells the two apart
+// (__starts_with_ampersand), also by its plain name (OnClick), as
+// Visual C++ 6 code writes it.
+#ifdef __starts_with_ampersand
+#define _ATL_SINK_PMF(f) _ATL_SINK_PMF_CAT(_ATL_SINK_PMF_, __starts_with_ampersand(f))(f)
+#define _ATL_SINK_PMF_CAT(a, b) _ATL_SINK_PMF_CAT2(a, b)
+#define _ATL_SINK_PMF_CAT2(a, b) a##b
+#define _ATL_SINK_PMF_0(f) &_atl_event_classtype::f
+#define _ATL_SINK_PMF_1(f) f
+#else
+#define _ATL_SINK_PMF(f) f
+#endif
 #define BEGIN_SINK_MAP(_class)                                           \
   typedef _class _GetSinkMapFinder;                                      \
   static const ATL::_ATL_EVENT_ENTRY<_class>* _GetSinkMap() {            \
@@ -2398,7 +2810,7 @@ protected:
 #define SINK_ENTRY_INFO(id, iid, dispid, fn, info)                                         \
   {id, &iid,                                                                               \
    (int)((INT_PTR)(static_cast<ATL::_IDispEventLocator<id, &iid>*>((_atl_event_classtype*)8)) - 8), \
-   dispid, (void(__stdcall _atl_event_classtype::*)())(fn), info},
+   dispid, (void(__stdcall _atl_event_classtype::*)())(_ATL_SINK_PMF(fn)), info},
 #define SINK_ENTRY_EX(id, iid, dispid, fn) SINK_ENTRY_INFO(id, iid, dispid, fn, NULL)
 #define SINK_ENTRY(id, dispid, fn) SINK_ENTRY_EX(id, IID_NULL, dispid, fn)
 #define END_SINK_MAP()          \
@@ -2429,6 +2841,11 @@ inline HRESULT AtlAdviseSinkMap(T* pT, bool bAdvise) {
     IUnknown* pUnk = NULL;
     if (FAILED(AtlAxGetControl(h, &pUnk)) || pUnk == NULL) continue;
     HRESULT hr2;
+    // Each sink advised once, whichever of the map's users asks.
+    if (bAdvise == (pDE->m_dwEventCookie != 0xFEFEFEFE)) {
+      pUnk->Release();
+      continue;
+    }
     if (bAdvise) {
       if (InlineIsEqualGUID(*pEntry->piid, IID_NULL) && InlineIsEqualGUID(pDE->m_iid, IID_NULL))
         AtlGetObjectSourceInterface(pUnk, &pDE->m_libid, &pDE->m_iid, &pDE->m_wMajorVerNum,
