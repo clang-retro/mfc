@@ -254,8 +254,10 @@ try.
   address, ComboBoxEx, month calendar, date and time picker, an
   animation from an AVI file) and property sheets; printer
   DCs, a job printed to a file, and the Print and Page Setup dialogs
-  driven through their hooks; and a CWnd with a message map, on the
-  console.
+  driven through their hooks; a window shaped by SetWindowRgn (hit
+  testing and clipping) and files dropped on a window (WM_DROPFILES,
+  DragQueryFile and DragQueryPoint); and a CWnd with a message map, on
+  the console.
 * `disptest`: the automation helpers in `afxdisp.h` (COleDateTime and
   its span, COleCurrency, COleVariant, COleSafeArray) and a
   COleDispatchDriver calling an IDispatch written in the test, on the

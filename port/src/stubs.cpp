@@ -36,9 +36,6 @@ extern "C" void _WinportStub(const char* name, bool* reported);
     return -1;                        \
   }
 
-STUB_VOID(DragFinish)
-STUB_ZERO(DragQueryFileA)
-STUB_ZERO(DragQueryFileW)
 STUB_HRESULT(OleCreateFromFile)
 STUB_HRESULT(OleCreateLinkFromData)
 STUB_HRESULT(OleCreateLinkToFile)
@@ -87,7 +84,6 @@ STUB_SQL(SQLSetConnectAttrW)
 STUB_SQL(SQLSetEnvAttr)
 STUB_SQL(SQLSetStmtAttrA)
 STUB_SQL(SQLSetStmtAttrW)
-STUB_ZERO(SetWindowRgn)
 STUB_ZERO(WinHelpA)
 STUB_ZERO(WinHelpW)
 STUB_ZERO(GopherCreateLocatorA)

@@ -267,6 +267,7 @@ Win* Create(void* owner, int x, int y, int width, int height, bool popup) {
   WinportView* view = [[WinportView alloc] initWithFrame:NSMakeRect(0, 0, frame.size.width, frame.size.height)];
   view->owner = owner;
   [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+  if (!popup) [view registerForDraggedTypes:[NSArray arrayWithObject:NSFilenamesPboardType]];
   [win setContentView:view];
   [win setDelegate:(id)g_delegate];
   w->window = win;
@@ -465,6 +466,37 @@ void Wake() {
 }
 - (BOOL)acceptsFirstResponder {
   return YES;
+}
+// Files dragged from the Finder go to the window under them that takes
+// files, as WM_DROPFILES.
+- (BOOL)dropPointOf:(id<NSDraggingInfo>)info x:(int*)x y:(int*)y {
+  NSWindow* win = [self window];
+  if (!win) return NO;
+  NSPoint at = [win convertBaseToScreen:[info draggingLocation]];
+  *x = (int)floor(at.x);
+  *y = (int)floor(MainScreen().size.height - at.y);
+  return YES;
+}
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info {
+  return [self draggingUpdated:info];
+}
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info {
+  int x, y;
+  if (![[[info draggingPasteboard] types] containsObject:NSFilenamesPboardType]) return NSDragOperationNone;
+  if (![self dropPointOf:info x:&x y:&y] || !OnDragFiles(x, y)) return NSDragOperationNone;
+  return NSDragOperationCopy;
+}
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)info {
+  int x, y;
+  if (![self dropPointOf:info x:&x y:&y]) return NO;
+  NSArray* names = [[info draggingPasteboard] propertyListForType:NSFilenamesPboardType];
+  if (![names isKindOfClass:[NSArray class]]) return NO;
+  std::vector<std::string> paths;
+  for (NSUInteger i = 0; i < [names count]; i++) {
+    id name = [names objectAtIndex:i];
+    if ([name isKindOfClass:[NSString class]]) paths.push_back([(NSString*)name fileSystemRepresentation]);
+  }
+  return OnDropFiles(x, y, paths) ? YES : NO;
 }
 - (void)drawRect:(NSRect)dirty {
   const uint32_t* pixels;

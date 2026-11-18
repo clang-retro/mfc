@@ -6,8 +6,9 @@
 // clipping, mapping modes and scrolling, lines, shapes, paths and
 // text, icons, accelerators and menus, dialogs and the standard
 // controls, MDI, image lists, the common controls, the list view, the
-// tree view and property sheets; printing and the print dialogs; and a
-// CWnd with a message map on top.
+// tree view and property sheets; printing and the print dialogs; window
+// shapes (SetWindowRgn) and dropped files (WM_DROPFILES); and a CWnd
+// with a message map on top.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -16,6 +17,7 @@
 #include <commdlg.h>
 #include <dlgs.h>
 #include <prsht.h>
+#include <shlobj.h>
 #include <stdio.h>
 #include <string.h>
 #include <string>
@@ -2356,6 +2358,112 @@ static void TestPropertySheets() {
   ::DestroyWindow(sheet);
 }
 
+// ---------------------------------------------------------------------
+// Window shapes, and files dropped on a window.
+
+static int g_drops = 0;
+static std::vector<std::wstring> g_dropped;
+static POINT g_dropPt;
+static BOOL g_dropInClient;
+static UINT g_dropShort;
+static WCHAR g_dropShortText[8];
+
+static LRESULT CALLBACK DropProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg != WM_DROPFILES) return ::DefWindowProcW(h, msg, wp, lp);
+  HDROP drop = (HDROP)wp;
+  g_dropped.clear();
+  UINT n = ::DragQueryFileW(drop, 0xFFFFFFFF, NULL, 0);
+  for (UINT i = 0; i < n; i++) {
+    UINT len = ::DragQueryFileW(drop, i, NULL, 0);
+    std::vector<WCHAR> buf(len + 1);
+    ::DragQueryFileW(drop, i, buf.data(), len + 1);
+    g_dropped.push_back(std::wstring(buf.data(), len));
+  }
+  // A buffer too short takes what fits.
+  g_dropShort = ::DragQueryFileW(drop, 0, g_dropShortText, 4);
+  g_dropInClient = ::DragQueryPoint(drop, &g_dropPt);
+  ::DragFinish(drop);
+  g_drops++;
+  return 0;
+}
+
+// An HDROP as the shell makes one: a DROPFILES and the paths.
+static HGLOBAL MakeDrop(const void* paths, size_t bytes, BOOL wide, POINT pt, BOOL nc) {
+  HGLOBAL h = ::GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DROPFILES) + bytes);
+  DROPFILES* df = (DROPFILES*)::GlobalLock(h);
+  df->pFiles = sizeof(DROPFILES);
+  df->pt = pt;
+  df->fNC = nc;
+  df->fWide = wide;
+  memcpy(df + 1, paths, bytes);
+  ::GlobalUnlock(h);
+  return h;
+}
+
+static void TestShapesAndDrops() {
+  WNDCLASSW wc;
+  memset(&wc, 0, sizeof(wc));
+  wc.lpfnWndProc = DropProc;
+  wc.hInstance = ::GetModuleHandleW(NULL);
+  wc.hbrBackground = (HBRUSH)::GetStockObject(WHITE_BRUSH);
+  wc.lpszClassName = L"WinTestDrop";
+  CHECK(::RegisterClassW(&wc) != 0);
+  HWND top = ::CreateWindowExW(WS_EX_TOPMOST, L"WinTestDrop", L"drop", WS_POPUP | WS_VISIBLE, 100, 100, 300, 200,
+                               NULL, NULL, wc.hInstance, NULL);
+  HWND child = ::CreateWindowExW(0, L"WinTestDrop", L"shaped", WS_CHILD | WS_VISIBLE, 0, 0, 100, 100, top, NULL,
+                                 wc.hInstance, NULL);
+  CHECK(top != NULL && child != NULL);
+  ::UpdateWindow(top);
+
+  // The child keeps only its right half.
+  HRGN rgn = ::CreateRectRgn(0, 0, 0, 0);
+  CHECK(::GetWindowRgn(child, rgn) == ERROR);
+  CHECK(::SetWindowRgn(child, ::CreateRectRgn(50, 0, 100, 100), TRUE));
+  CHECK(::GetWindowRgn(child, rgn) == SIMPLEREGION);
+  RECT box;
+  ::GetRgnBox(rgn, &box);
+  CHECK(box.left == 50 && box.top == 0 && box.right == 100 && box.bottom == 100);
+  POINT outside = {110, 110}, inside = {160, 110};
+  CHECK(::WindowFromPoint(outside) == top);
+  CHECK(::WindowFromPoint(inside) == child);
+  HDC dc = ::GetDC(child);
+  ::GetClipBox(dc, &box);
+  CHECK(box.left == 50 && box.right == 100);
+  ::ReleaseDC(child, dc);
+  CHECK(::SetWindowRgn(child, NULL, TRUE));
+  CHECK(::GetWindowRgn(child, rgn) == ERROR);
+  CHECK(::WindowFromPoint(outside) == child);
+  ::DeleteObject(rgn);
+
+  // Files dropped on the window.
+  ::DragAcceptFiles(top, TRUE);
+  CHECK((::GetWindowLongW(top, GWL_EXSTYLE) & WS_EX_ACCEPTFILES) != 0);
+  static const WCHAR wide[] = L"C:\\one.txt\0C:\\two words.txt\0";
+  POINT pt = {12, 34};
+  ::SendMessageW(top, WM_DROPFILES, (WPARAM)MakeDrop(wide, sizeof(wide), TRUE, pt, FALSE), 0);
+  CHECK(g_drops == 1);
+  CHECK(g_dropped.size() == 2);
+  if (g_dropped.size() == 2) {
+    CHECK(g_dropped[0] == L"C:\\one.txt");
+    CHECK(g_dropped[1] == L"C:\\two words.txt");
+  }
+  CHECK(g_dropShort == 3 && lstrcmpW(g_dropShortText, L"C:\\") == 0);
+  CHECK(g_dropInClient && g_dropPt.x == 12 && g_dropPt.y == 34);
+  // The narrow form, read wide; a drop on the frame.
+  static const char narrow[] = "/tmp/three\0";
+  ::SendMessageW(top, WM_DROPFILES, (WPARAM)MakeDrop(narrow, sizeof(narrow), FALSE, pt, TRUE), 0);
+  CHECK(g_drops == 2 && g_dropped.size() == 1 && g_dropped[0] == L"/tmp/three");
+  CHECK(!g_dropInClient);
+  char a[32] = "";
+  HGLOBAL h = MakeDrop(wide, sizeof(wide), TRUE, pt, FALSE);
+  CHECK(::DragQueryFileA((HDROP)h, 1, a, sizeof(a)) == 16 && strcmp(a, "C:\\two words.txt") == 0);
+  CHECK(::DragQueryFileA((HDROP)h, 2, a, sizeof(a)) == 0);
+  ::DragFinish((HDROP)h);
+  ::DragAcceptFiles(top, FALSE);
+  CHECK((::GetWindowLongW(top, GWL_EXSTYLE) & WS_EX_ACCEPTFILES) == 0);
+  ::DestroyWindow(top);
+}
+
 static void TestCWnd() {
   CTestWnd wnd;
   CString cls = AfxRegisterWndClass(CS_HREDRAW | CS_VREDRAW, NULL, (HBRUSH)(COLOR_WINDOW + 1));
@@ -2640,6 +2748,7 @@ int main() {
   TestTreeView();
   TestPropertySheets();
   TestPrinting();
+  TestShapesAndDrops();
   TestCWnd();
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;
