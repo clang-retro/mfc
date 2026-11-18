@@ -271,7 +271,10 @@ HRESULT WINAPI CoGetClassObject(REFCLSID clsid, DWORD context, LPVOID, REFIID ri
     std::lock_guard<std::mutex> g(g_classLock);
     for (size_t i = 0; i < g_classes.size(); i++) {
       ClassEntry& e = g_classes[i];
-      if (IsEqualGUID(e.clsid, clsid) && (e.context & context) != 0 && !e.used) {
+      // A class this program registered serves it in any context: a
+      // local server in this process is as near as an in-process one
+      // (Wine's CoGetClassObject hands it out the same way).
+      if (IsEqualGUID(e.clsid, clsid) && (context & (e.context | CLSCTX_INPROC)) != 0 && !e.used) {
         unk = e.unk;
         unk->AddRef();
         if (e.flags == REGCLS_SINGLEUSE) e.used = true;

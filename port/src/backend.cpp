@@ -93,6 +93,7 @@ void RegisterSystemClasses() {
   RegisterDialogClass();
   RegisterButtonClasses();
   RegisterEditClass();
+  RegisterRichEditClasses();
   RegisterListClasses();
   RegisterMdiClass();
   RegisterCommonControls();

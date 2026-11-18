@@ -209,6 +209,7 @@ void RegisterDialogClass();  // user_dialog.cpp
 size_t DialogTemplateSize(const void* tmpl);  // the bytes a dialog template takes
 void RegisterButtonClasses();  // user_button.cpp: Button, Static, ScrollBar
 void RegisterEditClass();  // user_edit.cpp
+void RegisterRichEditClasses();  // richedit.cpp
 void RegisterListClasses();  // user_listbox.cpp: ListBox, ComboLBox, ComboBox
 void RegisterMdiClass();  // user_mdi.cpp: MDIClient
 void RegisterCommonControls();  // comctl_misc.cpp: the common control classes
