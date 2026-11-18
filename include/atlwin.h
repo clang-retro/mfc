@@ -23,6 +23,9 @@
 
 #include "atlbase.h"
 #include <commctrl.h>
+#if defined(__APPLE__) && defined(__aarch64__)
+#include <pthread.h>
+#endif
 
 #if !defined(_ATL_NO_DEFAULT_LIBS) && defined(_WIN32)
 __asm__(".section .drectve,\"yn\"\n"
@@ -102,8 +105,8 @@ public:
   DWORD GetExStyle() const { return (DWORD)::GetWindowLong(m_hWnd, GWL_EXSTYLE); }
   LONG GetWindowLong(int nIndex) const { return ::GetWindowLong(m_hWnd, nIndex); }
   LONG SetWindowLong(int nIndex, LONG dwNewLong) { return ::SetWindowLong(m_hWnd, nIndex, dwNewLong); }
-#ifdef _WIN64
-  // (In 32-bit code these are macros naming GetWindowLong and
+#if defined(_WIN64) || defined(_WINPORT)
+  // (In 32-bit Windows code these are macros naming GetWindowLong and
   // SetWindowLong.)
   LONG_PTR GetWindowLongPtr(int nIndex) const { return ::GetWindowLongPtr(m_hWnd, nIndex); }
   LONG_PTR SetWindowLongPtr(int nIndex, LONG_PTR dwNewLong) {
@@ -800,6 +803,7 @@ public:
     if (pThunk == NULL) pThunk = Alloc();
     if (pThunk == NULL) return FALSE;
     BYTE* p = (BYTE*)pThunk;
+    WriteScope ws;
 #if defined(__i386__)
     // mov dword ptr [esp+4], pThis ; jmp proc
     p[0] = 0xC7;
@@ -812,17 +816,30 @@ public:
     DWORD dwRel = (DWORD)(proc - ((DWORD_PTR)p + 13));
     memcpy(p + 9, &dwRel, 4);
 #elif defined(__x86_64__)
+#ifdef _WIN32
     // mov rcx, pThis ; mov rax, proc ; jmp rax
     p[0] = 0x48;
     p[1] = 0xB9;
+#else
+    // The System V convention's first argument is in rdi:
+    // mov rdi, pThis ; mov rax, proc ; jmp rax
+    p[0] = 0x48;
+    p[1] = 0xBF;
+#endif
     memcpy(p + 2, &pThis, 8);
     p[10] = 0x48;
     p[11] = 0xB8;
     memcpy(p + 12, &proc, 8);
     p[20] = 0xFF;
     p[21] = 0xE0;
+#elif defined(__aarch64__)
+    // ldr x0, [pc+16] ; ldr x16, [pc+20] ; br x16 ; nop ; pThis ; proc
+    static const DWORD code[4] = {0x58000080, 0x580000B0, 0xD61F0200, 0xD503201F};
+    memcpy(p, code, sizeof code);
+    memcpy(p + 16, &pThis, 8);
+    memcpy(p + 24, &proc, 8);
 #else
-#error "ATL window thunks are written for x86 and x86-64"
+#error "ATL window thunks are written for x86, x86-64 and arm64"
 #endif
     ::FlushInstructionCache(::GetCurrentProcess(), pThunk, kSize);
     return TRUE;
@@ -831,6 +848,18 @@ public:
 
 private:
   enum { kSize = 32 };
+#if defined(__APPLE__) && defined(__aarch64__)
+  // There pages both written and run are MAP_JIT ones, which a thread
+  // writes only while it has their protection turned off.
+  struct WriteScope {
+    WriteScope() { pthread_jit_write_protect_np(0); }
+    ~WriteScope() { pthread_jit_write_protect_np(1); }
+  };
+#else
+  struct WriteScope {
+    WriteScope() {}
+  };
+#endif
   // Thunks come from pages that may run code, kSize bytes each.
   struct Pool {
     CRITICAL_SECTION cs;
@@ -844,6 +873,7 @@ private:
   static void* Alloc() {
     Pool& pool = GetPool();
     ::EnterCriticalSection(&pool.cs);
+    WriteScope ws;
     if (pool.pFree == NULL) {
       SYSTEM_INFO si;
       ::GetSystemInfo(&si);
@@ -864,6 +894,7 @@ private:
   static void Free(void* p) {
     Pool& pool = GetPool();
     ::EnterCriticalSection(&pool.cs);
+    WriteScope ws;
     *(void**)p = pool.pFree;
     pool.pFree = p;
     ::LeaveCriticalSection(&pool.cs);

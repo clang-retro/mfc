@@ -292,9 +292,9 @@ int Prot(DWORD p) {
   switch (p & 0xff) {
     case PAGE_NOACCESS: return PROT_NONE;
     case PAGE_READONLY: return PROT_READ;
-    case 0x10: return PROT_EXEC;                           // PAGE_EXECUTE
-    case 0x20: return PROT_READ | PROT_EXEC;               // PAGE_EXECUTE_READ
-    case 0x40: return PROT_READ | PROT_WRITE | PROT_EXEC;  // PAGE_EXECUTE_READWRITE
+    case PAGE_EXECUTE: return PROT_EXEC;
+    case PAGE_EXECUTE_READ: return PROT_READ | PROT_EXEC;
+    case PAGE_EXECUTE_READWRITE: return PROT_READ | PROT_WRITE | PROT_EXEC;
     default: return PROT_READ | PROT_WRITE;
   }
 }
@@ -305,6 +305,16 @@ size_t PageSize() {
 }  // namespace
 
 extern "C" {
+
+BOOL WINAPI FlushInstructionCache(HANDLE, LPCVOID addr, SIZE_T size) {
+#if !defined(__i386__) && !defined(__x86_64__)
+  if (addr) __builtin___clear_cache((char*)addr, (char*)addr + size);
+#else
+  (void)addr;
+  (void)size;
+#endif
+  return TRUE;
+}
 
 LPVOID WINAPI VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD protect) {
   size_t pg = PageSize();
@@ -319,7 +329,12 @@ LPVOID WINAPI VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD protect) 
     return a;
   }
   int prot = (type & MEM_COMMIT) ? Prot(protect) : PROT_NONE;
-  void* p = mmap(addr, size, prot, MAP_PRIVATE | MAP_ANON, -1, 0);
+  int flags = MAP_PRIVATE | MAP_ANON;
+#if defined(__APPLE__) && defined(__aarch64__)
+  // Pages written and run both must be JIT pages there (pthread_jit_write_protect_np).
+  if ((prot & (PROT_WRITE | PROT_EXEC)) == (PROT_WRITE | PROT_EXEC)) flags |= MAP_JIT;
+#endif
+  void* p = mmap(addr, size, prot, flags, -1, 0);
   if (p == MAP_FAILED) {
     SetLastError(ERROR_NOT_ENOUGH_MEMORY);
     return NULL;

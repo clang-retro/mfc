@@ -73,7 +73,21 @@ __asm__(".section .drectve,\"yn\"\n"
 #endif
 
 // The image that holds this code (the DLL, or the program).
+#ifdef _WINPORT
+// The layer finds it from an address in it: this function's own static,
+// one in each image as the function has internal linkage.
+static inline HINSTANCE _AtlThisImage() {
+  static const char marker = 0;
+  HMODULE h = NULL;
+  ::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       &marker, &h);
+  return (HINSTANCE)h;
+}
+#else
 extern "C" IMAGE_DOS_HEADER __ImageBase;
+static inline HINSTANCE _AtlThisImage() { return (HINSTANCE)&__ImageBase; }
+#endif
 
 namespace ATL {
 
@@ -1053,7 +1067,7 @@ public:
   HINSTANCE m_hInst;
   HINSTANCE m_hInstResource;
   CAtlBaseModule() {
-    m_hInst = m_hInstResource = (HINSTANCE)&__ImageBase;
+    m_hInst = m_hInstResource = _AtlThisImage();
   }
   HINSTANCE GetModuleInstance() { return m_hInst; }
   HINSTANCE GetResourceInstance() { return m_hInstResource; }
@@ -1478,8 +1492,12 @@ public:
     if (lpszProgID != NULL) key.SetKeyValue(TEXT("ProgID"), lpszProgID);
     if (lpszVerIndProgID != NULL) key.SetKeyValue(TEXT("VersionIndependentProgID"), lpszVerIndProgID);
     // A DLL is an in-process server, a program a local one.
+#ifdef _WINPORT
+    bool bDll = m_hInst != ::GetModuleHandle(NULL);
+#else
     bool bDll = (((IMAGE_NT_HEADERS*)((BYTE*)m_hInst + ((IMAGE_DOS_HEADER*)m_hInst)->e_lfanew))
                      ->FileHeader.Characteristics & IMAGE_FILE_DLL) != 0;
+#endif
     if (sub.Create(key, bDll ? TEXT("InprocServer32") : TEXT("LocalServer32")) == ERROR_SUCCESS) {
       sub.SetStringValue(NULL, szModule);
       if (bDll && (dwFlags & (THREADFLAGS_APARTMENT | THREADFLAGS_BOTH)))

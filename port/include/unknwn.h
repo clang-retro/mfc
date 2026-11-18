@@ -20,6 +20,13 @@ struct __winport_uuidof;
   struct __winport_uuidof<I> {                         \
     static constexpr const IID& iid() { return IID_##I; } \
   };
+// mingw-w64's form, for an interface whose IID has no IID_ name.
+#define __CRT_UUID_DECL(I, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8)       \
+  template <>                                                             \
+  struct __winport_uuidof<I> {                                            \
+    static constexpr IID v = {l, w1, w2, {b1, b2, b3, b4, b5, b6, b7, b8}}; \
+    static constexpr const IID& iid() { return v; }                       \
+  };
 
 interface IUnknown {
   virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObject) = 0;
