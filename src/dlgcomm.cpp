@@ -8,13 +8,15 @@
 
 IMPLEMENT_DYNAMIC(CCommonDialog, CDialog)
 
-// The dialogs end themselves; these only exist for the virtual calls.
+// The dialogs end themselves (the modeless Find and Replace ones by
+// destroying their windows): OK and Cancel go on to the dialogs' own
+// procedures.
 void CCommonDialog::OnOK() {
   if (!UpdateData(TRUE)) return;
-  CDialog::OnOK();
+  Default();
 }
 
-void CCommonDialog::OnCancel() { CDialog::OnCancel(); }
+void CCommonDialog::OnCancel() { Default(); }
 
 // Runs a modal common dialog the way CDialog::DoModal runs a dialog:
 // the owner is the safe owner and any top-level window is re-enabled.
@@ -109,6 +111,8 @@ CString CFileDialog::GetFileTitle() const {
 CString CFileDialog::GetFolderPath() const {
   CString strPath = GetPathName();
   int i = strPath.ReverseFind(_T('\\'));
+  int j = strPath.ReverseFind(_T('/'));
+  if (j > i) i = j;
   return i >= 0 ? strPath.Left(i) : CString();
 }
 
@@ -123,8 +127,10 @@ CString CFileDialog::GetNextPathName(POSITION& pos) const {
     }
     lpsz += lstrlen(lpsz) + 1;  // skip the folder
   }
+  // The folder's own separator joins it to the name: '/' for POSIX paths.
   CString strPath = m_ofn.lpstrFile;
-  if (strPath.Right(1) != _T("\\")) strPath += _T('\\');
+  TCHAR chSep = strPath.Find(_T('\\')) < 0 && strPath.Find(_T('/')) >= 0 ? _T('/') : _T('\\');
+  if (strPath.Right(1) != CString(chSep)) strPath += chSep;
   strPath += lpsz;
   lpsz += lstrlen(lpsz) + 1;
   pos = *lpsz != 0 ? (POSITION)lpsz : NULL;

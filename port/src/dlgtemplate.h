@@ -10,6 +10,9 @@
 
 namespace winport {
 
+// The error of the last common dialog, for CommDlgExtendedError.
+extern thread_local DWORD tlsDlgError;
+
 // A dialog template in memory.
 class Template {
  public:

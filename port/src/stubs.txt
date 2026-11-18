@@ -5,19 +5,9 @@
 # Part of clang-retro MFC, an independent implementation of the MFC API.
 # SPDX-License-Identifier: AGPL-3.0-only
 
-ChooseColorA
-ChooseColorW
-ChooseFontA
-ChooseFontW
 DragFinish
 DragQueryFileA
 DragQueryFileW
-FindTextA
-FindTextW
-GetOpenFileNameA
-GetOpenFileNameW
-GetSaveFileNameA
-GetSaveFileNameW
 OleCreateFromFile
 OleCreateLinkFromData
 OleCreateLinkToFile
@@ -34,8 +24,6 @@ OleUIConvertA
 OleUIConvertW
 OleUIUpdateLinksA
 OleUIUpdateLinksW
-ReplaceTextA
-ReplaceTextW
 SQLAllocHandle
 SQLBindParameter
 SQLCancel

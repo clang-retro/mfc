@@ -1,0 +1,8 @@
+// cdlgtest.rc - resources for cdlgtest.
+#include <windows.h>
+#include <afxres.h>
+
+STRINGTABLE
+BEGIN
+  AFX_IDS_APP_TITLE "CdlgTest"
+END

@@ -229,10 +229,11 @@ when there is no display. For a Linux or macOS target it builds `core`,
 `socktest`, `occtest`, `dlltest`, `inettest`, `oletest`, `iptest`,
 `docobtest`, `linktest`, `bindtest`, `richtest`, `richsrvtest`,
 `autotest`, `srvtest`, `atlwintest`, `atltest`, `conntest`, `ctltest`,
-`wltest`, `dragtest`, `daotest`, `dvtest`, `htmltest` and `atlctltest`
-against the portable layer, and `exttest`, `core`, `sditest`, `dlgtest`
-and `dlltest` again with the shared libraries (`SHARED_TESTS`), and runs
-them directly; `NATIVE_TESTS` names others to try.
+`wltest`, `dragtest`, `daotest`, `dvtest`, `htmltest`, `atlctltest` and
+`cdlgtest` against the portable layer, and `exttest`, `core`, `sditest`,
+`dlgtest` and `dlltest` again with the shared libraries
+(`SHARED_TESTS`), and runs them directly; `NATIVE_TESTS` names others to
+try.
 
 * `core`: CString, collections, CFile, CArchive and serialization,
   CTime, exceptions and run-time classes, on the console.
@@ -369,6 +370,13 @@ them directly; `NATIVE_TESTS` names others to try.
   and read back (cached, rendered when asked for, and as a file),
   a COleDropTarget fed enter, over, leave and drop by hand, scrolling
   near the edges, and a real DoDragDrop from the view onto itself.
+* `cdlgtest`: the common dialogs, driven by their hooks: CFileDialog
+  opening a file (its hook turning the first OK down), two files at
+  once, and none, saving with the default extension, and a buffer too
+  small for the answer; CColorDialog with a color set by SETRGBSTRING
+  and then edited; CFontDialog starting from a LOGFONT; and the modeless
+  CFindReplaceDialog telling its owner about Find Next, Replace, Replace
+  All and its closing.
 * `oletest`: an OLE container: objects of a class the test registers
   itself, embedded in a COleDocument, drawn by its view, opened and
   changed through their verbs and the verb menu, saved to flat and
