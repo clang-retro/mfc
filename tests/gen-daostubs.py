@@ -5,6 +5,10 @@
 # daomock.h derives from these and overrides what it does.
 #
 #   python3 tests/gen-daostubs.py SYSROOT/include/dbdaoint.h > tests/daostubs.h
+#   python3 tests/gen-daostubs.py port/include/dbdaoint.h > tests/daostubs-port.h
+#
+# The second is the portable layer's header, which declares its
+# interfaces as C++ classes ("interface X : public Y").
 import re
 import sys
 
@@ -24,9 +28,28 @@ for m in re.finditer(r'DECLARE_INTERFACE_\((\w+),(\w+)\)\s*\{(.*?)\n\};', src, r
         args = ' '.join(mm.group(4).split())
         args = args.replace('THIS_', '').replace('THIS', '').strip()
         args = re.sub(r'\binterface\b', 'struct', args)
+        args = args.replace('__LONG32', 'LONG')
         meths.append((ret, mname, args))
     ifaces[name] = (base, meths)
     order.append(name)
+
+# The portable layer's form.
+renames = dict(re.findall(r'#define (DAO\w+) (_DAO\w+)', src))
+if not order:
+    def rn(t):
+        return re.sub(r'\b(DAO\w+)\b', lambda m: renames.get(m.group(1), m.group(1)), t)
+    for m in re.finditer(r'\ninterface (\w+) : public (\w+) \{(.*?)\n\};', src, re.S):
+        name, base, body = rn(m.group(1)), rn(m.group(2)), m.group(3)
+        meths = []
+        for mm in re.finditer(r'STDMETHOD(?:_\(\s*(\w+)\s*,\s*(\w+)\s*\)|\((\w+)\))\s*\((.*?)\)\s*=\s*0;',
+                              body, re.S):
+            if mm.group(1):
+                ret, mname = mm.group(1), mm.group(2)
+            else:
+                ret, mname = 'HRESULT', mm.group(3)
+            meths.append((ret, mname, rn(' '.join(mm.group(4).split()))))
+        ifaces[name] = (base, meths)
+        order.append(name)
 
 
 def flat(n):

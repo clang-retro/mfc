@@ -227,9 +227,11 @@ when there is no display. For a Linux or macOS target it builds `core`,
 `mditest`, `cmntest`, `splittest`, `docktest`, `dbtest`, `rvtest`,
 `socktest`, `occtest`, `dlltest`, `inettest`, `oletest`, `iptest`,
 `docobtest`, `linktest`, `bindtest`, `richtest`, `richsrvtest`,
-`autotest`, `srvtest`, `atlwintest`, `atltest`, `conntest` and `ctltest` against the portable layer,
-and `exttest`, `core`, `sditest`, `dlgtest` and `dlltest` again with the
-shared libraries (`SHARED_TESTS`), and runs them directly; `NATIVE_TESTS` names others to try.
+`autotest`, `srvtest`, `atlwintest`, `atltest`, `conntest`, `ctltest`,
+`wltest`, `dragtest`, `daotest`, `dvtest` and `htmltest` against the
+portable layer, and `exttest`, `core`, `sditest`, `dlgtest` and
+`dlltest` again with the shared libraries (`SHARED_TESTS`), and runs
+them directly; `NATIVE_TESTS` names others to try.
 
 * `core`: CString, collections, CFile, CArchive and serialization,
   CTime, exceptions and run-time classes, on the console.

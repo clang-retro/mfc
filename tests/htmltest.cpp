@@ -31,7 +31,15 @@
 #include <afxwin.h>
 #include <afxhtml.h>
 #include "htmltest.h"
+#ifdef _WINPORT
+#include "htmlstubs-port.h"
+#else
+#ifdef _WINPORT
+#include "htmlstubs-port.h"
+#else
 #include "htmlstubs.h"
+#endif
+#endif
 #include "testutil.h"
 
 static const TCHAR kBrowserClass[] = _T("HtmlTestBrowser");
@@ -604,7 +612,16 @@ public:
     }
     // UTF-16 with its mark, as CHtmlEditCtrlBase writes it.
     if (ba.GetSize() < 2 || ba[0] != 0xFF || ba[1] != 0xFE) return E_FAIL;
-    m_strSource = CStringW((LPCWSTR)(ba.GetData() + 2), (int)(ba.GetSize() - 2) / 2);
+    // UTF-16 units, whatever size wchar_t is here.
+    m_strSource.Empty();
+    for (INT_PTR i = 2; i + 1 < ba.GetSize(); i += 2) {
+      unsigned int c = ba[i] | (ba[i + 1] << 8);
+      if (sizeof(wchar_t) > 2 && c >= 0xD800 && c < 0xDC00 && i + 3 < ba.GetSize()) {
+        c = 0x10000 + ((c - 0xD800) << 10) + ((ba[i + 2] | (ba[i + 3] << 8)) - 0xDC00);
+        i += 2;
+      }
+      m_strSource += (wchar_t)c;
+    }
     m_bDirty = TRUE;
     return S_OK;
   }

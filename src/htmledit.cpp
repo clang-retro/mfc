@@ -134,6 +134,42 @@ BOOL AFXAPI _AfxHtmlEditSetDesignMode(IHTMLDocument2* pDoc, BOOL bMode) {
 
 // The page's text, as its IPersistStreamInit saves it: UTF-16 with a
 // byte order mark, UTF-8, or the ANSI code page.
+// UTF-16 in little-endian units, which a page with the FF FE mark holds,
+// to and from wide text (whose wchar_t has 32 bits on some systems).
+static CStringW _AfxFromUtf16(const BYTE* pb, int cb) {
+  CStringW str;
+  for (int i = 0; i + 1 < cb; i += 2) {
+    unsigned int c = pb[i] | (pb[i + 1] << 8);
+    if (sizeof(wchar_t) > 2 && c >= 0xD800 && c < 0xDC00 && i + 3 < cb) {
+      unsigned int lo = pb[i + 2] | (pb[i + 3] << 8);
+      if (lo >= 0xDC00 && lo < 0xE000) {
+        c = 0x10000 + ((c - 0xD800) << 10) + (lo - 0xDC00);
+        i += 2;
+      }
+    }
+    str += (wchar_t)c;
+  }
+  return str;
+}
+
+static void _AfxToUtf16(const CStringW& str, CByteArray& out) {
+  for (int i = 0; i < str.GetLength(); i++) {
+    unsigned int c = (unsigned int)str[i];
+    unsigned int units[2] = {c, 0};
+    int n = 1;
+    if (c >= 0x10000) {
+      c -= 0x10000;
+      units[0] = 0xD800 + (c >> 10);
+      units[1] = 0xDC00 + (c & 0x3FF);
+      n = 2;
+    }
+    for (int k = 0; k < n; k++) {
+      out.Add((BYTE)units[k]);
+      out.Add((BYTE)(units[k] >> 8));
+    }
+  }
+}
+
 HRESULT AFXAPI _AfxHtmlEditGetHTML(IUnknown* pDoc, CString& str) {
   str.Empty();
   if (pDoc == NULL) return E_NOINTERFACE;
@@ -154,7 +190,7 @@ HRESULT AFXAPI _AfxHtmlEditGetHTML(IUnknown* pDoc, CString& str) {
       int cb = (int)stat.cbSize.QuadPart;
       if (pb != NULL) {
         if (cb >= 2 && pb[0] == 0xFF && pb[1] == 0xFE) {
-          str = CStringW((LPCWSTR)(pb + 2), (cb - 2) / 2);
+          str = _AfxFromUtf16(pb + 2, cb - 2);
         } else {
           if (cb >= 3 && pb[0] == 0xEF && pb[1] == 0xBB && pb[2] == 0xBF) {
             pb += 3;
@@ -189,17 +225,18 @@ HRESULT AFXAPI _AfxHtmlEditSetHTML(IUnknown* pDoc, LPCTSTR lpszHTML) {
   IPersistStreamInit* pPersist = NULL;
   HRESULT hr = pDoc->QueryInterface(IID_IPersistStreamInit, (void**)&pPersist);
   if (FAILED(hr)) return hr;
-  CStringW strW(lpszHTML != NULL ? lpszHTML : _T(""));
-  SIZE_T cb = 2 + (SIZE_T)strW.GetLength() * sizeof(WCHAR);
+  CByteArray text;
+  text.Add(0xFF);
+  text.Add(0xFE);
+  _AfxToUtf16(CStringW(lpszHTML != NULL ? lpszHTML : _T("")), text);
+  SIZE_T cb = (SIZE_T)text.GetSize();
   HGLOBAL hGlobal = ::GlobalAlloc(GMEM_MOVEABLE, cb);
   if (hGlobal == NULL) {
     pPersist->Release();
     return E_OUTOFMEMORY;
   }
   BYTE* pb = (BYTE*)::GlobalLock(hGlobal);
-  pb[0] = 0xFF;
-  pb[1] = 0xFE;
-  memcpy(pb + 2, (LPCWSTR)strW, cb - 2);
+  memcpy(pb, text.GetData(), cb);
   ::GlobalUnlock(hGlobal);
   IStream* pStream = NULL;
   hr = ::CreateStreamOnHGlobal(hGlobal, TRUE, &pStream);

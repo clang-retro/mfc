@@ -16,7 +16,11 @@
 #include <list>
 #include <vector>
 #include <algorithm>
+#ifdef _WINPORT
+#include "daostubs-port.h"
+#else
 #include "daostubs.h"
+#endif
 
 namespace daomock {
 
@@ -706,19 +710,19 @@ struct Field : public Stub_DAOField {
     C().type = t;
     return S_OK;
   }
-  STDMETHOD(get_Size)(__LONG32* p) override {
+  STDMETHOD(get_Size)(LONG* p) override {
     *p = C().size;
     return S_OK;
   }
-  STDMETHOD(put_Size)(__LONG32 s) override {
+  STDMETHOD(put_Size)(LONG s) override {
     C().size = s;
     return S_OK;
   }
-  STDMETHOD(get_Attributes)(__LONG32* p) override {
+  STDMETHOD(get_Attributes)(LONG* p) override {
     *p = C().attrs;
     return S_OK;
   }
-  STDMETHOD(put_Attributes)(__LONG32 a) override {
+  STDMETHOD(put_Attributes)(LONG a) override {
     C().attrs = a;
     return S_OK;
   }
@@ -744,7 +748,7 @@ struct Field : public Stub_DAOField {
     C().allowZeroLength = b != VARIANT_FALSE;
     return S_OK;
   }
-  STDMETHOD(get_CollatingOrder)(__LONG32* p) override {
+  STDMETHOD(get_CollatingOrder)(LONG* p) override {
     *p = dbSortGeneral;
     return S_OK;
   }
@@ -929,7 +933,7 @@ struct IndexObj : public Stub_DAOIndex {
     *p = VARIANT_FALSE;
     return S_OK;
   }
-  STDMETHOD(get_DistinctCount)(__LONG32* p) override {
+  STDMETHOD(get_DistinctCount)(LONG* p) override {
     *p = table != NULL ? (long)table->rows.size() : 0;
     return S_OK;
   }
@@ -1155,7 +1159,7 @@ struct Recordset : public StubDAORecordset {
     *p = Bstr(name);
     return S_OK;
   }
-  STDMETHOD(get_RecordCount)(__LONG32* p) override {
+  STDMETHOD(get_RecordCount)(LONG* p) override {
     long n = 0;
     for (long i = 0; i < Count(); i++)
       if (Values(i) != NULL) n++;
@@ -1232,7 +1236,7 @@ struct Recordset : public StubDAORecordset {
     cur = 0;
     return SkipDeleted(1);
   }
-  STDMETHOD(MoveLast)(__LONG32) override {
+  STDMETHOD(MoveLast)(LONG) override {
     editMode = dbEditNone;
     cur = Count() - 1;
     return SkipDeleted(-1);
@@ -1250,18 +1254,18 @@ struct Recordset : public StubDAORecordset {
     cur--;
     return SkipDeleted(-1);
   }
-  STDMETHOD(Move)(__LONG32 rows, VARIANT) override {
+  STDMETHOD(Move)(LONG rows, VARIANT) override {
     editMode = dbEditNone;
     cur += rows;
     if (cur < -1) cur = -1;
     if (cur > Count()) cur = Count();
     return S_OK;
   }
-  STDMETHOD(get_AbsolutePosition)(__LONG32* p) override {
+  STDMETHOD(get_AbsolutePosition)(LONG* p) override {
     *p = OnRecord() ? cur : -1;
     return S_OK;
   }
-  STDMETHOD(put_AbsolutePosition)(__LONG32 n) override {
+  STDMETHOD(put_AbsolutePosition)(LONG n) override {
     if (n < 0 || n >= Count()) return Fail(3001, _T("Invalid argument."));
     cur = n;
     return S_OK;
@@ -1396,7 +1400,7 @@ struct Recordset : public StubDAORecordset {
     editMode = dbEditInProgress;
     return S_OK;
   }
-  STDMETHOD(Update)(__LONG32, VARIANT_BOOL) override {
+  STDMETHOD(Update)(LONG, VARIANT_BOOL) override {
     if (editMode == dbEditNone) return Fail(3020, _T("Update or CancelUpdate without AddNew or Edit."));
     for (size_t i = 0; i < cols.size(); i++) {
       const Column& col = table->cols[cols[i]];
@@ -1438,7 +1442,7 @@ struct Recordset : public StubDAORecordset {
     return S_OK;
   }
   STDMETHOD(_30_Update)() override { return Update(dbUpdateRegular, VARIANT_FALSE); }
-  STDMETHOD(CancelUpdate)(__LONG32) override {
+  STDMETHOD(CancelUpdate)(LONG) override {
     editMode = dbEditNone;
     return S_OK;
   }
@@ -1713,7 +1717,7 @@ struct QueryDef : public Stub_DAOQueryDef {
     return S_OK;
   }
   STDMETHOD(get_LastUpdated)(VARIANT* p) override { return get_DateCreated(p); }
-  STDMETHOD(get_RecordsAffected)(__LONG32* p) override {
+  STDMETHOD(get_RecordsAffected)(LONG* p) override {
     *p = recordsAffected;
     return S_OK;
   }
@@ -1803,11 +1807,11 @@ struct TableDef : public Stub_DAOTableDef {
     T().name = b;
     return S_OK;
   }
-  STDMETHOD(get_Attributes)(__LONG32* p) override {
+  STDMETHOD(get_Attributes)(LONG* p) override {
     *p = T().attrs;
     return S_OK;
   }
-  STDMETHOD(put_Attributes)(__LONG32 a) override {
+  STDMETHOD(put_Attributes)(LONG a) override {
     T().attrs = a;
     return S_OK;
   }
@@ -1848,7 +1852,7 @@ struct TableDef : public Stub_DAOTableDef {
     return S_OK;
   }
   STDMETHOD(get_LastUpdated)(VARIANT* p) override { return get_DateCreated(p); }
-  STDMETHOD(get_RecordCount)(__LONG32* p) override {
+  STDMETHOD(get_RecordCount)(LONG* p) override {
     *p = (long)T().rows.size();
     return S_OK;
   }
@@ -1970,7 +1974,7 @@ struct RelationObj : public Stub_DAORelation {
     *p = Bstr(def.foreignTable);
     return S_OK;
   }
-  STDMETHOD(get_Attributes)(__LONG32* p) override {
+  STDMETHOD(get_Attributes)(LONG* p) override {
     *p = def.attrs;
     return S_OK;
   }
@@ -2081,7 +2085,7 @@ struct Database : public StubDAODatabase {
     *p = readOnly ? VARIANT_FALSE : VARIANT_TRUE;
     return S_OK;
   }
-  STDMETHOD(get_RecordsAffected)(__LONG32* p) override {
+  STDMETHOD(get_RecordsAffected)(LONG* p) override {
     *p = db->recordsAffected;
     return S_OK;
   }
@@ -2244,7 +2248,7 @@ struct Workspace : public StubDAOWorkspace {
     }
     return S_OK;
   }
-  STDMETHOD(CommitTrans)(__LONG32) override {
+  STDMETHOD(CommitTrans)(LONG) override {
     if (G().transactionDepth == 0) return Fail(3034, _T("You tried to commit or rollback a transaction without first beginning a transaction."));
     if (--G().transactionDepth == 0) G().saved.clear();
     return S_OK;
@@ -2312,7 +2316,7 @@ struct Workspaces : public StubDAOWorkspaces {
 struct Error : public StubDAOError {
   ErrorInfo info;
   bool IsIID(REFIID riid) override { return IsEqualIID(riid, IID_IDAOErrorW) != 0; }
-  STDMETHOD(get_Number)(__LONG32* p) override {
+  STDMETHOD(get_Number)(LONG* p) override {
     *p = info.nCode;
     return S_OK;
   }
@@ -2328,7 +2332,7 @@ struct Error : public StubDAOError {
     *p = Bstr(_T("jeterr40.chm"));
     return S_OK;
   }
-  STDMETHOD(get_HelpContext)(__LONG32* p) override {
+  STDMETHOD(get_HelpContext)(LONG* p) override {
     *p = 5000000 + info.nCode;
     return S_OK;
   }
