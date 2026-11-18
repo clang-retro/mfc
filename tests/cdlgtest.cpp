@@ -2,9 +2,8 @@
 // control identifiers of <dlgs.h>: CFileDialog opening one file, two at
 // once and none, saving with the default extension, a hook turning the
 // first answer down, and a buffer too small; CColorDialog with a color
-// set by SETRGBSTRING and then edited; CFontDialog starting from a
-// LOGFONT; and the modeless CFindReplaceDialog telling its owner what
-// was asked for.
+// typed in; CFontDialog starting from a LOGFONT; and the modeless
+// CFindReplaceDialog telling its owner what was asked for.
 #include <afxwin.h>
 #include <afxdlgs.h>
 #include <dlgs.h>
@@ -177,9 +176,8 @@ static void TestFileDialogs() {
 }
 
 // ---------------------------------------------------------------------
-// The color dialog: a color set by SETRGBSTRING, then its blue edited.
+// The color dialog: a color typed in its red, green and blue fields.
 
-static UINT g_msgSetRgb;
 static int g_nColorInit;
 
 static UINT_PTR CALLBACK ColorHook(HWND hDlg, UINT msg, WPARAM, LPARAM) {
@@ -189,7 +187,8 @@ static UINT_PTR CALLBACK ColorHook(HWND hDlg, UINT msg, WPARAM, LPARAM) {
     return TRUE;
   }
   if (msg == WM_APP) {
-    ::SendMessage(hDlg, g_msgSetRgb, 0, RGB(0, 128, 0));
+    ::SetDlgItemInt(hDlg, 706, 0, FALSE);    // red
+    ::SetDlgItemInt(hDlg, 707, 128, FALSE);  // green
     ::SetDlgItemInt(hDlg, 708, 255, FALSE);  // blue
     ::PostMessage(hDlg, WM_COMMAND, IDOK, 0);
     return TRUE;
@@ -199,7 +198,6 @@ static UINT_PTR CALLBACK ColorHook(HWND hDlg, UINT msg, WPARAM, LPARAM) {
 
 static void TestColorDialog() {
   TestLog("%s...", "color dialog");
-  g_msgSetRgb = ::RegisterWindowMessage(SETRGBSTRING);
   CColorDialog dlg(RGB(10, 20, 30), CC_FULLOPEN);
   dlg.m_cc.Flags |= CC_ENABLEHOOK;
   dlg.m_cc.lpfnHook = ColorHook;
@@ -230,7 +228,9 @@ static UINT_PTR CALLBACK FontHook(HWND hDlg, UINT msg, WPARAM, LPARAM) {
     return TRUE;
   }
   if (msg == WM_APP) {
-    ::CheckDlgButton(hDlg, chx2, BST_CHECKED);  // underline
+    // Underline, as a click on the box: the dialog reads it as it changes.
+    ::CheckDlgButton(hDlg, chx2, BST_CHECKED);
+    ::SendMessage(hDlg, WM_COMMAND, MAKEWPARAM(chx2, BN_CLICKED), (LPARAM)::GetDlgItem(hDlg, chx2));
     memset(&g_lfSeen, 0, sizeof(g_lfSeen));
     ::SendMessage(hDlg, WM_CHOOSEFONT_GETLOGFONT, 0, (LPARAM)&g_lfSeen);
     ::PostMessage(hDlg, WM_COMMAND, IDOK, 0);

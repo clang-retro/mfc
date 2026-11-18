@@ -373,8 +373,8 @@ try.
 * `cdlgtest`: the common dialogs, driven by their hooks: CFileDialog
   opening a file (its hook turning the first OK down), two files at
   once, and none, saving with the default extension, and a buffer too
-  small for the answer; CColorDialog with a color set by SETRGBSTRING
-  and then edited; CFontDialog starting from a LOGFONT; and the modeless
+  small for the answer; CColorDialog with a color typed in its
+  fields; CFontDialog starting from a LOGFONT; and the modeless
   CFindReplaceDialog telling its owner about Find Next, Replace, Replace
   All and its closing.
 * `oletest`: an OLE container: objects of a class the test registers
