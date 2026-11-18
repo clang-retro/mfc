@@ -209,6 +209,18 @@ static void TestVariant() {
     CHECK(dt == COleDateTime(2001, 2, 3, 4, 5, 6));
     CHECK(span.GetTotalDays() == 1.5);
   }
+
+  // VarCmp: numbers by value whatever their types, text as text, a
+  // number below text, and null with anything.
+  COleVariant i4(5L, VT_I4), r8(5.0), r8b(5.5), ab(_T("abc")), AB(_T("ABC")), nul;
+  nul.vt = VT_NULL;
+  CHECK(::VarCmp(&i4, &r8, LOCALE_USER_DEFAULT, 0) == VARCMP_EQ);
+  CHECK(::VarCmp(&i4, &r8b, LOCALE_USER_DEFAULT, 0) == VARCMP_LT);
+  CHECK(::VarCmp(&r8b, &i4, LOCALE_USER_DEFAULT, 0) == VARCMP_GT);
+  CHECK(::VarCmp(&ab, &AB, LOCALE_USER_DEFAULT, NORM_IGNORECASE) == VARCMP_EQ);
+  CHECK(::VarCmp(&ab, &AB, LOCALE_USER_DEFAULT, 0) != VARCMP_EQ);
+  CHECK(::VarCmp(&i4, &ab, LOCALE_USER_DEFAULT, 0) == VARCMP_LT);
+  CHECK(::VarCmp(&i4, &nul, LOCALE_USER_DEFAULT, 0) == VARCMP_NULL);
 }
 
 static void TestSafeArray() {

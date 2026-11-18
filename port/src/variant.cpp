@@ -1048,3 +1048,60 @@ HRESULT WINAPI SafeArrayRedim(SAFEARRAY* psa, SAFEARRAYBOUND* bound) {
 }
 
 }  // extern "C"
+
+// ---------------------------------------------------------------------
+// Comparing variants
+
+namespace {
+
+int CompareNum(const Num& a, const Num& b) {
+  if (a.big || b.big) {
+    if (a.big && b.big) return a.u < b.u ? VARCMP_LT : a.u > b.u ? VARCMP_GT : VARCMP_EQ;
+    return a.big ? VARCMP_GT : VARCMP_LT;  // above any signed value
+  }
+  if (a.isInt && b.isInt) return a.i < b.i ? VARCMP_LT : a.i > b.i ? VARCMP_GT : VARCMP_EQ;
+  return a.d < b.d ? VARCMP_LT : a.d > b.d ? VARCMP_GT : VARCMP_EQ;
+}
+
+}  // namespace
+
+extern "C" {
+
+HRESULT WINAPI VarBstrCmp(BSTR left, BSTR right, LCID lcid, ULONG flags) {
+  UINT nl = left ? SysStringLen(left) : 0, nr = right ? SysStringLen(right) : 0;
+  if (nl == 0 || nr == 0) return nl == nr ? VARCMP_EQ : nl == 0 ? VARCMP_LT : VARCMP_GT;
+  int r = CompareStringW(lcid, flags, left, (int)nl, right, (int)nr);
+  return r == 0 ? E_FAIL : (HRESULT)(r - 1);
+}
+
+// Numbers by value, text as text (NORM_ flags), a number below any text;
+// a null with anything is VARCMP_NULL, and empty is zero or no text.
+HRESULT WINAPI VarCmp(LPVARIANT left, LPVARIANT right, LCID lcid, ULONG flags) {
+  if (left == NULL || right == NULL) return E_INVALIDARG;
+  VARIANT l, r;
+  VariantInit(&l);
+  VariantInit(&r);
+  HRESULT hr = VariantCopyInd(&l, left);
+  if (SUCCEEDED(hr)) hr = VariantCopyInd(&r, right);
+  if (SUCCEEDED(hr)) {
+    VARTYPE lt = l.vt, rt = r.vt;
+    if (lt == VT_NULL || rt == VT_NULL) {
+      hr = VARCMP_NULL;
+    } else if ((lt == VT_BSTR || lt == VT_EMPTY) && (rt == VT_BSTR || rt == VT_EMPTY)) {
+      hr = VarBstrCmp(lt == VT_BSTR ? l.bstrVal : NULL, rt == VT_BSTR ? r.bstrVal : NULL, lcid, flags);
+    } else if ((IsNumber(lt) || lt == VT_EMPTY) && (IsNumber(rt) || rt == VT_EMPTY)) {
+      hr = CompareNum(NumOf(&l), NumOf(&r));
+    } else if (lt == VT_BSTR && IsNumber(rt)) {
+      hr = VARCMP_GT;
+    } else if (IsNumber(lt) && rt == VT_BSTR) {
+      hr = VARCMP_LT;
+    } else {
+      hr = DISP_E_BADVARTYPE;
+    }
+  }
+  VariantClear(&l);
+  VariantClear(&r);
+  return hr;
+}
+
+}  // extern "C"

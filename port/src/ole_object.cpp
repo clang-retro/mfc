@@ -19,6 +19,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "ole.h"
 
+#include <wctype.h>
+
 #include <map>
 #include <string>
 #include <vector>
@@ -1512,6 +1514,49 @@ HRESULT WINAPI OleRegEnumVerbs(REFCLSID clsid, LPENUMOLEVERB* out) {
     sorted.push_back(v);
   }
   *out = new VerbEnum(sorted);
+  return S_OK;
+}
+
+// The formats a class gives (DataFormats\GetSet\N = "format,aspect,
+// tymed,direction"), for the direction asked: 1 is get, 2 is set. A
+// format is a clipboard format's number or its name.
+HRESULT WINAPI OleRegEnumFormatEtc(REFCLSID clsid, DWORD dir, LPENUMFORMATETC* out) {
+  if (!out) return E_INVALIDARG;
+  *out = NULL;
+  if (dir != DATADIR_GET && dir != DATADIR_SET) return E_INVALIDARG;
+  std::wstring key = ClassKey(clsid, L"DataFormats\\GetSet");
+  HKEY hk;
+  if (RegOpenKeyExW(HKEY_CLASSES_ROOT, key.c_str(), 0, KEY_READ, &hk) != ERROR_SUCCESS) return REGDB_E_KEYMISSING;
+  std::vector<FORMATETC> v;
+  for (DWORD i = 0;; i++) {
+    WCHAR sub[64];
+    if (RegEnumKeyW(hk, i, sub, 64) != ERROR_SUCCESS) break;
+    WCHAR val[512];
+    LONG cb = sizeof val;
+    if (RegQueryValueW(hk, sub, val, &cb) != ERROR_SUCCESS) continue;
+    std::wstring s = val;
+    std::vector<std::wstring> parts;
+    for (size_t start = 0;;) {
+      size_t c = s.find(L',', start);
+      parts.push_back(s.substr(start, c == std::wstring::npos ? c : c - start));
+      if (c == std::wstring::npos) break;
+      start = c + 1;
+    }
+    if (parts.size() < 4) continue;
+    DWORD dirs = (DWORD)wcstoul(parts[3].c_str(), NULL, 10);
+    if (!(dirs & (dir == DATADIR_GET ? 1u : 2u))) continue;
+    std::wstring name = parts[0];
+    while (!name.empty() && name[0] == L' ') name.erase(0, 1);
+    FORMATETC f = {};
+    f.cfFormat = !name.empty() && iswdigit(name[0]) ? (CLIPFORMAT)wcstoul(name.c_str(), NULL, 10)
+                                                    : (CLIPFORMAT)RegisterClipboardFormatW(name.c_str());
+    f.dwAspect = (DWORD)wcstoul(parts[1].c_str(), NULL, 10);
+    f.lindex = -1;
+    f.tymed = (DWORD)wcstoul(parts[2].c_str(), NULL, 10);
+    if (f.cfFormat) v.push_back(f);
+  }
+  RegCloseKey(hk);
+  *out = new FormatEnum(v);
   return S_OK;
 }
 
