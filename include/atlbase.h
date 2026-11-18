@@ -28,7 +28,10 @@
 #include <string.h>
 #include <wchar.h>
 
+#include "atlexcept.h"
+#include "atlalloc.h"
 #include "atlcomcli.h"
+#include "atlsimpcoll.h"
 
 // Link the system libraries ATL uses, as Visual C++'s atlbase.h does,
 // unless _ATL_NO_DEFAULT_LIBS is defined. (clang ignores #pragma
@@ -343,6 +346,11 @@ inline HRESULT WINAPI AtlUnadvise(IUnknown* pUnkCP, const IID& iid, DWORD dw) {
   if (pCP != NULL) pCP->Release();
   if (pCPC != NULL) pCPC->Release();
   return hr;
+}
+
+template <class T>
+inline HRESULT CComPtr<T>::Advise(IUnknown* pUnk, const IID& iid, LPDWORD pdw) {
+  return AtlAdvise(p, pUnk, iid, pdw);
 }
 
 inline HRESULT WINAPI AtlFreeMarshalStream(IStream* pStream) {
@@ -1576,6 +1584,8 @@ public:
   }
   static void InitLibId() {}
   static HRESULT WINAPI UpdateRegistryAppId(BOOL) { return S_OK; }
+  // The module's AppID (DECLARE_REGISTRY_APPID_RESOURCEID gives one).
+  static LPCOLESTR GetAppId() { return NULL; }
 
   HRESULT RegisterServer(BOOL bRegTypeLib = FALSE, const CLSID* pCLSID = NULL) {
     HRESULT hr = T::UpdateRegistryAppId(TRUE);
@@ -1687,6 +1697,302 @@ public:
     return (int)hr;
   }
 };
+
+// (The portable layer has no service control manager yet: there the
+// class appears once it defines the service API.)
+#if !defined(_WINPORT) || defined(SERVICE_WIN32_OWN_PROCESS)
+// A Windows service that is also a COM server (the AppID's LocalService
+// names it). /Service registers it and installs it with the service
+// control manager, /RegServer registers it as an ordinary local server,
+// and /UnregServer undoes both. Started by the service control manager
+// it runs as a service; started otherwise, as a local server.
+template <class T, UINT nServiceNameID>
+class CAtlServiceModuleT : public CAtlExeModuleT<T> {
+public:
+  TCHAR m_szServiceName[256];
+  SERVICE_STATUS_HANDLE m_hServiceStatus;
+  SERVICE_STATUS m_status;
+  BOOL m_bService;
+  DWORD dwThreadID;
+
+  CAtlServiceModuleT() : m_hServiceStatus(NULL), m_bService(TRUE), dwThreadID(0) {
+    m_szServiceName[0] = 0;
+    ::LoadString(_AtlBaseModule.GetResourceInstance(), nServiceNameID, m_szServiceName,
+                 sizeof(m_szServiceName) / sizeof(TCHAR));
+    ::memset(&m_status, 0, sizeof(m_status));
+    m_status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
+    m_status.dwCurrentState = SERVICE_STOPPED;
+    m_status.dwControlsAccepted = SERVICE_ACCEPT_STOP;
+  }
+
+  int WinMain(int nShowCmd) {
+    T* pT = static_cast<T*>(this);
+    HRESULT hr = S_OK;
+    if (pT->ParseCommandLine(::GetCommandLine(), &hr)) hr = pT->Start(nShowCmd);
+    return (int)hr;
+  }
+
+  // A service when the AppID says so (and the dispatcher takes it), a
+  // local server otherwise.
+  HRESULT Start(int nShowCmd) {
+    T* pT = static_cast<T*>(this);
+    m_bService = _IsLocalService();
+    if (m_bService) {
+      SERVICE_TABLE_ENTRY st[] = {{m_szServiceName, _ServiceMain}, {NULL, NULL}};
+      if (::StartServiceCtrlDispatcher(st) == 0) m_status.dwWin32ExitCode = ::GetLastError();
+      return (HRESULT)m_status.dwWin32ExitCode;
+    }
+    m_status.dwWin32ExitCode = (DWORD)pT->Run(nShowCmd);
+    return (HRESULT)m_status.dwWin32ExitCode;
+  }
+
+  void ServiceMain(DWORD dwArgc, LPTSTR* lpszArgv) {
+    (void)dwArgc;
+    (void)lpszArgv;
+    T* pT = static_cast<T*>(this);
+    m_hServiceStatus = ::RegisterServiceCtrlHandler(m_szServiceName, _Handler);
+    if (m_hServiceStatus == NULL) {
+      LogEvent(TEXT("Handler not installed"));
+      return;
+    }
+    SetServiceStatus(SERVICE_START_PENDING);
+    m_status.dwWin32ExitCode = S_OK;
+    m_status.dwCheckPoint = 0;
+    m_status.dwWaitHint = 0;
+    m_status.dwWin32ExitCode = (DWORD)pT->Run(SW_HIDE);
+    SetServiceStatus(SERVICE_STOPPED);
+  }
+
+  HRESULT Run(int nShowCmd = SW_HIDE) {
+    T* pT = static_cast<T*>(this);
+    HRESULT hr = T::InitializeCom();
+    if (FAILED(hr)) return hr;
+    hr = pT->PreMessageLoop(nShowCmd);
+    if (hr == S_OK) {
+      if (m_bService) {
+        LogEvent(TEXT("Service started"));
+        SetServiceStatus(SERVICE_RUNNING);
+      }
+      pT->RunMessageLoop();
+    }
+    if (SUCCEEDED(hr)) hr = pT->PostMessageLoop();
+    T::UninitializeCom();
+    return hr;
+  }
+  HRESULT PreMessageLoop(int nShowCmd) {
+    dwThreadID = ::GetCurrentThreadId();
+    this->m_dwMainThreadID = dwThreadID;
+    (void)nShowCmd;
+    return this->RegisterClassObjects(CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE);
+  }
+  // A service keeps running when its last object goes.
+  LONG Unlock() {
+    if (m_bService) return CAtlModule::Unlock();
+    return CAtlExeModuleT<T>::Unlock();
+  }
+
+  void OnStop() {
+    SetServiceStatus(SERVICE_STOP_PENDING);
+    ::PostThreadMessage(dwThreadID, WM_QUIT, 0, 0);
+  }
+  void OnPause() {}
+  void OnContinue() {}
+  void OnInterrogate() {}
+  void OnShutdown() {}
+  void OnUnknownRequest(DWORD) { LogEvent(TEXT("Bad service request")); }
+
+  void Handler(DWORD dwOpcode) {
+    T* pT = static_cast<T*>(this);
+    switch (dwOpcode) {
+    case SERVICE_CONTROL_STOP: pT->OnStop(); break;
+    case SERVICE_CONTROL_PAUSE: pT->OnPause(); break;
+    case SERVICE_CONTROL_CONTINUE: pT->OnContinue(); break;
+    case SERVICE_CONTROL_INTERROGATE: pT->OnInterrogate(); break;
+    case SERVICE_CONTROL_SHUTDOWN: pT->OnShutdown(); break;
+    default: pT->OnUnknownRequest(dwOpcode); break;
+    }
+  }
+  void SetServiceStatus(DWORD dwState) {
+    m_status.dwCurrentState = dwState;
+    if (m_hServiceStatus != NULL) ::SetServiceStatus(m_hServiceStatus, &m_status);
+  }
+
+  BOOL IsInstalled() {
+    BOOL bResult = FALSE;
+    SC_HANDLE hSCM = ::OpenSCManager(NULL, NULL, SC_MANAGER_CONNECT);
+    if (hSCM != NULL) {
+      SC_HANDLE hService = ::OpenService(hSCM, m_szServiceName, SERVICE_QUERY_CONFIG);
+      if (hService != NULL) {
+        bResult = TRUE;
+        ::CloseServiceHandle(hService);
+      }
+      ::CloseServiceHandle(hSCM);
+    }
+    return bResult;
+  }
+  BOOL Install() {
+    if (IsInstalled()) return TRUE;
+    TCHAR szFilePath[MAX_PATH + 2];
+    DWORD n = ::GetModuleFileName(NULL, szFilePath + 1, MAX_PATH);
+    if (n == 0 || n == MAX_PATH) return FALSE;
+    // The path quoted, as it may hold spaces.
+    szFilePath[0] = TEXT('"');
+    szFilePath[n + 1] = TEXT('"');
+    szFilePath[n + 2] = 0;
+    TCHAR szQuoted[MAX_PATH + 3];
+    ::lstrcpyn(szQuoted, szFilePath, MAX_PATH + 3);
+    SC_HANDLE hSCM = ::OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
+    if (hSCM == NULL) return FALSE;
+    SC_HANDLE hService = ::CreateService(hSCM, m_szServiceName, m_szServiceName,
+                                         SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS,
+                                         SERVICE_DEMAND_START, SERVICE_ERROR_NORMAL, szQuoted,
+                                         NULL, NULL, TEXT("RPCSS\0"), NULL, NULL);
+    if (hService == NULL) {
+      ::CloseServiceHandle(hSCM);
+      return FALSE;
+    }
+    ::CloseServiceHandle(hService);
+    ::CloseServiceHandle(hSCM);
+    return TRUE;
+  }
+  BOOL Uninstall() {
+    if (!IsInstalled()) return TRUE;
+    SC_HANDLE hSCM = ::OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
+    if (hSCM == NULL) return FALSE;
+    SC_HANDLE hService = ::OpenService(hSCM, m_szServiceName, SERVICE_STOP | DELETE);
+    if (hService == NULL) {
+      ::CloseServiceHandle(hSCM);
+      return FALSE;
+    }
+    SERVICE_STATUS status;
+    ::ControlService(hService, SERVICE_CONTROL_STOP, &status);
+    BOOL bDelete = ::DeleteService(hService);
+    ::CloseServiceHandle(hService);
+    ::CloseServiceHandle(hSCM);
+    return bDelete;
+  }
+
+  // A message in the event log, under the service's name.
+  void __cdecl LogEvent(LPCTSTR pszFormat, ...) {
+    TCHAR chMsg[256];
+    va_list pArg;
+    va_start(pArg, pszFormat);
+    ::wvsprintf(chMsg, pszFormat, pArg);
+    va_end(pArg);
+    LogEventEx(0, chMsg);
+  }
+  void LogEventEx(int id, LPCTSTR pszMessage = NULL, WORD type = EVENTLOG_INFORMATION_TYPE) {
+    HANDLE hEventSource = ::RegisterEventSource(NULL, m_szServiceName);
+    if (hEventSource == NULL) return;
+    LPCTSTR lpszStrings[1] = {pszMessage};
+    ::ReportEvent(hEventSource, type, 0, (DWORD)id, NULL, pszMessage != NULL ? 1 : 0, 0,
+                  pszMessage != NULL ? lpszStrings : NULL, NULL);
+    ::DeregisterEventSource(hEventSource);
+  }
+
+  bool ParseCommandLine(LPCTSTR lpCmdLine, HRESULT* pnRetCode) {
+    T* pT = static_cast<T*>(this);
+    *pnRetCode = S_OK;
+    for (LPCTSTR p = lpCmdLine; p != NULL && *p; p++) {
+      if (*p != TEXT('/') && *p != TEXT('-')) continue;
+      if (_IsWord(p + 1, TEXT("UnregServer"))) {
+        *pnRetCode = pT->UnregisterAppId();
+        if (SUCCEEDED(*pnRetCode)) *pnRetCode = pT->UnregisterServer(TRUE);
+        return false;
+      }
+      if (_IsWord(p + 1, TEXT("RegServer"))) {
+        *pnRetCode = pT->RegisterAppId(false);
+        if (SUCCEEDED(*pnRetCode)) *pnRetCode = pT->RegisterServer(TRUE);
+        return false;
+      }
+      if (_IsWord(p + 1, TEXT("Service"))) {
+        *pnRetCode = pT->RegisterAppId(true);
+        if (SUCCEEDED(*pnRetCode)) *pnRetCode = pT->RegisterServer(TRUE);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // The AppID's LocalService value names the service (bService) or is
+  // removed (a local server); the service is installed or uninstalled to
+  // match.
+  HRESULT RegisterAppId(bool bService = false) {
+    T* pT = static_cast<T*>(this);
+    if (!Uninstall()) return E_FAIL;
+    HRESULT hr = T::UpdateRegistryAppId(TRUE);
+    if (FAILED(hr)) return hr;
+    LPCOLESTR pszAppId = T::GetAppId();
+    if (pszAppId != NULL) {
+      CRegKey keyAppID;
+      LONG lRes = keyAppID.Open(HKEY_CLASSES_ROOT, TEXT("AppID"), KEY_WRITE);
+      if (lRes != ERROR_SUCCESS) return AtlHresultFromWin32((DWORD)lRes);
+      CRegKey key;
+      lRes = key.Create(keyAppID, _AppIdT(pszAppId));
+      if (lRes != ERROR_SUCCESS) return AtlHresultFromWin32((DWORD)lRes);
+      key.DeleteValue(TEXT("LocalService"));
+      if (bService) {
+        key.SetStringValue(TEXT("LocalService"), m_szServiceName);
+        key.SetStringValue(TEXT("ServiceParameters"), TEXT("-Service"));
+      }
+    }
+    if (bService && !pT->Install()) return AtlHresultFromLastError();
+    return S_OK;
+  }
+  HRESULT UnregisterAppId() {
+    if (!Uninstall()) return E_FAIL;
+    LPCOLESTR pszAppId = T::GetAppId();
+    if (pszAppId != NULL) {
+      CRegKey keyAppID;
+      if (keyAppID.Open(HKEY_CLASSES_ROOT, TEXT("AppID"), KEY_WRITE) == ERROR_SUCCESS) {
+        CRegKey key;
+        if (key.Open(keyAppID, _AppIdT(pszAppId), KEY_WRITE) == ERROR_SUCCESS) {
+          key.DeleteValue(TEXT("LocalService"));
+          key.DeleteValue(TEXT("ServiceParameters"));
+        }
+      }
+    }
+    return T::UpdateRegistryAppId(FALSE);
+  }
+  HRESULT InitializeSecurity() { return S_OK; }
+
+  static void WINAPI _ServiceMain(DWORD dwArgc, LPTSTR* lpszArgv) {
+    static_cast<T*>(_pAtlModule)->ServiceMain(dwArgc, lpszArgv);
+  }
+  static void WINAPI _Handler(DWORD dwOpcode) { static_cast<T*>(_pAtlModule)->Handler(dwOpcode); }
+
+private:
+  static bool _IsWord(LPCTSTR p, LPCTSTR pszWord) {
+    int n = ::lstrlen(pszWord);
+    if (::CompareString(LOCALE_USER_DEFAULT, NORM_IGNORECASE, p, n, pszWord, n) != CSTR_EQUAL)
+      return false;
+    return p[n] == 0 || p[n] == TEXT(' ') || p[n] == TEXT('\t') || p[n] == TEXT('"');
+  }
+  // The AppID as TCHARs.
+  struct _AppIdT {
+    TCHAR sz[64];
+    explicit _AppIdT(LPCOLESTR psz) {
+      int i = 0;
+      for (; psz[i] && i < 63; i++) sz[i] = (TCHAR)psz[i];
+      sz[i] = 0;
+    }
+    operator LPCTSTR() const { return sz; }
+  };
+  // Whether the AppID names this service as its LocalService.
+  bool _IsLocalService() {
+    LPCOLESTR pszAppId = T::GetAppId();
+    if (pszAppId == NULL) return false;
+    CRegKey keyAppID;
+    if (keyAppID.Open(HKEY_CLASSES_ROOT, TEXT("AppID"), KEY_READ) != ERROR_SUCCESS) return false;
+    CRegKey key;
+    if (key.Open(keyAppID, _AppIdT(pszAppId), KEY_READ) != ERROR_SUCCESS) return false;
+    TCHAR szValue[256];
+    ULONG nChars = 256;
+    if (key.QueryStringValue(TEXT("LocalService"), szValue, &nChars) != ERROR_SUCCESS) return false;
+    return ::lstrcmpi(szValue, m_szServiceName) == 0;
+  }
+};
+#endif
 
 // ---------------------------------------------------------------------
 // String resources.

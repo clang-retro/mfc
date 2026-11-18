@@ -7,6 +7,11 @@
 #ifndef __AFX_H__
 #define __AFX_H__
 
+// MFC is in use (ATL's headers and user code test it).
+#ifndef _AFX
+#define _AFX
+#endif
+
 #ifndef __cplusplus
 #error MFC requires C++ compilation
 #endif
@@ -256,8 +261,12 @@ typedef AFX_MAINTAIN_STATE AFX_MAINTAIN_STATE2;
 #define UNUSED_ALWAYS(x) (void)(x)
 
 // Types that MFC adds on top of windows.h
+// (POSITION is ATL's too: atlcoll.h declares it the same way.)
+#ifndef _ATL_POSITION_DEFINED
+#define _ATL_POSITION_DEFINED
 struct __POSITION {};
 typedef __POSITION* POSITION;
+#endif
 #define BEFORE_START_POSITION ((POSITION)-1L)
 
 #ifndef _AFX_NO_DEFAULT_FLOAT
