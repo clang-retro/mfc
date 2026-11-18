@@ -10,6 +10,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "winport.h"
 #include "com.h"
+#include "ole.h"
 
 #include <objbase.h>
 #include <ole2.h>
@@ -322,6 +323,8 @@ HRESULT WINAPI CoGetClassObject(REFCLSID clsid, DWORD context, LPVOID, REFIID ri
   if (unk == NULL) {
     HRESULT hr = REGDB_E_CLASSNOTREG;
     if (context & CLSCTX_INPROC_SERVER) hr = GetInprocClassObject(clsid, riid, out);
+    if (hr == REGDB_E_CLASSNOTREG && (context & CLSCTX_INPROC_SERVER))
+      hr = winport::ole::GetBuiltinClassObject(clsid, riid, out);
     if (FAILED(hr) && (context & CLSCTX_LOCAL_SERVER)) hr = winport::com::GetRemoteClassObject(clsid, riid, out);
     return hr;
   }

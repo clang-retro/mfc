@@ -534,8 +534,10 @@ public:
     // Unsigned values go in the bag as their signed types.
     VARTYPE vt = vtProp == VT_UI2 ? VT_I2 : vtProp == VT_UI4 ? VT_I4 : vtProp;
     if (m_bLoading) {
+      // The type asked for, with nothing in it: a bag that fails leaves
+      // it as it is, and it is cleared all the same.
       VARIANT var;
-      ::VariantInit(&var);
+      memset(&var, 0, sizeof(var));
       var.vt = vt;
       HRESULT hr = m_pPropBag->Read(strName, &var, m_pErrorLog);
       if (SUCCEEDED(hr) && var.vt != vt) hr = ::VariantChangeType(&var, &var, 0, vt);
@@ -639,6 +641,7 @@ public:
       VARIANT var;
       ::VariantInit(&var);
       var.vt = VT_UNKNOWN;
+      var.punkVal = NULL;
       HRESULT hr = m_pPropBag->Read(strName, &var, m_pErrorLog);
       LPFONT pFont = NULL;
       if (SUCCEEDED(hr) && (var.vt == VT_UNKNOWN || var.vt == VT_DISPATCH) && var.punkVal != NULL) {
@@ -670,6 +673,7 @@ public:
       VARIANT var;
       ::VariantInit(&var);
       var.vt = VT_UNKNOWN;
+      var.punkVal = NULL;
       HRESULT hr = m_pPropBag->Read(strName, &var, m_pErrorLog);
       if (*ppUnk != NULL) (*ppUnk)->Release();
       *ppUnk = NULL;
@@ -731,13 +735,21 @@ PX_PAIR(PX_Float, float, VT_R4)
 PX_PAIR(PX_Double, double, VT_R8)
 PX_PAIR(PX_Currency, CY, VT_CY)
 
+// A color goes as a VT_I4, whose storage is a long: wider than an
+// OLE_COLOR where long has 64 bits.
 BOOL AFXAPI PX_Color(CPropExchange* pPX, LPCTSTR pszPropName, OLE_COLOR& clrValue) {
-  return pPX->ExchangeProp(pszPropName, VT_I4, &clrValue);
+  long l = (long)(LONG)clrValue;
+  BOOL bOK = pPX->ExchangeProp(pszPropName, VT_I4, &l);
+  clrValue = (OLE_COLOR)l;
+  return bOK;
 }
 
 BOOL AFXAPI PX_Color(CPropExchange* pPX, LPCTSTR pszPropName, OLE_COLOR& clrValue,
                      OLE_COLOR clrDefault) {
-  return pPX->ExchangeProp(pszPropName, VT_I4, &clrValue, &clrDefault);
+  long l = (long)(LONG)clrValue, lDefault = (long)(LONG)clrDefault;
+  BOOL bOK = pPX->ExchangeProp(pszPropName, VT_I4, &l, &lDefault);
+  clrValue = (OLE_COLOR)l;
+  return bOK;
 }
 
 BOOL AFXAPI PX_String(CPropExchange* pPX, LPCTSTR pszPropName, CString& strValue) {

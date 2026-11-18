@@ -129,5 +129,9 @@ inline bool SameFormat(const FORMATETC& a, const FORMATETC& b) {
 HANDLE DuplicateData(HANDLE h, CLIPFORMAT cf, UINT flags);
 HRESULT CopyMedium(STGMEDIUM* dst, const STGMEDIUM* src, CLIPFORMAT cf);
 
+// The classes the layer serves itself (the standard font and picture),
+// for CoGetClassObject when no program or DLL serves them.
+HRESULT GetBuiltinClassObject(REFCLSID clsid, REFIID riid, void** out);
+
 }  // namespace ole
 }  // namespace winport
