@@ -272,6 +272,10 @@ double AFXAPI _AfxDispGetReal(const VARIANT& v) {
   }
 }
 
+static BOOL Is32BitInt(VARTYPE vt) {
+  return vt == VT_I4 || vt == VT_UI4 || vt == VT_INT || vt == VT_UINT || vt == VT_ERROR;
+}
+
 // Converts v to vt. VT_ERROR is not a type VariantChangeType makes.
 static HRESULT ChangeType(VARIANT* pDest, const VARIANT* pSrc, VARTYPE vt) {
   const VARIANT* p = pSrc;
@@ -487,6 +491,11 @@ HRESULT CCmdTarget::InvokeEntry(const AFX_DISPMAP_ENTRY* pEntry, WORD wFlags,
       if (vtResult == VT_EMPTY || vtResult == VT_VARIANT || result.vt == vtResult) {
         *pvarResult = result;  // moved
         ::VariantInit(&result);
+      } else if (Is32BitInt(result.vt) && Is32BitInt(vtResult)) {
+        // The function's 32 bits, as the entry's type says (an OLE_COLOR
+        // that is a system color is a negative VT_I4).
+        pvarResult->vt = vtResult;
+        pvarResult->lVal = result.lVal;
       } else {
         hr = ChangeType(pvarResult, &result, vtResult);
       }

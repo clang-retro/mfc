@@ -16,6 +16,10 @@
 #include "ole.h"
 
 #include <sys/stat.h>
+#include <urlmon.h>
+#include <wctype.h>
+
+#include <map>
 #include <string>
 #include <vector>
 
@@ -987,6 +991,372 @@ void AddParts(IMoniker* m, std::vector<IMoniker*>& v) {
 }
 
 // A moniker of ours, by class, or another class's through COM.
+// ---------------------------------------------------------------------
+// URL monikers. Only file: URLs (and plain paths) bind: the data comes
+// as a stream, at once, or for a binding that asked for it while the
+// program runs, in a notice from a timer on the binding thread.
+
+const wchar_t kBscHolder[] = L"_BSCB_Holder_";
+
+// The local file a URL names, or empty when it names none.
+std::wstring FileOfUrl(const std::wstring& url) {
+  std::wstring rest;
+  if (url.size() >= 5 && _wcsnicmp(url.c_str(), L"file:", 5) == 0) {
+    rest = url.substr(5);
+    if (rest.compare(0, 2, L"//") == 0) {
+      rest = rest.substr(2);
+      // file://host/path: only the local host.
+      size_t slash = rest.find(L'/');
+      std::wstring host = rest.substr(0, slash);
+      if (!host.empty() && _wcsicmp(host.c_str(), L"localhost") != 0) return std::wstring();
+      rest = slash == std::wstring::npos ? std::wstring() : rest.substr(slash);
+    }
+    // /C:/dir is the drive's.
+    if (rest.size() >= 3 && rest[0] == L'/' && iswalpha(rest[1]) && (rest[2] == L':' || rest[2] == L'|')) {
+      rest = rest.substr(1);
+      rest[1] = L':';
+    }
+  } else {
+    size_t colon = url.find(L':');
+    // A scheme is two letters or more; one is a drive.
+    if (colon != std::wstring::npos && colon > 1 && url.find_first_of(L"/\\") > colon) return std::wstring();
+    return url;
+  }
+  std::wstring out;
+  for (size_t i = 0; i < rest.size(); i++) {
+    if (rest[i] == L'%' && i + 2 < rest.size() && iswxdigit(rest[i + 1]) && iswxdigit(rest[i + 2])) {
+      // Escapes are of UTF-8 bytes.
+      std::string bytes;
+      while (i + 2 < rest.size() && rest[i] == L'%' && iswxdigit(rest[i + 1]) && iswxdigit(rest[i + 2])) {
+        bytes += (char)wcstol(rest.substr(i + 1, 2).c_str(), NULL, 16);
+        i += 3;
+      }
+      i--;
+      out += winport::Widen(bytes.c_str());
+    } else {
+      out += rest[i];
+    }
+  }
+  return out;
+}
+
+// The file's bytes in a stream of their own.
+HRESULT OpenUrlStream(const std::wstring& url, IStream** out, ULONG* size) {
+  *out = NULL;
+  std::wstring path = FileOfUrl(url);
+  if (path.empty()) return INET_E_UNKNOWN_PROTOCOL;
+  FILE* f = fopen(winport::PosixPath(path.c_str()).c_str(), "rb");
+  if (f == NULL) return INET_E_RESOURCE_NOT_FOUND;
+  std::vector<BYTE> data;
+  BYTE buf[16384];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof buf, f)) > 0) data.insert(data.end(), buf, buf + n);
+  bool bad = ferror(f) != 0;
+  fclose(f);
+  if (bad) return INET_E_DOWNLOAD_FAILURE;
+  HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, data.size() ? data.size() : 1);
+  if (h == NULL) return E_OUTOFMEMORY;
+  if (!data.empty()) {
+    memcpy(GlobalLock(h), data.data(), data.size());
+    GlobalUnlock(h);
+  }
+  HRESULT hr = CreateStreamOnHGlobal(h, TRUE, out);
+  if (FAILED(hr)) {
+    GlobalFree(h);
+    return hr;
+  }
+  ULARGE_INTEGER len;
+  len.QuadPart = data.size();
+  (*out)->SetSize(len);
+  *size = (ULONG)data.size();
+  return S_OK;
+}
+
+class UrlBinding;
+std::map<UINT_PTR, UrlBinding*>& Bindings() {
+  static thread_local std::map<UINT_PTR, UrlBinding*> m;
+  return m;
+}
+
+// A binding under way: it holds the callback until the data is in.
+class UrlBinding final : public IBinding {
+ public:
+  UrlBinding(IBindStatusCallback* bsc, IStream* stream, ULONG size, const std::wstring& url)
+      : bsc_(bsc), stream_(stream), size_(size), url_(url) {
+    bsc_->AddRef();
+    stream_->AddRef();
+  }
+  STDMETHOD(QueryInterface)(REFIID riid, void** out) override {
+    if (!out) return E_POINTER;
+    if (IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_IBinding)) {
+      *out = static_cast<IBinding*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *out = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() override { return ++refs_; }
+  STDMETHOD_(ULONG, Release)() override {
+    ULONG n = --refs_;
+    if (n == 0) delete this;
+    return n;
+  }
+  STDMETHOD(Abort)() override {
+    if (done_) return S_FALSE;
+    Finish(E_ABORT);
+    return S_OK;
+  }
+  STDMETHOD(Suspend)() override { return E_NOTIMPL; }
+  STDMETHOD(Resume)() override { return E_NOTIMPL; }
+  STDMETHOD(SetPriority)(LONG p) override {
+    priority_ = p;
+    return S_OK;
+  }
+  STDMETHOD(GetPriority)(LONG* p) override {
+    if (!p) return E_POINTER;
+    *p = priority_;
+    return S_OK;
+  }
+  STDMETHOD(GetBindResult)(CLSID* proto, DWORD* result, LPOLESTR* text, DWORD*) override {
+    if (proto) *proto = CLSID_NULL;
+    if (result) *result = (DWORD)result_;
+    if (text) *text = NULL;
+    return S_OK;
+  }
+
+  // Starts it: the data comes on the next timer.
+  HRESULT Start() {
+    HRESULT hr = bsc_->OnStartBinding(0, this);
+    if (FAILED(hr)) {
+      Finish(hr);
+      return hr;
+    }
+    bsc_->OnProgress(0, size_, BINDSTATUS_BEGINDOWNLOADDATA, url_.c_str());
+    timer_ = SetTimer(NULL, 0, 0, Tick);
+    if (timer_ == 0) {
+      Finish(E_FAIL);
+      return E_FAIL;
+    }
+    AddRef();  // the timer's
+    Bindings()[timer_] = this;
+    return S_OK;
+  }
+  // Everything at once, for a binding that waits.
+  void RunNow() {
+    if (SUCCEEDED(bsc_->OnStartBinding(0, this))) Deliver();
+    else Finish(E_ABORT);
+  }
+
+ private:
+  ~UrlBinding() {
+    if (bsc_) bsc_->Release();
+    if (stream_) stream_->Release();
+  }
+  static void CALLBACK Tick(HWND, UINT, UINT_PTR id, DWORD) {
+    auto it = Bindings().find(id);
+    if (it == Bindings().end()) {
+      KillTimer(NULL, id);
+      return;
+    }
+    UrlBinding* b = it->second;
+    b->Deliver();
+  }
+  void Deliver() {
+    if (done_) return;
+    AddRef();
+    StopTimer();
+    bsc_->OnProgress(size_, size_, BINDSTATUS_ENDDOWNLOADDATA, url_.c_str());
+    if (!done_) {
+      FORMATETC fmt = {0, NULL, DVASPECT_CONTENT, -1, TYMED_ISTREAM};
+      STGMEDIUM med = {};
+      med.tymed = TYMED_ISTREAM;
+      med.pstm = stream_;
+      LARGE_INTEGER zero = {};
+      stream_->Seek(zero, STREAM_SEEK_SET, NULL);
+      bsc_->OnDataAvailable(BSCF_FIRSTDATANOTIFICATION | BSCF_LASTDATANOTIFICATION | BSCF_DATAFULLYAVAILABLE,
+                            size_, &fmt, &med);
+    }
+    if (!done_) Finish(S_OK);
+    Release();
+  }
+  void StopTimer() {
+    if (timer_ == 0) return;
+    KillTimer(NULL, timer_);
+    Bindings().erase(timer_);
+    timer_ = 0;
+    Release();  // the timer's
+  }
+  // Reports the stop, an abort's too, and lets go of the callback.
+  void Finish(HRESULT hr) {
+    if (done_) return;
+    done_ = true;
+    result_ = hr;
+    AddRef();
+    StopTimer();
+    IBindStatusCallback* bsc = bsc_;
+    bsc_ = NULL;
+    bsc->OnStopBinding(hr, NULL);
+    bsc->Release();
+    if (stream_) {
+      stream_->Release();
+      stream_ = NULL;
+    }
+    Release();
+  }
+
+  ULONG refs_ = 1;
+  IBindStatusCallback* bsc_;
+  IStream* stream_;
+  ULONG size_;
+  std::wstring url_;
+  UINT_PTR timer_ = 0;
+  LONG priority_ = THREAD_PRIORITY_NORMAL;
+  HRESULT result_ = S_OK;
+  bool done_ = false;
+};
+
+const CLSID kUrlMoniker = {0x79EAC9E0, 0xBAF9, 0x11CE, {0x8C, 0x82, 0x00, 0xAA, 0x00, 0x4B, 0xA9, 0x0B}};
+
+class UrlMoniker final : public MonikerBase {
+ public:
+  explicit UrlMoniker(const std::wstring& url = std::wstring()) : url_(url) {}
+  const std::wstring& Url() const { return url_; }
+
+  STDMETHOD(GetClassID)(CLSID* out) override {
+    if (!out) return E_POINTER;
+    *out = kUrlMoniker;
+    return S_OK;
+  }
+  // The URL's size in bytes, with its end, then the URL in UTF-16.
+  STDMETHOD(Load)(IStream* s) override {
+    if (!s) return E_POINTER;
+    DWORD bytes;
+    HRESULT hr = ReadDword(s, &bytes);
+    if (FAILED(hr) || bytes > 0x200000) return FAILED(hr) ? hr : E_FAIL;
+    std::vector<BYTE> u(bytes);
+    if (bytes) hr = ReadExact(s, u.data(), bytes);
+    if (FAILED(hr)) return hr;
+    url_ = FromUtf16(u.data(), u.size());
+    while (!url_.empty() && url_.back() == L'\0') url_.pop_back();
+    return S_OK;
+  }
+  STDMETHOD(Save)(IStream* s, BOOL) override {
+    if (!s) return E_POINTER;
+    std::vector<BYTE> u = Utf16Of(url_);
+    u.push_back(0);
+    u.push_back(0);
+    HRESULT hr = WriteDword(s, (DWORD)u.size());
+    if (SUCCEEDED(hr)) hr = WriteExact(s, u.data(), (ULONG)u.size());
+    return hr;
+  }
+  STDMETHOD(BindToObject)(IBindCtx*, IMoniker*, REFIID, void** out) override {
+    if (out) *out = NULL;
+    return MK_E_NOOBJECT;
+  }
+  STDMETHOD(BindToStorage)(IBindCtx* given, IMoniker*, REFIID riid, void** out) override {
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (!IsEqualIID(riid, IID_IStream) && !IsEqualIID(riid, IID_IUnknown)) return E_NOINTERFACE;
+    OwnCtx ctx(given);
+    IBindStatusCallback* bsc = NULL;
+    IUnknown* held = NULL;
+    if (SUCCEEDED(ctx.pbc->GetObjectParam(const_cast<LPOLESTR>(kBscHolder), &held)) && held) {
+      held->QueryInterface(IID_IBindStatusCallback, (void**)&bsc);
+      held->Release();
+    }
+    IStream* stream = NULL;
+    ULONG size = 0;
+    HRESULT hr = OpenUrlStream(url_, &stream, &size);
+    if (bsc == NULL) {
+      *out = stream;
+      return hr;
+    }
+    DWORD flags = 0;
+    BINDINFO info = {};
+    info.cbSize = sizeof info;
+    bsc->GetBindInfo(&flags, &info);
+    ReleaseStgMedium(&info.stgmedData);
+    CoTaskMemFree(info.szExtraInfo);
+    CoTaskMemFree(info.szCustomVerb);
+    if (info.pUnk) info.pUnk->Release();
+    if (FAILED(hr)) {
+      bsc->Release();
+      return hr;
+    }
+    UrlBinding* b = new UrlBinding(bsc, stream, size, url_);
+    bsc->Release();
+    if (flags & BINDF_ASYNCHRONOUS) {
+      hr = b->Start();
+      b->Release();
+      stream->Release();
+      return SUCCEEDED(hr) ? MK_S_ASYNCHRONOUS : hr;
+    }
+    b->RunNow();
+    b->Release();
+    *out = stream;
+    return S_OK;
+  }
+  STDMETHOD(IsEqual)(IMoniker* other) override {
+    if (!other) return S_FALSE;
+    CLSID c;
+    if (FAILED(other->GetClassID(&c)) || !IsEqualCLSID(c, kUrlMoniker)) return S_FALSE;
+    return static_cast<UrlMoniker*>(other)->url_ == url_ ? S_OK : S_FALSE;
+  }
+  STDMETHOD(IsRunning)(IBindCtx*, IMoniker*, IMoniker* newly) override {
+    return newly && IsEqual(newly) == S_OK ? S_OK : S_FALSE;
+  }
+  STDMETHOD(GetTimeOfLastChange)(IBindCtx*, IMoniker*, FILETIME* ft) override {
+    if (!ft) return E_POINTER;
+    std::wstring path = FileOfUrl(url_);
+    struct stat st;
+    if (path.empty() || stat(winport::PosixPath(path.c_str()).c_str(), &st) != 0) return MK_E_UNAVAILABLE;
+    ULONGLONG t = ((ULONGLONG)st.st_mtime + 11644473600ULL) * 10000000ULL;
+    ft->dwLowDateTime = (DWORD)t;
+    ft->dwHighDateTime = (DWORD)(t >> 32);
+    return S_OK;
+  }
+  STDMETHOD(GetDisplayName)(IBindCtx*, IMoniker*, LPOLESTR* out) override {
+    if (!out) return E_POINTER;
+    *out = CoStrDup(url_.c_str());
+    return *out ? S_OK : E_OUTOFMEMORY;
+  }
+  STDMETHOD(ParseDisplayName)(IBindCtx*, IMoniker*, LPOLESTR name, ULONG* eaten, IMoniker** out) override {
+    if (!out || !eaten || !name) return E_POINTER;
+    *out = NULL;
+    *eaten = 0;
+    HRESULT hr = CreateURLMoniker(this, name, out);
+    if (SUCCEEDED(hr)) *eaten = (ULONG)wcslen(name);
+    return hr;
+  }
+  STDMETHOD(IsSystemMoniker)(DWORD* out) override {
+    if (!out) return E_POINTER;
+    *out = 6;  // MKSYS_URLMONIKER
+    return S_OK;
+  }
+
+ protected:
+  std::wstring Name() const override { return url_; }
+
+ private:
+  std::wstring url_;
+};
+
+// A URL taken against the one it is relative to.
+std::wstring JoinUrl(const std::wstring& base, const std::wstring& rel) {
+  size_t colon = rel.find(L':');
+  if (colon != std::wstring::npos && colon > 1 && rel.find_first_of(L"/\\") > colon) return rel;
+  if (rel.empty()) return base;
+  size_t start = base.find(L"://");
+  start = start == std::wstring::npos ? 0 : base.find(L'/', start + 3);
+  if (start == std::wstring::npos) start = base.size();
+  if (rel[0] == L'/' || rel[0] == L'\\') return base.substr(0, start) + rel;
+  size_t slash = base.find_last_of(L"/\\");
+  std::wstring dir = slash == std::wstring::npos || slash < start ? base.substr(0, start) + L"/"
+                                                                   : base.substr(0, slash + 1);
+  return dir + rel;
+}
+
 HRESULT NewByClass(REFCLSID clsid, REFIID riid, void** out) {
   IUnknown* u = NULL;
   if (IsEqualCLSID(clsid, kFileMoniker))
@@ -995,6 +1365,8 @@ HRESULT NewByClass(REFCLSID clsid, REFIID riid, void** out) {
     u = static_cast<IMoniker*>(new ItemMoniker);
   else if (IsEqualCLSID(clsid, kCompositeMoniker))
     u = static_cast<IMoniker*>(new CompositeMoniker);
+  else if (IsEqualCLSID(clsid, kUrlMoniker))
+    u = static_cast<IMoniker*>(new UrlMoniker);
   if (!u) return CoCreateInstance(clsid, NULL, CLSCTX_INPROC_SERVER, riid, out);
   HRESULT hr = u->QueryInterface(riid, out);
   u->Release();
@@ -1131,6 +1503,70 @@ HRESULT WINAPI CoRegisterMessageFilter(LPMESSAGEFILTER filter, LPMESSAGEFILTER* 
   g_filter = filter;
   if (filter) filter->AddRef();
   return S_OK;
+}
+
+HRESULT WINAPI CreateURLMoniker(LPMONIKER ctx, LPCWSTR url, LPMONIKER* out) {
+  if (!out) return E_INVALIDARG;
+  *out = NULL;
+  if (!url) return E_INVALIDARG;
+  std::wstring full = url;
+  CLSID c;
+  if (ctx && SUCCEEDED(ctx->GetClassID(&c)) && IsEqualCLSID(c, kUrlMoniker))
+    full = JoinUrl(static_cast<UrlMoniker*>(ctx)->Url(), url);
+  if (full.empty()) return MK_E_SYNTAX;
+  *out = new UrlMoniker(full);
+  return S_OK;
+}
+
+HRESULT WINAPI RegisterBindStatusCallback(LPBC pbc, IBindStatusCallback* bsc, IBindStatusCallback** prev,
+                                          DWORD) {
+  if (!pbc || !bsc) return E_INVALIDARG;
+  if (prev) {
+    *prev = NULL;
+    IUnknown* held = NULL;
+    if (SUCCEEDED(pbc->GetObjectParam(const_cast<LPOLESTR>(kBscHolder), &held)) && held) {
+      held->QueryInterface(IID_IBindStatusCallback, (void**)prev);
+      held->Release();
+    }
+  }
+  return pbc->RegisterObjectParam(const_cast<LPOLESTR>(kBscHolder), bsc);
+}
+
+HRESULT WINAPI RevokeBindStatusCallback(LPBC pbc, IBindStatusCallback* bsc) {
+  if (!pbc || !bsc) return E_INVALIDARG;
+  IUnknown* held = NULL;
+  if (FAILED(pbc->GetObjectParam(const_cast<LPOLESTR>(kBscHolder), &held)) || !held) return S_FALSE;
+  IBindStatusCallback* cur = NULL;
+  held->QueryInterface(IID_IBindStatusCallback, (void**)&cur);
+  held->Release();
+  HRESULT hr = S_FALSE;
+  if (cur == bsc) hr = pbc->RevokeObjectParam(const_cast<LPOLESTR>(kBscHolder));
+  if (cur) cur->Release();
+  return hr;
+}
+
+HRESULT WINAPI CreateAsyncBindCtx(DWORD, IBindStatusCallback* bsc, IEnumFORMATETC*, IBindCtx** out) {
+  if (!out) return E_INVALIDARG;
+  *out = NULL;
+  if (!bsc) return E_INVALIDARG;
+  IBindCtx* pbc = new BindCtx;
+  BIND_OPTS opts = {sizeof opts};
+  pbc->GetBindOptions(&opts);
+  opts.grfFlags |= BIND_MAYBOTHERUSER;
+  pbc->SetBindOptions(&opts);
+  HRESULT hr = RegisterBindStatusCallback(pbc, bsc, NULL, 0);
+  if (FAILED(hr)) {
+    pbc->Release();
+    return hr;
+  }
+  *out = pbc;
+  return S_OK;
+}
+
+HRESULT WINAPI IsAsyncMoniker(IMoniker* mk) {
+  if (!mk) return E_INVALIDARG;
+  CLSID c;
+  return SUCCEEDED(mk->GetClassID(&c)) && IsEqualCLSID(c, kUrlMoniker) ? S_OK : S_FALSE;
 }
 
 }  // extern "C"
