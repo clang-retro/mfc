@@ -469,6 +469,15 @@ them directly; `NATIVE_TESTS` names others to try.
   owner and DACL, and the process's CAccessToken; and CAtlServiceModuleT,
   installed with /Service, started and stopped by the service control
   manager, and removed with /UnregServer.
+* `wtltest`: WTL 10 over this ATL, built when `tools/fetch-wtl.sh` has
+  fetched WTL's headers (skipped otherwise): a CFrameWindowImpl frame
+  with CUpdateUI, a message filter and an idle handler, a command bar,
+  a toolbar from a toolbar resource in a rebar, a status bar, and a
+  splitter of a tree view and a list view; the message cracker maps
+  (`atlcrack.h`); a dialog with DDX and CDialogResize; a dialog from
+  CIndirectDialogImpl's in-memory template; a modeless property sheet;
+  a CScrollWindowImpl view; and WTL's GDI and USER wrappers, CResource
+  and CFindFile.
 * `ctltest`: writing a control with COleControl, the test being both
   its server and its container: stock and custom properties, a method,
   stock and custom events, verbs from its message map (ON_OLEVERB,
@@ -738,6 +747,34 @@ request with the stock MinGW-w64 toolchain.
   dialog's ActiveX items into host windows and give them their DLGINIT
   state; CWindow::GetDlgControl and GetDlgHost.
 
+### WTL
+
+WTL (the Windows Template Library, under the MS-PL) builds on this ATL.
+It is not part of this repository: `tools/fetch-wtl.sh [dir]` downloads
+WTL 10.01 from NuGet, checks it against a pinned SHA-256, and puts its
+headers in `dir/include` (`build/wtl/include` by default). WTL wants
+what Visual C++ gives it:
+
+* `-fms-compatibility` (WTL uses `__if_exists` and Visual C++'s array
+  rules). On a MinGW target, stock clang then stops defining `__GNUC__`,
+  which MinGW-w64's headers need, so add `-fgnuc-version=4.2.1` too.
+  WTL programs are built with both:
+  `-fms-compatibility -fgnuc-version=4.2.1`.
+* `_MSC_VER` of at least 1400 while `atlapp.h` is read, and only then:
+  defined for the whole program, it would change what libc++ and the C
+  headers do. `tests/wtltest.cpp` shows the way:
+  `#define _MSC_VER 1400`, `#include <atlapp.h>`, `#undef _MSC_VER`.
+* `WINVER` and `_WIN32_WINNT` 0x0501 and `_WIN32_IE` 0x0600 or more.
+* `atlstr.h` included before WTL's headers, for the CString overloads.
+
+What WTL needs from ATL is here: `_ATL_VER` is 0x0800 (ATL 8, Visual
+C++ 2005, unless a program defines another), `ATL::Checked` (the
+`_s` string functions, made to throw as ATL's do, in `atlchecked.h`),
+ATLVERIFY, ATLENSURE and ATLTRY, the trace categories (CTraceCategory,
+`atlTraceUI` and the others), `_AtlWinModule` in `atlbase.h`,
+`_DialogSplitHelper`, and `atlhost.h` from `atlwin.h` (define
+`_ATL_NO_HOSTING` to leave it out), as in ATL.
+
 ## Differences from Visual C++ MFC
 
 * Message map handler names: Visual C++ 6 code writes plain names
@@ -933,7 +970,8 @@ portable Win32 layer (its headers, sources and the generator for its
 placeholders), `tests/` the
 test programs and `tools/` the generator for the `ON_WM_*` macros and
 CWnd's default handlers (`tools/gen-msgmap.py`) and a development helper
-that lists declared functions the library does not define yet.
+that lists declared functions the library does not define yet, and
+`tools/fetch-wtl.sh`, which fetches WTL's headers for `wtltest`.
 
 ## License
 

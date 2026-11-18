@@ -20,7 +20,7 @@ CXX=${BIN:+$BIN/}clang++
 RC=${RC:-${BIN:+$BIN/}llvm-windres}
 LDFLAGS=${LDFLAGS:-}
 SHARED_TESTS=${SHARED_TESTS-"exttest core sditest dlgtest dlltest"}
-TESTS=${TESTS:-"core memtest wintest disptest isapitest daotest socktest inettest dlgtest sditest mditest docktest splittest richtest dbtest rvtest dvtest autotest conntest dragtest oletest srvtest linktest richsrvtest iptest docobtest occtest htmltest ctltest cmntest wltest bindtest dlltest atltest atlwintest atlctltest atlutiltest"}
+TESTS=${TESTS:-"core memtest wintest disptest isapitest daotest socktest inettest dlgtest sditest mditest docktest splittest richtest dbtest rvtest dvtest autotest conntest dragtest oletest srvtest linktest richsrvtest iptest docobtest occtest htmltest ctltest cmntest wltest bindtest dlltest atltest atlwintest atlctltest atlutiltest wtltest"}
 
 if [ -z "${DISPLAY:-}" ] && [ -z "${MFC_TEST_NO_XVFB:-}" ] && command -v xvfb-run >/dev/null 2>&1; then
   MFC_TEST_NO_XVFB=1 exec xvfb-run -a -s "-screen 0 1024x768x24" "$0" "$@"
@@ -212,6 +212,8 @@ fi
 CXXFLAGS="$CXXFLAGS -fuse-ld=lld ${STDLIB--stdlib=libc++} -std=c++17"
 CXXFLAGS="$CXXFLAGS -Wall -Wno-unused-function -Wno-overloaded-virtual -Wno-missing-exception-spec -Iinclude -Itests"
 RCFLAGS="--target=i686-w64-mingw32 -I tests -I include -I $T ${SYSROOT:+-I $SYSROOT/include}"
+# WTL's headers, for wtltest (tools/fetch-wtl.sh puts them here).
+WTL_INCLUDE=${WTL_INCLUDE:-build/wtl/include}
 
 nfail=0
 npass=0
@@ -270,6 +272,17 @@ run_test() {  # name exe outdir label
 build_and_run() {  # name label exe outdir shared ldflags
   name=$1 label=$2 exe=$3 outdir=$4 shared=$5 ldflags=$6
   srcs=tests/$name.cpp
+  # WTL, built as Visual C++ builds it (-fms-compatibility; MinGW's headers
+  # still want __GNUC__), when its headers are there.
+  extra= rcextra=
+  if [ $name = wtltest ]; then
+    if [ ! -f "$WTL_INCLUDE/atlapp.h" ]; then
+      echo "skip   $label-$v (no WTL headers; run tools/fetch-wtl.sh)"
+      return
+    fi
+    extra="-isystem $WTL_INCLUDE -fms-compatibility -fgnuc-version=4.2.1"
+    rcextra="-I $WTL_INCLUDE"
+  fi
   dllflags=
   [ $shared = 1 ] && dllflags=-D_AFXDLL
   # A test with a DLL of its own: tests/NAME-dll.cpp, with its exports
@@ -298,12 +311,12 @@ build_and_run() {  # name label exe outdir shared ldflags
     [ -n "$implib" ] && srcs="$srcs $T/lib$name-dll-$v.a"
   fi
   if [ -f tests/$name.rc ]; then
-    "$RC" $RCFLAGS tests/$name.rc -o "$T/$name-res.o" 2>"$T/$name-rc.log" || {
+    "$RC" $RCFLAGS $rcextra tests/$name.rc -o "$T/$name-res.o" 2>"$T/$name-rc.log" || {
       echo "FAIL   $label-$v (resources)"; cat "$T/$name-rc.log"; nfail=$((nfail + 1)); return; }
     srcs="$srcs $T/$name-res.o -mwindows"
   fi
   # shellcheck disable=SC2086
-  "$CXX" $CXXFLAGS $flags $dllflags $srcs -L"$OUT" $ldflags -o "$exe" 2>"$T/$label-$v-build.log" || {
+  "$CXX" $CXXFLAGS $flags $extra $dllflags $srcs -L"$OUT" $ldflags -o "$exe" 2>"$T/$label-$v-build.log" || {
     echo "FAIL   $label-$v (build)"; cat "$T/$label-$v-build.log"; nfail=$((nfail + 1)); return; }
   if [ ! -f tests/$name.rc ]; then
     # The console tests (no resources) report on standard output.

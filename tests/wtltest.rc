@@ -1,0 +1,78 @@
+// wtltest.rc - wtltest's frame menu, toolbar, accelerators, dialogs and
+// strings. atlres.h comes from WTL.
+#include <windows.h>
+#include <atlres.h>
+#include "wtltest.h"
+
+IDR_MAINFRAME MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&New", ID_FILE_NEW
+    MENUITEM SEPARATOR
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+  POPUP "&Edit"
+  BEGIN
+    MENUITEM "Cu&t", ID_EDIT_CUT
+    MENUITEM "&Copy", ID_EDIT_COPY
+  END
+  POPUP "&View"
+  BEGIN
+    MENUITEM "&Status Bar", ID_VIEW_STATUS_BAR
+    MENUITEM "Test &One", ID_TEST_ONE
+    MENUITEM "Test &Two", ID_TEST_TWO
+  END
+END
+
+IDR_MAINFRAME ACCELERATORS
+BEGIN
+  "N", ID_FILE_NEW, VIRTKEY, CONTROL
+  "T", ID_TEST_ONE, VIRTKEY, CONTROL
+END
+
+// The toolbar: the bitmap the tests generate (six 16x15 images), and
+// the RT_TOOLBAR resource (241) WTL reads: version, image width and
+// height, the number of items, and their command IDs (0 for a separator).
+IDR_MAINFRAME BITMAP "toolbar.bmp"
+IDR_MAINFRAME 241
+BEGIN
+  1, 16, 15, 5, ID_FILE_NEW, 0, ID_EDIT_CUT, ID_EDIT_COPY, ID_TEST_ONE
+END
+
+IDD_DDX DIALOGEX 0, 0, 200, 100
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "DDX"
+FONT 8, "MS Shell Dlg"
+BEGIN
+  EDITTEXT IDC_NAME, 10, 10, 120, 14, ES_AUTOHSCROLL
+  EDITTEXT IDC_COUNT, 10, 30, 60, 14, ES_AUTOHSCROLL
+  AUTOCHECKBOX "Flag", IDC_FLAG, 10, 50, 60, 10
+  EDITTEXT IDC_GROW, 10, 64, 120, 14, ES_AUTOHSCROLL
+  DEFPUSHBUTTON "OK", IDOK, 140, 10, 50, 14
+  PUSHBUTTON "Cancel", IDCANCEL, 140, 30, 50, 14
+END
+
+IDD_PAGE1 DIALOGEX 0, 0, 160, 80
+STYLE DS_SETFONT | WS_CHILD | WS_CAPTION
+CAPTION "First"
+FONT 8, "MS Shell Dlg"
+BEGIN
+  EDITTEXT IDC_NAME, 10, 10, 120, 14, ES_AUTOHSCROLL
+END
+
+IDD_PAGE2 DIALOGEX 0, 0, 160, 80
+STYLE DS_SETFONT | WS_CHILD | WS_CAPTION
+CAPTION "Second"
+FONT 8, "MS Shell Dlg"
+BEGIN
+  AUTOCHECKBOX "Flag", IDC_FLAG, 10, 10, 60, 10
+END
+
+STRINGTABLE
+BEGIN
+  IDR_MAINFRAME "wtltest"
+  IDS_HELLO "Hello from WTL"
+  ID_FILE_NEW "Create a document\nNew"
+  ID_TEST_ONE "The first test command\nTest one"
+END

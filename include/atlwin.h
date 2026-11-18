@@ -352,6 +352,12 @@ public:
     return ::ScrollWindowEx(m_hWnd, dx, dy, lpRectScroll, lpRectClip, hRgnUpdate, lpRectUpdate,
                             uFlags);
   }
+  int ScrollWindowEx(int dx, int dy, UINT uFlags, LPCRECT lpRectScroll = NULL,
+                     LPCRECT lpRectClip = NULL, HRGN hRgnUpdate = NULL,
+                     LPRECT lpRectUpdate = NULL) {
+    return ::ScrollWindowEx(m_hWnd, dx, dy, lpRectScroll, lpRectClip, hRgnUpdate, lpRectUpdate,
+                            uFlags);
+  }
   int SetScrollPos(int nBar, int nPos, BOOL bRedraw = TRUE) {
     return ::SetScrollPos(m_hWnd, nBar, nPos, bRedraw);
   }
@@ -918,13 +924,6 @@ private:
   CStdCallThunk& operator=(const CStdCallThunk&);
 };
 
-// The object a window being created belongs to, until its first message.
-struct _AtlCreateWndData {
-  void* m_pThis;
-  DWORD m_dwThreadID;
-  _AtlCreateWndData* m_pNext;
-};
-
 class CWndProcThunk {
 public:
   _AtlCreateWndData cd;
@@ -938,37 +937,6 @@ public:
   DLGPROC GetDLGPROC() { return (DLGPROC)thunk.GetCodeAddress(); }
 };
 
-// The module's window state: the objects whose windows are being made.
-class CAtlWinModule {
-public:
-  CComCriticalSection m_csWindowCreate;
-  _AtlCreateWndData* m_pCreateWndList;
-  CAtlWinModule() : m_pCreateWndList(NULL) { m_csWindowCreate.Init(); }
-  ~CAtlWinModule() { m_csWindowCreate.Term(); }
-  void AddCreateWndData(_AtlCreateWndData* pData, void* pObject) {
-    pData->m_pThis = pObject;
-    pData->m_dwThreadID = ::GetCurrentThreadId();
-    m_csWindowCreate.Lock();
-    pData->m_pNext = m_pCreateWndList;
-    m_pCreateWndList = pData;
-    m_csWindowCreate.Unlock();
-  }
-  void* ExtractCreateWndData() {
-    void* pv = NULL;
-    m_csWindowCreate.Lock();
-    DWORD dwThreadID = ::GetCurrentThreadId();
-    for (_AtlCreateWndData** pp = &m_pCreateWndList; *pp != NULL; pp = &(*pp)->m_pNext) {
-      if ((*pp)->m_dwThreadID == dwThreadID) {
-        pv = (*pp)->m_pThis;
-        *pp = (*pp)->m_pNext;
-        break;
-      }
-    }
-    m_csWindowCreate.Unlock();
-    return pv;
-  }
-};
-inline CAtlWinModule _AtlWinModule;
 
 // ---------------------------------------------------------------------
 // Window classes: DECLARE_WND_CLASS and DECLARE_WND_SUPERCLASS give a
@@ -1031,39 +999,43 @@ struct _ATL_WNDCLASSINFO {
 };
 typedef _ATL_WNDCLASSINFO CWndClassInfo;
 
-#define DECLARE_WND_CLASS(WndClassName)                                                  \
+// The "2" forms name the class that declares them, for a class template
+// whose StartWindowProc is in a dependent base.
+#define _ATL_DECLARE_WND_CLASS(WndClassName, style, bkgnd, proc)                         \
   static ATL::CWndClassInfo& GetWndClassInfo() {                                         \
     static ATL::CWndClassInfo wc = {                                                     \
-        {sizeof(WNDCLASSEX), CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS, StartWindowProc, 0, 0, \
-         NULL, NULL, NULL, (HBRUSH)(COLOR_WINDOW + 1), NULL, WndClassName, NULL},        \
-        NULL, NULL, IDC_ARROW, TRUE, 0, _T("")};                                         \
-    return wc;                                                                           \
-  }
-#define DECLARE_WND_CLASS2(WndClassName, EnclosingClass) DECLARE_WND_CLASS(WndClassName)
-#define DECLARE_WND_CLASS_EX(WndClassName, style, bkgnd)                                 \
-  static ATL::CWndClassInfo& GetWndClassInfo() {                                         \
-    static ATL::CWndClassInfo wc = {                                                     \
-        {sizeof(WNDCLASSEX), style, StartWindowProc, 0, 0, NULL, NULL, NULL,             \
-         (HBRUSH)(bkgnd + 1), NULL, WndClassName, NULL},                                 \
-        NULL, NULL, IDC_ARROW, TRUE, 0, _T("")};                                         \
-    return wc;                                                                           \
-  }
-#define DECLARE_WND_SUPERCLASS(WndClassName, OrigWndClassName)                           \
-  static ATL::CWndClassInfo& GetWndClassInfo() {                                         \
-    static ATL::CWndClassInfo wc = {                                                     \
-        {sizeof(WNDCLASSEX), 0, StartWindowProc, 0, 0, NULL, NULL, NULL, NULL, NULL,     \
+        {sizeof(WNDCLASSEX), style, proc, 0, 0, NULL, NULL, NULL, bkgnd, NULL,           \
          WndClassName, NULL},                                                            \
+        NULL, NULL, IDC_ARROW, TRUE, 0, _T("")};                                         \
+    return wc;                                                                           \
+  }
+#define _ATL_DECLARE_WND_SUPERCLASS(WndClassName, OrigWndClassName, proc)                \
+  static ATL::CWndClassInfo& GetWndClassInfo() {                                         \
+    static ATL::CWndClassInfo wc = {                                                     \
+        {sizeof(WNDCLASSEX), 0, proc, 0, 0, NULL, NULL, NULL, NULL, NULL, WndClassName,  \
+         NULL},                                                                          \
         OrigWndClassName, NULL, NULL, TRUE, 0, _T("")};                                  \
     return wc;                                                                           \
   }
+#define DECLARE_WND_CLASS(WndClassName)                                       \
+  _ATL_DECLARE_WND_CLASS(WndClassName, CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS, \
+                         (HBRUSH)(COLOR_WINDOW + 1), StartWindowProc)
+#define DECLARE_WND_CLASS2(WndClassName, EnclosingClass)                      \
+  _ATL_DECLARE_WND_CLASS(WndClassName, CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS, \
+                         (HBRUSH)(COLOR_WINDOW + 1), EnclosingClass::StartWindowProc)
+#define DECLARE_WND_CLASS_EX(WndClassName, style, bkgnd) \
+  _ATL_DECLARE_WND_CLASS(WndClassName, style, (HBRUSH)(bkgnd + 1), StartWindowProc)
+#define DECLARE_WND_CLASS_EX2(WndClassName, EnclosingClass, style, bkgnd) \
+  _ATL_DECLARE_WND_CLASS(WndClassName, style, (HBRUSH)(bkgnd + 1),        \
+                         EnclosingClass::StartWindowProc)
+#define DECLARE_WND_SUPERCLASS(WndClassName, OrigWndClassName) \
+  _ATL_DECLARE_WND_SUPERCLASS(WndClassName, OrigWndClassName, StartWindowProc)
 #define DECLARE_WND_SUPERCLASS2(WndClassName, EnclosingClass, OrigWndClassName) \
-  DECLARE_WND_SUPERCLASS(WndClassName, OrigWndClassName)
+  _ATL_DECLARE_WND_SUPERCLASS(WndClassName, OrigWndClassName, EnclosingClass::StartWindowProc)
 
 // ---------------------------------------------------------------------
 // The part of CWindowImpl and CDialogImpl that does not depend on the
 // window procedure: the message, reflection.
-
-#define WINSTATE_DESTROYED 0x00000001
 
 template <class TBase = CWindow>
 class ATL_NO_VTABLE CWindowImplRoot : public TBase, public CMessageMap {
@@ -1071,6 +1043,7 @@ public:
   CWndProcThunk m_thunk;
   const _ATL_MSG* m_pCurrentMsg;
   DWORD m_dwState;
+  enum { WINSTATE_DESTROYED = 0x00000001 };
 
   CWindowImplRoot() : m_pCurrentMsg(NULL), m_dwState(0) {}
   virtual ~CWindowImplRoot() {}
@@ -1245,15 +1218,15 @@ public:
         if (pThis->m_pfnSuperWindowProc != ::DefWindowProc &&
             ::GetWindowLongPtr(pThis->m_hWnd, GWLP_WNDPROC) == pfnWndProc)
           ::SetWindowLongPtr(pThis->m_hWnd, GWLP_WNDPROC, (LONG_PTR)pThis->m_pfnSuperWindowProc);
-        pThis->m_dwState |= WINSTATE_DESTROYED;
+        pThis->m_dwState |= CWindowImplRoot<TBase>::WINSTATE_DESTROYED;
       }
     } else if (uMsg == WM_NCDESTROY) {
-      pThis->m_dwState |= WINSTATE_DESTROYED;
+      pThis->m_dwState |= CWindowImplRoot<TBase>::WINSTATE_DESTROYED;
     }
-    if ((pThis->m_dwState & WINSTATE_DESTROYED) && pOldMsg == NULL) {
+    if ((pThis->m_dwState & CWindowImplRoot<TBase>::WINSTATE_DESTROYED) && pOldMsg == NULL) {
       HWND hWndThis = pThis->m_hWnd;
       pThis->m_hWnd = NULL;
-      pThis->m_dwState &= ~WINSTATE_DESTROYED;
+      pThis->m_dwState &= ~CWindowImplRoot<TBase>::WINSTATE_DESTROYED;
       // The object may delete itself here.
       pThis->OnFinalMessage(hWndThis);
     }
@@ -1529,7 +1502,7 @@ public:
     LRESULT lRes = 0;
     BOOL bRet = pThis->ProcessWindowMessage(pThis->m_hWnd, uMsg, wParam, lParam, lRes, 0);
     pThis->m_pCurrentMsg = pOldMsg;
-    if (uMsg == WM_NCDESTROY) pThis->m_dwState |= WINSTATE_DESTROYED;
+    if (uMsg == WM_NCDESTROY) pThis->m_dwState |= CWindowImplRoot<TBase>::WINSTATE_DESTROYED;
     INT_PTR nRet = FALSE;
     if (bRet) {
       // These return their result directly; the others through
@@ -1550,16 +1523,16 @@ public:
         nRet = (INT_PTR)lRes;
         break;
       default:
-        if (pThis->m_hWnd != NULL && (pThis->m_dwState & WINSTATE_DESTROYED) == 0)
+        if (pThis->m_hWnd != NULL && (pThis->m_dwState & CWindowImplRoot<TBase>::WINSTATE_DESTROYED) == 0)
           ::SetWindowLongPtr(pThis->m_hWnd, DWLP_MSGRESULT, (LONG_PTR)lRes);
         nRet = TRUE;
         break;
       }
     }
-    if ((pThis->m_dwState & WINSTATE_DESTROYED) && pOldMsg == NULL) {
+    if ((pThis->m_dwState & CWindowImplRoot<TBase>::WINSTATE_DESTROYED) && pOldMsg == NULL) {
       HWND hWndThis = pThis->m_hWnd;
       pThis->m_hWnd = NULL;
-      pThis->m_dwState &= ~WINSTATE_DESTROYED;
+      pThis->m_dwState &= ~CWindowImplRoot<TBase>::WINSTATE_DESTROYED;
       pThis->OnFinalMessage(hWndThis);
     }
     return nRet;
@@ -1625,5 +1598,10 @@ public:
 };
 
 }  // namespace ATL
+
+// The control host comes with the windows, as in ATL 7 and later.
+#ifndef _ATL_NO_HOSTING
+#include "atlhost.h"
+#endif
 
 #endif  // __ATLWIN_H__
