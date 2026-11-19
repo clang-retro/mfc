@@ -2,7 +2,8 @@
 // FTP server that the test runs on the loopback interface: URL parsing,
 // OpenURL, requests with headers and bodies, status codes and headers,
 // cookies, the status callback, errors, and FTP directories, files,
-// listings and transfers in passive and active mode.
+// listings and transfers in passive and active mode, and on the port
+// gopher's menus, files, searches and gopher+ attributes.
 #include <winsock2.h>
 #include <afx.h>
 #include <afxwin.h>
@@ -387,6 +388,59 @@ static DWORD WINAPI FtpThread(LPVOID) {
 // ---------------------------------------------------------------------
 // The tests
 
+#ifdef _WINPORT
+// Gopher (not in Windows' WinINet since IE 7, a stub in Wine's): a menu,
+// a submenu, a text file that is a gopher+ item (with a view and its
+// attributes), a binary file and a search. One request per connection.
+static SOCKET g_hGopherListen = INVALID_SOCKET;
+static u_short g_nGopherPort = 0;
+
+static CStringA GopherLine(char c, const char* display, const char* selector, const char* plus = "") {
+  CStringA s;
+  s.Format("%c%s\t%s\t127.0.0.1\t%u%s\r\n", c, display, selector, g_nGopherPort, plus);
+  return s;
+}
+
+static const char kGopherBinary[] = "\x00\x01\x02.\r\n\xff";
+
+static void ServeGopher(SOCKET c) {
+  CStringA line;
+  if (!RecvLine(c, line)) return;
+  if (line.IsEmpty()) {
+    SendAll(c, GopherLine('1', "Docs", "/docs") + GopherLine('0', "Read me", "/readme.txt", "\t+") +
+                   GopherLine('9', "Data", "/data.bin") + GopherLine('7', "Search", "/search") +
+                   "iWelcome\t\terror.host\t1\r\n.\r\n");
+  } else if (line == "/docs") {
+    SendAll(c, GopherLine('0', "Inner", "/docs/inner.txt") + ".\r\n");
+  } else if (line == "/readme.txt") {
+    SendAll(c, "..hidden\r\nline two\r\n.\r\n");
+  } else if (line == "/readme.txt\t+text/plain") {
+    SendAll(c, "+9\r\nplus body and more");
+  } else if (line.Left(13) == "/readme.txt\t!") {
+    SendAll(c, "+-1\r\n+INFO: " + GopherLine('0', "Read me", "/readme.txt", "\t+") +
+                   "+ADMIN:\r\n Admin: Pat <pat@example.test>\r\n Mod-Date: <19941115081231>\r\n"
+                   "+VIEWS:\r\n text/plain: <1k>\r\n.\r\n");
+  } else if (line == "/data.bin") {
+    SendAll(c, kGopherBinary, sizeof(kGopherBinary) - 1);
+  } else if (line.Left(8) == "/search\t") {
+    SendAll(c, GopherLine('0', "Result " + line.Mid(8), "/r") + ".\r\n");
+  } else {
+    SendAll(c, "3Not found\t\terror.host\t1\r\n.\r\n");
+  }
+}
+
+static DWORD WINAPI GopherThread(LPVOID) {
+  while (!g_bStop) {
+    SOCKET c = ::accept(g_hGopherListen, NULL, NULL);
+    if (c == INVALID_SOCKET) break;
+    ServeGopher(c);
+    ::shutdown(c, SD_SEND);
+    ::closesocket(c);
+  }
+  return 0;
+}
+#endif
+
 static void TestParse() {
   DWORD dwService;
   CString strServer, strObject, strUser, strPass;
@@ -713,6 +767,106 @@ static void TestFtp(CTestSession& session, u_short nFtpPort) {
   CHECK(bThrown2);
 }
 
+#ifdef _WINPORT
+static void TestGopher(CTestSession& session, u_short nPort) {
+  // Locators.
+  TCHAR szLoc[MAX_GOPHER_LOCATOR_LENGTH + 1];
+  DWORD dwLen = 2;
+  CHECK(!::GopherCreateLocator(_T("g.example"), 70, _T("Doc"), _T("/doc"), GOPHER_TYPE_TEXT_FILE, szLoc, &dwLen));
+  CHECK(::GetLastError() == ERROR_INSUFFICIENT_BUFFER && dwLen == 25);  // with its zero
+  dwLen = MAX_GOPHER_LOCATOR_LENGTH;
+  CHECK(::GopherCreateLocator(_T("g.example"), 70, _T("Doc"), _T("/doc"), GOPHER_TYPE_TEXT_FILE, szLoc, &dwLen));
+  CHECK(CString(szLoc) == _T("0Doc\t/doc\tg.example\t70\r\n") && dwLen == 25);
+  DWORD dwType = 0;
+  CHECK(::GopherGetLocatorType(szLoc, &dwType) && dwType == GOPHER_TYPE_TEXT_FILE);
+  CHECK(::GopherGetLocatorType(_T("1Menu\t\th\t70\t+\r\n"), &dwType) &&
+        dwType == (GOPHER_TYPE_DIRECTORY | GOPHER_TYPE_GOPHER_PLUS));
+  CHECK(!::GopherGetLocatorType(_T("nonsense"), &dwType) && ::GetLastError() == ERROR_GOPHER_INVALID_LOCATOR);
+
+  CGopherConnection* pConn = session.GetGopherConnection(_T("127.0.0.1"), NULL, NULL, nPort);
+  CHECK(pConn != NULL);
+  if (pConn == NULL) return;
+  CGopherLocator loc = pConn->CreateLocator(_T("Read me"), _T("/readme.txt"), GOPHER_TYPE_TEXT_FILE);
+  CHECK(loc.GetLocatorType(dwType) && dwType == GOPHER_TYPE_TEXT_FILE);
+
+  // The server's menu.
+  CGopherFileFind find(pConn);
+  CStringArray names;
+  CGopherLocator readme(_T(""), 1), docs(_T(""), 1), data(_T(""), 1), search(_T(""), 1);
+  BOOL bMore = find.FindFile(NULL);
+  CHECK(bMore);
+  while (bMore) {
+    bMore = find.FindNextFile();
+    CString strName = find.GetScreenName();
+    names.Add(strName);
+    if (strName == _T("Read me")) readme = find.GetLocator();
+    if (strName == _T("Docs")) docs = find.GetLocator();
+    if (strName == _T("Data")) data = find.GetLocator();
+    if (strName == _T("Search")) search = find.GetLocator();
+  }
+  find.Close();
+  CHECK(names.GetSize() == 5 && names[0] == _T("Docs") && names[4] == _T("Welcome"));
+  CHECK(readme.GetLocatorType(dwType) && dwType == (GOPHER_TYPE_TEXT_FILE | GOPHER_TYPE_GOPHER_PLUS));
+  CHECK(docs.GetLocatorType(dwType) && dwType == GOPHER_TYPE_DIRECTORY);
+
+  // A submenu, and a search.
+  CHECK(find.FindFile(docs, NULL));
+  CHECK(!find.FindNextFile() && find.GetScreenName() == _T("Inner"));
+  find.Close();
+  CHECK(find.FindFile(search, _T("cats")));
+  find.FindNextFile();
+  CHECK(find.GetScreenName() == _T("Result cats"));
+  find.Close();
+
+  // Files: text (its dots undone), a gopher+ view, binary.
+  CGopherFile* pFile = pConn->OpenFile(readme);
+  CHECK(ReadAllA(pFile) == ".hidden\r\nline two\r\n");
+  pFile->Close();
+  delete pFile;
+  pFile = pConn->OpenFile(readme, 0, _T("text/plain"));
+  CHECK(ReadAllA(pFile) == "plus body");
+  delete pFile;
+  pFile = pConn->OpenFile(data);
+  CHECK(ReadAllA(pFile) == CStringA(kGopherBinary, sizeof(kGopherBinary) - 1));
+  delete pFile;
+  BOOL bThrown = FALSE;
+  try {
+    pConn->OpenFile(docs);
+  } catch (CInternetException* e) {
+    bThrown = e->m_dwError == ERROR_GOPHER_NOT_FILE;
+    e->Delete();
+  }
+  CHECK(bThrown);
+
+  // Gopher+ attributes: all of them, or one block.
+  CString strAttr;
+  CHECK(pConn->GetAttribute(readme, CString(), strAttr));
+  CHECK(strAttr.Find(_T("+INFO:")) == 0 && strAttr.Find(_T("+VIEWS:")) > 0);
+  CHECK(pConn->GetAttribute(readme, _T("ADMIN"), strAttr));
+  CHECK(strAttr.Find(_T("+ADMIN:")) == 0 && strAttr.Find(_T("Admin: Pat")) > 0 && strAttr.Find(_T("+VIEWS")) < 0);
+  CHECK(!pConn->GetAttribute(readme, _T("NOPE"), strAttr) && ::GetLastError() == ERROR_GOPHER_ATTRIBUTE_NOT_FOUND);
+  CHECK(!pConn->GetAttribute(data, CString(), strAttr) && ::GetLastError() == ERROR_GOPHER_NOT_GOPHER_PLUS);
+  pConn->Close();
+  delete pConn;
+
+  // OpenURL: a file, and a menu as its lines.
+  CString strUrl;
+  strUrl.Format(_T("gopher://127.0.0.1:%u/0/readme.txt"), nPort);
+  CStdioFile* pUrl = session.OpenURL(strUrl);
+  CHECK(pUrl != NULL && pUrl->IsKindOf(RUNTIME_CLASS(CGopherFile)));
+  if (pUrl != NULL) {
+    CHECK(ReadAllA((CInternetFile*)pUrl) == ".hidden\r\nline two\r\n");
+    delete pUrl;
+  }
+  strUrl.Format(_T("gopher://127.0.0.1:%u/1/docs"), nPort);
+  pUrl = session.OpenURL(strUrl);
+  if (pUrl != NULL) {
+    CHECK(ReadAllA((CInternetFile*)pUrl).Find("0Inner\t/docs/inner.txt") == 0);
+    delete pUrl;
+  }
+}
+#endif
+
 int main() {
   WSADATA wsa;
   ::WSAStartup(MAKEWORD(2, 2), &wsa);
@@ -721,6 +875,10 @@ int main() {
   g_hFtpListen = Listen(nFtpPort);
   HANDLE hHttp = ::CreateThread(NULL, 0, HttpThread, NULL, 0, NULL);
   HANDLE hFtp = ::CreateThread(NULL, 0, FtpThread, NULL, 0, NULL);
+#ifdef _WINPORT
+  g_hGopherListen = Listen(g_nGopherPort);
+  HANDLE hGopher = ::CreateThread(NULL, 0, GopherThread, NULL, 0, NULL);
+#endif
 
   TestParse();
   try {
@@ -731,6 +889,9 @@ int main() {
     CHECK(session.SetOption(INTERNET_OPTION_CONNECT_TIMEOUT, 5000));
     TestHttp(session, nHttpPort);
     TestFtp(session, nFtpPort);
+#ifdef _WINPORT
+    TestGopher(session, g_nGopherPort);
+#endif
     session.Close();
   } catch (CException* e) {
     TCHAR sz[256] = {0};
@@ -745,6 +906,10 @@ int main() {
   ::closesocket(g_hFtpListen);
   ::WaitForSingleObject(hHttp, 5000);
   ::WaitForSingleObject(hFtp, 5000);
+#ifdef _WINPORT
+  ::closesocket(g_hGopherListen);
+  ::WaitForSingleObject(hGopher, 5000);
+#endif
   if (g_failures == 0) printf("PASS: all internet tests\n");
   else printf("%d failure(s)\n", g_failures);
   return g_failures ? 1 : 0;

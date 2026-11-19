@@ -108,7 +108,7 @@ registry (kept in `~/.config/winport/registry.reg`), resources, sockets
 (with `WSAAsyncSelect`), ODBC through the system's driver manager
 (unixODBC or iODBC, loaded when first used; `WINPORT_ODBC` names its
 library when it is elsewhere),
-WinInet's HTTP and FTP (no HTTPS yet), and COM within one process,
+WinInet's HTTP, FTP and gopher (no HTTPS yet), and COM within one process,
 in-process servers in a shared library included, work, and so does the window manager: window
 classes and windows, messages and the message loop, timers, hooks,
 focus, painting, and drawing in software with device contexts, bitmaps,
@@ -155,6 +155,16 @@ The common controls are all there: besides the bars, list and tree
 views, tabs and the rest, the rebar, pager, SysLink, IP address,
 ComboBoxEx, animation (uncompressed and RLE8 AVI clips), month calendar
 and date and time picker.
+
+There is no WinHelp viewer: `WinHelp` (and so MFC's Help commands)
+opens a document next to the program's `.hlp` file instead, of the same
+name as `.html`, `.htm`, `.pdf` or `.txt` (or a folder of that name with
+an `index.html`), with the desktop's opener, or with the command that
+`WINPORT_HELP` names. A help context is the HTML page's anchor
+(`app.html#131072`). The internet security manager has no zone settings:
+local files and `res:` are the local machine, a share or a host without
+a dot the intranet, the rest the internet, and `SetZoneMapping` adds
+mappings for the process.
 
 The functions not written yet are
 listed in `port/src/stubs.txt` and fail with `ERROR_CALL_NOT_IMPLEMENTED`;
@@ -288,7 +298,10 @@ try.
   QueryInfo, ReadString, cookies, the status callback,
   CInternetException, and FTP directories, files, listings
   (CFtpFileFind), PutFile, GetFile, Rename and Remove, in passive and
-  active mode.
+  active mode. On Linux and macOS (Windows' WinINet has had no gopher
+  since IE 7, and Wine's is a stub) a gopher server too: locators,
+  menus, submenus and searches (CGopherFileFind), text, binary and
+  gopher+ files, gopher+ attributes, and gopher URLs.
 * `isapitest`: `afxisapi.h`, with an extension and a filter called
   through the functions an ISAPI DLL exports by a pretend server:
   CHtmlStream (growing, attached buffers), a parse map's commands
@@ -298,7 +311,12 @@ try.
   headers, server variables, and CHttpFilter notifications.
 * `htmltest`: `afxhtml.h` with a WebBrowser control of the test's own
   (Wine's needs Gecko to show a page), registered for CLSID_WebBrowser
-  in the process. For CHtmlView: the browser filling the view,
+  in the process. First the internet security manager that decides
+  window.external: zones (on the port, which has no zone settings of
+  its own: local files and res: are the local machine, a share or a
+  dotless host the intranet, the rest the internet), what each zone
+  allows, security ids, zone mappings, and a service provider's own
+  manager asked first. For CHtmlView: the browser filling the view,
   Navigate, the Navigate2 forms and LoadFromResource with their
   arguments, the browser's events reaching the handlers (and a cancel
   going back), the properties, PutProperty and GetProperty, ExecWB,

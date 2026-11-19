@@ -18,6 +18,7 @@
 #include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #ifdef __APPLE__
@@ -1071,4 +1072,89 @@ extern "C" HINSTANCE WINAPI ShellExecuteA(HWND, LPCSTR verb, LPCSTR file, LPCSTR
 extern "C" HINSTANCE WINAPI ShellExecuteW(HWND, LPCWSTR verb, LPCWSTR file, LPCWSTR, LPCWSTR,
                                           INT) {
   return ShellExecuteCore(verb ? Narrow(verb) : std::string(), file ? Narrow(file) : std::string());
+}
+
+// WinHelp: there is no WinHelp viewer here, so the help is a document
+// next to the .hlp file the program names (the same name, as .html, .htm,
+// .pdf or .txt, or a folder of that name with an index.html), opened with
+// the desktop's opener, or with the command WINPORT_HELP names (given the
+// document as its argument). A context (HELP_CONTEXT, HELP_CONTEXTPOPUP)
+// is the HTML page's anchor: help.html#131072. Closing the viewer
+// (HELP_QUIT) and placing it are left to the viewer.
+static bool IsFile(const std::string& p) {
+  struct stat st;
+  return stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static std::string HelpDocument(std::string file) {
+  size_t window = file.find('>');
+  if (window != std::string::npos) file.resize(window);
+  std::string path = PosixPath(file.c_str());
+  size_t dot = path.rfind('.');
+  size_t slash = path.rfind('/');
+  std::string ext = dot != std::string::npos && (slash == std::string::npos || dot > slash) ? path.substr(dot) : "";
+  for (char& c : ext) c = (char)tolower((unsigned char)c);
+  if (ext != ".hlp" && ext != ".chm" && IsFile(path)) return path;
+  std::string base = ext.empty() ? path : path.substr(0, dot);
+  for (const char* e : {".html", ".htm", ".pdf", ".txt", ".HTML", ".HTM", ".PDF", ".TXT"})
+    if (IsFile(base + e)) return base + e;
+  if (IsFile(base + "/index.html")) return base + "/index.html";
+  return std::string();
+}
+
+static BOOL WinHelpCore(const char* file, UINT cmd, ULONG_PTR data) {
+  switch (cmd) {
+    case HELP_QUIT:
+    case HELP_SETWINPOS:
+    case HELP_SETPOPUP_POS:
+    case HELP_SETINDEX:
+    case HELP_TCARD_DATA:
+    case HELP_TCARD_OTHER_CALLER:
+      return TRUE;
+  }
+  if (!file || !*file) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  std::string doc = HelpDocument(file);
+  if (doc.empty()) {
+    SetLastError(ERROR_FILE_NOT_FOUND);
+    return FALSE;
+  }
+  std::string target = doc;
+  size_t dot = doc.rfind('.');
+  std::string ext = dot == std::string::npos ? "" : doc.substr(dot);
+  for (char& c : ext) c = (char)tolower((unsigned char)c);
+  if ((cmd == HELP_CONTEXT || cmd == HELP_CONTEXTPOPUP) && (ext == ".html" || ext == ".htm"))
+    target = "file://" + doc + "#" + std::to_string((unsigned long)data);
+  const char* custom = getenv("WINPORT_HELP");
+  std::vector<char*> argv;
+  std::string script;
+  if (custom && *custom) {
+    script = std::string(custom) + " \"$1\"";
+    argv = {(char*)"sh", (char*)"-c", (char*)script.c_str(), (char*)"sh", (char*)target.c_str(), NULL};
+  } else {
+#if defined(__APPLE__)
+    argv = {(char*)"open", (char*)target.c_str(), NULL};
+#else
+    argv = {(char*)"xdg-open", (char*)target.c_str(), NULL};
+#endif
+  }
+  pid_t pid;
+  if (posix_spawnp(&pid, argv[0], NULL, NULL, argv.data(), environ) != 0) {
+    SetLastError(ERROR_FILE_NOT_FOUND);
+    return FALSE;
+  }
+  int status;
+  waitpid(pid, &status, WNOHANG);
+  return TRUE;
+}
+
+extern "C" BOOL WINAPI WinHelpA(HWND, LPCSTR file, UINT cmd, ULONG_PTR data) {
+  return WinHelpCore(file, cmd, data);
+}
+
+extern "C" BOOL WINAPI WinHelpW(HWND, LPCWSTR file, UINT cmd, ULONG_PTR data) {
+  std::string f = file ? Narrow(file) : std::string();
+  return WinHelpCore(file ? f.c_str() : NULL, cmd, data);
 }

@@ -109,6 +109,8 @@ class VectorEnum final : public IEnum {
     if (v.lpszVerbName) v.lpszVerbName = CoStrDup(v.lpszVerbName);
   }
   static void Free(OLEVERB& v) { CoTaskMemFree(v.lpszVerbName); }
+  static void Copied(LPOLESTR& s) { s = s ? CoStrDup(s) : NULL; }
+  static void Free(LPOLESTR& s) { CoTaskMemFree(s); }
   static void Copied(FORMATETC& f) { f.ptd = NULL; }
   static void Free(FORMATETC&) {}
 
@@ -119,6 +121,7 @@ class VectorEnum final : public IEnum {
 typedef VectorEnum<IEnumSTATDATA, STATDATA, &IID_IEnumSTATDATA> StatDataEnum;
 typedef VectorEnum<IEnumOLEVERB, OLEVERB, &IID_IEnumOLEVERB> VerbEnum;
 typedef VectorEnum<IEnumFORMATETC, FORMATETC, &IID_IEnumFORMATETC> FormatEnum;
+typedef VectorEnum<IEnumString, LPOLESTR, &IID_IEnumString> StringEnum;
 
 inline bool SameFormat(const FORMATETC& a, const FORMATETC& b) {
   return a.cfFormat == b.cfFormat && a.dwAspect == b.dwAspect && a.lindex == b.lindex;

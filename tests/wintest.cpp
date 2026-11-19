@@ -2720,6 +2720,71 @@ static void TestPrinting() {
   ::GlobalFree(psd.hDevMode);
 }
 
+#ifdef _WINPORT
+// WinHelp, which opens the help document next to the .hlp file: here
+// through WINPORT_HELP, a command that notes what it was given.
+static std::string WaitForLine(const std::string& log, size_t n) {
+  for (int i = 0; i < 500; i++) {
+    std::vector<std::string> lines;
+    if (FILE* f = fopen(log.c_str(), "r")) {
+      char buf[1024];
+      while (fgets(buf, sizeof(buf), f)) lines.push_back(buf);
+      fclose(f);
+    }
+    if (lines.size() >= n) {
+      std::string s = lines[n - 1];
+      while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+      return s;
+    }
+    ::Sleep(10);
+  }
+  return std::string();
+}
+
+static void TestWinHelp() {
+  const char* out = getenv("MFC_TEST_OUT");
+  std::string dir = out && *out ? out : ".";
+  std::string log = dir + "/winhelp.log";
+  remove(log.c_str());
+  std::string html = dir + "/AppHelp.html";
+  if (FILE* f = fopen(html.c_str(), "w")) {
+    fputs("<html><body><h1 id=\"131072\">Help</h1></body></html>\n", f);
+    fclose(f);
+  }
+  std::string cmd = "echo >> '" + log + "'";
+  setenv("WINPORT_HELP", cmd.c_str(), 1);
+  std::wstring hlp = std::wstring(CStringW(dir.c_str())) + L"/AppHelp.HLP";
+
+  // The contents: the document itself.
+  CHECK(::WinHelpW(NULL, hlp.c_str(), HELP_FINDER, 0));
+  CHECK(WaitForLine(log, 1) == html);
+  // A context: the page's anchor; a window after the name is let go.
+  std::string hlpA = dir + "/AppHelp.HLP>main";
+  CHECK(::WinHelpA(NULL, hlpA.c_str(), HELP_CONTEXT, 131072));
+  CHECK(WaitForLine(log, 2) == "file://" + html + "#131072");
+  // Through CWnd, with the program's own help file.
+  CWinApp* pApp = AfxGetApp();
+  LPCTSTR pszOld = pApp->m_pszHelpFilePath;
+  CString strHlp(hlp.c_str());
+  pApp->m_pszHelpFilePath = strHlp;
+  CWnd wnd;
+  CHECK(wnd.CreateEx(0, _T("STATIC"), _T("help"), WS_POPUP, CRect(0, 0, 10, 10), NULL, 0));
+  wnd.WinHelp(0, HELP_INDEX);
+  wnd.DestroyWindow();
+  pApp->m_pszHelpFilePath = pszOld;
+  CHECK(WaitForLine(log, 3) == html);
+
+  // Nothing to close; no document.
+  CHECK(::WinHelpW(NULL, hlp.c_str(), HELP_QUIT, 0));
+  ::SetLastError(0);
+  CHECK(!::WinHelpW(NULL, L"/nowhere/none.hlp", HELP_CONTENTS, 0));
+  CHECK(::GetLastError() == ERROR_FILE_NOT_FOUND);
+  unsetenv("WINPORT_HELP");
+  remove(html.c_str());
+  remove(log.c_str());
+}
+#endif
+
 int main() {
   if (!AfxWinInit(::GetModuleHandle(NULL), NULL, ::GetCommandLine(), SW_SHOW)) {
     printf("FAIL: AfxWinInit\n");
@@ -2750,6 +2815,9 @@ int main() {
   TestPrinting();
   TestShapesAndDrops();
   TestCWnd();
+#ifdef _WINPORT
+  TestWinHelp();
+#endif
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;
 }

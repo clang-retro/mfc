@@ -105,6 +105,18 @@ struct FtpFind : Handle {
   size_t next = 0;
 };
 
+struct GopherFind : Handle {
+  std::vector<GOPHER_FIND_DATAW> entries;
+  size_t next = 0;
+};
+
+struct GopherFile : Handle {
+  int sock = -1;
+  std::string pending;    // read but not yet given out
+  long long left = -1;    // what is left of a gopher+ item of known length
+  bool whole = false;     // all of it is in pending
+};
+
 std::mutex g_lock;  // the set of live handles
 std::vector<Handle*>& LiveHandles() {
   static auto* v = new std::vector<Handle*>;
@@ -1367,6 +1379,399 @@ BOOL FtpSimple(HINTERNET hc, const std::string& cmd) {
 // ---------------------------------------------------------------------
 // Opening
 
+std::basic_string<char> Conv(const std::string& s, char*) { return s; }
+std::basic_string<wchar_t> Conv(const std::string& s, wchar_t*) { return Widen(s.c_str()); }
+
+// ---------------------------------------------------------------------
+// Gopher (RFC 1436, and gopher+'s items and attributes)
+//
+// A locator is a menu line: the type's character and the display string,
+// then the selector, host and port, separated by tabs, then CR LF; a
+// gopher+ item has a tab and a + after the port.
+
+struct GopherTypeChar {
+  char c;
+  DWORD type;
+};
+const GopherTypeChar kGopherTypes[] = {
+    {'0', GOPHER_TYPE_TEXT_FILE}, {'1', GOPHER_TYPE_DIRECTORY},    {'2', GOPHER_TYPE_CSO},
+    {'3', GOPHER_TYPE_ERROR},     {'4', GOPHER_TYPE_MAC_BINHEX},   {'5', GOPHER_TYPE_DOS_ARCHIVE},
+    {'6', GOPHER_TYPE_UNIX_UUENCODED}, {'7', GOPHER_TYPE_INDEX_SERVER}, {'8', GOPHER_TYPE_TELNET},
+    {'9', GOPHER_TYPE_BINARY},    {'+', GOPHER_TYPE_REDUNDANT},    {'T', GOPHER_TYPE_TN3270},
+    {'g', GOPHER_TYPE_GIF},       {'I', GOPHER_TYPE_IMAGE},        {':', GOPHER_TYPE_BITMAP},
+    {';', GOPHER_TYPE_MOVIE},     {'<', GOPHER_TYPE_SOUND},        {'s', GOPHER_TYPE_SOUND},
+    {'h', GOPHER_TYPE_HTML},      {'P', GOPHER_TYPE_PDF},          {'c', GOPHER_TYPE_CALENDAR},
+    {'i', GOPHER_TYPE_INLINE},
+};
+
+DWORD GopherTypeOf(char c) {
+  for (const GopherTypeChar& t : kGopherTypes)
+    if (t.c == c) return t.type;
+  return GOPHER_TYPE_UNKNOWN;
+}
+
+char GopherCharOf(DWORD type) {
+  type &= ~(DWORD)(GOPHER_TYPE_GOPHER_PLUS | GOPHER_TYPE_ASK);
+  if (type == 0) return '1';
+  for (const GopherTypeChar& t : kGopherTypes)
+    if (t.type == type) return t.c;
+  return 0;
+}
+
+struct Locator {
+  DWORD type = 0;
+  char c = 0;
+  std::string display, selector, host;
+  INTERNET_PORT port = INTERNET_DEFAULT_GOPHER_PORT;
+  bool plus = false;
+};
+
+std::string MakeLocator(char c, const std::string& display, const std::string& selector, const std::string& host,
+                        INTERNET_PORT port, bool plus) {
+  std::string s(1, c);
+  s += display + "\t" + selector + "\t" + host + "\t" + std::to_string(port ? port : INTERNET_DEFAULT_GOPHER_PORT);
+  if (plus) s += "\t+";
+  return s + "\r\n";
+}
+
+bool ParseLocator(const std::string& text, Locator* l) {
+  std::string s = text;
+  while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+  if (s.empty()) return false;
+  std::vector<std::string> f;
+  size_t at = 1;
+  for (;;) {
+    size_t tab = s.find('\t', at);
+    f.push_back(s.substr(at, tab == std::string::npos ? std::string::npos : tab - at));
+    if (tab == std::string::npos) break;
+    at = tab + 1;
+  }
+  if (f.size() < 4) return false;
+  l->c = s[0];
+  l->type = GopherTypeOf(l->c);
+  l->display = f[0];
+  l->selector = f[1];
+  l->host = f[2];
+  long port = atol(f[3].c_str());
+  if (port <= 0 || port > 65535) return false;
+  l->port = (INTERNET_PORT)port;
+  l->plus = f.size() > 4 && !f[4].empty() && f[4][0] == '+';
+  if (l->plus) l->type |= GOPHER_TYPE_GOPHER_PLUS;
+  return true;
+}
+
+bool IsGopherDirectory(DWORD type) { return (type & (GOPHER_TYPE_DIRECTORY | GOPHER_TYPE_INDEX_SERVER)) != 0; }
+
+bool IsGopherFile(DWORD type) {
+  return (type & (GOPHER_TYPE_DIRECTORY | GOPHER_TYPE_INDEX_SERVER | GOPHER_TYPE_CSO | GOPHER_TYPE_ERROR |
+                  GOPHER_TYPE_TELNET | GOPHER_TYPE_TN3270 | GOPHER_TYPE_INLINE)) == 0;
+}
+
+// The locator a connection's handle and a caller's locator name: the
+// server's root without one.
+bool GopherTarget(Connection* c, LPCWSTR locator, Locator* l) {
+  if (!locator || !*locator) {
+    l->c = '1';
+    l->type = GOPHER_TYPE_DIRECTORY;
+    l->host = U(c->server.c_str());
+    l->port = c->port;
+    return true;
+  }
+  if (!ParseLocator(U(locator), l)) {
+    SetLastError(ERROR_GOPHER_INVALID_LOCATOR);
+    return false;
+  }
+  if (l->host.empty()) {
+    l->host = U(c->server.c_str());
+    l->port = c->port;
+  }
+  return true;
+}
+
+// Sends a request and returns the socket.
+int GopherAsk(Connection* c, const Locator& l, const std::string& request) {
+  Session* s = c->session();
+  int fd = ConnectTo(c, l.host, l.port, s ? s->connectTimeout : 60000);
+  if (fd < 0) return -1;
+  Notify(c, INTERNET_STATUS_SENDING_REQUEST);
+  if (!SendAll(fd, request + "\r\n")) {
+    close(fd);
+    return -1;
+  }
+  Notify(c, INTERNET_STATUS_REQUEST_SENT);
+  return fd;
+}
+
+// Everything a socket has until it closes.
+std::string ReadToEnd(int fd, std::string have = std::string()) {
+  char tmp[4096];
+  for (;;) {
+    ssize_t r = recv(fd, tmp, sizeof tmp, 0);
+    if (r < 0 && errno == EINTR) continue;
+    if (r <= 0) break;
+    have.append(tmp, (size_t)r);
+  }
+  return have;
+}
+
+// A text reply's lines without the closing "." and with ".." unescaped.
+std::vector<std::string> TextLines(const std::string& text) {
+  std::vector<std::string> lines;
+  size_t at = 0;
+  while (at < text.size()) {
+    size_t nl = text.find('\n', at);
+    std::string line = text.substr(at, nl == std::string::npos ? std::string::npos : nl - at);
+    at = nl == std::string::npos ? text.size() : nl + 1;
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    if (line == ".") break;
+    if (line.compare(0, 2, "..") == 0) line.erase(0, 1);
+    lines.push_back(line);
+  }
+  return lines;
+}
+
+// A gopher+ reply's data: "+n" (n bytes), "+-1" (to a "." line), "+-2"
+// (to the end), or "--n" for an error. False for an error.
+bool GopherPlusBody(int fd, std::string* body) {
+  std::string buffer, head;
+  if (!ReadLine(fd, buffer, head) || head.size() < 2) {
+    SetLastError(ERROR_GOPHER_PROTOCOL_ERROR);
+    return false;
+  }
+  if (head[0] == '-') {
+    SetLastError(ERROR_GOPHER_DATA_ERROR);
+    return false;
+  }
+  if (head[0] != '+') {
+    SetLastError(ERROR_GOPHER_NOT_GOPHER_PLUS);
+    return false;
+  }
+  long long n = atoll(head.c_str() + 1);
+  std::string all = ReadToEnd(fd, buffer);
+  if (n == -1) {
+    std::string out;
+    for (const std::string& line : TextLines(all)) out += line + "\r\n";
+    *body = out;
+  } else if (n >= 0 && (size_t)n < all.size()) {
+    *body = all.substr(0, (size_t)n);
+  } else {
+    *body = all;
+  }
+  return true;
+}
+
+void FillGopherFind(const Locator& item, GOPHER_FIND_DATAW* fd) {
+  memset(fd, 0, sizeof *fd);
+  std::wstring display = Widen(item.display.c_str());
+  wcsncpy(fd->DisplayString, display.c_str(), MAX_GOPHER_DISPLAY_TEXT);
+  fd->GopherType = item.type;
+  std::wstring loc = Widen(MakeLocator(item.c, item.display, item.selector, item.host, item.port, item.plus).c_str());
+  wcsncpy(fd->Locator, loc.c_str(), MAX_GOPHER_LOCATOR_LENGTH);
+}
+
+void ToGopherFindA(const GOPHER_FIND_DATAW& w, GOPHER_FIND_DATAA* a) {
+  memset(a, 0, sizeof *a);
+  std::string d = Narrow(w.DisplayString), l = Narrow(w.Locator);
+  strncpy(a->DisplayString, d.c_str(), MAX_GOPHER_DISPLAY_TEXT);
+  a->GopherType = w.GopherType;
+  a->SizeLow = w.SizeLow;
+  a->SizeHigh = w.SizeHigh;
+  a->LastModificationTime = w.LastModificationTime;
+  strncpy(a->Locator, l.c_str(), MAX_GOPHER_LOCATOR_LENGTH);
+}
+
+HINTERNET GopherFindFirst(HINTERNET hc, LPCWSTR locator, LPCWSTR search, GOPHER_FIND_DATAW* out, DWORD flags,
+                          DWORD_PTR ctx) {
+  Connection* c = As<Connection>(hc, INTERNET_HANDLE_TYPE_CONNECT_GOPHER);
+  if (!c) return NULL;
+  Locator l;
+  if (!GopherTarget(c, locator, &l)) return NULL;
+  if (!IsGopherDirectory(l.type)) {
+    SetLastError(ERROR_GOPHER_INCORRECT_LOCATOR_TYPE);
+    return NULL;
+  }
+  std::string request = l.selector;
+  if ((l.type & GOPHER_TYPE_INDEX_SERVER) && search && *search) request += "\t" + U(search);
+  int fd = GopherAsk(c, l, request);
+  if (fd < 0) return NULL;
+  std::string text = ReadToEnd(fd);
+  close(fd);
+  Notify(c, INTERNET_STATUS_RESPONSE_RECEIVED);
+  GopherFind* f = NewChild<GopherFind>(c, INTERNET_HANDLE_TYPE_GOPHER_FIND, ctx, flags);
+  for (const std::string& line : TextLines(text)) {
+    Locator item;
+    if (!ParseLocator(line, &item)) continue;
+    GOPHER_FIND_DATAW fd;
+    FillGopherFind(item, &fd);
+    f->entries.push_back(fd);
+  }
+  if (f->entries.empty()) {
+    InternetCloseHandle((HINTERNET)f);
+    SetLastError(ERROR_NO_MORE_FILES);
+    return NULL;
+  }
+  if (out) *out = f->entries[0];
+  f->next = 1;
+  return (HINTERNET)f;
+}
+
+// A menu's lines (or a search's), as a file.
+HINTERNET GopherMenuFile(Connection* c, const Locator& l, const std::string& request, DWORD flags, DWORD_PTR ctx) {
+  int fd = GopherAsk(c, l, request);
+  if (fd < 0) return NULL;
+  GopherFile* f = NewChild<GopherFile>(c, INTERNET_HANDLE_TYPE_GOPHER_FILE, ctx, flags);
+  std::string text = ReadToEnd(fd);
+  close(fd);
+  for (const std::string& line : TextLines(text)) f->pending += line + "\r\n";
+  f->whole = true;
+  return (HINTERNET)f;
+}
+
+HINTERNET GopherOpen(HINTERNET hc, LPCWSTR locator, LPCWSTR view, DWORD flags, DWORD_PTR ctx) {
+  Connection* c = As<Connection>(hc, INTERNET_HANDLE_TYPE_CONNECT_GOPHER);
+  if (!c) return NULL;
+  Locator l;
+  if (!GopherTarget(c, locator, &l)) return NULL;
+  if (!IsGopherFile(l.type)) {
+    SetLastError(ERROR_GOPHER_NOT_FILE);
+    return NULL;
+  }
+  std::string request = l.selector;
+  bool plus = l.plus && view && *view;
+  if (plus) request += "\t+" + U(view);
+  int fd = GopherAsk(c, l, request);
+  if (fd < 0) return NULL;
+  GopherFile* f = NewChild<GopherFile>(c, INTERNET_HANDLE_TYPE_GOPHER_FILE, ctx, flags);
+  if (plus) {
+    if (!GopherPlusBody(fd, &f->pending)) {
+      DWORD e = GetLastError();
+      close(fd);
+      InternetCloseHandle((HINTERNET)f);
+      SetLastError(e);
+      return NULL;
+    }
+    close(fd);
+    f->whole = true;
+  } else if (l.type & GOPHER_TYPE_TEXT_FILE) {
+    // Text ends with a "." line, and a line beginning with a dot has
+    // another in front of it.
+    std::string text = ReadToEnd(fd);
+    close(fd);
+    for (const std::string& line : TextLines(text)) f->pending += line + "\r\n";
+    f->whole = true;
+  } else {
+    f->sock = fd;
+  }
+  return (HINTERNET)f;
+}
+
+BOOL GopherAttribute(HINTERNET hc, LPCWSTR locator, LPCWSTR name, std::string* out) {
+  Connection* c = As<Connection>(hc, INTERNET_HANDLE_TYPE_CONNECT_GOPHER);
+  if (!c) return FALSE;
+  Locator l;
+  if (!GopherTarget(c, locator, &l)) return FALSE;
+  if (!l.plus) {
+    SetLastError(ERROR_GOPHER_NOT_GOPHER_PLUS);
+    return FALSE;
+  }
+  std::string want = name && *name ? U(name) : std::string();
+  if (!want.empty() && want[0] != '+') want = "+" + want;
+  int fd = GopherAsk(c, l, l.selector + "\t!" + want);
+  if (fd < 0) return FALSE;
+  std::string body;
+  BOOL ok = GopherPlusBody(fd, &body);
+  close(fd);
+  if (!ok) return FALSE;
+  // One block: from its "+NAME:" line to the next block.
+  if (!want.empty()) {
+    std::string key = want + ":";
+    size_t at = 0, start = std::string::npos;
+    while (at < body.size()) {
+      if (body.compare(at, key.size(), key) == 0) {
+        start = at;
+        break;
+      }
+      size_t nl = body.find('\n', at);
+      if (nl == std::string::npos) break;
+      at = nl + 1;
+    }
+    if (start == std::string::npos) {
+      SetLastError(ERROR_GOPHER_ATTRIBUTE_NOT_FOUND);
+      return FALSE;
+    }
+    size_t end = start;
+    for (;;) {
+      size_t nl = body.find('\n', end);
+      if (nl == std::string::npos) {
+        end = body.size();
+        break;
+      }
+      end = nl + 1;
+      if (end < body.size() && body[end] == '+') break;
+    }
+    body = body.substr(start, end - start);
+  }
+  *out = body;
+  return TRUE;
+}
+
+template <class C>
+BOOL CreateLocator(const std::string& host, INTERNET_PORT port, const std::string* display,
+                   const std::string* selector, DWORD type, C* buf, LPDWORD len) {
+  if (!len || host.empty()) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  char c = GopherCharOf(type);
+  if (!c) {
+    SetLastError(ERROR_GOPHER_UNKNOWN_LOCATOR);
+    return FALSE;
+  }
+  std::string sel = selector ? *selector : std::string();
+  std::string disp = display ? *display : sel;
+  std::string loc = MakeLocator(c, disp, sel, host, port == INTERNET_INVALID_PORT_NUMBER ? 0 : port,
+                                (type & GOPHER_TYPE_GOPHER_PLUS) != 0);
+  std::basic_string<C> text = Conv(loc, (C*)NULL);
+  if (!buf || *len < text.size() + 1) {
+    *len = (DWORD)text.size() + 1;
+    SetLastError(ERROR_INSUFFICIENT_BUFFER);
+    return FALSE;
+  }
+  memcpy(buf, text.c_str(), (text.size() + 1) * sizeof(C));
+  *len = (DWORD)text.size() + 1;
+  return TRUE;
+}
+
+BOOL LocatorType(const std::string& locator, LPDWORD type) {
+  Locator l;
+  if (!type || !ParseLocator(locator, &l)) {
+    SetLastError(type ? ERROR_GOPHER_INVALID_LOCATOR : ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  if (l.type & GOPHER_TYPE_UNKNOWN) {
+    SetLastError(ERROR_GOPHER_UNKNOWN_LOCATOR);
+    return FALSE;
+  }
+  *type = l.type;
+  return TRUE;
+}
+
+// Attributes into a caller's buffer, in bytes; ERROR_INSUFFICIENT_BUFFER
+// says how many it takes.
+template <class C>
+BOOL PutAttribute(const std::string& text, LPBYTE buf, DWORD cap, LPDWORD got) {
+  std::basic_string<C> t = Conv(text, (C*)NULL);
+  DWORD need = (DWORD)(t.size() * sizeof(C));
+  if (got) *got = need;
+  if (!buf || cap < need + sizeof(C)) {
+    SetLastError(ERROR_INSUFFICIENT_BUFFER);
+    return FALSE;
+  }
+  memcpy(buf, t.c_str(), need + sizeof(C));
+  return TRUE;
+}
+
+
 HINTERNET Open(const std::wstring& agent, DWORD access, DWORD flags) {
   Session* s = new Session;
   s->type = INTERNET_HANDLE_TYPE_INTERNET;
@@ -1385,6 +1790,7 @@ HINTERNET Connect(HINTERNET hs, const std::wstring& server, INTERNET_PORT port, 
   switch (service) {
     case INTERNET_SERVICE_FTP: type = INTERNET_HANDLE_TYPE_CONNECT_FTP; break;
     case INTERNET_SERVICE_HTTP: type = INTERNET_HANDLE_TYPE_CONNECT_HTTP; break;
+    case INTERNET_SERVICE_GOPHER: type = INTERNET_HANDLE_TYPE_CONNECT_GOPHER; break;
     default: SetLastError(ERROR_INTERNET_PROTOCOL_NOT_FOUND); return NULL;
   }
   if (server.empty()) {
@@ -1398,6 +1804,7 @@ HINTERNET Connect(HINTERNET hs, const std::wstring& server, INTERNET_PORT port, 
   c->password = pass;
   c->port = port ? port
                  : service == INTERNET_SERVICE_FTP ? INTERNET_DEFAULT_FTP_PORT
+                 : service == INTERNET_SERVICE_GOPHER ? INTERNET_DEFAULT_GOPHER_PORT
                  : (flags & INTERNET_FLAG_SECURE) ? INTERNET_DEFAULT_HTTPS_PORT
                                                   : INTERNET_DEFAULT_HTTP_PORT;
   if (service != INTERNET_SERVICE_FTP) return (HINTERNET)c;
@@ -1492,6 +1899,33 @@ HINTERNET OpenUrl(HINTERNET hs, const std::string& url, const std::string& heade
       ((Handle*)f)->ownsParent = true;
       return f;
     }
+    case INTERNET_SCHEME_GOPHER: {
+      // gopher://host:port/Tselector, the type's character first, and a
+      // search after a tab (%09). A menu or a search's results come as a
+      // file of the menu's lines.
+      HINTERNET c = Connect(hs, Widen(u.host.c_str()), u.port, L"", L"", INTERNET_SERVICE_GOPHER, 0, ctx);
+      if (!c) return NULL;
+      Connection* conn = (Connection*)c;
+      std::string path = Decode(u.path + u.extra);
+      Locator l;
+      l.c = path.size() > 1 ? path[1] : '1';
+      l.type = GopherTypeOf(l.c);
+      l.selector = path.size() > 2 ? path.substr(2) : std::string();
+      l.host = U(conn->server.c_str());
+      l.port = conn->port;
+      HINTERNET f = IsGopherDirectory(l.type) ? GopherMenuFile(conn, l, l.selector, flags, ctx)
+                                              : GopherOpen(c, Widen(MakeLocator(l.c, "", l.selector, l.host, l.port,
+                                                                                false).c_str()).c_str(),
+                                                           NULL, flags, ctx);
+      if (!f) {
+        DWORD e = GetLastError();
+        InternetCloseHandle(c);
+        SetLastError(e);
+        return NULL;
+      }
+      ((Handle*)f)->ownsParent = true;
+      return f;
+    }
     case INTERNET_SCHEME_UNKNOWN: SetLastError(ERROR_INTERNET_UNRECOGNIZED_SCHEME); return NULL;
     default: SetLastError(ERROR_INTERNET_UNRECOGNIZED_SCHEME); return NULL;
   }
@@ -1521,8 +1955,6 @@ BOOL CrackPart(const C* url, size_t at, const std::basic_string<C>& value, bool 
   return TRUE;
 }
 
-std::basic_string<char> Conv(const std::string& s, char*) { return s; }
-std::basic_string<wchar_t> Conv(const std::string& s, wchar_t*) { return Widen(s.c_str()); }
 
 template <class C, class UC>
 BOOL Crack(const C* url, DWORD urlLen, DWORD flags, UC* uc) {
@@ -1742,6 +2174,12 @@ BOOL WINAPI InternetCloseHandle(HINTERNET hi) {
       break;
     }
     case INTERNET_HANDLE_TYPE_FTP_FILE: ok = CloseFtpFile((FtpFile*)h); break;
+    case INTERNET_HANDLE_TYPE_GOPHER_FILE: {
+      GopherFile* f = (GopherFile*)h;
+      if (f->sock >= 0) close(f->sock);
+      f->sock = -1;
+      break;
+    }
     case INTERNET_HANDLE_TYPE_CONNECT_FTP: {
       Connection* c = (Connection*)h;
       if (c->control >= 0) {
@@ -1887,6 +2325,26 @@ BOOL WINAPI InternetReadFile(HINTERNET hi, LPVOID buf, DWORD want, LPDWORD got) 
     *got = total;
     return TRUE;
   }
+  if (h->type == INTERNET_HANDLE_TYPE_GOPHER_FILE) {
+    GopherFile* f = (GopherFile*)h;
+    DWORD total = 0;
+    size_t n = std::min(f->pending.size(), (size_t)want);
+    memcpy(buf, f->pending.data(), n);
+    f->pending.erase(0, n);
+    total = (DWORD)n;
+    while (total < want && f->sock >= 0) {
+      ssize_t r = recv(f->sock, (char*)buf + total, want - total, 0);
+      if (r < 0 && errno == EINTR) continue;
+      if (r <= 0) {
+        close(f->sock);
+        f->sock = -1;
+        break;
+      }
+      total += (DWORD)r;
+    }
+    *got = total;
+    return TRUE;
+  }
   SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
   return FALSE;
 }
@@ -1985,6 +2443,28 @@ BOOL WINAPI InternetQueryDataAvailable(HINTERNET hi, LPDWORD avail, DWORD, DWORD
     if (poll(&p, 1, -1) == 1 && ioctl(f->data, FIONREAD, &n) == 0) *avail = (DWORD)n;
     return TRUE;
   }
+  if (h->type == INTERNET_HANDLE_TYPE_GOPHER_FILE) {
+    GopherFile* f = (GopherFile*)h;
+    if (f->pending.empty() && f->sock >= 0) {
+      char tmp[4096];
+      ssize_t r;
+      while ((r = recv(f->sock, tmp, sizeof tmp, 0)) < 0 && errno == EINTR) {
+      }
+      if (r > 0) {
+        f->pending.assign(tmp, (size_t)r);
+      } else {
+        close(f->sock);
+        f->sock = -1;
+      }
+    }
+    *avail = (DWORD)f->pending.size();
+    return TRUE;
+  }
+  if (h->type == INTERNET_HANDLE_TYPE_GOPHER_FIND) {
+    GopherFind* f = (GopherFind*)h;
+    *avail = (DWORD)((f->entries.size() - f->next) * sizeof(GOPHER_FIND_DATAW));
+    return TRUE;
+  }
   if (h->type == INTERNET_HANDLE_TYPE_FTP_FIND) {
     FtpFind* f = (FtpFind*)h;
     *avail = (DWORD)((f->entries.size() - f->next) * sizeof(WIN32_FIND_DATAW));
@@ -1995,6 +2475,17 @@ BOOL WINAPI InternetQueryDataAvailable(HINTERNET hi, LPDWORD avail, DWORD, DWORD
 }
 
 BOOL WINAPI InternetFindNextFileW(HINTERNET hi, LPVOID out) {
+  Handle* h = InetHandle(hi);
+  if (h && h->type == INTERNET_HANDLE_TYPE_GOPHER_FIND) {
+    GopherFind* g = (GopherFind*)h;
+    if (g->next >= g->entries.size()) {
+      SetLastError(ERROR_NO_MORE_FILES);
+      return FALSE;
+    }
+    if (out) *(GOPHER_FIND_DATAW*)out = g->entries[g->next];
+    g->next++;
+    return TRUE;
+  }
   FtpFind* f = As<FtpFind>(hi, INTERNET_HANDLE_TYPE_FTP_FIND);
   if (!f) return FALSE;
   if (f->next >= f->entries.size()) {
@@ -2006,6 +2497,13 @@ BOOL WINAPI InternetFindNextFileW(HINTERNET hi, LPVOID out) {
   return TRUE;
 }
 BOOL WINAPI InternetFindNextFileA(HINTERNET hi, LPVOID out) {
+  Handle* h = InetHandle(hi);
+  if (h && h->type == INTERNET_HANDLE_TYPE_GOPHER_FIND) {
+    GOPHER_FIND_DATAW g;
+    if (!InternetFindNextFileW(hi, &g)) return FALSE;
+    if (out) ToGopherFindA(g, (GOPHER_FIND_DATAA*)out);
+    return TRUE;
+  }
   WIN32_FIND_DATAW w;
   if (!InternetFindNextFileW(hi, &w)) return FALSE;
   if (out) ToFindDataA(w, (WIN32_FIND_DATAA*)out);
@@ -2283,6 +2781,60 @@ BOOL WINAPI FtpGetCurrentDirectoryA(HINTERNET hc, LPSTR buf, LPDWORD len) {
   strcpy(buf, d.c_str());
   *len = (DWORD)d.size();
   return TRUE;
+}
+
+// Gopher
+
+BOOL WINAPI GopherCreateLocatorW(LPCWSTR host, INTERNET_PORT port, LPCWSTR display, LPCWSTR selector, DWORD type,
+                                 LPWSTR buf, LPDWORD len) {
+  std::string d = U(display), sel = U(selector);
+  return CreateLocator<wchar_t>(U(host), port, display ? &d : NULL, selector ? &sel : NULL, type, buf, len);
+}
+BOOL WINAPI GopherCreateLocatorA(LPCSTR host, INTERNET_PORT port, LPCSTR display, LPCSTR selector, DWORD type,
+                                 LPSTR buf, LPDWORD len) {
+  std::string d = display ? display : "", sel = selector ? selector : "";
+  return CreateLocator<char>(host ? host : "", port, display ? &d : NULL, selector ? &sel : NULL, type, buf, len);
+}
+
+BOOL WINAPI GopherGetLocatorTypeW(LPCWSTR locator, LPDWORD type) { return LocatorType(U(locator), type); }
+BOOL WINAPI GopherGetLocatorTypeA(LPCSTR locator, LPDWORD type) {
+  return LocatorType(locator ? locator : "", type);
+}
+
+HINTERNET WINAPI GopherFindFirstFileW(HINTERNET hc, LPCWSTR locator, LPCWSTR search, LPGOPHER_FIND_DATAW out,
+                                      DWORD flags, DWORD_PTR ctx) {
+  return GopherFindFirst(hc, locator, search, out, flags, ctx);
+}
+HINTERNET WINAPI GopherFindFirstFileA(HINTERNET hc, LPCSTR locator, LPCSTR search, LPGOPHER_FIND_DATAA out,
+                                      DWORD flags, DWORD_PTR ctx) {
+  std::wstring l = W(locator), q = W(search);
+  GOPHER_FIND_DATAW w;
+  HINTERNET h = GopherFindFirst(hc, locator ? l.c_str() : NULL, search ? q.c_str() : NULL, &w, flags, ctx);
+  if (h && out) ToGopherFindA(w, out);
+  return h;
+}
+
+HINTERNET WINAPI GopherOpenFileW(HINTERNET hc, LPCWSTR locator, LPCWSTR view, DWORD flags, DWORD_PTR ctx) {
+  return GopherOpen(hc, locator, view, flags, ctx);
+}
+HINTERNET WINAPI GopherOpenFileA(HINTERNET hc, LPCSTR locator, LPCSTR view, DWORD flags, DWORD_PTR ctx) {
+  std::wstring l = W(locator), v = W(view);
+  return GopherOpen(hc, locator ? l.c_str() : NULL, view ? v.c_str() : NULL, flags, ctx);
+}
+
+// The attributes as text; an enumerator is not called.
+BOOL WINAPI GopherGetAttributeW(HINTERNET hc, LPCWSTR locator, LPCWSTR name, LPBYTE buf, DWORD cap, LPDWORD got,
+                                LPVOID, DWORD_PTR) {
+  std::string text;
+  if (!GopherAttribute(hc, locator, name, &text)) return FALSE;
+  return PutAttribute<wchar_t>(text, buf, cap, got);
+}
+BOOL WINAPI GopherGetAttributeA(HINTERNET hc, LPCSTR locator, LPCSTR name, LPBYTE buf, DWORD cap, LPDWORD got,
+                                LPVOID, DWORD_PTR) {
+  std::wstring l = W(locator), n = W(name);
+  std::string text;
+  if (!GopherAttribute(hc, locator ? l.c_str() : NULL, name ? n.c_str() : NULL, &text)) return FALSE;
+  return PutAttribute<char>(text, buf, cap, got);
 }
 
 }  // extern "C"
