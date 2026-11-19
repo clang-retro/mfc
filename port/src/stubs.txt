@@ -5,38 +5,6 @@
 # Part of clang-retro MFC, an independent implementation of the MFC API.
 # SPDX-License-Identifier: AGPL-3.0-only
 
-SQLAllocHandle
-SQLBindParameter
-SQLCancel
-SQLDescribeColA
-SQLDescribeColW
-SQLDisconnect
-SQLDriverConnectA
-SQLDriverConnectW
-SQLEndTran
-SQLExecDirectA
-SQLExecDirectW
-SQLExecute
-SQLFetch
-SQLFetchScroll
-SQLFreeHandle
-SQLGetData
-SQLGetDiagRecA
-SQLGetDiagRecW
-SQLGetInfoA
-SQLGetInfoW
-SQLGetStmtAttrA
-SQLGetStmtAttrW
-SQLMoreResults
-SQLNumResultCols
-SQLPrepareA
-SQLPrepareW
-SQLRowCount
-SQLSetConnectAttrA
-SQLSetConnectAttrW
-SQLSetEnvAttr
-SQLSetStmtAttrA
-SQLSetStmtAttrW
 WinHelpA
 WinHelpW
 

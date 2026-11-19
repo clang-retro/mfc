@@ -146,9 +146,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      # odbctest's driver manager and SQLite driver.
+      - name: Install unixODBC and the SQLite driver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends unixodbc libsqliteodbc
       - name: Build
         run: make -j"$(nproc)" TARGET=x86_64-linux-gnu STDLIB= AR=ar
       - name: Test
+        env:
+          MFC_TEST_ODBC: 1
         run: make check TARGET=x86_64-linux-gnu STDLIB= AR=ar
       - uses: actions/upload-artifact@v4
         if: always()
@@ -163,6 +170,15 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      # odbctest's driver manager and SQLite driver; without them it skips.
+      - name: Install unixODBC and the SQLite driver
+        run: |
+          if brew install unixodbc sqliteodbc; then
+            echo "MFC_TEST_ODBC=1" >> "$GITHUB_ENV"
+            echo "MFC_TEST_ODBC_DRIVER=$(brew --prefix)/lib/libsqlite3odbc.dylib" >> "$GITHUB_ENV"
+          else
+            echo "::warning::no unixODBC or SQLite driver; odbctest skips"
+          fi
       - name: Build
         run: make -j"$(sysctl -n hw.ncpu)" TARGET=arm64-apple-macos11 STDLIB= AR=ar
       - name: Test
