@@ -36,16 +36,3 @@ extern "C" void _WinportStub(const char* name, bool* reported);
     return -1;                        \
   }
 
-STUB_ZERO(WinHelpA)
-STUB_ZERO(WinHelpW)
-STUB_ZERO(GopherCreateLocatorA)
-STUB_ZERO(GopherCreateLocatorW)
-STUB_ZERO(GopherFindFirstFileA)
-STUB_ZERO(GopherFindFirstFileW)
-STUB_ZERO(GopherGetAttributeA)
-STUB_ZERO(GopherGetAttributeW)
-STUB_ZERO(GopherGetLocatorTypeA)
-STUB_ZERO(GopherGetLocatorTypeW)
-STUB_ZERO(GopherOpenFileA)
-STUB_ZERO(GopherOpenFileW)
-STUB_HRESULT(CoInternetCreateSecurityManager)

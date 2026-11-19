@@ -2156,6 +2156,140 @@ static void RunPlainDHtmlDialog(CWnd* pParent) {
   pDoc->Release();
 }
 
+// The internet security manager: zones, what they allow, the mappings,
+// and a service provider's own manager asked first.
+class CCustomZones : public IInternetSecurityManager, public IServiceProvider {
+public:
+  ULONG m_nRefs = 1;
+  int m_nAsked = 0;
+  STDMETHOD(QueryInterface)(REFIID riid, void** ppv) {
+    if (IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_IInternetSecurityManager))
+      *ppv = static_cast<IInternetSecurityManager*>(this);
+    else if (IsEqualIID(riid, IID_IServiceProvider))
+      *ppv = static_cast<IServiceProvider*>(this);
+    else {
+      *ppv = NULL;
+      return E_NOINTERFACE;
+    }
+    AddRef();
+    return S_OK;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return ++m_nRefs; }
+  STDMETHOD_(ULONG, Release)() { return --m_nRefs; }
+  STDMETHOD(QueryService)(REFGUID guid, REFIID riid, void** ppv) {
+    if (IsEqualGUID(guid, SID_SInternetSecurityManager)) return QueryInterface(riid, ppv);
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD(SetSecuritySite)(IInternetSecurityMgrSite*) { return INET_E_DEFAULT_ACTION; }
+  STDMETHOD(GetSecuritySite)(IInternetSecurityMgrSite**) { return INET_E_DEFAULT_ACTION; }
+  // One host of its own, trusted; the rest as usual.
+  STDMETHOD(MapUrlToZone)(LPCWSTR pwszUrl, DWORD* pdwZone, DWORD) {
+    m_nAsked++;
+    if (wcsstr(pwszUrl, L"custom.example") == NULL) return INET_E_DEFAULT_ACTION;
+    *pdwZone = URLZONE_TRUSTED;
+    return S_OK;
+  }
+  STDMETHOD(GetSecurityId)(LPCWSTR, BYTE*, DWORD*, DWORD_PTR) { return INET_E_DEFAULT_ACTION; }
+  STDMETHOD(ProcessUrlAction)(LPCWSTR, DWORD, BYTE*, DWORD, BYTE*, DWORD, DWORD, DWORD) {
+    return INET_E_DEFAULT_ACTION;
+  }
+  STDMETHOD(QueryCustomPolicy)(LPCWSTR, REFGUID, BYTE**, DWORD*, BYTE*, DWORD, DWORD) {
+    return INET_E_DEFAULT_ACTION;
+  }
+  STDMETHOD(SetZoneMapping)(DWORD, LPCWSTR, DWORD) { return INET_E_DEFAULT_ACTION; }
+  STDMETHOD(GetZoneMappings)(DWORD, IEnumString**, DWORD) { return INET_E_DEFAULT_ACTION; }
+};
+
+static DWORD ZoneOf(IInternetSecurityManager* pMgr, LPCWSTR pszUrl) {
+  DWORD dwZone = (DWORD)URLZONE_INVALID;
+  if (FAILED(pMgr->MapUrlToZone(pszUrl, &dwZone, 0))) return (DWORD)URLZONE_INVALID;
+  return dwZone;
+}
+
+static void TestSecurityManager() {
+  IInternetSecurityManager* pMgr = NULL;
+  CHECK(SUCCEEDED(::CoInternetCreateSecurityManager(NULL, &pMgr, 0)) && pMgr != NULL);
+  if (pMgr == NULL) return;
+  CHECK(ZoneOf(pMgr, L"http://www.example.com/page.htm") == URLZONE_INTERNET);
+  DWORD dwZone = 0;
+  CHECK(FAILED(pMgr->MapUrlToZone(NULL, &dwZone, 0)));
+#ifdef _WINPORT
+  // (Windows and Wine have settings of their own for these.)
+  CHECK(ZoneOf(pMgr, L"file:///home/me/page.htm") == URLZONE_LOCAL_MACHINE);
+  CHECK(ZoneOf(pMgr, L"C:\\pages\\page.htm") == URLZONE_LOCAL_MACHINE);
+  CHECK(ZoneOf(pMgr, L"res://htmltest.exe/page.htm") == URLZONE_LOCAL_MACHINE);
+  CHECK(ZoneOf(pMgr, L"\\\\server\\share\\page.htm") == URLZONE_INTRANET);
+  CHECK(ZoneOf(pMgr, L"http://intranet/") == URLZONE_INTRANET);
+  CHECK(ZoneOf(pMgr, L"https://user@www.example.com:8443/x") == URLZONE_INTERNET);
+
+  // What a zone allows.
+  DWORD dwPolicy = 0xFF;
+  CHECK(pMgr->ProcessUrlAction(L"http://www.example.com/", URLACTION_SCRIPT_RUN, (BYTE*)&dwPolicy,
+                               sizeof(dwPolicy), NULL, 0, PUAF_NOUI, 0) == S_OK);
+  CHECK(dwPolicy == URLPOLICY_ALLOW);
+  CHECK(pMgr->ProcessUrlAction(L"http://www.example.com/", URLACTION_DOWNLOAD_UNSIGNED_ACTIVEX,
+                               (BYTE*)&dwPolicy, sizeof(dwPolicy), NULL, 0, PUAF_NOUI, 0) == E_ACCESSDENIED);
+  CHECK(dwPolicy == URLPOLICY_DISALLOW);
+  CHECK(pMgr->ProcessUrlAction(L"file:///home/me/page.htm", URLACTION_DOWNLOAD_UNSIGNED_ACTIVEX,
+                               (BYTE*)&dwPolicy, sizeof(dwPolicy), NULL, 0, PUAF_NOUI, 0) == S_OK);
+
+  // The security id: "scheme:host" and the zone.
+  BYTE id[MAX_SIZE_SECURITY_ID];
+  DWORD cb = sizeof(id);
+  CHECK(pMgr->GetSecurityId(L"http://www.example.com/a/b", id, &cb, 0) == S_OK);
+  CHECK(cb == 24 && memcmp(id, "http:www.example.com", 20) == 0 && id[20] == URLZONE_INTERNET && id[21] == 0);
+  DWORD cbSmall = 4;
+  CHECK(FAILED(pMgr->GetSecurityId(L"http://www.example.com/", id, &cbSmall, 0)) && cbSmall == 24);
+
+  // A mapping: the domain and its hosts, any scheme.
+  CHECK(pMgr->SetZoneMapping(URLZONE_TRUSTED, L"*.trusted.example", SZM_CREATE) == S_OK);
+  CHECK(pMgr->SetZoneMapping(URLZONE_TRUSTED, L"*.trusted.example", SZM_CREATE) ==
+        HRESULT_FROM_WIN32(ERROR_FILE_EXISTS));
+  CHECK(pMgr->SetZoneMapping(URLZONE_UNTRUSTED, L"http://bad.example", SZM_CREATE) == S_OK);
+  CHECK(ZoneOf(pMgr, L"https://www.trusted.example/") == URLZONE_TRUSTED);
+  CHECK(ZoneOf(pMgr, L"http://trusted.example/") == URLZONE_TRUSTED);
+  CHECK(ZoneOf(pMgr, L"http://nottrusted.example/") == URLZONE_INTERNET);
+  CHECK(ZoneOf(pMgr, L"http://bad.example/") == URLZONE_UNTRUSTED);
+  CHECK(ZoneOf(pMgr, L"https://bad.example/") == URLZONE_INTERNET);  // http only
+  CHECK(pMgr->ProcessUrlAction(L"http://bad.example/", URLACTION_SCRIPT_RUN, (BYTE*)&dwPolicy,
+                               sizeof(dwPolicy), NULL, 0, PUAF_NOUI, 0) == E_ACCESSDENIED);
+  IEnumString* pEnum = NULL;
+  CHECK(pMgr->GetZoneMappings(URLZONE_TRUSTED, &pEnum, 0) == S_OK && pEnum != NULL);
+  if (pEnum != NULL) {
+    LPOLESTR psz = NULL;
+    ULONG n = 0;
+    CHECK(pEnum->Next(1, &psz, &n) == S_OK && n == 1 && wcscmp(psz, L"*.trusted.example") == 0);
+    ::CoTaskMemFree(psz);
+    CHECK(pEnum->Next(1, &psz, &n) == S_FALSE && n == 0);
+    pEnum->Release();
+  }
+  CHECK(pMgr->SetZoneMapping(URLZONE_TRUSTED, L"*.trusted.example", SZM_DELETE) == S_OK);
+  CHECK(pMgr->SetZoneMapping(URLZONE_UNTRUSTED, L"http://bad.example", SZM_DELETE) == S_OK);
+  CHECK(ZoneOf(pMgr, L"https://www.trusted.example/") == URLZONE_INTERNET);
+  CHECK(FAILED(pMgr->SetZoneMapping(URLZONE_TRUSTED, L"*.trusted.example", SZM_DELETE)));
+#endif
+  pMgr->Release();
+
+  // A provider's own manager comes first (not in Wine's, which never
+  // asks the provider).
+  BOOL bWine = ::GetProcAddress(::GetModuleHandleA("ntdll.dll"), "wine_get_version") != NULL;
+  CCustomZones custom;
+  CHECK(SUCCEEDED(::CoInternetCreateSecurityManager(&custom, &pMgr, 0)) && pMgr != NULL);
+  if (pMgr != NULL) {
+    DWORD dwCustom = ZoneOf(pMgr, L"http://custom.example/");
+    CHECK(ZoneOf(pMgr, L"http://www.example.com/") == URLZONE_INTERNET);
+    if (bWine) {
+      TestLog("note: Wine's security manager did not ask the provider's (zone %lu)", (unsigned long)dwCustom);
+    } else {
+      CHECK(dwCustom == URLZONE_TRUSTED);
+      CHECK(custom.m_nAsked == 2);
+    }
+    pMgr->Release();
+  }
+  CHECK(custom.m_nRefs == 1);
+}
+
 void TestDHtmlDialog(CWnd* pParent) {
   RunDHtmlDialog(pParent);
   RunMultiPageDialog(pParent);
@@ -2759,6 +2893,7 @@ public:
       return FALSE;
     }
     AfxEnableControlContainer();
+    TestSecurityManager();
     WNDCLASS wc;
     memset(&wc, 0, sizeof(wc));
     wc.lpfnWndProc = BrowserWndProc;
