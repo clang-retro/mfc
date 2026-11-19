@@ -6,7 +6,10 @@
 // not open, which COM makes and loads from the file. It checks the item's
 // moniker, data and notifications, the Link Source data Paste Link uses,
 // the shell registration that finds the file's class, and links to an
-// object embedded in a container's document ("file!Embedding 1").
+// object embedded in a container's document ("file!Embedding 1"). Then
+// the objects a container makes from the file: a link (saved, loaded and
+// bound again), a copy embedded from it, a link from Link Source data,
+// and a storage's class converted by the registry's AutoConvertTo.
 #include <afxwin.h>
 #include <afxext.h>
 #include <afxole.h>
@@ -257,6 +260,7 @@ public:
   void TestClosedDocument();
   void TestEmbeddedObject();
   void TestDialogs(CCntrDoc* pCntr, COleClientItem* pClient);
+  void TestLinkObjects();
   void TestMessageFilter();
 };
 
@@ -680,6 +684,201 @@ void CLinkApp::TestDialogs(CCntrDoc* pCntr, COleClientItem* pClient) {
   pLink->Delete();
 }
 
+// A storage in memory, for an object of its own.
+static LPSTORAGE MemoryStorage() {
+  LPLOCKBYTES lpBytes = NULL;
+  LPSTORAGE lpStg = NULL;
+  if (SUCCEEDED(::CreateILockBytesOnHGlobal(NULL, TRUE, &lpBytes)))
+    ::StgCreateDocfileOnILockBytes(lpBytes, STGM_CREATE | STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0,
+                                   &lpStg);
+  if (lpBytes != NULL) lpBytes->Release();
+  return lpStg;
+}
+
+static BOOL IsWine() {
+  return ::GetProcAddress(::GetModuleHandleA("ntdll.dll"), "wine_get_version") != NULL;
+}
+
+static BOOL IsLink(LPUNKNOWN lpObject) {
+  LPOLELINK lpLink = NULL;
+  if (lpObject == NULL || FAILED(lpObject->QueryInterface(IID_IOleLink, (void**)&lpLink)))
+    return FALSE;
+  lpLink->Release();
+  return TRUE;
+}
+
+// Links and objects made from the square's file, through the OLE calls
+// COleClientItem makes: each keeps a picture of its own, and needs no
+// document open once made. Wine has some of them only as E_NOTIMPL, or
+// makes something else; under Wine those are noted, not checked.
+void CLinkApp::TestLinkObjects() {
+  CStringW strPathW(m_strPath);
+  CHECK(g_nDocs == 0);
+
+  // A link to the file, saved and loaded again.
+  LPSTORAGE lpStg = MemoryStorage();
+  LPOLEOBJECT lpObj = NULL;
+  HRESULT hr = ::OleCreateLinkToFile(strPathW, IID_IOleObject, OLERENDER_DRAW, NULL, NULL, lpStg,
+                                     (void**)&lpObj);
+  TestLog("OleCreateLinkToFile: %08lx, documents %d", (unsigned long)hr, g_nDocs);
+  if (hr == E_NOTIMPL) {
+    TestLog("note: no OleCreateLinkToFile");
+  } else {
+    CHECK(SUCCEEDED(hr) && IsLink(lpObj) && g_nDocs == 0);
+    CHECK(PictureColor(lpObj) == g_colors[2]);
+    CLSID clsid = CLSID_NULL;
+    CHECK(lpObj != NULL && lpObj->GetUserClassID(&clsid) == S_OK && clsid == CLSID_LinkDoc);
+    LPPERSISTSTORAGE lpPersist = NULL;
+    if (lpObj != NULL && SUCCEEDED(lpObj->QueryInterface(IID_IPersistStorage, (void**)&lpPersist))) {
+      CHECK(::OleSave(lpPersist, lpStg, TRUE) == S_OK);
+      lpPersist->SaveCompleted(NULL);
+      lpPersist->Release();
+    }
+    if (lpObj != NULL) lpObj->Release();
+    lpObj = NULL;
+    hr = ::OleLoad(lpStg, IID_IOleObject, NULL, (void**)&lpObj);
+    TestLog("OleLoad link: %08lx", (unsigned long)hr);
+    CHECK(SUCCEEDED(hr) && IsLink(lpObj) && g_nDocs == 0);
+    CHECK(PictureColor(lpObj) == g_colors[2]);
+    LPOLELINK lpLink = NULL;
+    if (lpObj != NULL && SUCCEEDED(lpObj->QueryInterface(IID_IOleLink, (void**)&lpLink))) {
+      LPOLESTR pszName = NULL;
+      CHECK(lpLink->GetSourceDisplayName(&pszName) == S_OK && pszName != NULL &&
+            AfxComparePath(CString(pszName), m_strPath));
+      ::CoTaskMemFree(pszName);
+      DWORD dwOpt = 0;
+      CHECK(lpLink->GetUpdateOptions(&dwOpt) == S_OK && dwOpt == OLEUPDATE_ALWAYS);
+      // Not running: bound only when asked for.
+      CHECK(lpLink->BindIfRunning() != S_OK && g_nDocs == 0);
+      CHECK(lpLink->BindToSource(0, NULL) == S_OK && g_nDocs == 1);
+      LPUNKNOWN lpSource = NULL;
+      CHECK(lpLink->GetBoundSource(&lpSource) == S_OK && lpSource != NULL);
+      if (lpSource != NULL) lpSource->Release();
+      CHECK(lpObj->Update() == S_OK && PictureColor(lpObj) == g_colors[2]);
+      CHECK(lpObj->Close(OLECLOSE_NOSAVE) == S_OK);
+      TestLog("link closed: documents %d", g_nDocs);
+      CHECK(g_nDocs == 0);
+      lpLink->Release();
+    }
+    if (lpObj != NULL) lpObj->Release();
+    lpObj = NULL;
+  }
+  if (lpStg != NULL) lpStg->Release();
+
+  // An object embedded from the file: a copy, not a link.
+  lpStg = MemoryStorage();
+  hr = ::OleCreateFromFile(CLSID_NULL, strPathW, IID_IOleObject, OLERENDER_DRAW, NULL, NULL, lpStg,
+                           (void**)&lpObj);
+  TestLog("OleCreateFromFile: %08lx, documents %d", (unsigned long)hr, g_nDocs);
+  if (hr == E_NOTIMPL || (IsWine() && (FAILED(hr) || g_nDocs != 1))) {
+    TestLog("note: OleCreateFromFile not checked");
+    if (lpObj != NULL) {
+      lpObj->Close(OLECLOSE_NOSAVE);
+      lpObj->Release();
+      lpObj = NULL;
+    }
+  } else {
+    // The class is this program's, so the object is its document itself
+    // (as a local server's in the same program is), embedded, loaded
+    // from the copy; the file's own document has gone.
+    CHECK(SUCCEEDED(hr) && lpObj != NULL && !IsLink(lpObj) && g_nDocs == 1);
+    CHECK(PictureColor(lpObj) == g_colors[2]);
+    CLSID clsid = CLSID_NULL;
+    CHECK(::ReadClassStg(lpStg, &clsid) == S_OK && clsid == CLSID_LinkDoc);
+    if (lpObj != NULL) {
+      POSITION pos = m_pTemplate->GetFirstDocPosition();
+      CLinkDoc* pDoc = pos != NULL ? (CLinkDoc*)m_pTemplate->GetNextDoc(pos) : NULL;
+      CHECK(pDoc != NULL && pDoc->IsEmbedded() && pDoc->m_nColor == 2);
+      lpObj->Close(OLECLOSE_NOSAVE);
+      lpObj->Release();
+      lpObj = NULL;
+    }
+    CHECK(g_nDocs == 0);
+  }
+  if (lpStg != NULL) lpStg->Release();
+
+  // A link from Link Source data, as Paste Link makes one.
+  COleDataSource* pSource = new COleDataSource;
+  LPMONIKER lpFile = FileMoniker(m_strPath);
+  LPSTREAM lpStream = NULL;
+  if (SUCCEEDED(::CreateStreamOnHGlobal(NULL, TRUE, &lpStream)) &&
+      SUCCEEDED(::OleSaveToStream(lpFile, lpStream)) &&
+      SUCCEEDED(::WriteClassStm(lpStream, CLSID_LinkDoc))) {
+    LARGE_INTEGER zero;
+    zero.QuadPart = 0;
+    lpStream->Seek(zero, STREAM_SEEK_SET, NULL);
+    STGMEDIUM medium;
+    medium.tymed = TYMED_ISTREAM;
+    medium.pstm = lpStream;
+    medium.pUnkForRelease = NULL;
+    FORMATETC fe = {(CLIPFORMAT)::RegisterClipboardFormat(_T("Link Source")), NULL,
+                    DVASPECT_CONTENT, -1, TYMED_ISTREAM};
+    pSource->CacheData(fe.cfFormat, &medium, &fe);
+    lpStream = NULL;
+  }
+  if (lpStream != NULL) lpStream->Release();
+  LPDATAOBJECT lpData = (LPDATAOBJECT)pSource->GetInterface(&IID_IDataObject);
+  CHECK(::OleQueryLinkFromData(lpData) == S_OK);
+  lpStg = MemoryStorage();
+  hr = ::OleCreateLinkFromData(lpData, IID_IOleObject, OLERENDER_DRAW, NULL, NULL, lpStg,
+                               (void**)&lpObj);
+  TestLog("OleCreateLinkFromData: %08lx, documents %d", (unsigned long)hr, g_nDocs);
+  if (hr == E_NOTIMPL || (IsWine() && (FAILED(hr) || !IsLink(lpObj)))) {
+    TestLog("note: OleCreateLinkFromData not checked");
+    if (lpObj != NULL) {
+      lpObj->Close(OLECLOSE_NOSAVE);
+      lpObj->Release();
+      lpObj = NULL;
+    }
+  } else {
+    CHECK(SUCCEEDED(hr) && IsLink(lpObj) && g_nDocs == 0);
+    CHECK(PictureColor(lpObj) == g_colors[2]);
+    LPOLELINK lpLink = NULL;
+    if (lpObj != NULL && SUCCEEDED(lpObj->QueryInterface(IID_IOleLink, (void**)&lpLink))) {
+      LPMONIKER lpMoniker = NULL;
+      CHECK(lpLink->GetSourceMoniker(&lpMoniker) == S_OK && lpMoniker != NULL &&
+            lpMoniker->IsEqual(lpFile) == S_OK);
+      if (lpMoniker != NULL) lpMoniker->Release();
+      lpLink->Release();
+    }
+    if (lpObj != NULL) lpObj->Release();
+    lpObj = NULL;
+  }
+  if (lpStg != NULL) lpStg->Release();
+  pSource->InternalRelease();
+  if (lpFile != NULL) lpFile->Release();
+
+  // Auto convert: nothing to convert to, then the class's AutoConvertTo.
+  lpStg = MemoryStorage();
+  ::WriteClassStg(lpStg, CLSID_LinkDoc);
+  ::WriteFmtUserTypeStg(lpStg, 0, const_cast<LPOLESTR>(L"LinkTest Document"));
+  CLSID clsidNew = CLSID_NULL;
+  hr = ::OleDoAutoConvert(lpStg, &clsidNew);
+  TestLog("OleDoAutoConvert, none: %08lx", (unsigned long)hr);
+  CHECK(FAILED(hr) && (IsWine() || clsidNew == CLSID_LinkDoc));
+  // {4C1A7E93-3B5D-4F08-A6C3-9E2D71B05F44}
+  static const CLSID clsidNext = {
+      0x4c1a7e93, 0x3b5d, 0x4f08, {0xa6, 0xc3, 0x9e, 0x2d, 0x71, 0xb0, 0x5f, 0x44}};
+  OLECHAR szDoc[40], szNext[40];
+  ::StringFromGUID2(CLSID_LinkDoc, szDoc, 40);
+  ::StringFromGUID2(clsidNext, szNext, 40);
+  CString strKey = CString(_T("CLSID\\")) + CString(szDoc) + _T("\\AutoConvertTo");
+  CString strNext(szNext);
+  ::RegSetValue(HKEY_CLASSES_ROOT, strKey, REG_SZ, strNext, 0);
+  hr = ::OleDoAutoConvert(lpStg, &clsidNew);
+  TestLog("OleDoAutoConvert: %08lx", (unsigned long)hr);
+  if (IsWine() && hr != S_OK) {
+    TestLog("note: OleDoAutoConvert not checked");
+  } else {
+    CHECK(hr == S_OK && clsidNew == clsidNext);
+    CLSID clsid = CLSID_NULL;
+    CHECK(::ReadClassStg(lpStg, &clsid) == S_OK && clsid == clsidNext);
+    CHECK(::GetConvertStg(lpStg) == S_OK);
+  }
+  ::RegDeleteKey(HKEY_CLASSES_ROOT, strKey);
+  lpStg->Release();
+}
+
 // The thread's message filter, made by AfxOleInit: busy, it refuses new
 // calls; a refused call of its own is retried, then the user decides.
 void CLinkApp::TestMessageFilter() {
@@ -761,6 +960,7 @@ BOOL CLinkApp::InitInstance() {
   TestRegistry();
   TestClosedDocument();
   TestEmbeddedObject();
+  TestLinkObjects();
   TestMessageFilter();
 
   pFrame->DestroyWindow();

@@ -133,5 +133,10 @@ HRESULT CopyMedium(STGMEDIUM* dst, const STGMEDIUM* src, CLIPFORMAT cf);
 // for CoGetClassObject when no program or DLL serves them.
 HRESULT GetBuiltinClassObject(REFCLSID clsid, REFIID riid, void** out);
 
+// A new object's cache: the pictures OLERENDER_DRAW or _FORMAT ask for,
+// and filled from data (NULL: the object's own).
+void AddRenderCache(IUnknown* obj, DWORD render, LPFORMATETC fe);
+void FillCache(IUnknown* obj, IDataObject* src);
+
 }  // namespace ole
 }  // namespace winport

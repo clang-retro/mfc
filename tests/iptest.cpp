@@ -4,7 +4,8 @@
 // document and activates it in place in the container's view. It checks
 // the in-place frame and its position, the shared menu, the server's
 // toolbar on the container's frame and the container's toolbar out of
-// its way, the keys of both sides, resizing through COleResizeBar, UI
+// its way, the keys of both sides, the shared menu's commands going to
+// the side whose menu they are on, resizing through COleResizeBar, UI
 // deactivation and activation again, and full deactivation; then
 // CRectTracker on its own.
 #include <afxwin.h>
@@ -449,7 +450,48 @@ public:
       m_nStep++;
       break;
     }
+    case 8: {
+      if (!Wait(g_nToolsChecks == 3, "the container's command")) return;
+      CHECK(g_nToolsChecks == 3 && g_nRecolors == 3);
+      // The container's in-place accelerators, as OleTranslateAccelerator
+      // reads them: F6 is its Tools Check, F5 is not its.
+      HACCEL hAccel = m_pItem->GetDocument()->GetDocTemplate()->m_hAccelInPlace;
+      int nAccel = hAccel != NULL ? ::CopyAcceleratorTable(hAccel, NULL, 0) : 0;
+      MSG msg = {m_hWnd, WM_KEYDOWN, VK_F6, 1};
+      WORD wCmd = 0;
+      CHECK(::IsAccelerator(hAccel, nAccel, &msg, &wCmd) && wCmd == ID_TOOLS_CHECK);
+      msg.wParam = VK_F5;
+      CHECK(!::IsAccelerator(hAccel, nAccel, &msg, &wCmd));
+      // And red again, from the server's Color menu.
+      HMENU hMenu = ::GetMenu(m_hWnd);
+      SendMessage(WM_INITMENUPOPUP, (WPARAM)::GetSubMenu(hMenu, 3), MAKELPARAM(3, FALSE));
+      PostMessage(WM_COMMAND, MAKEWPARAM(ID_COLOR_RED, 0), 0);
+      m_nStep++;
+      break;
+    }
+    case 7: {
+      if (!Wait(g_nRecolors == 3, "the server's menu command")) return;
+      TestLog("after the Edit menu's Recolor: recolors %d, color %d", g_nRecolors,
+              g_pSrvDoc->m_nColor);
+      CHECK(g_nRecolors == 3 && g_pSrvDoc->m_nColor == 1);
+      // The Tools menu is the container's: its command stays here.
+      HMENU hMenu = ::GetMenu(m_hWnd);
+      SendMessage(WM_INITMENUPOPUP, (WPARAM)::GetSubMenu(hMenu, 2), MAKELPARAM(2, FALSE));
+      PostMessage(WM_COMMAND, MAKEWPARAM(ID_TOOLS_CHECK, 0), 0);
+      m_nStep++;
+      break;
+    }
     case 6: {
+      // The shared menu's Edit menu is the server's: a command chosen
+      // from it goes to the object's window (the menu descriptor).
+      HMENU hMenu = ::GetMenu(m_hWnd);
+      SendMessage(WM_INITMENUPOPUP, (WPARAM)::GetSubMenu(hMenu, 1), MAKELPARAM(1, FALSE));
+      PostMessage(WM_COMMAND, MAKEWPARAM(ID_EDIT_RECOLOR, 0), 0);
+      m_nStep++;
+      break;
+    }
+    case 9: {
+      if (!Wait(g_pSrvDoc->m_nColor == 0, "the Color menu's Red")) return;
       // Full deactivation: the frame goes, the server's view goes back to
       // its own frame, and the container draws the object again.
       HWND hWndInPlace = m_hWndInPlace;
@@ -469,7 +511,7 @@ public:
       m_nStep++;
       break;
     }
-    case 7: {
+    case 10: {
       Redraw();
       TestSaveWindowBitmap(m_hWnd, _T("iptest-inactive.bmp"));
       COLORREF cr = ScreenPixel(ItemCenter());
@@ -482,7 +524,7 @@ public:
       m_nStep++;
       break;
     }
-    case 8:
+    case 11:
       if (!Wait(g_pSrvDoc == NULL, "the server document to go")) return;
       CHECK(g_pSrvDoc == NULL);
       Finish();
