@@ -36,14 +36,6 @@ extern "C" void _WinportStub(const char* name, bool* reported);
     return -1;                        \
   }
 
-STUB_HRESULT(OleCreateFromFile)
-STUB_HRESULT(OleCreateLinkFromData)
-STUB_HRESULT(OleCreateLinkToFile)
-STUB_ZERO(OleCreateMenuDescriptor)
-STUB_HRESULT(OleDestroyMenuDescriptor)
-STUB_HRESULT(OleDoAutoConvert)
-STUB_HRESULT(OleSetMenuDescriptor)
-STUB_HRESULT(OleTranslateAccelerator)
 STUB_ZERO(OleUIBusyA)
 STUB_ZERO(OleUIBusyW)
 STUB_ZERO(OleUIChangeIconA)

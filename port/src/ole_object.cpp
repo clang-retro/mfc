@@ -352,6 +352,8 @@ class HandlerSink final : public IAdviseSink {
 const CLSID kStaticMetafile = {0x00000315, 0, 0, {0xC0, 0, 0, 0, 0, 0, 0, 0x46}};
 const CLSID kStaticDib = {0x00000316, 0, 0, {0xC0, 0, 0, 0, 0, 0, 0, 0x46}};
 const CLSID kStaticEnhMetafile = {0x00000319, 0, 0, {0xC0, 0, 0, 0, 0, 0, 0, 0x46}};
+// The class of a link's storage.
+const CLSID kStdOleLink = {0x00000300, 0, 0, {0xC0, 0, 0, 0, 0, 0, 0, 0x46}};
 bool IsStaticClass(REFCLSID c) {
   return IsEqualCLSID(c, kStaticMetafile) || IsEqualCLSID(c, kStaticDib) || IsEqualCLSID(c, kStaticEnhMetafile);
 }
@@ -369,9 +371,10 @@ class DefaultHandler final : public IOleObject,
                              public IDataObject,
                              public IPersistStorage,
                              public IViewObject2,
-                             public IRunnableObject {
+                             public IRunnableObject,
+                             public IOleLink {
  public:
-  explicit DefaultHandler(REFCLSID clsid) : clsid_(clsid), cache_(this) {
+  explicit DefaultHandler(REFCLSID clsid, bool link = false) : clsid_(clsid), cache_(this), link_(link) {
     sink_ = new HandlerSink(this);
     CreateOleAdviseHolder(&oleAdvise_);
   }
@@ -386,6 +389,7 @@ class DefaultHandler final : public IOleObject,
     SafeRelease(site_);
     SafeRelease(storage_);
     SafeRelease(oleAdvise_);
+    SafeRelease(source_);
   }
 
   // IUnknown
@@ -404,6 +408,8 @@ class DefaultHandler final : public IOleObject,
       *out = static_cast<IRunnableObject*>(this);
     else if (IsEqualIID(riid, IID_IOleCache) || IsEqualIID(riid, IID_IOleCache2))
       *out = static_cast<IOleCache2*>(&cache_);
+    else if (link_ && IsEqualIID(riid, IID_IOleLink))
+      *out = static_cast<IOleLink*>(this);
     if (*out) {
       AddRef();
       return S_OK;
@@ -423,7 +429,8 @@ class DefaultHandler final : public IOleObject,
   // IOleObject
   STDMETHOD(SetClientSite)(IOleClientSite* site) override {
     Assign(site_, site);
-    if (object_) return object_->SetClientSite(site);
+    // A link's source has its own (it is not the container's).
+    if (object_ && !link_) return object_->SetClientSite(site);
     return S_OK;
   }
   STDMETHOD(GetClientSite)(IOleClientSite** out) override {
@@ -436,11 +443,16 @@ class DefaultHandler final : public IOleObject,
     hostApp_ = app ? app : L"";
     hostObj_ = obj ? obj : L"";
     haveHostNames_ = true;
-    if (object_) return object_->SetHostNames(app, obj);
+    if (object_ && !link_) return object_->SetHostNames(app, obj);
     return S_OK;
   }
   STDMETHOD(Close)(DWORD saveOption) override {
     if (!object_) return S_OK;
+    if (link_) {
+      // A link lets its source go; the source stays open for its own.
+      Stop();
+      return S_OK;
+    }
     HRESULT hr = object_->Close(saveOption);
     Stop();
     return hr;
@@ -452,7 +464,7 @@ class DefaultHandler final : public IOleObject,
   STDMETHOD(GetMoniker)(DWORD assign, DWORD which, IMoniker** out) override {
     if (!out) return E_POINTER;
     *out = NULL;
-    if (object_) return object_->GetMoniker(assign, which, out);
+    if (object_ && !link_) return object_->GetMoniker(assign, which, out);
     if (site_) return site_->GetMoniker(assign, which, out);
     return E_FAIL;
   }
@@ -478,6 +490,7 @@ class DefaultHandler final : public IOleObject,
     return OleRegEnumVerbs(clsid_, out);
   }
   STDMETHOD(Update)() override {
+    if (link_) return Update((IBindCtx*)NULL);
     if (!object_) return OLE_E_NOTRUNNING;
     HRESULT hr = object_->Update();
     if (SUCCEEDED(hr)) cache_.UpdateCache(data_, UPDFCACHE_ALL, NULL);
@@ -602,7 +615,7 @@ class DefaultHandler final : public IOleObject,
   // IPersistStorage
   STDMETHOD(GetClassID)(CLSID* out) override {
     if (!out) return E_POINTER;
-    *out = clsid_;
+    *out = link_ ? kStdOleLink : clsid_;
     return S_OK;
   }
   STDMETHOD(IsDirty)() override {
@@ -623,6 +636,7 @@ class DefaultHandler final : public IOleObject,
     loaded_ = true;
     dirty_ = false;
     LoadCache(stg);
+    if (link_) return ReadLinkStream(stg);
     if (persist_) return persist_->Load(stg);
     return S_OK;
   }
@@ -637,7 +651,12 @@ class DefaultHandler final : public IOleObject,
       hr = storage_->CopyTo(0, NULL, NULL, stg);
       if (FAILED(hr)) return hr;
     }
-    WriteOleStream(stg);
+    if (link_) {
+      hr = WriteLinkStream(stg);
+      if (FAILED(hr)) return hr;
+    } else {
+      WriteOleStream(stg);
+    }
     SaveCache(stg);
     return S_OK;
   }
@@ -712,8 +731,19 @@ class DefaultHandler final : public IOleObject,
     *out = clsid_;
     return S_OK;
   }
-  STDMETHOD(Run)(LPBINDCTX) override {
+  STDMETHOD(Run)(LPBINDCTX bc) override {
     if (server_) return S_OK;
+    if (link_) {
+      // A link runs its source: whatever its moniker binds to.
+      if (!source_) return OLE_E_CANT_BINDTOSOURCE;
+      IBindCtx* own = NULL;
+      if (!bc && FAILED(CreateBindCtx(0, &own))) return E_OUTOFMEMORY;
+      IUnknown* unk = NULL;
+      HRESULT hr = source_->BindToObject(bc ? bc : own, NULL, IID_IUnknown, (void**)&unk);
+      SafeRelease(own);
+      if (FAILED(hr)) return hr;
+      return Connect(unk);
+    }
     if (IsStaticClass(clsid_)) return OLE_E_STATIC;
     IUnknown* unk = NULL;
     HRESULT hr = CoCreateInstance(clsid_, NULL, CLSCTX_SERVER, IID_IUnknown, (void**)&unk);
@@ -734,11 +764,103 @@ class DefaultHandler final : public IOleObject,
     return S_OK;
   }
 
+  // IOleLink
+  STDMETHOD(SetUpdateOptions)(DWORD opt) override {
+    if (opt != OLEUPDATE_ALWAYS && opt != OLEUPDATE_ONCALL) return E_INVALIDARG;
+    updateOpt_ = opt;
+    dirty_ = true;
+    return S_OK;
+  }
+  STDMETHOD(GetUpdateOptions)(DWORD* out) override {
+    if (!out) return E_POINTER;
+    *out = updateOpt_;
+    return S_OK;
+  }
+  STDMETHOD(SetSourceMoniker)(IMoniker* mk, REFCLSID clsid) override {
+    if (server_) Stop();
+    Assign(source_, mk);
+    if (!IsEqualCLSID(clsid, CLSID_NULL)) clsid_ = clsid;
+    dirty_ = true;
+    return S_OK;
+  }
+  STDMETHOD(GetSourceMoniker)(IMoniker** out) override {
+    if (!out) return E_POINTER;
+    *out = source_;
+    if (!source_) return MK_E_UNAVAILABLE;
+    source_->AddRef();
+    return S_OK;
+  }
+  STDMETHOD(SetSourceDisplayName)(LPCOLESTR name) override {
+    if (!name) return E_INVALIDARG;
+    IBindCtx* bc = NULL;
+    HRESULT hr = CreateBindCtx(0, &bc);
+    if (FAILED(hr)) return hr;
+    ULONG eaten = 0;
+    IMoniker* mk = NULL;
+    hr = MkParseDisplayName(bc, name, &eaten, &mk);
+    bc->Release();
+    if (FAILED(hr)) return hr;
+    hr = SetSourceMoniker(mk, CLSID_NULL);
+    mk->Release();
+    return hr;
+  }
+  STDMETHOD(GetSourceDisplayName)(LPOLESTR* out) override {
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (!source_) return MK_E_UNAVAILABLE;
+    IBindCtx* bc = NULL;
+    HRESULT hr = CreateBindCtx(0, &bc);
+    if (FAILED(hr)) return hr;
+    hr = source_->GetDisplayName(bc, NULL, out);
+    bc->Release();
+    return hr;
+  }
+  STDMETHOD(BindToSource)(DWORD, IBindCtx* bc) override { return Run(bc); }
+  STDMETHOD(BindIfRunning)() override {
+    if (server_) return S_OK;
+    if (!source_) return OLE_E_CANT_BINDTOSOURCE;
+    IBindCtx* bc = NULL;
+    HRESULT hr = CreateBindCtx(0, &bc);
+    if (FAILED(hr)) return hr;
+    hr = source_->IsRunning(bc, NULL, NULL) == S_OK ? Run(bc) : S_FALSE;
+    bc->Release();
+    return hr;
+  }
+  STDMETHOD(GetBoundSource)(IUnknown** out) override {
+    if (!out) return E_POINTER;
+    *out = server_;
+    if (!server_) return E_FAIL;
+    server_->AddRef();
+    return S_OK;
+  }
+  STDMETHOD(UnbindSource)() override {
+    Stop();
+    return S_OK;
+  }
+  STDMETHOD(Update)(IBindCtx* bc) override {
+    HRESULT hr = Run(bc);
+    if (FAILED(hr)) return hr;
+    cache_.UpdateCache(data_, UPDFCACHE_ALL, NULL);
+    return S_OK;
+  }
+
   // Takes an object already made (it is running) as the one it handles.
   HRESULT Connect(IUnknown* unk) {
     server_ = unk;
     unk->QueryInterface(IID_IOleObject, (void**)&object_);
     unk->QueryInterface(IID_IDataObject, (void**)&data_);
+    if (link_) {
+      // The source keeps itself: only its news and its data.
+      CLSID c;
+      if (object_ && SUCCEEDED(object_->GetUserClassID(&c))) clsid_ = c;
+      if (object_) object_->Advise(sink_, &oleConn_);
+      if (data_) {
+        for (STATDATA& s : dataAdvise_)
+          data_->DAdvise(&s.formatetc, s.advf, s.pAdvSink, &serverData_[s.dwConnection]);
+        for (CacheEntry& e : entries_) AdviseCache(e);
+      }
+      return S_OK;
+    }
     unk->QueryInterface(IID_IPersistStorage, (void**)&persist_);
     HRESULT hr = S_OK;
     DWORD misc = 0;
@@ -775,7 +897,7 @@ class DefaultHandler final : public IOleObject,
     serverData_.clear();
     if (object_ && oleConn_) object_->Unadvise(oleConn_);
     oleConn_ = 0;
-    if (object_) object_->SetClientSite(NULL);
+    if (object_ && !link_) object_->SetClientSite(NULL);
     SafeRelease(persist_);
     SafeRelease(data_);
     SafeRelease(object_);
@@ -1196,6 +1318,87 @@ class DefaultHandler final : public IOleObject,
     WriteStream(stg, L"\1Ole", v);
   }
 
+  // "\1Ole" of a link: as an embedded object's with the link flag, then
+  // the source's moniker (absolute; no relative one), its class and
+  // three times nobody keeps.
+  HRESULT WriteLinkStream(IStorage* stg) {
+    std::vector<BYTE> mk;
+    if (source_) {
+      IStream* s = NULL;
+      HRESULT hr = CreateStreamOnHGlobal(NULL, TRUE, &s);
+      if (FAILED(hr)) return hr;
+      hr = OleSaveToStream(source_, s);
+      if (SUCCEEDED(hr)) {
+        HGLOBAL g = NULL;
+        GetHGlobalFromStream(s, &g);
+        ULARGE_INTEGER end = {};
+        LARGE_INTEGER zero = {};
+        s->Seek(zero, STREAM_SEEK_CUR, &end);
+        BYTE* p = (BYTE*)GlobalLock(g);
+        if (p) mk.assign(p, p + (size_t)end.QuadPart);
+        GlobalUnlock(g);
+      }
+      s->Release();
+      if (FAILED(hr)) return hr;
+    }
+    std::vector<BYTE> v;
+    PutD(v, 0x02000001);
+    PutD(v, 1);  // a link
+    PutD(v, updateOpt_);
+    PutD(v, 0);
+    PutD(v, 0);  // no reserved moniker
+    PutD(v, 0);  // no relative moniker
+    PutD(v, (DWORD)mk.size());
+    v.insert(v.end(), mk.begin(), mk.end());
+    PutD(v, 0xFFFFFFFF);
+    const BYTE* c = (const BYTE*)&clsid_;
+    v.insert(v.end(), c, c + sizeof(CLSID));
+    PutD(v, 0);  // no display name
+    PutD(v, 0);
+    for (int i = 0; i < 6; i++) PutD(v, 0);
+    return WriteStream(stg, L"\1Ole", v);
+  }
+
+  HRESULT ReadLinkStream(IStorage* stg) {
+    std::vector<BYTE> v;
+    HRESULT hr = ReadStream(stg, L"\1Ole", &v);
+    if (FAILED(hr)) return hr;
+    size_t pos = 0;
+    bool ok = true;
+    GetD(v, &pos, &ok);
+    GetD(v, &pos, &ok);
+    DWORD opt = GetD(v, &pos, &ok);
+    if (ok) updateOpt_ = opt == OLEUPDATE_ONCALL ? OLEUPDATE_ONCALL : OLEUPDATE_ALWAYS;
+    GetD(v, &pos, &ok);
+    for (int i = 0; i < 2 && ok; i++) {
+      DWORD n = GetD(v, &pos, &ok);
+      pos += n;
+    }
+    DWORD n = GetD(v, &pos, &ok);
+    if (!ok || pos + n > v.size()) return STG_E_READFAULT;
+    if (n) {
+      HGLOBAL g = GlobalAlloc(GMEM_MOVEABLE, n);
+      if (!g) return E_OUTOFMEMORY;
+      memcpy(GlobalLock(g), &v[pos], n);
+      GlobalUnlock(g);
+      IStream* s = NULL;
+      hr = CreateStreamOnHGlobal(g, TRUE, &s);
+      if (FAILED(hr)) {
+        GlobalFree(g);
+        return hr;
+      }
+      IMoniker* mk = NULL;
+      hr = OleLoadFromStream(s, IID_IMoniker, (void**)&mk);
+      s->Release();
+      if (FAILED(hr)) return hr;
+      SafeRelease(source_);
+      source_ = mk;
+    }
+    pos += n;
+    if (GetD(v, &pos, &ok) == 0xFFFFFFFF && ok && pos + sizeof(CLSID) <= v.size()) memcpy(&clsid_, &v[pos], sizeof(CLSID));
+    return S_OK;
+  }
+
   ULONG refs_ = 1;
   CLSID clsid_;
   CachePart cache_;
@@ -1224,6 +1427,10 @@ class DefaultHandler final : public IOleObject,
   DWORD nextCache_ = 1;
   IAdviseSink* viewSink_ = NULL;
   DWORD viewAspects_ = 0, viewAdvf_ = 0;
+  // A link's source.
+  bool link_;
+  IMoniker* source_ = NULL;
+  DWORD updateOpt_ = OLEUPDATE_ALWAYS;
 };
 
 void HandlerSink::OnDataChange(FORMATETC* fe, STGMEDIUM* m) {
@@ -1281,6 +1488,35 @@ HRESULT NewHandler(REFCLSID clsid, DefaultHandler** out) {
 
 }  // namespace
 
+// What a new object's cache keeps, as asked for.
+void winport::ole::AddRenderCache(IUnknown* obj, DWORD render, LPFORMATETC fe) {
+  if (render != OLERENDER_DRAW && !(render == OLERENDER_FORMAT && fe)) return;
+  IOleCache* cache = NULL;
+  if (FAILED(obj->QueryInterface(IID_IOleCache, (void**)&cache))) return;
+  FORMATETC f = {0, NULL, DVASPECT_CONTENT, -1, TYMED_NULL};
+  if (fe) f = *fe;
+  if (render == OLERENDER_DRAW && f.cfFormat != 0 && f.cfFormat != CF_METAFILEPICT && f.cfFormat != CF_ENHMETAFILE &&
+      f.cfFormat != CF_DIB && f.cfFormat != CF_BITMAP)
+    f.cfFormat = 0;
+  DWORD conn = 0;
+  cache->Cache(&f, ADVF_PRIMEFIRST, &conn);
+  cache->Release();
+}
+
+// The cache filled from data: the object's own (running), or another's.
+void winport::ole::FillCache(IUnknown* obj, IDataObject* src) {
+  IOleCache2* c2 = NULL;
+  if (FAILED(obj->QueryInterface(IID_IOleCache2, (void**)&c2))) return;
+  IDataObject* d = src;
+  if (d)
+    d->AddRef();
+  else
+    obj->QueryInterface(IID_IDataObject, (void**)&d);
+  c2->UpdateCache(d, UPDFCACHE_ALL, NULL);
+  SafeRelease(d);
+  c2->Release();
+}
+
 extern "C" {
 
 HRESULT WINAPI CreateOleAdviseHolder(LPOLEADVISEHOLDER* out) {
@@ -1334,33 +1570,12 @@ HRESULT WINAPI OleCreate(REFCLSID clsid, REFIID riid, DWORD render, LPFORMATETC 
   HRESULT hr = NewHandler(clsid, &h);
   if (FAILED(hr)) return hr;
   if (stg) WriteClassStg(stg, clsid);
-  // What the cache keeps.
-  IOleCache* cache = NULL;
-  h->QueryInterface(IID_IOleCache, (void**)&cache);
-  if (render == OLERENDER_DRAW || (render == OLERENDER_FORMAT && fe)) {
-    FORMATETC f = {0, NULL, DVASPECT_CONTENT, -1, TYMED_NULL};
-    if (fe) f = *fe;
-    if (render == OLERENDER_DRAW && f.cfFormat != 0 && f.cfFormat != CF_METAFILEPICT &&
-        f.cfFormat != CF_ENHMETAFILE && f.cfFormat != CF_DIB && f.cfFormat != CF_BITMAP)
-      f.cfFormat = 0;
-    DWORD conn = 0;
-    cache->Cache(&f, ADVF_PRIMEFIRST, &conn);
-  }
+  AddRenderCache(static_cast<IOleObject*>(h), render, fe);
   // Set it up, run it (which hands the object its storage and site), and
   // fill the cache from it.
   hr = SetUpObject(static_cast<IOleObject*>(h), site, stg, false);
   if (SUCCEEDED(hr)) hr = h->Run(NULL);
-  if (SUCCEEDED(hr) && render != OLERENDER_NONE) {
-    IOleCache2* c2 = NULL;
-    if (SUCCEEDED(h->QueryInterface(IID_IOleCache2, (void**)&c2))) {
-      IDataObject* d = NULL;
-      h->QueryInterface(IID_IDataObject, (void**)&d);
-      c2->UpdateCache(d, UPDFCACHE_ALL, NULL);
-      SafeRelease(d);
-      c2->Release();
-    }
-  }
-  SafeRelease(cache);
+  if (SUCCEEDED(hr) && render != OLERENDER_NONE) FillCache(static_cast<IOleObject*>(h), NULL);
   if (SUCCEEDED(hr)) hr = h->QueryInterface(riid, out);
   if (FAILED(hr)) h->Close(OLECLOSE_NOSAVE);
   h->Release();
@@ -1373,19 +1588,130 @@ HRESULT WINAPI OleLoad(LPSTORAGE stg, REFIID riid, LPOLECLIENTSITE site, LPVOID*
   CLSID clsid = CLSID_NULL;
   HRESULT hr = ReadClassStg(stg, &clsid);
   if (FAILED(hr)) return hr;
-  if (IUnknown* direct = NewInprocObject(clsid)) {
+  DefaultHandler* h = NULL;
+  if (IsEqualCLSID(clsid, kStdOleLink)) {
+    h = new DefaultHandler(CLSID_NULL, true);
+  } else if (IUnknown* direct = NewInprocObject(clsid)) {
     hr = SetUpObject(direct, site, stg, true);
     if (SUCCEEDED(hr)) hr = direct->QueryInterface(riid, out);
     direct->Release();
     return hr;
+  } else {
+    hr = NewHandler(clsid, &h);
+    if (FAILED(hr)) return hr;
   }
-  DefaultHandler* h = NULL;
-  hr = NewHandler(clsid, &h);
-  if (FAILED(hr)) return hr;
   hr = SetUpObject(static_cast<IOleObject*>(h), site, stg, true);
   if (SUCCEEDED(hr)) hr = h->QueryInterface(riid, out);
   h->Release();
   return hr;
+}
+
+// A link to what a moniker names: the handler in link mode, its cache
+// filled from the source. A source that was not running before is let go
+// again (the cache keeps its picture).
+HRESULT WINAPI OleCreateLink(LPMONIKER mk, REFIID riid, DWORD render, LPFORMATETC fe, LPOLECLIENTSITE site,
+                             LPSTORAGE stg, LPVOID* out) {
+  if (!out || !mk) return E_INVALIDARG;
+  *out = NULL;
+  IBindCtx* bc = NULL;
+  HRESULT hr = CreateBindCtx(0, &bc);
+  if (FAILED(hr)) return hr;
+  bool wasRunning = mk->IsRunning(bc, NULL, NULL) == S_OK;
+  DefaultHandler* h = new DefaultHandler(CLSID_NULL, true);
+  h->SetSourceMoniker(mk, CLSID_NULL);
+  if (stg) WriteClassStg(stg, kStdOleLink);
+  AddRenderCache(static_cast<IOleObject*>(h), render, fe);
+  hr = SetUpObject(static_cast<IOleObject*>(h), site, stg, false);
+  if (SUCCEEDED(hr)) hr = h->Run(bc);
+  bc->Release();
+  if (SUCCEEDED(hr) && render != OLERENDER_NONE) FillCache(static_cast<IOleObject*>(h), NULL);
+  if (SUCCEEDED(hr) && !wasRunning) h->UnbindSource();
+  if (SUCCEEDED(hr)) hr = h->QueryInterface(riid, out);
+  if (FAILED(hr)) h->UnbindSource();
+  h->Release();
+  return hr;
+}
+
+HRESULT WINAPI OleCreateLinkToFile(LPCOLESTR file, REFIID riid, DWORD render, LPFORMATETC fe, LPOLECLIENTSITE site,
+                                   LPSTORAGE stg, LPVOID* out) {
+  if (!out || !file) return E_INVALIDARG;
+  *out = NULL;
+  IMoniker* mk = NULL;
+  HRESULT hr = CreateFileMoniker(file, &mk);
+  if (FAILED(hr)) return hr;
+  hr = OleCreateLink(mk, riid, render, fe, site, stg, out);
+  mk->Release();
+  return hr;
+}
+
+// An object embedded from a file: the file's own object (found by its
+// class) saves itself into the new object's storage, which is loaded;
+// its picture comes from the file's object too.
+HRESULT WINAPI OleCreateFromFile(REFCLSID, LPCOLESTR file, REFIID riid, DWORD render, LPFORMATETC fe,
+                                 LPOLECLIENTSITE site, LPSTORAGE stg, LPVOID* out) {
+  if (!out || !file) return E_INVALIDARG;
+  *out = NULL;
+  if (!stg) return E_INVALIDARG;
+  CLSID clsid;
+  HRESULT hr = GetClassFile(file, &clsid);
+  if (FAILED(hr)) return hr;
+  IMoniker* mk = NULL;
+  hr = CreateFileMoniker(file, &mk);
+  if (FAILED(hr)) return hr;
+  IBindCtx* bc = NULL;
+  hr = CreateBindCtx(0, &bc);
+  IUnknown* unk = NULL;
+  if (SUCCEEDED(hr)) hr = mk->BindToObject(bc, NULL, IID_IUnknown, (void**)&unk);
+  SafeRelease(bc);
+  mk->Release();
+  if (FAILED(hr)) return hr;
+  IPersistStorage* ps = NULL;
+  hr = unk->QueryInterface(IID_IPersistStorage, (void**)&ps);
+  if (SUCCEEDED(hr)) {
+    hr = WriteClassStg(stg, clsid);
+    if (SUCCEEDED(hr)) hr = ps->Save(stg, FALSE);
+    if (SUCCEEDED(hr)) ps->SaveCompleted(NULL);
+    ps->Release();
+  }
+  if (SUCCEEDED(hr)) hr = stg->Commit(STGC_DEFAULT);
+  IUnknown* obj = NULL;
+  if (SUCCEEDED(hr)) hr = OleLoad(stg, IID_IUnknown, site, (void**)&obj);
+  if (SUCCEEDED(hr) && render != OLERENDER_NONE) {
+    IDataObject* data = NULL;
+    unk->QueryInterface(IID_IDataObject, (void**)&data);
+    AddRenderCache(obj, render, fe);
+    if (data) FillCache(obj, data);
+    SafeRelease(data);
+  }
+  unk->Release();
+  if (SUCCEEDED(hr)) hr = obj->QueryInterface(riid, out);
+  SafeRelease(obj);
+  return hr;
+}
+
+// The class an object's class says to become, as its storage's class
+// (the object turns into one on its next load).
+HRESULT WINAPI OleDoAutoConvert(LPSTORAGE stg, LPCLSID out) {
+  if (!stg || !out) return E_INVALIDARG;
+  CLSID clsid = CLSID_NULL;
+  HRESULT hr = ReadClassStg(stg, &clsid);
+  if (FAILED(hr)) return hr;
+  *out = clsid;
+  std::wstring to;
+  CLSID next;
+  if (!ClassValue(clsid, L"AutoConvertTo", &to) || FAILED(CLSIDFromString(to.c_str(), &next)))
+    return REGDB_E_KEYMISSING;
+  CLIPFORMAT cf = 0;
+  ReadFmtUserTypeStg(stg, &cf, NULL);
+  LPOLESTR type = NULL;
+  OleRegGetUserType(next, USERCLASSTYPE_FULL, &type);
+  hr = WriteClassStg(stg, next);
+  if (SUCCEEDED(hr)) hr = WriteFmtUserTypeStg(stg, cf, type);
+  if (SUCCEEDED(hr)) hr = SetConvertStg(stg, TRUE);
+  CoTaskMemFree(type);
+  if (FAILED(hr)) return hr;
+  *out = next;
+  return S_OK;
 }
 
 HRESULT WINAPI OleSave(LPPERSISTSTORAGE ps, LPSTORAGE stg, BOOL sameAsLoad) {

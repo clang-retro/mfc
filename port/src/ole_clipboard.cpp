@@ -18,6 +18,8 @@
 #include "ole.h"
 #include "com.h"
 
+#include <string>
+
 using namespace winport::ole;
 
 namespace {
@@ -26,6 +28,28 @@ IDataObject* g_clip = NULL;  // the data object OleSetClipboard put there
 HWND g_clipWnd = NULL;       // the clipboard's owner while it is
 
 CLIPFORMAT Format(const wchar_t* name) { return (CLIPFORMAT)RegisterClipboardFormatW(name); }
+
+// The file named by "FileName" data (the shell's, in the ANSI code page),
+// or nothing.
+std::wstring FileNameOf(IDataObject* data) {
+  FORMATETC f = {Format(L"FileName"), NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+  STGMEDIUM m = {};
+  std::wstring file;
+  if (FAILED(data->GetData(&f, &m))) return file;
+  if (m.tymed == TYMED_HGLOBAL) {
+    if (const char* p = (const char*)GlobalLock(m.hGlobal)) {
+      int n = MultiByteToWideChar(CP_ACP, 0, p, -1, NULL, 0);
+      if (n > 1) {
+        file.resize(n);
+        MultiByteToWideChar(CP_ACP, 0, p, -1, &file[0], n);
+        file.resize(n - 1);
+      }
+      GlobalUnlock(m.hGlobal);
+    }
+  }
+  ReleaseStgMedium(&m);
+  return file;
+}
 
 // The medium a format takes on the clipboard.
 DWORD TymedOf(CLIPFORMAT cf) {
@@ -342,11 +366,54 @@ HRESULT WINAPI OleCreateFromData(LPDATAOBJECT data, REFIID riid, DWORD render, L
       if (FAILED(hr)) return hr;
     }
     stg->Commit(STGC_DEFAULT);
-    return OleLoad(stg, riid, site, out);
+    IUnknown* obj = NULL;
+    hr = OleLoad(stg, IID_IUnknown, site, (void**)&obj);
+    if (FAILED(hr)) return hr;
+    // The picture asked for, from the data when it has one.
+    if (render != OLERENDER_NONE) {
+      AddRenderCache(obj, render, fe);
+      FillCache(obj, data);
+    }
+    hr = obj->QueryInterface(riid, out);
+    obj->Release();
+    return hr;
   }
+  // A file the shell dropped or copied: the object it holds.
+  std::wstring file = FileNameOf(data);
+  if (!file.empty()) return OleCreateFromFile(CLSID_NULL, file.c_str(), riid, render, fe, site, stg, out);
   if (OleQueryCreateFromData(data) == OLE_S_STATIC)
     return OleCreateStaticFromData(data, riid, render, fe, site, stg, out);
   return DV_E_FORMATETC;
+}
+
+// A link from data: the source's moniker and class, as "Link Source"
+// holds them.
+HRESULT WINAPI OleCreateLinkFromData(LPDATAOBJECT data, REFIID riid, DWORD render, LPFORMATETC fe,
+                                     LPOLECLIENTSITE site, LPSTORAGE stg, LPVOID* out) {
+  if (!data || !out) return E_INVALIDARG;
+  *out = NULL;
+  FORMATETC f = {Format(L"Link Source"), NULL, DVASPECT_CONTENT, -1, TYMED_ISTREAM};
+  STGMEDIUM m = {};
+  HRESULT hr = data->GetData(&f, &m);
+  if (FAILED(hr)) {
+    // Only a file: a link to it.
+    std::wstring file = FileNameOf(data);
+    if (file.empty()) return hr;
+    return OleCreateLinkToFile(file.c_str(), riid, render, fe, site, stg, out);
+  }
+  if (m.tymed != TYMED_ISTREAM || !m.pstm) {
+    ReleaseStgMedium(&m);
+    return DV_E_TYMED;
+  }
+  LARGE_INTEGER zero = {};
+  m.pstm->Seek(zero, STREAM_SEEK_SET, NULL);
+  IMoniker* mk = NULL;
+  hr = OleLoadFromStream(m.pstm, IID_IMoniker, (void**)&mk);
+  ReleaseStgMedium(&m);
+  if (FAILED(hr)) return hr;
+  hr = OleCreateLink(mk, riid, render, fe, site, stg, out);
+  mk->Release();
+  return hr;
 }
 
 }  // extern "C"

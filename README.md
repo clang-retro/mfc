@@ -396,10 +396,16 @@ try.
   checks the item's moniker, data and notifications, the item container,
   the Link Source data Paste Link uses, links to an object embedded
   in a container's file, the object information the Object Properties
-  and Change Source dialogs show, and COleMessageFilter's answers.
+  and Change Source dialogs show, and COleMessageFilter's answers. Then
+  the objects a container makes from a file: a link, which keeps its
+  picture without the file open and is saved, loaded and bound again; a
+  copy embedded from the file; a link from Link Source data; and a
+  storage converted to the class the registry's AutoConvertTo names.
 * `iptest`: in-place activation, with the container and the server in
   one program: the object activated in the container's view, the
-  shared menu, both sides' accelerators, the server's toolbar in the
+  shared menu and its commands (each goes to the side whose popup it
+  is on, through the menu descriptor), both sides' accelerators
+  (IsAccelerator reading the container's), the server's toolbar in the
   container's frame, resizing through the resize bar, UI deactivation
   and full deactivation, and CRectTracker.
 * `docobtest`: Active Documents, with the container and the server in
