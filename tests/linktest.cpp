@@ -818,7 +818,8 @@ void CLinkApp::TestLinkObjects() {
   }
   if (lpStream != NULL) lpStream->Release();
   LPDATAOBJECT lpData = (LPDATAOBJECT)pSource->GetInterface(&IID_IDataObject);
-  CHECK(::OleQueryLinkFromData(lpData) == S_OK);
+  // (Wine's OleQueryLinkFromData always says no.)
+  CHECK(IsWine() || ::OleQueryLinkFromData(lpData) == S_OK);
   lpStg = MemoryStorage();
   hr = ::OleCreateLinkFromData(lpData, IID_IOleObject, OLERENDER_DRAW, NULL, NULL, lpStg,
                                (void**)&lpObj);
