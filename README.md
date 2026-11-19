@@ -105,7 +105,9 @@ python3 path/to/mfc/port/tools/res2cpp.py -I path/to/mfc/include app.rc -o app-r
 
 It is a work in progress. So far the non-window classes, automation, the
 registry (kept in `~/.config/winport/registry.reg`), resources, sockets
-(with `WSAAsyncSelect`), ODBC through the system's driver manager,
+(with `WSAAsyncSelect`), ODBC through the system's driver manager
+(unixODBC or iODBC, loaded when first used; `WINPORT_ODBC` names its
+library when it is elsewhere),
 WinInet's HTTP and FTP (no HTTPS yet), and COM within one process,
 in-process servers in a shared library included, work, and so does the window manager: window
 classes and windows, messages and the message loop, timers, hooks,
@@ -350,6 +352,14 @@ try.
   set, a return value, output and input/output parameters), transactions,
   field info and errors, and a dynaset seeing another connection's
   changes and deletions where a snapshot does not, on the console.
+* `odbctest` (Linux and macOS): the same classes and the wide ODBC
+  functions against a real driver, SQLite 3 through unixODBC, with text
+  outside ASCII going in and coming back: connecting, creating, inserting
+  with parameters, reading wide text in pieces, a filtered and sorted
+  recordset with a parameter, a transaction rolled back, and the
+  driver's errors. Without the driver manager or the driver it notes
+  that and passes, unless `MFC_TEST_ODBC=1`; `MFC_TEST_ODBC_DRIVER`
+  names the driver's library where none is registered.
 * `rvtest`: a CRecordView over the same driver; the form showing the
   current record, edits written back when moving, nulls shown as empty
   fields and indeterminate check boxes, and the record commands enabled
