@@ -2271,13 +2271,20 @@ static void TestSecurityManager() {
 #endif
   pMgr->Release();
 
-  // A provider's own manager comes first.
+  // A provider's own manager comes first (not in Wine's, which never
+  // asks the provider).
+  BOOL bWine = ::GetProcAddress(::GetModuleHandleA("ntdll.dll"), "wine_get_version") != NULL;
   CCustomZones custom;
   CHECK(SUCCEEDED(::CoInternetCreateSecurityManager(&custom, &pMgr, 0)) && pMgr != NULL);
   if (pMgr != NULL) {
-    CHECK(ZoneOf(pMgr, L"http://custom.example/") == URLZONE_TRUSTED);
+    DWORD dwCustom = ZoneOf(pMgr, L"http://custom.example/");
     CHECK(ZoneOf(pMgr, L"http://www.example.com/") == URLZONE_INTERNET);
-    CHECK(custom.m_nAsked == 2);
+    if (bWine) {
+      TestLog("note: Wine's security manager did not ask the provider's (zone %lu)", (unsigned long)dwCustom);
+    } else {
+      CHECK(dwCustom == URLZONE_TRUSTED);
+      CHECK(custom.m_nAsked == 2);
+    }
     pMgr->Release();
   }
   CHECK(custom.m_nRefs == 1);
