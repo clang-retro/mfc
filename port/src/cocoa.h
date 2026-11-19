@@ -16,6 +16,7 @@
 #include <stdint.h>
 
 #include <string>
+#include <vector>
 
 namespace winport {
 namespace cocoa {
@@ -60,6 +61,11 @@ enum { kKeyDown, kKeyUp, kModifiers };
 bool OnKey(void* owner, int type, unsigned code, unsigned mods, const uint16_t* text, size_t textLength,
            const uint16_t* plain, size_t plainLength);
 void OnBecameKey(void* owner);
+// Files dragged from the Finder, at a screen point: whether a window of
+// ours there takes them, and the drop (UTF-8 paths), which says whether
+// one did.
+bool OnDragFiles(int x, int y);
+bool OnDropFiles(int x, int y, const std::vector<std::string>& paths);
 void OnQuit();
 // Drawing: the window's pixels (0x00RRGGBB in the machine's byte order,
 // top row first), held still until EndDraw. False when there are none.

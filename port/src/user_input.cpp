@@ -82,7 +82,8 @@ Window* WindowAt(Window* top, POINT screen, LRESULT* hit) {
         for (Window* k : w->children) {
           if (!k->Visible() || (k->exStyle & WS_EX_TRANSPARENT)) continue;
           RECT r = ScreenRect(k);
-          if (screen.x >= r.left && screen.x < r.right && screen.y >= r.top && screen.y < r.bottom) {
+          if (screen.x >= r.left && screen.x < r.right && screen.y >= r.top && screen.y < r.bottom &&
+              InShape(k, screen)) {
             next = k;
             break;
           }

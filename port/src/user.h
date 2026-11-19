@@ -86,6 +86,10 @@ struct Window {
   RECT normalRect = {0, 0, 0, 0};  // where the window goes when restored
   HDC ownDC = NULL;                // a CS_OWNDC window's DC
   bool ncActive = false;           // an MDI child's caption is drawn active
+  // SetWindowRgn's shape, from the window's top left: outside it the
+  // window neither draws nor takes the mouse.
+  Region shape;
+  bool shaped = false;
 
   bool Visible() const { return (style & WS_VISIBLE) != 0; }
   bool Child() const { return (style & WS_CHILD) != 0 && parent != NULL; }
@@ -111,6 +115,19 @@ bool ReallyVisible(Window* w);
 // The part of the surface the window may draw in: client is false for
 // the whole window. In surface coordinates.
 Region VisibleRegion(Window* w, bool client);
+// Whether a screen point is inside the window's shape (any point is
+// when it has none); the caller checks the rectangle.
+bool InShape(Window* w, POINT screen);
+
+// Files dropped from the desktop (shell_drop.cpp). MakeDrop makes the
+// HDROP of WM_DROPFILES; DropTarget is the window at a screen point that
+// takes files (WS_EX_ACCEPTFILES), or NULL; DropFiles posts the drop to
+// it, and fails when there is none.
+HGLOBAL MakeDrop(const std::vector<std::wstring>& paths, POINT pt, bool nc);
+HWND DropTarget(POINT screen);
+bool DropFiles(POINT screen, const std::vector<std::wstring>& paths);
+// The local files of a text/uri-list, as paths.
+std::vector<std::wstring> PathsFromUris(const std::string& list);
 
 // Classes
 Class* FindClass(const wchar_t* name, HINSTANCE inst);

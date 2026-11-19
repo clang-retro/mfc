@@ -176,6 +176,13 @@ struct X11Backend : Backend {
   // The clipboard: an unmapped window owns it and is sent its requests.
   ::Window clipWin = 0;
   Atom clipboard = 0, targets = 0, textPlain = 0, clipProp = 0, incr = 0;
+  // Files dragged from other programs (the XDND protocol): the source,
+  // the window of ours it is over, where, and whether that takes them.
+  Atom xdndAware = 0, xdndEnter = 0, xdndPosition = 0, xdndStatus = 0, xdndDrop = 0, xdndFinished = 0,
+       xdndLeave = 0, xdndSelection = 0, xdndTypeList = 0, xdndActionCopy = 0, uriList = 0, dropProp = 0;
+  ::Window dndSource = 0;
+  bool dndUris = false, dndAccept = false;
+  POINT dndAt = {0, 0};
   std::string clipText;  // UTF-8, what this program offers
   int fixesEvent = -1;   // XFixesSelectionNotify, when the server has XFixes
   DWORD clipGeneration = 0;
@@ -223,6 +230,18 @@ struct X11Backend : Backend {
     textPlain = x.XInternAtom(dpy, "text/plain;charset=utf-8", False);
     clipProp = x.XInternAtom(dpy, "WINPORT_CLIPBOARD", False);
     incr = x.XInternAtom(dpy, "INCR", False);
+    xdndAware = x.XInternAtom(dpy, "XdndAware", False);
+    xdndEnter = x.XInternAtom(dpy, "XdndEnter", False);
+    xdndPosition = x.XInternAtom(dpy, "XdndPosition", False);
+    xdndStatus = x.XInternAtom(dpy, "XdndStatus", False);
+    xdndDrop = x.XInternAtom(dpy, "XdndDrop", False);
+    xdndFinished = x.XInternAtom(dpy, "XdndFinished", False);
+    xdndLeave = x.XInternAtom(dpy, "XdndLeave", False);
+    xdndSelection = x.XInternAtom(dpy, "XdndSelection", False);
+    xdndTypeList = x.XInternAtom(dpy, "XdndTypeList", False);
+    xdndActionCopy = x.XInternAtom(dpy, "XdndActionCopy", False);
+    uriList = x.XInternAtom(dpy, "text/uri-list", False);
+    dropProp = x.XInternAtom(dpy, "WINPORT_DROP", False);
     XSetWindowAttributes ca = {};
     clipWin = x.XCreateWindow(dpy, root, -10, -10, 1, 1, 0, 0, InputOnly, CopyFromParent, 0, &ca);
     XfixesLib fixes;
@@ -323,6 +342,8 @@ struct X11Backend : Backend {
       long motif[5] = {2 /* decorations */, 0, 0, 0, 0};
       x.XChangeProperty(dpy, n->xid, motifHints, motifHints, 32, PropModeReplace, (const unsigned char*)motif, 5);
       x.XSetWMProtocols(dpy, n->xid, &wmDelete, 1);
+      Atom version = 5;
+      x.XChangeProperty(dpy, n->xid, xdndAware, XA_ATOM, 32, PropModeReplace, (const unsigned char*)&version, 1);
       XWMHints wmh = {};
       wmh.flags = InputHint | StateHint;
       wmh.input = True;
@@ -600,6 +621,90 @@ struct X11Backend : Backend {
     return POINT{rootX - n->w->rect.left, rootY - n->w->rect.top};
   }
 
+  // Tells the source of a drag what happens.
+  void DndSend(Native* n, Atom type, long l1, long l2) {
+    XEvent r = {};
+    r.xclient.type = ClientMessage;
+    r.xclient.display = dpy;
+    r.xclient.window = dndSource;
+    r.xclient.message_type = type;
+    r.xclient.format = 32;
+    r.xclient.data.l[0] = (long)n->xid;
+    r.xclient.data.l[1] = l1;
+    if (type == xdndStatus) {
+      r.xclient.data.l[4] = l2;
+    } else {
+      r.xclient.data.l[2] = l2;
+    }
+    std::lock_guard<std::recursive_mutex> g(lock);
+    x.XSendEvent(dpy, dndSource, False, NoEventMask, &r);
+    x.XFlush(dpy);
+  }
+
+  void DndMessage(Native* n, const XClientMessageEvent& m) {
+    if (m.message_type == xdndEnter) {
+      dndSource = (::Window)m.data.l[0];
+      dndUris = false;
+      dndAccept = false;
+      if (m.data.l[1] & 1) {
+        // More than three types: the source lists them.
+        Atom got;
+        int format;
+        unsigned long count = 0, after;
+        unsigned char* data = NULL;
+        std::lock_guard<std::recursive_mutex> g(lock);
+        if (x.XGetWindowProperty(dpy, dndSource, xdndTypeList, 0, 1024, False, XA_ATOM, &got, &format, &count,
+                                 &after, &data) == Success && data) {
+          for (unsigned long i = 0; i < count; i++)
+            if (((Atom*)data)[i] == uriList) dndUris = true;
+        }
+        if (data) x.XFree(data);
+      } else {
+        for (int i = 2; i < 5; i++)
+          if ((Atom)m.data.l[i] == uriList) dndUris = true;
+      }
+    } else if (m.message_type == xdndPosition) {
+      if ((::Window)m.data.l[0] != dndSource) return;
+      dndAt = POINT{(LONG)((unsigned long)m.data.l[2] >> 16), (LONG)(m.data.l[2] & 0xFFFF)};
+      dndAccept = dndUris && DropTarget(dndAt) != NULL;
+      // Bit 1: send the positions inside the window too.
+      DndSend(n, xdndStatus, (dndAccept ? 1 : 0) | 2, dndAccept ? (long)xdndActionCopy : 0);
+    } else if (m.message_type == xdndLeave) {
+      dndSource = 0;
+      dndAccept = false;
+    } else if (m.message_type == xdndDrop) {
+      if ((::Window)m.data.l[0] != dndSource) return;
+      if (!dndAccept) {
+        DndSend(n, xdndFinished, 0, 0);
+        dndSource = 0;
+        return;
+      }
+      std::lock_guard<std::recursive_mutex> g(lock);
+      x.XConvertSelection(dpy, xdndSelection, uriList, dropProp, n->xid, (Time)m.data.l[2]);
+      x.XFlush(dpy);
+    }
+  }
+
+  // The dropped files arrive.
+  void DndData(Native* n, const XSelectionEvent& ev) {
+    std::string list;
+    if (ev.property != None) {
+      Atom got;
+      int format;
+      unsigned long count = 0, after;
+      unsigned char* data = NULL;
+      std::lock_guard<std::recursive_mutex> g(lock);
+      if (x.XGetWindowProperty(dpy, n->xid, dropProp, 0, 0x1000000, True, AnyPropertyType, &got, &format, &count,
+                               &after, &data) == Success && data && format == 8)
+        list.assign((const char*)data, count);
+      if (data) x.XFree(data);
+    }
+    bool ok = !list.empty() && DropFiles(dndAt, PathsFromUris(list));
+    if (dndSource) DndSend(n, xdndFinished, ok ? 1 : 0, ok ? (long)xdndActionCopy : 0);
+    dndSource = 0;
+    dndAccept = false;
+  }
+
   void Handle(XEvent& e) {
     if (e.xany.window == clipWin && clipWin) {
       if (e.type == SelectionRequest) {
@@ -658,7 +763,13 @@ struct X11Backend : Backend {
         break;
       }
       case ClientMessage:
-        if (e.xclient.message_type == wmProtocols && (Atom)e.xclient.data.l[0] == wmDelete) CloseRequested(w);
+        if (e.xclient.message_type == wmProtocols && (Atom)e.xclient.data.l[0] == wmDelete)
+          CloseRequested(w);
+        else
+          DndMessage(n, e.xclient);
+        break;
+      case SelectionNotify:
+        if (e.xselection.selection == xdndSelection) DndData(n, e.xselection);
         break;
       case FocusIn:
         if (n->managed && e.xfocus.mode == NotifyNormal && GetActiveWindow() != w->hwnd && IsWindowEnabled(w->hwnd))

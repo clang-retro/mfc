@@ -165,27 +165,44 @@ bool ReallyVisible(Window* w) {
   return true;
 }
 
+bool InShape(Window* w, POINT screen) {
+  if (!w->shaped) return true;
+  RECT r = ScreenRect(w);
+  return w->shape.Contains(screen.x - r.left, screen.y - r.top);
+}
+
 Region VisibleRegion(Window* w, bool client) {
   if (!ReallyVisible(w)) return Region();
   Window* top = w->TopLevel();
   RECT topScreen = ScreenRect(top);
   auto toSurface = [&](RECT r) { return Offset(r, -topScreen.left, -topScreen.top); };
+  // The area a window covers: its rectangle, or its shape.
+  auto area = [&](Window* x) {
+    RECT r = toSurface(ScreenRect(x));
+    if (!x->shaped) return Region(r);
+    Region s = x->shape;
+    s.Offset(r.left, r.top);
+    s.Intersect(r);
+    return s;
+  };
   Region rgn(toSurface(client ? ScreenClient(w) : ScreenRect(w)));
-  // Clipped by each parent's client area, and by siblings above when
-  // WS_CLIPSIBLINGS is set.
+  if (w->shaped) rgn.Intersect(area(w));
+  // Clipped by each parent's client area and shape, and by siblings
+  // above when WS_CLIPSIBLINGS is set.
   for (Window* c = w; c->parent; c = c->parent) {
     Window* p = c->parent;
     rgn.Intersect(toSurface(ScreenClient(p)));
+    if (p->shaped) rgn.Intersect(area(p));
     if (c->style & WS_CLIPSIBLINGS) {
       for (Window* s : p->children) {
         if (s == c) break;
-        if (s->Visible()) rgn.Subtract(toSurface(ScreenRect(s)));
+        if (s->Visible()) rgn.Subtract(area(s));
       }
     }
   }
   if (w->style & WS_CLIPCHILDREN)
     for (Window* c : w->children)
-      if (c->Visible()) rgn.Subtract(toSurface(ScreenRect(c)));
+      if (c->Visible()) rgn.Subtract(area(c));
   return rgn;
 }
 
@@ -1032,7 +1049,8 @@ static Window* ChildAt(Window* w, POINT screen, UINT skip) {
     if ((skip & CWP_SKIPDISABLED) && (c->style & WS_DISABLED)) continue;
     if ((skip & CWP_SKIPTRANSPARENT) && (c->exStyle & WS_EX_TRANSPARENT)) continue;
     RECT r = ScreenRect(c);
-    if (screen.x >= r.left && screen.x < r.right && screen.y >= r.top && screen.y < r.bottom) return c;
+    if (screen.x >= r.left && screen.x < r.right && screen.y >= r.top && screen.y < r.bottom && InShape(c, screen))
+      return c;
   }
   return NULL;
 }
@@ -1061,7 +1079,7 @@ HWND WINAPI WindowFromPoint(POINT pt) {
   for (Window* t : TopLevels()) {
     if (!t->Visible()) continue;
     RECT r = ScreenRect(t);
-    if (pt.x < r.left || pt.x >= r.right || pt.y < r.top || pt.y >= r.bottom) continue;
+    if (pt.x < r.left || pt.x >= r.right || pt.y < r.top || pt.y >= r.bottom || !InShape(t, pt)) continue;
     Window* w = t;
     for (Window* c; (c = ChildAt(w, pt, CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT)) != NULL;) w = c;
     return w->hwnd;

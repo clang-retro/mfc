@@ -273,6 +273,14 @@ bool OnKey(void* owner, int type, unsigned code, unsigned mods, const uint16_t* 
   return true;
 }
 
+bool OnDragFiles(int x, int y) { return DropTarget(POINT{x, y}) != NULL; }
+
+bool OnDropFiles(int x, int y, const std::vector<std::string>& paths) {
+  std::vector<std::wstring> wide;
+  for (const std::string& p : paths) wide.push_back(Widen(p.c_str()));
+  return DropFiles(POINT{x, y}, wide);
+}
+
 void OnBecameKey(void* owner) {
   Native* n = Valid(owner);
   if (!n || n->popup) return;

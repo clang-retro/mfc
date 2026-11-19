@@ -545,4 +545,46 @@ BOOL WINAPI ScrollDC(HDC hdc, int dx, int dy, const RECT* scroll, const RECT* cl
   return TRUE;
 }
 
+// A window's shape. The window owns the region it is given.
+int WINAPI SetWindowRgn(HWND h, HRGN rgn, BOOL redraw) {
+  Window* w = GetWindowOrFail(h);
+  if (!w) return 0;
+  {
+    UserGuard g(UserLock());
+    if (rgn) {
+      RegionObj* r = GdiAs<RegionObj>(rgn, OBJ_REGION);
+      if (!r) {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return 0;
+      }
+      w->shape = r->rgn;
+      w->shaped = true;
+    } else {
+      w->shape.Clear();
+      w->shaped = false;
+    }
+  }
+  if (rgn) DeleteObject(rgn);
+  if (redraw && ReallyVisible(w)) {
+    // What the window covered before shows its parent again.
+    if (w->parent) {
+      RECT r = w->rect;
+      RedrawWindow(w->parent->hwnd, &r, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+    }
+    RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+  }
+  return 1;
+}
+
+int WINAPI GetWindowRgn(HWND h, HRGN rgn) {
+  Window* w = GetWindowOrFail(h);
+  RegionObj* r = GdiAs<RegionObj>(rgn, OBJ_REGION);
+  if (!w || !r) return ERROR;
+  UserGuard g(UserLock());
+  if (!w->shaped) return ERROR;
+  r->rgn = w->shape;
+  size_t n = r->rgn.Rects().size();
+  return n == 0 ? NULLREGION : n == 1 ? SIMPLEREGION : COMPLEXREGION;
+}
+
 }  // extern "C"
