@@ -9,7 +9,8 @@
 // object embedded in a container's document ("file!Embedding 1"). Then
 // the objects a container makes from the file: a link (saved, loaded and
 // bound again), a copy embedded from it, a link from Link Source data,
-// and a storage's class converted by the registry's AutoConvertTo.
+// and a storage's class converted by the registry's AutoConvertTo; and
+// the OLE dialogs about an object or link, answered by their hooks.
 #include <afxwin.h>
 #include <afxext.h>
 #include <afxole.h>
@@ -260,6 +261,7 @@ public:
   void TestClosedDocument();
   void TestEmbeddedObject();
   void TestDialogs(CCntrDoc* pCntr, COleClientItem* pClient);
+  void TestOleDialogs(CCntrDoc* pCntr, COleClientItem* pClient, COleClientItem* pLink);
   void TestLinkObjects();
   void TestMessageFilter();
 };
@@ -679,9 +681,178 @@ void CLinkApp::TestDialogs(CCntrDoc* pCntr, COleClientItem* pClient) {
           S_OK);
     CHECK(lpszLocation != NULL && m_strPath.CompareNoCase(lpszLocation) == 0);
     ::CoTaskMemFree(lpszLocation);
+    TestOleDialogs(pCntr, pClient, pLink);
     pLink->Close(OLECLOSE_NOSAVE);
   }
   pLink->Delete();
+}
+
+static BOOL IsWine() {
+  return ::GetProcAddress(::GetModuleHandleA("ntdll.dll"), "wine_get_version") != NULL;
+}
+
+// ---------------------------------------------------------------------
+// The dialogs themselves, answered by their hooks: each hook, as its
+// dialog starts, posts the clicks a user would make.
+
+// The control whose text (without its '&') is lpszText.
+struct ChildByText {
+  LPCTSTR lpszText;
+  HWND hWnd;
+};
+static BOOL CALLBACK FindChild(HWND hWnd, LPARAM lParam) {
+  ChildByText* p = (ChildByText*)lParam;
+  TCHAR sz[128], szPlain[128];
+  ::GetWindowText(hWnd, sz, 128);
+  int j = 0;
+  for (int i = 0; sz[i] != 0; i++)
+    if (sz[i] != _T('&')) szPlain[j++] = sz[i];
+  szPlain[j] = 0;
+  if (lstrcmp(szPlain, p->lpszText) == 0) {
+    p->hWnd = hWnd;
+    return FALSE;
+  }
+  return TRUE;
+}
+static HWND Child(HWND hDlg, LPCTSTR lpszText) {
+  ChildByText f = {lpszText, NULL};
+  ::EnumChildWindows(hDlg, FindChild, (LPARAM)&f);
+  return f.hWnd;
+}
+static void Click(HWND hDlg, LPCTSTR lpszText) {
+  HWND hWnd = Child(hDlg, lpszText);
+  if (hWnd == NULL) {
+    TestLog("no button %s", (const char*)CStringA(lpszText));
+    hWnd = ::GetDlgItem(hDlg, IDCANCEL);
+  }
+  ::PostMessage(hDlg, WM_COMMAND, MAKEWPARAM(::GetDlgCtrlID(hWnd), BN_CLICKED), (LPARAM)hWnd);
+}
+// The edit after a label.
+static HWND EditAfter(HWND hDlg, LPCTSTR lpszLabel) {
+  HWND hWnd = Child(hDlg, lpszLabel);
+  return hWnd != NULL ? ::GetWindow(hWnd, GW_HWNDNEXT) : NULL;
+}
+
+static UINT CALLBACK BusyHook(HWND hDlg, UINT msg, WPARAM, LPARAM) {
+  if (msg == WM_INITDIALOG) Click(hDlg, _T("Retry"));
+  return 0;
+}
+static UINT CALLBACK ConvertHook(HWND hDlg, UINT msg, WPARAM, LPARAM) {
+  if (msg == WM_INITDIALOG) {
+    HWND hList = ::FindWindowEx(hDlg, NULL, _T("ListBox"), NULL);
+    int n = hList != NULL ? (int)::SendMessage(hList, LB_GETCOUNT, 0, 0) : 0;
+    TestLog("convert: %d classes", n);
+    int i = hList != NULL ? (int)::SendMessage(hList, LB_FINDSTRINGEXACT, (WPARAM)-1,
+                                               (LPARAM)_T("LinkTest Picture"))
+                          : -1;
+    if (i >= 0) ::SendMessage(hList, LB_SETCURSEL, i, 0);
+    Click(hDlg, _T("OK"));
+  }
+  return 0;
+}
+static UINT CALLBACK IconHook(HWND hDlg, UINT msg, WPARAM, LPARAM) {
+  if (msg == WM_INITDIALOG) {
+    HWND hLabel = EditAfter(hDlg, _T("Label:"));
+    if (hLabel != NULL) ::SetWindowText(hLabel, _T("Square"));
+    Click(hDlg, _T("Default"));
+    Click(hDlg, _T("OK"));
+  }
+  return 0;
+}
+static UINT CALLBACK SourceHook(HWND hDlg, UINT msg, WPARAM, LPARAM) {
+  if (msg == WM_INITDIALOG) Click(hDlg, _T("OK"));
+  return 0;
+}
+// Object Properties: the General page goes to the View page, which sets
+// the scale and presses OK.
+static UINT CALLBACK GeneralHook(HWND hDlg, UINT msg, WPARAM, LPARAM) {
+  if (msg == WM_INITDIALOG) ::PostMessage(::GetParent(hDlg), PSM_SETCURSEL, 1, 0);
+  return 0;
+}
+static UINT CALLBACK ViewHook(HWND hDlg, UINT msg, WPARAM, LPARAM) {
+  if (msg == WM_INITDIALOG) {
+    HWND hScale = EditAfter(hDlg, _T("Scale (%):"));
+    if (hScale != NULL) ::SetWindowText(hScale, _T("120"));
+    ::PostMessage(::GetParent(hDlg), PSM_PRESSBUTTON, PSBTN_OK, 0);
+  }
+  return 0;
+}
+
+void CLinkApp::TestOleDialogs(CCntrDoc* pCntr, COleClientItem* pClient, COleClientItem* pLink) {
+  if (IsWine()) {
+    TestLog("note: Wine's oledlg has these dialogs only as stubs");
+    return;
+  }
+  // Server Busy: Retry.
+  {
+    COleBusyDialog dlg(NULL);
+    dlg.m_bz.lpfnHook = BusyHook;
+    INT_PTR n = dlg.DoModal();
+    TestLog("busy: %d, selection %d", (int)n, (int)dlg.GetSelectionType());
+    CHECK(n == IDOK && dlg.GetSelectionType() == COleBusyDialog::retry);
+  }
+  // Convert: to a class that says it reads and writes the object's
+  // format.
+  {
+    // {4C1A7E94-3B5D-4F08-A6C3-9E2D71B05F44}
+    static const CLSID clsidPicture = {
+        0x4c1a7e94, 0x3b5d, 0x4f08, {0xa6, 0xc3, 0x9e, 0x2d, 0x71, 0xb0, 0x5f, 0x44}};
+    OLECHAR szGuid[40];
+    ::StringFromGUID2(clsidPicture, szGuid, 40);
+    CString strKey = CString(_T("CLSID\\")) + CString(szGuid);
+    COleConvertDialog dlg(pClient);
+    TCHAR szFormat[128] = {0};
+    ::GetClipboardFormatName(dlg.m_cv.wFormat, szFormat, 128);
+    // Without a format of its own, the class's ProgID names it.
+    if (szFormat[0] == 0) lstrcpy(szFormat, _T("LinkTest.Document"));
+    TestLog("object's format %u: %s", dlg.m_cv.wFormat, (const char*)CStringA(szFormat));
+    ::RegSetValue(HKEY_CLASSES_ROOT, strKey, REG_SZ, _T("LinkTest Picture"), 0);
+    ::RegSetValue(HKEY_CLASSES_ROOT, strKey + _T("\\Conversion\\Readwritable\\Main"), REG_SZ,
+                  szFormat, 0);
+    dlg.m_cv.lpfnHook = ConvertHook;
+    INT_PTR n = dlg.DoModal();
+    CHECK(n == IDOK && dlg.m_cv.clsidNew == clsidPicture);
+    CHECK(dlg.GetSelectionType() == COleConvertDialog::convertItem);
+    ::RegDeleteKey(HKEY_CLASSES_ROOT, strKey + _T("\\Conversion\\Readwritable\\Main"));
+    ::RegDeleteKey(HKEY_CLASSES_ROOT, strKey + _T("\\Conversion\\Readwritable"));
+    ::RegDeleteKey(HKEY_CLASSES_ROOT, strKey + _T("\\Conversion"));
+    ::RegDeleteKey(HKEY_CLASSES_ROOT, strKey);
+  }
+  // Change Icon: the class's, labeled.
+  {
+    COleChangeIconDialog dlg(pClient);
+    HGLOBAL hBefore = dlg.m_ci.hMetaPict;
+    dlg.m_ci.lpfnHook = IconHook;
+    INT_PTR n = dlg.DoModal();
+    TestLog("change icon: %d, picture %p (was %p)", (int)n, dlg.m_ci.hMetaPict, hBefore);
+    CHECK(n == IDOK && dlg.m_ci.hMetaPict != NULL && dlg.m_ci.hMetaPict != hBefore);
+  }
+  // Change Source: the same file, which is a valid source.
+  {
+    COleChangeSourceDialog dlg(pLink);
+    dlg.m_cs.lpfnHook = SourceHook;
+    INT_PTR n = dlg.DoModal();
+    TestLog("change source: %d, valid %d, %s", (int)n, dlg.IsValidSource(),
+            (const char*)CStringA(dlg.GetDisplayName()));
+    CHECK(n == IDOK && dlg.IsValidSource() && m_strPath.CompareNoCase(dlg.GetFileName()) == 0);
+  }
+  // Object Properties: a new scale, applied.
+  {
+    CPropsDialog dlg(pLink);
+    dlg.m_gp.lpfnHook = GeneralHook;
+    dlg.m_vp.lpfnHook = ViewHook;
+    INT_PTR n = dlg.DoModal();
+    TestLog("object properties: %d, scale %d", (int)n, dlg.m_nScale);
+    CHECK(n == IDOK && dlg.m_nScale == 120);
+  }
+  // Update Links: the link, from its file.
+  {
+    COleUpdateDialog dlg(pCntr);
+    INT_PTR n = dlg.DoModal();
+    TestLog("update links: %d", (int)n);
+    CHECK(n == IDOK);
+  }
+  pCntr->SetModifiedFlag(FALSE);
 }
 
 // A storage in memory, for an object of its own.
@@ -693,10 +864,6 @@ static LPSTORAGE MemoryStorage() {
                                    &lpStg);
   if (lpBytes != NULL) lpBytes->Release();
   return lpStg;
-}
-
-static BOOL IsWine() {
-  return ::GetProcAddress(::GetModuleHandleA("ntdll.dll"), "wine_get_version") != NULL;
 }
 
 static BOOL IsLink(LPUNKNOWN lpObject) {

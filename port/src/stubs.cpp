@@ -36,14 +36,6 @@ extern "C" void _WinportStub(const char* name, bool* reported);
     return -1;                        \
   }
 
-STUB_ZERO(OleUIBusyA)
-STUB_ZERO(OleUIBusyW)
-STUB_ZERO(OleUIChangeIconA)
-STUB_ZERO(OleUIChangeIconW)
-STUB_ZERO(OleUIConvertA)
-STUB_ZERO(OleUIConvertW)
-STUB_ZERO(OleUIUpdateLinksA)
-STUB_ZERO(OleUIUpdateLinksW)
 STUB_SQL(SQLAllocHandle)
 STUB_SQL(SQLBindParameter)
 STUB_SQL(SQLCancel)
@@ -89,7 +81,3 @@ STUB_ZERO(GopherGetLocatorTypeW)
 STUB_ZERO(GopherOpenFileA)
 STUB_ZERO(GopherOpenFileW)
 STUB_HRESULT(CoInternetCreateSecurityManager)
-STUB_ZERO(OleUIChangeSourceA)
-STUB_ZERO(OleUIChangeSourceW)
-STUB_ZERO(OleUIObjectPropertiesA)
-STUB_ZERO(OleUIObjectPropertiesW)

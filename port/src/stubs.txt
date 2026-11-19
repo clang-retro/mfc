@@ -5,14 +5,6 @@
 # Part of clang-retro MFC, an independent implementation of the MFC API.
 # SPDX-License-Identifier: AGPL-3.0-only
 
-OleUIBusyA
-OleUIBusyW
-OleUIChangeIconA
-OleUIChangeIconW
-OleUIConvertA
-OleUIConvertW
-OleUIUpdateLinksA
-OleUIUpdateLinksW
 SQLAllocHandle
 SQLBindParameter
 SQLCancel
@@ -62,7 +54,3 @@ GopherOpenFileW
 
 # from main: HTML views, DAO, OLE dialogs, controls
 CoInternetCreateSecurityManager
-OleUIChangeSourceA
-OleUIChangeSourceW
-OleUIObjectPropertiesA
-OleUIObjectPropertiesW
