@@ -401,6 +401,9 @@ try.
   picture without the file open and is saved, loaded and bound again; a
   copy embedded from the file; a link from Link Source data; and a
   storage converted to the class the registry's AutoConvertTo names.
+  And the OLE dialogs themselves, answered by their hooks: Server Busy,
+  Convert, Change Icon, Change Source, Object Properties (its View page
+  applying a new scale) and the progress of Update Links.
 * `iptest`: in-place activation, with the container and the server in
   one program: the object activated in the container's view, the
   shared menu and its commands (each goes to the side whose popup it

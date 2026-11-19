@@ -1517,6 +1517,76 @@ void winport::ole::FillCache(IUnknown* obj, IDataObject* src) {
   c2->Release();
 }
 
+namespace {
+
+// An icon's picture as a metafile: the icon (or, without one, a frame)
+// with its label under it.
+HGLOBAL IconPicture(HICON icon, const std::wstring& label) {
+  std::wstring text = label.empty() ? L"Document" : label;
+  const int w = 72, hIcon = 32, h = 48;
+  HDC dc = CreateMetaFileW(NULL);
+  if (!dc) return NULL;
+  SetMapMode(dc, MM_ANISOTROPIC);
+  SetWindowOrgEx(dc, 0, 0, NULL);
+  SetWindowExtEx(dc, w, h, NULL);
+  bool drawn = false;
+  if (icon) {
+    // The icon's pixels, on white.
+    HDC screen = GetDC(NULL);
+    HDC mem = CreateCompatibleDC(screen);
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+    bi.bmiHeader.biWidth = hIcon;
+    bi.bmiHeader.biHeight = hIcon;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void* bits = NULL;
+    HBITMAP bmp = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (bmp && bits) {
+      HGDIOBJ old = SelectObject(mem, bmp);
+      RECT rc = {0, 0, hIcon, hIcon};
+      FillRect(mem, &rc, (HBRUSH)GetStockObject(WHITE_BRUSH));
+      DrawIconEx(mem, 0, 0, icon, hIcon, hIcon, 0, NULL, DI_NORMAL);
+      GdiFlush();
+      StretchDIBits(dc, (w - hIcon) / 2, 0, hIcon, hIcon, 0, 0, hIcon, hIcon, bits, &bi, DIB_RGB_COLORS, SRCCOPY);
+      SelectObject(mem, old);
+      drawn = true;
+    }
+    if (bmp) DeleteObject(bmp);
+    DeleteDC(mem);
+    ReleaseDC(NULL, screen);
+  }
+  if (!drawn) {
+    HBRUSH b = CreateSolidBrush(RGB(255, 255, 255));
+    HGDIOBJ oldB = SelectObject(dc, b);
+    HGDIOBJ oldP = SelectObject(dc, GetStockObject(BLACK_PEN));
+    Rectangle(dc, (w - hIcon) / 2, 0, (w + hIcon) / 2, hIcon);
+    SelectObject(dc, oldB);
+    SelectObject(dc, oldP);
+    DeleteObject(b);
+  }
+  SetBkMode(dc, TRANSPARENT);
+  SetTextAlign(dc, TA_CENTER | TA_TOP);
+  TextOutW(dc, w / 2, hIcon + 2, text.c_str(), (int)text.size());
+  HMETAFILE mf = CloseMetaFile(dc);
+  if (!mf) return NULL;
+  HGLOBAL g = GlobalAlloc(GMEM_MOVEABLE, sizeof(METAFILEPICT));
+  if (!g) {
+    DeleteMetaFile(mf);
+    return NULL;
+  }
+  METAFILEPICT* p = (METAFILEPICT*)GlobalLock(g);
+  p->mm = MM_ANISOTROPIC;
+  p->xExt = MulDiv(w, 2540, 96);
+  p->yExt = MulDiv(h, 2540, 96);
+  p->hMF = mf;
+  GlobalUnlock(g);
+  return g;
+}
+
+}  // namespace
+
 extern "C" {
 
 HRESULT WINAPI CreateOleAdviseHolder(LPOLEADVISEHOLDER* out) {
@@ -1898,37 +1968,14 @@ HGLOBAL WINAPI OleGetIconOfClass(REFCLSID clsid, LPOLESTR label, BOOL useTypeAsL
       CoTaskMemFree(t);
     }
   }
-  if (text.empty()) text = L"Document";
-  const int w = 72, hIcon = 32, h = 48;
-  HDC dc = CreateMetaFileW(NULL);
-  if (!dc) return NULL;
-  SetMapMode(dc, MM_ANISOTROPIC);
-  SetWindowOrgEx(dc, 0, 0, NULL);
-  SetWindowExtEx(dc, w, h, NULL);
-  HBRUSH b = CreateSolidBrush(RGB(255, 255, 255));
-  HGDIOBJ oldB = SelectObject(dc, b);
-  HGDIOBJ oldP = SelectObject(dc, GetStockObject(BLACK_PEN));
-  Rectangle(dc, (w - hIcon) / 2, 0, (w + hIcon) / 2, hIcon);
-  SelectObject(dc, oldB);
-  SelectObject(dc, oldP);
-  DeleteObject(b);
-  SetBkMode(dc, TRANSPARENT);
-  SetTextAlign(dc, TA_CENTER | TA_TOP);
-  TextOutW(dc, w / 2, hIcon + 2, text.c_str(), (int)text.size());
-  HMETAFILE mf = CloseMetaFile(dc);
-  if (!mf) return NULL;
-  HGLOBAL g = GlobalAlloc(GMEM_MOVEABLE, sizeof(METAFILEPICT));
-  if (!g) {
-    DeleteMetaFile(mf);
-    return NULL;
-  }
-  METAFILEPICT* p = (METAFILEPICT*)GlobalLock(g);
-  p->mm = MM_ANISOTROPIC;
-  p->xExt = MulDiv(w, 2540, 96);
-  p->yExt = MulDiv(h, 2540, 96);
-  p->hMF = mf;
-  GlobalUnlock(g);
-  return g;
+  return IconPicture(NULL, text);
+}
+
+// An icon and its label as a picture. (Where the icon came from is not
+// kept in it.)
+HGLOBAL WINAPI OleMetafilePictFromIconAndLabel(HICON icon, LPOLESTR label, LPOLESTR, UINT) {
+  if (!icon) return NULL;
+  return IconPicture(icon, label ? label : L"");
 }
 
 // A picture as an object of its own: the handler of a static class, with

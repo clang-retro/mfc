@@ -14,6 +14,8 @@
 #include "user.h"
 
 #include <commctrl.h>
+#include <shellapi.h>
+#include <wctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1199,3 +1201,52 @@ int TranslateCore(HWND hwnd, HACCEL h, LPMSG msg, bool unicode) {
 
 int WINAPI TranslateAcceleratorW(HWND hwnd, HACCEL h, LPMSG msg) { return TranslateCore(hwnd, h, msg, true); }
 int WINAPI TranslateAcceleratorA(HWND hwnd, HACCEL h, LPMSG msg) { return TranslateCore(hwnd, h, msg, false); }
+
+// ---------------------------------------------------------------------
+// ExtractIcon: the icons of an icon file, or of this program's own file
+// (its icon resources; other programs' files are not read).
+
+namespace {
+
+BOOL CALLBACK CollectIconGroup(HMODULE, LPCWSTR, LPWSTR name, LONG_PTR l) {
+  auto* v = (std::vector<LPCWSTR>*)l;
+  v->push_back(IS_INTRESOURCE(name) ? name : _wcsdup(name));
+  return TRUE;
+}
+
+HICON ExtractCore(const std::wstring& file, UINT index) {
+  size_t dot = file.rfind(L'.');
+  std::wstring ext = dot == std::wstring::npos ? L"" : file.substr(dot);
+  for (wchar_t& c : ext) c = (wchar_t)towlower(c);
+  if (ext == L".ico") {
+    if (index == (UINT)-1) return GetFileAttributesW(file.c_str()) != INVALID_FILE_ATTRIBUTES ? (HICON)1 : NULL;
+    if (index != 0) return NULL;
+    return (HICON)LoadImageW(NULL, file.c_str(), IMAGE_ICON, 32, 32, LR_LOADFROMFILE);
+  }
+  WCHAR self[MAX_PATH] = {};
+  GetModuleFileNameW(NULL, self, MAX_PATH);
+  if (lstrcmpiW(self, file.c_str()) != 0) return NULL;
+  std::vector<LPCWSTR> groups;
+  HMODULE mod = GetModuleHandleW(NULL);
+  EnumResourceNamesW(mod, (LPCWSTR)RT_GROUP_ICON, CollectIconGroup, (LONG_PTR)&groups);
+  HICON icon = NULL;
+  if (index == (UINT)-1)
+    icon = (HICON)(UINT_PTR)groups.size();
+  else if (index < groups.size())
+    icon = (HICON)LoadImageW(mod, groups[index], IMAGE_ICON, 32, 32, 0);
+  for (LPCWSTR n : groups)
+    if (!IS_INTRESOURCE(n)) free((void*)n);
+  return icon;
+}
+
+}  // namespace
+
+HICON WINAPI ExtractIconW(HINSTANCE, LPCWSTR file, UINT index) {
+  if (!file) return NULL;
+  return ExtractCore(file, index);
+}
+
+HICON WINAPI ExtractIconA(HINSTANCE, LPCSTR file, UINT index) {
+  if (!file) return NULL;
+  return ExtractCore(winport::Widen(file), index);
+}

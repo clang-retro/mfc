@@ -17,7 +17,9 @@ extern thread_local DWORD tlsDlgError;
 class Template {
  public:
   Template(DWORD style, int cx, int cy, const wchar_t* title) {
-    style |= DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU;
+    // A property sheet's page is a child; anything else a dialog box.
+    style |= DS_SETFONT;
+    if (!(style & WS_CHILD)) style |= DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU;
     Dword(style);
     Dword(0);
     w_.push_back(0);  // the item count, set by Add
@@ -33,6 +35,23 @@ class Template {
   }
   enum { kButton = 0x80, kEdit = 0x81, kStatic = 0x82, kListBox = 0x83, kCombo = 0x85 };
   void Add(int cls, DWORD style, int x, int y, int cx, int cy, int id, const wchar_t* text) {
+    Item(style, x, y, cx, cy, id);
+    w_.push_back(0xFFFF);
+    w_.push_back((WORD)cls);
+    String(text);
+    w_.push_back(0);
+  }
+  // A control of a class named (a common control's).
+  void Add(const wchar_t* cls, DWORD style, int x, int y, int cx, int cy, int id, const wchar_t* text) {
+    Item(style, x, y, cx, cy, id);
+    String(cls);
+    String(text);
+    w_.push_back(0);
+  }
+  LPCDLGTEMPLATEW Get() const { return (LPCDLGTEMPLATEW)w_.data(); }
+
+ private:
+  void Item(DWORD style, int x, int y, int cx, int cy, int id) {
     if (w_.size() & 1) w_.push_back(0);
     Dword(style | WS_CHILD | WS_VISIBLE);
     Dword(0);
@@ -41,15 +60,8 @@ class Template {
     Short(cx);
     Short(cy);
     w_.push_back((WORD)id);
-    w_.push_back(0xFFFF);
-    w_.push_back((WORD)cls);
-    String(text);
-    w_.push_back(0);
     w_[4]++;
   }
-  LPCDLGTEMPLATEW Get() const { return (LPCDLGTEMPLATEW)w_.data(); }
-
- private:
   void Dword(DWORD d) {
     w_.push_back((WORD)d);
     w_.push_back((WORD)(d >> 16));
