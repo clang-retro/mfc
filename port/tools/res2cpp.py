@@ -10,7 +10,8 @@
 # resource compiler understands only the preprocessor, so it does not get
 # the portable layer's headers, which are C++: it gets stand-ins for
 # them that hold just their macros, which clang ($CXX, default clang++)
-# collects with -dM. A .res file is used as it is.
+# collects with -dM. A .res file is used as it is. MFC's include
+# directory is searched after the ones given.
 #
 # Part of clang-retro MFC, an independent implementation of the MFC API.
 # SPDX-License-Identifier: AGPL-3.0-only
@@ -22,7 +23,21 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PORT_INCLUDE = os.path.normpath(os.path.join(HERE, "..", "include"))
+
+
+def first_dir(marker, *paths):
+    """The first of the directories (relative to this script) that holds marker."""
+    for d in paths:
+        d = os.path.normpath(os.path.join(HERE, *d.split("/")))
+        if os.path.exists(os.path.join(d, marker)):
+            return d
+    return None
+
+
+# The portable layer's headers and MFC's: beside this script in the source
+# tree (port/tools), or under the prefix once installed (share/libmfc).
+PORT_INCLUDE = first_dir("windows.h", "../include", "../../include/libmfc/winport")
+MFC_INCLUDE = first_dir("afxres.h", "../../include", "../../include/libmfc")
 
 # A macro the resource compiler can use: an object-like macro whose value
 # is numbers, names, strings and operators (no casts or calls).
@@ -65,11 +80,16 @@ def compile_rc(args, res):
         cmd = [rc, "/I", stand_ins]
         for d in args.I:
             cmd += ["/I", d]
+        # afxres.h and MFC's own scripts, after the directories asked for.
+        if MFC_INCLUDE:
+            cmd += ["/I", MFC_INCLUDE]
         for d in args.D:
             cmd += ["/D", d]
         # Relative names in the script are found from its own directory.
         cmd += ["/I", os.path.dirname(os.path.abspath(args.input)) or "."]
-        cmd += ["/FO", res, args.input]
+        # The input after "--": an absolute path such as /Users/... would
+        # otherwise read as an option (/U).
+        cmd += ["/FO", res, "--", args.input]
         r = subprocess.run(cmd)
         if r.returncode != 0:
             sys.exit(r.returncode)

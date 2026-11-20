@@ -12,7 +12,11 @@
 # libmfcdll.a and libmfcudll.a, and libmfcs.a and libmfcus.a, the part
 # each module links itself. `make static` builds only the static ones.
 # `make install PREFIX=dir` copies the headers to dir/include/mfc, the
-# libraries to dir/lib and the DLLs to dir/bin. `make check` builds and runs the tests (needs Wine
+# libraries to dir/lib and the DLLs to dir/bin; for Linux and macOS, the
+# headers to dir/include/libmfc, the static libraries to dir/lib, the
+# shared ones to dir/lib/libmfc-shared, res2cpp.py to dir/share/libmfc,
+# and the pkg-config (libmfc, libmfcu, libmfc-shared, libmfcu-shared)
+# and CMake (libmfc) packages to dir/lib. `make check` builds and runs the tests (needs Wine
 # for the GUI tests; see tests/run-tests.sh).
 
 BIN ?=
@@ -32,11 +36,21 @@ else
 OUT ?= build/$(TARGET)
 TARGET_FLAGS = --target=$(TARGET) $(if $(SYSROOT),--sysroot=$(SYSROOT),)
 endif
+ifeq ($(PORTABLE)$(SYSROOT),1)
+PREFIX ?= /usr/local
+endif
 PREFIX ?= $(SYSROOT)
+DESTDIR ?=
 
 CXX = $(if $(BIN),$(BIN)/,)clang++
-AR = $(if $(BIN),$(BIN)/,)llvm-ar
-NM = $(if $(BIN),$(BIN)/,)llvm-nm
+# Without BIN, llvm-ar and llvm-nm from the path, or else the system's.
+ifneq ($(BIN),)
+AR = $(BIN)/llvm-ar
+NM = $(BIN)/llvm-nm
+else
+AR = $(if $(shell command -v llvm-ar 2>/dev/null),llvm-ar,ar)
+NM = $(if $(shell command -v llvm-nm 2>/dev/null),llvm-nm,nm)
+endif
 
 CXXFLAGS ?= -O2
 STDLIB ?= -stdlib=libc++
@@ -183,19 +197,39 @@ $(OUT)/su/%.o: src/%.cpp $(HDRS)
 	@mkdir -p $(dir $@)
 	$(CXX) $(ALL_CXXFLAGS) -D_AFXDLL -DUNICODE -D_UNICODE -c $< -o $@
 
+DEST = $(DESTDIR)$(PREFIX)
+PKG_VERSION = 6.0
+# $(call pcfile,name,u or nothing,static or shared,description)
+pcfile = sed -e 's|@NAME@|$(1)|g' -e 's|@DESC@|$(4)|g' -e 's|@VERSION@|$(PKG_VERSION)|' \
+  -e 's|@DEFS@|$(if $(2), -DUNICODE -D_UNICODE)$(if $(filter shared,$(3)), -D_AFXDLL)|' \
+  -e 's|@LIBS@|$(PC_LIBS_$(3))|' -e 's|@LIB@|mfc$(2)|g' -e 's|@SYSLIBS@|$(SHLIB_SYSLIBS)|' \
+  port/pkg/libmfc.pc.in > $(DEST)/lib/pkgconfig/$(1).pc
+PC_LIBS_static = -L$${libdir} -l@LIB@ -lwinport
+# The program's own part (main among it) from libmfcs.a, then the shared libraries.
+PC_LIBS_shared = -L$${shareddir} -L$${libdir} -l@LIB@s -l@LIB@ -lwinport -Wl,-rpath,$${shareddir}
+
 install: all
-	mkdir -p $(PREFIX)/include/mfc $(PREFIX)/lib $(PREFIX)/bin
-	cp include/*.h include/*.rc $(PREFIX)/include/mfc/
 ifeq ($(PORTABLE),1)
-	cp $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PORT_LIB) $(OUT)/libmfcs.a $(OUT)/libmfcus.a $(PREFIX)/lib/
-	mkdir -p $(PREFIX)/lib/mfc-shared
-	cp $(SHARED_LIBS:%.a=) $(PREFIX)/lib/mfc-shared/
-	mkdir -p $(PREFIX)/include/winport
-	cp port/include/*.h $(PREFIX)/include/winport/
+	mkdir -p $(DEST)/include/libmfc/winport $(DEST)/lib/libmfc-shared $(DEST)/lib/pkgconfig \
+	  $(DEST)/lib/cmake/libmfc $(DEST)/share/libmfc
+	cp include/*.h include/*.rc include/*.cpp $(DEST)/include/libmfc/
+	cp port/include/*.h $(DEST)/include/libmfc/winport/
+	cp $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PORT_LIB) $(OUT)/libmfcs.a $(OUT)/libmfcus.a $(DEST)/lib/
+	cp $(filter-out %.a,$(SHARED_LIBS)) $(DEST)/lib/libmfc-shared/
+	cp port/tools/res2cpp.py $(DEST)/share/libmfc/
+	$(call pcfile,libmfc,,static,the ANSI static library)
+	$(call pcfile,libmfcu,u,static,the Unicode static library)
+	$(call pcfile,libmfc-shared,,shared,the ANSI shared library)
+	$(call pcfile,libmfcu-shared,u,shared,the Unicode shared library)
+	cp port/pkg/libmfcConfig.cmake $(DEST)/lib/cmake/libmfc/
+	sed -e 's|@VERSION@|$(PKG_VERSION)|' port/pkg/libmfcConfigVersion.cmake.in \
+	  > $(DEST)/lib/cmake/libmfc/libmfcConfigVersion.cmake
 else
+	mkdir -p $(DEST)/include/mfc $(DEST)/lib $(DEST)/bin
+	cp include/*.h include/*.rc $(DEST)/include/mfc/
 	cp $(OUT)/libmfc.a $(OUT)/libmfcu.a $(OUT)/libmfcs.a $(OUT)/libmfcus.a \
-	  $(OUT)/libmfcdll.a $(OUT)/libmfcudll.a $(PREFIX)/lib/
-	cp $(OUT)/mfc.dll $(OUT)/mfcu.dll $(PREFIX)/bin/
+	  $(OUT)/libmfcdll.a $(OUT)/libmfcudll.a $(DEST)/lib/
+	cp $(OUT)/mfc.dll $(OUT)/mfcu.dll $(DEST)/bin/
 endif
 
 check: all

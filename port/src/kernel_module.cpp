@@ -139,7 +139,7 @@ std::string StripExt(const std::string& n) {
 bool IsSystemDll(const std::string& name) {
   static const char* const names[] = {
       "kernel32", "user32", "gdi32", "advapi32", "shell32", "shlwapi", "comctl32", "comdlg32", "ole32",
-      "oleaut32", "olepro32", "oledlg", "winspool", "winspool.drv", "uxtheme", "imm32", "version", "winmm",
+      "oleaut32", "olepro32", "oledlg", "winspool", "winspool.drv", "uxtheme", "imm32", "version", "winmm", "msacm32",
       "ws2_32", "wsock32", "wininet", "urlmon", "msimg32", "rpcrt4", "odbc32", "riched20", "riched32",
       "msftedit", "mpr", "ntdll", "htmlhelp", "hhctrl", "dwmapi", "secur32", "crypt32", "msvcrt"};
   std::string b = Lower(BaseName(name));

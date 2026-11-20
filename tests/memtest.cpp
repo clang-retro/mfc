@@ -1,7 +1,7 @@
 // memtest.cpp - console tests for the memory diagnostics in a debug
 // build: DEBUG_NEW and object blocks, CMemoryState, dumps, guard bytes,
 // AfxIsMemoryBlock, AfxDoForAllObjects, tracking off, the allocation hook
-// and delayed frees.
+// and delayed frees; and a console program that starts at WinMain.
 #define _DEBUG
 #include <afx.h>
 #include <stdio.h>
@@ -208,7 +208,9 @@ static void TestLeaks() {
   CHECK(!AfxDumpMemoryLeaks());
 }
 
-int main() {
+// The program starts at WinMain, defined as a program defines it, without
+// extern "C": the declaration in the headers gives it its C name.
+int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
   g_bAll = _AfxTracksAllBlocks();
   if (!g_bAll) printf("note: the C++ runtime's delete is linked; only objects are tracked\n");
   try {

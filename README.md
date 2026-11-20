@@ -27,7 +27,8 @@ The libraries go to `build/<triple>` (or `build/<config name>`): the
 static libraries `libmfc.a` and `libmfcu.a` (Unicode), and the shared
 library, `mfc.dll` and `mfcu.dll` (see below). `make static` builds only
 the static ones. `make install PREFIX=dir` copies the headers to
-`dir/include/mfc`, the libraries to `dir/lib` and the DLLs to `dir/bin`.
+`dir/include/mfc`, the libraries to `dir/lib` and the DLLs to `dir/bin`
+(for Linux and macOS, see below).
 
 A program then needs only the include path and the library path:
 
@@ -81,8 +82,11 @@ the system's own clang:
 
 ```sh
 make TARGET=x86_64-linux-gnu STDLIB=          # Linux (glibc, libstdc++)
-make TARGET=arm64-apple-macos11 STDLIB= AR=ar # macOS
+make TARGET=arm64-apple-macos11 STDLIB=        # macOS
 ```
+
+Without `BIN`, the build uses `llvm-ar` when it is on the path and the
+system's `ar` otherwise.
 
 This adds `libwinport.a`, which programs link after the MFC library:
 
@@ -94,14 +98,40 @@ clang++ -std=c++17 -Ipath/to/mfc/port/include -Ipath/to/mfc/include app.cpp \
 On macOS the system libraries are `-framework Cocoa -lpthread` instead
 of `-ldl -lpthread`.
 
+`make install` (to `/usr/local`, or `PREFIX=dir`; `DESTDIR` works too)
+puts the headers in `include/libmfc` (the portable layer's in
+`include/libmfc/winport`), the static libraries in `lib`, the shared
+ones in `lib/libmfc-shared`, and `res2cpp.py` in `share/libmfc`. It also
+installs pkg-config files, `libmfc` and `libmfcu` (Unicode) for the
+static libraries and `libmfc-shared` and `libmfcu-shared` for the shared
+ones, and a CMake package, `libmfc`. Both find the install from where
+they are, so the tree can be moved:
+
+```sh
+python3 "$(pkg-config --variable=res2cpp libmfc)" app.rc -o app-res.cpp
+clang++ app.cpp app-res.cpp $(pkg-config --cflags --libs libmfc) -o app
+```
+
+```cmake
+find_package(libmfc REQUIRED)
+add_executable(app WIN32 app.cpp)
+target_link_libraries(app PRIVATE libmfc::mfc)  # or mfcu, mfc_shared, mfcu_shared
+libmfc_add_resources(app app.rc)
+```
+
+A program may define its own `WinMain`, as on Windows (declared with C
+names in `winbase.h`); otherwise the library's runs `AfxWinMain`.
+
 A program's resources go in as C++: `port/tools/res2cpp.py` compiles the
 `.rc` file with `llvm-rc` and writes the result as a source file that
 registers it when the program starts (it needs Python 3, `llvm-rc` and
 clang):
 
 ```sh
-python3 path/to/mfc/port/tools/res2cpp.py -I path/to/mfc/include app.rc -o app-res.cpp
+python3 path/to/mfc/port/tools/res2cpp.py app.rc -o app-res.cpp
 ```
+
+MFC's include directory is searched after any given with `-I`.
 
 It is a work in progress. So far the non-window classes, automation, the
 registry (kept in `~/.config/winport/registry.reg`), resources, sockets
@@ -138,6 +168,28 @@ device's own path (`/dev/ttyUSB0`) opens as a port too. Its `DCB`,
 reads, writes and event waits on a port opened with
 `FILE_FLAG_OVERLAPPED` run in the background until `GetOverlappedResult`
 or the event says they are done.
+
+Sound goes through ALSA on Linux (libasound, loaded when first used;
+`WINPORT_AUDIO_DEVICE` names the device) and through audio queues on
+macOS. `waveOut` and `waveIn` take any format the built-in ACM driver
+reads (PCM of 8 to 32 bits and float, A-law, mu-law and IMA ADPCM, at
+any rate and channels) and convert it for the device, with callbacks,
+loops, pause, positions and volume. The ACM itself enumerates, suggests
+and converts those formats. `mmio` reads and writes RIFF files on disk
+and in memory; `PlaySound` plays WAVE files, resources and images; and
+`timeSetEvent` timers run on their own threads. `WINPORT_AUDIO=null`
+chooses a loopback device that keeps time like a sound card and records
+what was played. `Beep` plays its tone the same way.
+
+`GetEnvironmentStrings`, `GetUserName` (from the password database) and
+`SHGetFolderPath` work: `CSIDL_APPDATA` and the other folders are the
+XDG folders on Linux (`XDG_CONFIG_HOME`, `XDG_DATA_HOME` and the
+`user-dirs.dirs` names such as Documents) and the usual folders under
+`~/Library` on macOS, and `CSIDL_PROFILE` is the home folder.
+`SendInput`, `mouse_event` and `keybd_event` feed the window manager's
+input as a real mouse and keyboard would, and mouse messages go to the
+window under the pointer, passing through controls that answer
+`WM_NCHITTEST` with `HTTRANSPARENT` (such as group boxes).
 
 A regular DLL builds as a shared library (`-shared`, exporting
 `DllMain` and the `.def` file's names; the program links with
@@ -195,7 +247,13 @@ Times New Roman and Courier New map to similar installed families
 the folders to search instead of the system's, separated by colons; set
 to `builtin`, text uses only the built-in fallback, the public domain
 X11 6x13 bitmap font (`port/tools/gen-builtin-font.py` makes
-`port/src/font_builtin.inc` from it).
+`port/src/font_builtin.inc` from it). Symbol and Wingdings are symbol
+fonts as on Windows: their `A` text is read a byte at a time, and when
+the font is not installed each character is drawn as its Unicode
+counterpart (the Adobe Symbol mapping, and for Wingdings the characters
+Unicode encodes, such as U+2713 for the check mark), from the stand-in
+family or a symbol font such as Symbola, Noto Sans Symbols or DejaVu
+Sans. A Wingdings character with no clear counterpart draws as its byte.
 
 The ANSI code page there is UTF-8, `WCHAR` is the system's 32-bit
 `wchar_t`, and `long` is 64 bits on 64-bit systems while `LONG` and
@@ -259,7 +317,7 @@ when there is no display. For a Linux or macOS target it builds `core`,
 `docobtest`, `linktest`, `bindtest`, `richtest`, `richsrvtest`,
 `autotest`, `srvtest`, `atlwintest`, `atltest`, `conntest`, `ctltest`,
 `wltest`, `dragtest`, `daotest`, `dvtest`, `htmltest`, `atlctltest`,
-`cdlgtest` and `iotest` against the portable layer, and `exttest`, `core`, `sditest`,
+`cdlgtest`, `iotest` and `audiotest` against the portable layer, and `exttest`, `core`, `sditest`,
 `dlgtest` and `dlltest` again with the shared libraries
 (`SHARED_TESTS`), and runs them directly; `NATIVE_TESTS` names others to
 try.
@@ -452,6 +510,14 @@ try.
   return at once, wait, or end when the line goes quiet, a command out
   and a reply in, and WaitCommEvent overlapped, ended by data, by
   SetCommMask and by CancelIo.
+* `audiotest`: voice audio, on the console: ACM format details,
+  enumeration and suggestion, and streams through mu-law, IMA ADPCM and
+  a rate change; a WAVE file written and read through mmio, its buffer
+  used directly, and a file in memory; periodic and one-shot timers;
+  and, where there is a sound device, a mu-law tone played while
+  recording (checked against what was recorded on the loopback device),
+  positions, pause, reset, a loop, a recording stopped early, and
+  PlaySound.
 * `oletest`: an OLE container: objects of a class the test registers
   itself, embedded in a COleDocument, drawn by its view, opened and
   changed through their verbs and the verb menu, saved to flat and
@@ -1127,8 +1193,9 @@ programs build and look the same on macOS and Linux.
 ## Layout
 
 `include/` has the public headers, `src/` the library, `port/` the
-portable Win32 layer (its headers, sources and the generator for its
-placeholders), `tests/` the
+portable Win32 layer (its headers, sources, the generator for its
+placeholders, `res2cpp.py`, and in `port/pkg` the pkg-config and CMake
+package files), `tests/` the
 test programs and `tools/` the generator for the `ON_WM_*` macros and
 CWnd's default handlers (`tools/gen-msgmap.py`) and a development helper
 that lists declared functions the library does not define yet, and

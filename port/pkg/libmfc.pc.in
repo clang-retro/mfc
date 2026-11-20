@@ -1,0 +1,16 @@
+# @NAME@.pc - clang-retro MFC for pkg-config: @DESC@.
+#
+# Part of clang-retro MFC, an independent implementation of the MFC API.
+# SPDX-License-Identifier: AGPL-3.0-only
+
+prefix=${pcfiledir}/../..
+includedir=${prefix}/include/libmfc
+libdir=${prefix}/lib
+shareddir=${libdir}/libmfc-shared
+res2cpp=${prefix}/share/libmfc/res2cpp.py
+
+Name: @NAME@
+Description: clang-retro MFC, an independent implementation of the MFC API: @DESC@
+Version: @VERSION@
+Cflags: -std=c++17 -I${includedir}/winport -I${includedir}@DEFS@
+Libs: @LIBS@ @SYSLIBS@

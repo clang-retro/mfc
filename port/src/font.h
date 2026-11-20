@@ -15,6 +15,8 @@
 
 #include "winport.h"
 
+#include <stdint.h>
+
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -60,11 +62,16 @@ struct RealFont {
   int bitmapScale = 1;
   bool boldBitmap = false;
   bool synthBold = false, synthItalic = false;
+  // Symbol and Wingdings: what each character code is in Unicode, for
+  // when the font itself is not installed; NULL for other fonts.
+  const uint32_t* symbolMap = NULL;
+  bool symbolFont = false;  // Symbol or Wingdings, installed or not
 
  private:
   std::mutex lock_;
   std::unordered_map<UINT32, GlyphImage> cache_;
   void Render(UINT32 ch, GlyphImage* g);
+  bool Source(UINT32 ch, FontSource** s, int* glyph, float* sx, float* sy);
 };
 
 // The font for a LOGFONT whose height and width are already in device

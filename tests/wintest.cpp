@@ -2472,6 +2472,179 @@ static void TestShapesAndDrops() {
   ::DestroyWindow(top);
 }
 
+// Clicks through a group box: it answers HTTRANSPARENT, so a click on a
+// button inside it (beneath it in z-order) reaches the button.
+static int g_groupClicks = 0;
+static LRESULT CALLBACK GroupParentProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_COMMAND && LOWORD(wp) == 101 && HIWORD(wp) == BN_CLICKED) g_groupClicks++;
+  return ::DefWindowProcW(h, msg, wp, lp);
+}
+
+static void PumpFor(DWORD ms) {
+  DWORD t0 = ::GetTickCount();
+  MSG m;
+  while (::GetTickCount() - t0 < ms) {
+    while (::PeekMessageW(&m, NULL, 0, 0, PM_REMOVE)) {
+      ::TranslateMessage(&m);
+      ::DispatchMessageW(&m);
+    }
+    ::Sleep(5);
+  }
+}
+
+static void TestClickThroughGroupBox() {
+  WNDCLASSW wc;
+  memset(&wc, 0, sizeof(wc));
+  wc.lpfnWndProc = GroupParentProc;
+  wc.hInstance = ::GetModuleHandleW(NULL);
+  wc.hbrBackground = (HBRUSH)::GetStockObject(WHITE_BRUSH);
+  wc.lpszClassName = L"WinTestGroup";
+  CHECK(::RegisterClassW(&wc) != 0);
+  HWND top = ::CreateWindowExW(WS_EX_TOPMOST, L"WinTestGroup", L"group", WS_POPUP | WS_VISIBLE, 120, 120, 300, 200,
+                               NULL, NULL, wc.hInstance, NULL);
+  HWND group = ::CreateWindowExW(0, L"BUTTON", L"Group", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 10, 10, 280, 180, top,
+                                 (HMENU)100, wc.hInstance, NULL);
+  HWND button = ::CreateWindowExW(0, L"BUTTON", L"Push", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 40, 60, 100, 30, top,
+                                  (HMENU)101, wc.hInstance, NULL);
+  CHECK(top && group && button);
+  ::SetForegroundWindow(top);
+  ::UpdateWindow(top);
+  // The group box, made first, is above the button.
+  CHECK(::GetWindow(top, GW_CHILD) == group);
+  RECT r;
+  ::GetWindowRect(button, &r);
+  ::SetCursorPos((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+  ::mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+  PumpFor(30);
+  ::mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+  PumpFor(30);
+  CHECK(g_groupClicks == 1);
+  ::DestroyWindow(top);
+}
+
+// Focus after a modal dialog: the control that had it in the owner (a
+// dialog itself) gets it back when the modal dialog ends.
+static HWND g_ownerEdit2 = NULL;
+static INT_PTR CALLBACK OwnerDlgProc(HWND h, UINT msg, WPARAM, LPARAM) {
+  if (msg == WM_INITDIALOG) {
+    ::CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 10, 10, 100, 20, h, (HMENU)1, NULL, NULL);
+    g_ownerEdit2 =
+        ::CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 10, 40, 100, 20, h, (HMENU)2, NULL, NULL);
+    return TRUE;
+  }
+  return FALSE;
+}
+static INT_PTR CALLBACK ShortModalProc(HWND h, UINT msg, WPARAM, LPARAM) {
+  if (msg == WM_INITDIALOG) {
+    ::CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 10, 10, 100, 20, h, (HMENU)1, NULL, NULL);
+    ::SetTimer(h, 1, 50, NULL);
+    return TRUE;
+  }
+  if (msg == WM_TIMER) {
+    ::KillTimer(h, 1);
+    ::EndDialog(h, 7);
+    return TRUE;
+  }
+  return FALSE;
+}
+
+// Draws text into a fresh bitmap and returns its pixels.
+static std::vector<DWORD> InkOf(HFONT font, const char* a, const wchar_t* w) {
+  BITMAPINFO bi = {};
+  bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+  bi.bmiHeader.biWidth = 64;
+  bi.bmiHeader.biHeight = -48;
+  bi.bmiHeader.biPlanes = 1;
+  bi.bmiHeader.biBitCount = 32;
+  void* bits = NULL;
+  HDC dc = ::CreateCompatibleDC(NULL);
+  HBITMAP bmp = ::CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+  HGDIOBJ oldBmp = ::SelectObject(dc, bmp);
+  HGDIOBJ oldFont = ::SelectObject(dc, font);
+  RECT rc = {0, 0, 64, 48};
+  ::FillRect(dc, &rc, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  ::SetBkMode(dc, TRANSPARENT);
+  if (a)
+    ::TextOutA(dc, 4, 4, a, (int)strlen(a));
+  else
+    ::TextOutW(dc, 4, 4, w, (int)wcslen(w));
+  ::GdiFlush();
+  std::vector<DWORD> px((const DWORD*)bits, (const DWORD*)bits + 64 * 48);
+  ::SelectObject(dc, oldFont);
+  ::SelectObject(dc, oldBmp);
+  ::DeleteObject(bmp);
+  ::DeleteDC(dc);
+  return px;
+}
+
+static bool Inked(const std::vector<DWORD>& px) {
+  for (DWORD p : px)
+    if ((p & 0xFFFFFF) != 0xFFFFFF) return true;
+  return false;
+}
+
+// Wingdings is a symbol font: its A text is read byte by byte, and its
+// characters draw whether or not Wingdings itself is installed.
+static void TestSymbolFont() {
+  HFONT wd = ::CreateFontW(-32, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, 0, 0, L"Wingdings");
+  HFONT arial = ::CreateFontW(-32, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, 0, L"Arial");
+  HDC dc = ::CreateCompatibleDC(NULL);
+  HGDIOBJ old = ::SelectObject(dc, wd);
+#ifndef _WINPORT
+  // Windows draws the font only when it is installed (Wine has none).
+  WCHAR face[LF_FACESIZE] = {};
+  ::GetTextFaceW(dc, LF_FACESIZE, face);
+  if (lstrcmpiW(face, L"Wingdings") != 0) {
+    printf("no Wingdings font: symbol fonts not tested\n");
+    ::SelectObject(dc, old);
+    ::DeleteDC(dc);
+    ::DeleteObject(wd);
+    ::DeleteObject(arial);
+    return;
+  }
+#endif
+  TEXTMETRICW tm = {};
+  CHECK(::GetTextMetricsW(dc, &tm));
+  CHECK(tm.tmCharSet == SYMBOL_CHARSET);
+  // One byte, one character.
+  SIZE one = {}, two = {};
+  CHECK(::GetTextExtentPoint32A(dc, "\xFC", 1, &one));
+  CHECK(::GetTextExtentPoint32A(dc, "\xFC\xFC", 2, &two));
+  CHECK(one.cx > 0 && two.cx == 2 * one.cx);
+  ::SelectObject(dc, old);
+  ::DeleteDC(dc);
+  // 0xFC is the check mark: the same from the A form and from U+F0FC,
+  // and not the u with diaeresis that Arial has there.
+  std::vector<DWORD> byA = InkOf(wd, "\xFC", NULL);
+  std::vector<DWORD> byW = InkOf(wd, NULL, L"\xF0FC");
+  std::vector<DWORD> latin = InkOf(arial, NULL, L"\x00FC");
+  CHECK(Inked(byA));
+  CHECK(byA == byW);
+  CHECK(byA != latin);
+  ::DeleteObject(wd);
+  ::DeleteObject(arial);
+}
+
+static void TestModalFocus() {
+  // An empty template: the controls are made in WM_INITDIALOG.
+  static WORD tmpl[32];
+  memset(tmpl, 0, sizeof tmpl);
+  DLGTEMPLATE* t = (DLGTEMPLATE*)tmpl;
+  t->style = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME;
+  t->cx = 150;
+  t->cy = 80;
+  HWND owner = ::CreateDialogIndirectParamW(NULL, t, NULL, OwnerDlgProc, 0);
+  CHECK(owner != NULL);
+  ::ShowWindow(owner, SW_SHOW);
+  ::SetForegroundWindow(owner);
+  ::SetFocus(g_ownerEdit2);
+  CHECK(::GetFocus() == g_ownerEdit2);
+  CHECK(::DialogBoxIndirectParamW(NULL, t, owner, ShortModalProc, 0) == 7);
+  CHECK(::GetActiveWindow() == owner);
+  CHECK(::GetFocus() == g_ownerEdit2);
+  ::DestroyWindow(owner);
+}
+
 static void TestCWnd() {
   CTestWnd wnd;
   CString cls = AfxRegisterWndClass(CS_HREDRAW | CS_VREDRAW, NULL, (HBRUSH)(COLOR_WINDOW + 1));
@@ -2870,8 +3043,11 @@ int main() {
   TestPropertySheets();
   TestPrinting();
   TestShapesAndDrops();
+  TestModalFocus();
+  TestSymbolFont();
   TestCWnd();
 #ifdef _WINPORT
+  TestClickThroughGroupBox();
   TestWinHelp();
   TestPlgBlt();
 #endif
