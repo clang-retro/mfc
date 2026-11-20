@@ -10,6 +10,7 @@
 #include <pthread.h>
 #include <atomic>
 #include <string>
+#include <vector>
 
 namespace winport {
 
@@ -19,12 +20,16 @@ inline void SetErrorFromErrno() { SetLastError(ErrorFromErrno(errno)); }
 
 // Kernel objects. A HANDLE points at one of these; the magic number
 // tells handles from other pointers.
-enum ObjectType { kFile = 1, kEvent, kMutex, kSemaphore, kThread, kProcess, kFind, kHeap, kOther };
+enum ObjectType { kFile = 1, kEvent, kMutex, kSemaphore, kThread, kProcess, kFind, kHeap, kOther, kToken };
 struct Object {
   static const DWORD kMagic = 0x6f62706a;  // "jpbo"
   DWORD magic = kMagic;
   ObjectType type;
   std::atomic<int> refs{1};
+  bool named = false;  // in the table of named objects
+  // The object's security descriptor, self-relative; empty for the
+  // default one (its creator as owner, and the creator's default DACL).
+  std::vector<unsigned char> security;
   explicit Object(ObjectType t) : type(t) {}
   virtual ~Object() {}
   // Waitable objects: whether a wait would be satisfied now, and taking
@@ -32,18 +37,25 @@ struct Object {
   virtual bool IsSignaled(DWORD /*tid*/) { return false; }
   virtual void Acquire(DWORD /*tid*/) {}
   virtual bool Waitable() { return false; }
+  // When the object will next signal by itself (a waitable timer), as a
+  // FILETIME on the system clock; 0 for never. Called with WaitLock held.
+  virtual ULONGLONG Due() { return 0; }
 };
 Object* FromHandle(HANDLE h, ObjectType type = (ObjectType)0);
 HANDLE NewHandle(Object* o);
 void Release(Object* o);
 // A new handle to an open file, for DuplicateHandle.
 HANDLE DuplicateFile(Object* o);
+// Gives a new object the security descriptor a SECURITY_ATTRIBUTES names.
+void SetObjectSecurity(Object* o, const SECURITY_ATTRIBUTES* sa);
 // The descriptor of a file handle, or -1.
 int FileDescriptor(HANDLE h);
 // All waits sleep on one condition, which every change of a waitable
 // object's state broadcasts.
 pthread_mutex_t* WaitLock();
 void SignalChange();  // call with WaitLock held
+// Runs the calling thread's queued APCs; whether there were any.
+bool DeliverApcs();
 
 // Text: the ANSI code page is UTF-8.
 std::wstring Widen(const char* s, int n = -1);

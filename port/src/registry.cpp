@@ -1,6 +1,7 @@
 // registry.cpp - the registry, kept in a text file: the keys and values
-// of all the hives, read at the first use and written back when a key is
-// flushed or closed after a change, and at exit.
+// of all the hives. Each change is written back at once, under a lock on
+// the file, and the file is read again whenever another process has
+// replaced it, so that processes see each other's changes.
 //
 // The file is $WINPORT_REGISTRY, else registry.reg in the configuration
 // directory ($XDG_CONFIG_HOME/winport or ~/.config/winport). Each key is a
@@ -13,7 +14,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <fcntl.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <wctype.h>
@@ -67,11 +70,20 @@ std::recursive_mutex& g_lock = *new std::recursive_mutex;
 Key g_hives[kNumHives];
 bool g_loaded;
 bool g_dirty;
+// The file as last read or written, to notice another process's changes;
+// and a count of the times it was read again, which open handles compare.
+struct stat g_seen;
+bool g_seenValid;
+unsigned g_generation;
 
-// An open key. Predefined hive handles are not these.
+// An open key. Predefined hive handles are not these. The key is found
+// again by its path after the file is read again.
 struct Handle {
   DWORD magic = 0x6b676572;  // "regk"
   Key* key;
+  int hive;
+  std::vector<std::wstring> path;
+  unsigned generation;
 };
 
 std::string RegistryFile() {
@@ -190,9 +202,63 @@ void Load() {
     }
     line.clear();
   }
+  struct stat st;
+  g_seenValid = fstat(fileno(f), &st) == 0;
+  if (g_seenValid) g_seen = st;
   fclose(f);
   g_dirty = false;
 }
+
+// (An inode number can come back for the next file written, so the
+// times count too, to the nanosecond.)
+#ifdef __APPLE__
+#define WINPORT_MTIME(s) (s).st_mtimespec
+#define WINPORT_CTIME(s) (s).st_ctimespec
+#else
+#define WINPORT_MTIME(s) (s).st_mtim
+#define WINPORT_CTIME(s) (s).st_ctim
+#endif
+bool SameFile(const struct stat& a, const struct stat& b) {
+  return a.st_ino == b.st_ino && a.st_dev == b.st_dev && a.st_size == b.st_size &&
+         WINPORT_MTIME(a).tv_sec == WINPORT_MTIME(b).tv_sec && WINPORT_MTIME(a).tv_nsec == WINPORT_MTIME(b).tv_nsec &&
+         WINPORT_CTIME(a).tv_sec == WINPORT_CTIME(b).tv_sec && WINPORT_CTIME(a).tv_nsec == WINPORT_CTIME(b).tv_nsec;
+}
+
+// Reads the file again if another process has replaced it since.
+void Refresh() {
+  if (!g_loaded) {
+    Load();
+    return;
+  }
+  struct stat st;
+  bool exists = stat(RegistryFile().c_str(), &st) == 0;
+  if (exists == g_seenValid && (!exists || SameFile(st, g_seen))) return;
+  for (int i = 0; i < kNumHives; i++) {
+    // Keys that open handles point at are found again by path; detach
+    // them rather than free them, as DeleteKey does.
+    for (auto& c : g_hives[i].children) c.second.release();
+    g_hives[i].children.clear();
+    g_hives[i].values.clear();
+  }
+  g_loaded = false;
+  g_seenValid = false;
+  g_generation++;
+  Load();
+}
+
+// A change: the file locked against other processes, read again if they
+// changed it, and written back after.
+struct Change {
+  int fd;
+  Change() {
+    std::string file = RegistryFile();
+    MakeParents(file);
+    fd = open((file + ".lock").c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    if (fd >= 0) flock(fd, LOCK_EX);
+    Refresh();
+  }
+  ~Change();
+};
 
 void SaveKey(FILE* f, Key* k, const std::wstring& path) {
   if (!k->values.empty() || k->children.empty()) {
@@ -225,8 +291,19 @@ void Save() {
     SaveKey(f, &g_hives[i], kHives[i]);
   }
   bool ok = fclose(f) == 0;
-  if (ok && rename(tmp.c_str(), file.c_str()) == 0) g_dirty = false;
-  else unlink(tmp.c_str());
+  if (ok && rename(tmp.c_str(), file.c_str()) == 0) {
+    g_dirty = false;
+    struct stat st;
+    g_seenValid = stat(file.c_str(), &st) == 0;
+    if (g_seenValid) g_seen = st;
+  } else {
+    unlink(tmp.c_str());
+  }
+}
+
+Change::~Change() {
+  Save();
+  if (fd >= 0) close(fd);  // and the lock with it
 }
 
 struct Saver {
@@ -236,21 +313,43 @@ struct Saver {
   }
 } g_saver;
 
-Key* KeyOf(HKEY h) {
+// The key a handle names, with the file read again first if it changed
+// (a Change has done that already).
+Key* KeyOf(HKEY h, bool refresh = true) {
+  if (refresh) Refresh();
   ULONG_PTR v = (ULONG_PTR)h;
-  if (v >= (ULONG_PTR)HKEY_CLASSES_ROOT && v < (ULONG_PTR)HKEY_CLASSES_ROOT + kNumHives) {
-    Load();
+  if (v >= (ULONG_PTR)HKEY_CLASSES_ROOT && v < (ULONG_PTR)HKEY_CLASSES_ROOT + kNumHives)
     return &g_hives[v - (ULONG_PTR)HKEY_CLASSES_ROOT];
-  }
   if (h == NULL) return NULL;
   Handle* hd = (Handle*)h;
-  if (hd->magic != 0x6b676572 || hd->key->deleted) return NULL;
+  if (hd->magic != 0x6b676572) return NULL;
+  if (hd->generation != g_generation) {
+    Key* k = &g_hives[hd->hive];
+    for (const std::wstring& part : hd->path) {
+      auto it = k->children.find(part);
+      if (it == k->children.end()) {
+        k = NULL;
+        break;
+      }
+      k = it->second.get();
+    }
+    if (k == NULL) return NULL;
+    hd->key = k;
+    hd->generation = g_generation;
+  }
+  if (hd->key->deleted) return NULL;
   return hd->key;
 }
 
 HKEY NewHandle(Key* k) {
   Handle* h = new Handle;
   h->key = k;
+  h->generation = g_generation;
+  while (k->parent != NULL) {
+    h->path.insert(h->path.begin(), k->name);
+    k = k->parent;
+  }
+  h->hive = (int)(k - g_hives);
   return (HKEY)h;
 }
 
@@ -341,7 +440,8 @@ LONG Open(HKEY h, const std::wstring& sub, PHKEY out) {
 LONG Create(HKEY h, const std::wstring& sub, PHKEY out, LPDWORD disposition) {
   if (out == NULL) return ERROR_INVALID_PARAMETER;
   std::lock_guard<std::recursive_mutex> g(g_lock);
-  Key* k = KeyOf(h);
+  Change change;
+  Key* k = KeyOf(h, false);
   if (k == NULL) return ERROR_INVALID_HANDLE;
   bool created;
   Key* found = Walk(k, sub, true, &created);
@@ -362,7 +462,8 @@ LONG Query(HKEY h, const std::wstring& name, LPDWORD type, LPBYTE data, LPDWORD 
 
 LONG Set(HKEY h, const std::wstring& name, DWORD type, std::vector<BYTE> data) {
   std::lock_guard<std::recursive_mutex> g(g_lock);
-  Key* k = KeyOf(h);
+  Change change;
+  Key* k = KeyOf(h, false);
   if (k == NULL) return ERROR_INVALID_HANDLE;
   Value* v = k->Find(name);
   if (v == NULL) {
@@ -379,7 +480,8 @@ LONG Set(HKEY h, const std::wstring& name, DWORD type, std::vector<BYTE> data) {
 
 LONG DeleteKey(HKEY h, const std::wstring& sub) {
   std::lock_guard<std::recursive_mutex> g(g_lock);
-  Key* k = KeyOf(h);
+  Change change;
+  Key* k = KeyOf(h, false);
   if (k == NULL) return ERROR_INVALID_HANDLE;
   Key* target = Walk(k, sub, false, NULL);
   if (target == NULL || target == k) return ERROR_FILE_NOT_FOUND;
@@ -397,7 +499,8 @@ LONG DeleteKey(HKEY h, const std::wstring& sub) {
 
 LONG DeleteValue(HKEY h, const std::wstring& name) {
   std::lock_guard<std::recursive_mutex> g(g_lock);
-  Key* k = KeyOf(h);
+  Change change;
+  Key* k = KeyOf(h, false);
   if (k == NULL) return ERROR_INVALID_HANDLE;
   for (size_t i = 0; i < k->values.size(); i++) {
     if (!NoCase()(k->values[i].name, name) && !NoCase()(name, k->values[i].name)) {

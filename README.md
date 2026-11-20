@@ -124,8 +124,8 @@ names in `winbase.h`); otherwise the library's runs `AfxWinMain`.
 
 A program's resources go in as C++: `port/tools/res2cpp.py` compiles the
 `.rc` file with `llvm-rc` and writes the result as a source file that
-registers it when the program starts (it needs Python 3, `llvm-rc` and
-clang):
+registers it before the program's constructors run (it needs Python 3,
+`llvm-rc` and clang):
 
 ```sh
 python3 path/to/mfc/port/tools/res2cpp.py app.rc -o app-res.cpp
@@ -190,6 +190,29 @@ XDG folders on Linux (`XDG_CONFIG_HOME`, `XDG_DATA_HOME` and the
 input as a real mouse and keyboard would, and mouse messages go to the
 window under the pointer, passing through controls that answer
 `WM_NCHITTEST` with `HTTRANSPARENT` (such as group boxes).
+
+Kernel objects go further than events, mutexes and semaphores: named
+ones (within the process), waitable timers, APCs and alertable waits
+(`QueueUserAPC`, `SleepEx`), I/O completion ports (packets posted, and
+the results of overlapped reads and writes on a file associated with
+one), and file mappings over `mmap` (a named mapping without a file is
+POSIX shared memory, which other processes open by name). Services work
+too: the service control manager keeps them under
+`HKLM\SYSTEM\CurrentControlSet\Services`, `StartService` runs the
+program, and its dispatcher takes `ControlService`'s controls over a
+local socket; `ReportEvent` writes to the system log. The registry's
+file is shared: each change is written at once, under a lock, and a
+program reads the file again when another has changed it.
+
+GDI+ is there as far as images go (`CImage` uses it): bitmaps in the
+usual pixel formats, locking their bits, and BMP, PNG, JPEG and GIF
+files and streams, read with [stb_image](https://github.com/nothings/stb)
+and written with stb_image_write (public domain or MIT, in
+`port/src/third_party/`), GIF only read. CryptoAPI has the base and
+enhanced providers' hashes (MD4, MD5, SHA-1, SHA-256, SHA-384, SHA-512
+and HMAC), RC4 and AES keys (derived, imported or random) and
+`CryptGenRandom`, but no RSA: there are no key pairs. `shlwapi`'s path
+and string functions, access control lists and SDDL work as well.
 
 A regular DLL builds as a shared library (`-shared`, exporting
 `DllMain` and the `.def` file's names; the program links with

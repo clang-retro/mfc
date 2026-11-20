@@ -16,6 +16,7 @@
 #include <wingdi.h>
 #include <winuser.h>
 #include <winreg.h>
+#include <winsvc.h>
 #include <winver.h>
 #ifndef WIN32_LEAN_AND_MEAN
 #include <mmsystem.h>

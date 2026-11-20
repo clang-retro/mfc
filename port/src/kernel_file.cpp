@@ -148,19 +148,22 @@ void UnixFromFileTime(const FILETIME& ft, long long* sec, long* nsec) {
 
 File::~File() {
   if (comm) CloseComm(this);
+  if (port) Release(FromHandle(port));
   if (fd > 2) close(fd);
   if (deleteOnClose && !path.empty()) unlink(path.c_str());
 }
 
 File* GetFile(HANDLE h) { return static_cast<File*>(FromHandle(h, kFile)); }
 
-void CompleteOverlapped(LPOVERLAPPED ov, DWORD error, DWORD n) {
+void CompleteOverlapped(LPOVERLAPPED ov, DWORD error, DWORD n, File* f) {
   if (!ov) return;
   ov->InternalHigh = n;
   // Errors are kept apart from STATUS_PENDING, which is also a Win32 code.
   ov->Internal = error ? 0xE0000000u | error : 0;
   HANDLE e = (HANDLE)((UINT_PTR)ov->hEvent & ~(UINT_PTR)1);
   if (e) SetEvent(e);
+  // An event handle with its low bit set asks for no packet.
+  if (f && f->port && !((UINT_PTR)ov->hEvent & 1)) PostCompletion(f->port, n, f->portKey, ov, error);
 }
 
 }  // namespace winport
@@ -341,7 +344,7 @@ BOOL WINAPI ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD read, LPOVERLAPPED o
   else do r = read_fd(f->fd, buf, n); while (r < 0 && errno == EINTR);
   if (r < 0) {
     SetErrorFromErrno();
-    if (ov) CompleteOverlapped(ov, GetLastError(), 0);
+    if (ov) CompleteOverlapped(ov, GetLastError(), 0, f);
     return FALSE;
   }
   if (r == 0 && n > 0 && f->pipe) {
@@ -350,7 +353,7 @@ BOOL WINAPI ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD read, LPOVERLAPPED o
     return FALSE;
   }
   if (read) *read = (DWORD)r;
-  if (ov) CompleteOverlapped(ov, ERROR_SUCCESS, (DWORD)r);
+  if (ov) CompleteOverlapped(ov, ERROR_SUCCESS, (DWORD)r, f);
   return TRUE;
 }
 
@@ -372,13 +375,13 @@ BOOL WINAPI WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD written, LPOVERLAP
       // A pipe whose reading end is closed (SIGPIPE is ignored for pipes).
       SetLastError(errno == EPIPE ? ERROR_NO_DATA : ErrorFromErrno(errno));
       if (written) *written = (DWORD)done;
-      if (ov) CompleteOverlapped(ov, GetLastError(), (DWORD)done);
+      if (ov) CompleteOverlapped(ov, GetLastError(), (DWORD)done, f);
       return FALSE;
     }
     done += (size_t)r;
   }
   if (written) *written = (DWORD)done;
-  if (ov) CompleteOverlapped(ov, ERROR_SUCCESS, (DWORD)done);
+  if (ov) CompleteOverlapped(ov, ERROR_SUCCESS, (DWORD)done, f);
   return TRUE;
 }
 
@@ -911,10 +914,27 @@ UINT WINAPI GetTempFileNameW(LPCWSTR dir, LPCWSTR prefix, UINT unique, LPWSTR ou
   return u;
 }
 
-// The Windows and system directories are the layer's data directory.
+// The Windows and system directories: $WINPORT_WINDIR, else the layer's
+// data directory when it is installed, else the user's configuration
+// directory for the layer (made if need be), so that, as on Windows, the
+// directory is there.
 static std::string SystemDir() {
   const char* d = getenv("WINPORT_WINDIR");
-  return d && *d ? d : "/usr/share/winport";
+  if (d && *d) return d;
+  struct stat st;
+  if (stat("/usr/share/winport", &st) == 0 && S_ISDIR(st.st_mode)) return "/usr/share/winport";
+  std::string dir;
+  const char* xdg = getenv("XDG_CONFIG_HOME");
+  if (xdg && *xdg) {
+    dir = xdg;
+  } else {
+    const char* home = getenv("HOME");
+    dir = std::string(home && *home ? home : "/tmp") + "/.config";
+  }
+  mkdir(dir.c_str(), 0700);
+  dir += "/winport";
+  mkdir(dir.c_str(), 0700);
+  return dir;
 }
 UINT WINAPI GetWindowsDirectoryA(LPSTR b, UINT n) { return CopyOut(SystemDir(), b, n); }
 UINT WINAPI GetWindowsDirectoryW(LPWSTR b, UINT n) { return CopyOut(Widen(SystemDir().c_str()), b, n); }

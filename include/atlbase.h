@@ -1851,9 +1851,6 @@ public:
   }
 };
 
-// (The portable layer has no service control manager yet: there the
-// class appears once it defines the service API.)
-#if !defined(_WINPORT) || defined(SERVICE_WIN32_OWN_PROCESS)
 // A Windows service that is also a COM server (the AppID's LocalService
 // names it). /Service registers it and installs it with the service
 // control manager, /RegServer registers it as an ordinary local server,
@@ -2145,7 +2142,6 @@ private:
     return ::lstrcmpi(szValue, m_szServiceName) == 0;
   }
 };
-#endif
 
 // ---------------------------------------------------------------------
 // String resources.

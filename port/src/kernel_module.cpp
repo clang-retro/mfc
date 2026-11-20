@@ -25,6 +25,7 @@
 #ifdef __APPLE__
 #include <crt_externs.h>
 #include <mach-o/dyld.h>
+#include <mach-o/getsect.h>
 #else
 #include <link.h>
 #endif
@@ -34,6 +35,7 @@
 #include <vector>
 
 extern char** environ;
+extern "C" void _WinportAddResources(const void* anchor, const void* data, size_t size);
 
 using namespace winport;
 
@@ -149,7 +151,52 @@ bool IsSystemDll(const std::string& name) {
   return false;
 }
 
+#ifdef __APPLE__
+// On macOS a generated resource file puts a record of its resources in a
+// section of its image rather than registering them from a constructor,
+// as constructors in different files run in no set order there: the
+// layer reads the section of each image as it is loaded (the callback
+// only notes them; they register at the next look at a module).
+struct ResourceRecord {
+  const void* data;
+  size_t size;
+};
+std::mutex& PendingLock() {
+  static auto* m = new std::mutex;
+  return *m;
+}
+std::vector<ResourceRecord>& Pending() {
+  static auto* v = new std::vector<ResourceRecord>;
+  return *v;
+}
+void OnAddImage(const struct mach_header* mh, intptr_t) {
+  unsigned long size = 0;
+#ifdef __LP64__
+  uint8_t* p = getsectiondata((const struct mach_header_64*)mh, "__DATA", "__winport_res", &size);
+#else
+  uint8_t* p = getsectiondata(mh, "__DATA", "__winport_res", &size);
+#endif
+  if (p == NULL) return;
+  std::lock_guard<std::mutex> g(PendingLock());
+  for (unsigned long i = 0; i + sizeof(ResourceRecord) <= size; i += sizeof(ResourceRecord))
+    Pending().push_back(*(const ResourceRecord*)(p + i));
+}
+void ScanImageResources() {
+  static std::once_flag once;
+  std::call_once(once, [] { _dyld_register_func_for_add_image(OnAddImage); });
+  std::vector<ResourceRecord> todo;
+  {
+    std::lock_guard<std::mutex> g(PendingLock());
+    todo.swap(Pending());
+  }
+  for (const ResourceRecord& r : todo) _WinportAddResources(r.data, r.data, r.size);
+}
+#else
+void ScanImageResources() {}
+#endif
+
 Module* ToModule(HMODULE h) {
+  ScanImageResources();
   if (h == NULL) return MainModule();
   Module* m = (Module*)h;
   if (m == SystemModule()) return m;
