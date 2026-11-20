@@ -1031,6 +1031,7 @@ DWORD WINAPI MsgWaitForMultipleObjectsEx(DWORD n, const HANDLE* handles, DWORD t
   Queue* q = CurrentQueue();
   ULONGLONG start = Now();
   for (;;) {
+    if ((flags & MWMO_ALERTABLE) && winport::DeliverApcs()) return WAIT_IO_COMPLETION;
     if (n) {
       DWORD r = WaitForMultipleObjects(n, handles, (flags & MWMO_WAITALL) != 0, 0);
       if (r != WAIT_TIMEOUT) return r;

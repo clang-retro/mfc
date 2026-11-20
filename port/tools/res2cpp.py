@@ -106,9 +106,21 @@ def write_cpp(data, path, symbol):
         f.write("namespace {\n\n")
         f.write("alignas(4) const unsigned char %s[] = {\n" % symbol)
         f.write("\n".join(lines) + "\n};\n\n")
+        # Before any other constructor, so that a static object's
+        # constructor can load a string: on macOS, where constructors in
+        # different files run in link order, a record in a section the
+        # layer reads as the image loads; elsewhere, a constructor that
+        # runs first.
+        f.write("#ifdef __APPLE__\n")
+        f.write("struct Record {\n  const void* data;\n  size_t size;\n};\n")
+        f.write('__attribute__((used, section("__DATA,__winport_res"))) Record record = {%s, sizeof %s};\n'
+                % (symbol, symbol))
+        f.write("#else\n")
         f.write("struct Register {\n")
         f.write("  Register() { _WinportAddResources(%s, %s, sizeof %s); }\n" % (symbol, symbol, symbol))
-        f.write("} registered;\n\n")
+        f.write("};\n")
+        f.write("__attribute__((init_priority(101))) Register registered;\n")
+        f.write("#endif\n\n")
         f.write("}  // namespace\n")
 
 

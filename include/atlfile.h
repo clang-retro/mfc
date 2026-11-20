@@ -51,13 +51,11 @@ public:
     if (!::WriteFile(m_h, pBuffer, nBufSize, NULL, pOverlapped)) return AtlHresultFromLastError();
     return S_OK;
   }
-#ifndef _WINPORT
   HRESULT GetOverlappedResult(LPOVERLAPPED pOverlapped, DWORD& dwBytesTransferred, BOOL bWait) {
     if (!::GetOverlappedResult(m_h, pOverlapped, &dwBytesTransferred, bWait))
       return AtlHresultFromLastError();
     return S_OK;
   }
-#endif
 
   HRESULT Seek(LONGLONG nOffset, DWORD dwFrom = FILE_CURRENT) {
     LARGE_INTEGER li;
@@ -170,9 +168,7 @@ private:
   TCHAR m_szTempFileName[MAX_PATH + 1];
 };
 
-// A view of a file mapping. (Not on the portable layer yet, which has
-// no file mappings.)
-#if !defined(_WINPORT) || defined(FILE_MAP_READ)
+// A view of a file mapping.
 class CAtlFileMappingBase {
 public:
   CAtlFileMappingBase() : m_pData(NULL), m_nMappingSize(0), m_hMapping(NULL), m_dwViewDesiredAccess(0) {
@@ -264,7 +260,6 @@ class CAtlFileMapping : public CAtlFileMappingBase {
 public:
   operator T*() const { return reinterpret_cast<T*>(GetData()); }
 };
-#endif
 
 }  // namespace ATL
 

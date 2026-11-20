@@ -332,7 +332,7 @@ BOOL Run(File* f, LPOVERLAPPED ov, LPDWORD done, Op op) {
     std::thread([f, ov, op] {
       DWORD n = 0;
       DWORD err = op(&n);
-      CompleteOverlapped(ov, err, n);
+      CompleteOverlapped(ov, err, n, f);
       Release(f);
     }).detach();
     if (done) *done = 0;
@@ -342,7 +342,7 @@ BOOL Run(File* f, LPOVERLAPPED ov, LPDWORD done, Op op) {
   DWORD n = 0;
   DWORD err = op(&n);
   if (done) *done = n;
-  if (ov) CompleteOverlapped(ov, err, n);
+  if (ov) CompleteOverlapped(ov, err, n, f);
   if (err) return Fail(err);
   return TRUE;
 }
