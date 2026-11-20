@@ -255,6 +255,13 @@ struct CursorPicture {
   std::vector<DWORD> argb;
 };
 bool CursorImage(HCURSOR c, CursorPicture* out);
+// The icons the desktop shows for a top-level window (in a taskbar, a
+// window switcher or a dock), in the same form: its big icon and its small
+// one, its class's when it has none of its own. Empty when it has none.
+std::vector<CursorPicture> DesktopIcons(Window* w);
+// Tells the backend that a top-level window's icons, or its class's, have
+// changed, and redraws the caption.
+void WindowIconChanged(Window* w);
 
 // The backend: how top-level windows are shown.
 struct Backend {
@@ -265,6 +272,7 @@ struct Backend {
   virtual void Destroy(Window* /*w*/) {}
   virtual void Moved(Window* /*w*/) {}  // position or size
   virtual void TitleChanged(Window* /*w*/) {}
+  virtual void IconChanged(Window* /*w*/) {}  // see DesktopIcons
   virtual void Present(Window* /*w*/, const RECT& /*r*/) {}
   // Moving or sizing a top-level window with the mouse, for displays
   // where only the compositor can; hit is HTCAPTION or a frame edge.

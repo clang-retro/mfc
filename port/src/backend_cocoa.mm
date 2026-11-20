@@ -326,6 +326,33 @@ void Invalidate(Win* w, int x, int y, int width, int height) {
   [w->view setNeedsDisplayInRect:NSMakeRect(x, h - y - height, width, height)];
 }
 
+// An image of a picture: ARGB, not premultiplied, top row first.
+static NSImage* ImageOf(const uint32_t* argb, int width, int height) {
+  NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL
+                                                                  pixelsWide:width
+                                                                  pixelsHigh:height
+                                                               bitsPerSample:8
+                                                             samplesPerPixel:4
+                                                                    hasAlpha:YES
+                                                                    isPlanar:NO
+                                                              colorSpaceName:NSDeviceRGBColorSpace
+                                                                 bytesPerRow:width * 4
+                                                                bitsPerPixel:32];
+  // Premultiplied RGBA, as the representation keeps it.
+  unsigned char* out = [rep bitmapData];
+  for (int i = 0; i < width * height; i++) {
+    uint32_t px = argb[i], a = px >> 24;
+    out[i * 4 + 0] = (unsigned char)(((px >> 16) & 0xFF) * a / 255);
+    out[i * 4 + 1] = (unsigned char)(((px >> 8) & 0xFF) * a / 255);
+    out[i * 4 + 2] = (unsigned char)((px & 0xFF) * a / 255);
+    out[i * 4 + 3] = (unsigned char)a;
+  }
+  NSImage* img = [[NSImage alloc] initWithSize:NSMakeSize(width, height)];
+  [img addRepresentation:rep];
+  [rep release];
+  return img;
+}
+
 void SetCursor(bool hidden, int systemId, const uint32_t* argb, int width, int height, int hotX, int hotY) {
   static bool g_hidden;
   static NSCursor* g_own;  // the program's own cursor, kept while shown
@@ -351,28 +378,7 @@ void SetCursor(bool hidden, int systemId, const uint32_t* argb, int width, int h
       break;
   }
   if (!c && argb && width > 0 && height > 0) {
-    NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL
-                                                                    pixelsWide:width
-                                                                    pixelsHigh:height
-                                                                 bitsPerSample:8
-                                                               samplesPerPixel:4
-                                                                      hasAlpha:YES
-                                                                      isPlanar:NO
-                                                                colorSpaceName:NSDeviceRGBColorSpace
-                                                                   bytesPerRow:width * 4
-                                                                  bitsPerPixel:32];
-    // Premultiplied RGBA, as the representation keeps it.
-    unsigned char* out = [rep bitmapData];
-    for (int i = 0; i < width * height; i++) {
-      uint32_t px = argb[i], a = px >> 24;
-      out[i * 4 + 0] = (unsigned char)(((px >> 16) & 0xFF) * a / 255);
-      out[i * 4 + 1] = (unsigned char)(((px >> 8) & 0xFF) * a / 255);
-      out[i * 4 + 2] = (unsigned char)((px & 0xFF) * a / 255);
-      out[i * 4 + 3] = (unsigned char)a;
-    }
-    NSImage* img = [[NSImage alloc] initWithSize:NSMakeSize(width, height)];
-    [img addRepresentation:rep];
-    [rep release];
+    NSImage* img = ImageOf(argb, width, height);
     [g_own release];
     g_own = [[NSCursor alloc] initWithImage:img hotSpot:NSMakePoint(hotX, hotY)];
     [img release];
@@ -380,6 +386,15 @@ void SetCursor(bool hidden, int systemId, const uint32_t* argb, int width, int h
   }
   if (!c) c = [NSCursor arrowCursor];
   [c set];
+  [pool release];
+}
+
+void SetAppIcon(const uint32_t* argb, int width, int height) {
+  if (!argb || width <= 0 || height <= 0) return;
+  NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+  NSImage* img = ImageOf(argb, width, height);
+  [NSApp setApplicationIconImage:img];
+  [img release];
   [pool release];
 }
 

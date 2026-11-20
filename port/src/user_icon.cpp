@@ -71,6 +71,28 @@ bool CursorImage(HCURSOR c, CursorPicture* out) {
   return true;
 }
 
+std::vector<CursorPicture> DesktopIcons(Window* w) {
+  std::vector<CursorPicture> out;
+  HICON big = w->iconBig, small = w->iconSmall;
+  if (!big && !small && w->cls) {
+    big = w->cls->wc.hIcon;
+    small = w->cls->wc.hIconSm;
+  }
+  for (HICON h : {big, small == big ? (HICON)NULL : small}) {
+    CursorPicture p;
+    if (!h || !CursorImage(h, &p)) continue;
+    bool same = false;
+    for (const CursorPicture& q : out) same |= q.width == p.width && q.height == p.height;
+    if (!same) out.push_back(std::move(p));
+  }
+  return out;
+}
+
+void WindowIconChanged(Window* w) {
+  if (!w->parent) GetBackend()->IconChanged(w);
+  if (ReallyVisible(w) && (w->style & WS_CAPTION) == WS_CAPTION && (w->style & WS_SYSMENU)) DrawFrame(w);
+}
+
 }  // namespace winport
 
 namespace {

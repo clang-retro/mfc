@@ -148,7 +148,11 @@ DIBs, regions, fills and blits, lines, curves, shapes and paths, and
 text. Windows show on Wayland, on X11 or with Cocoa on macOS (Mac OS X
 10.4 and later, PowerPC and Intel); `WINPORT_BACKEND` picks one
 (`wayland`, `x11`, `cocoa`, or `headless` to keep windows in memory, as
-the tests do). Wayland, X11 and xkbcommon are loaded when a program
+the tests do). A window draws its own frame, the caption's icon
+included, so on Wayland it asks the compositor for client-side
+decorations (xdg-decoration); its icon goes to the taskbar and the
+window switcher (`_NET_WM_ICON` on X11, xdg-toplevel-icon on Wayland,
+the Dock on macOS). Wayland, X11 and xkbcommon are loaded when a program
 starts, so it runs without them. Text copied and pasted through the
 clipboard goes to and from other programs.
 

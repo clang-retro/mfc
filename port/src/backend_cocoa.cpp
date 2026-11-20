@@ -119,6 +119,7 @@ struct CocoaBackend : Backend {
       w->native = n;
       SetTitle(n);
     }
+    if (show) SetAppIcon(n);
     cocoa::Show(n->win, !show ? cocoa::kHide : (n->popup || (w->style & WS_DISABLED)) ? cocoa::kShow : cocoa::kShowKey);
   }
 
@@ -140,6 +141,22 @@ struct CocoaBackend : Backend {
 
   void TitleChanged(Window* w) override {
     if (Native* n = (Native*)w->native) SetTitle(n);
+  }
+
+  // macOS gives an application one icon, in the Dock and the switcher:
+  // that of its main window, an ordinary one that no other window owns,
+  // as it is shown or its icon changes. The biggest picture serves.
+  static void SetAppIcon(Native* n) {
+    if (n->popup || n->w->owner) return;
+    std::vector<CursorPicture> pics = DesktopIcons(n->w);
+    const CursorPicture* best = NULL;
+    for (const CursorPicture& p : pics)
+      if (!best || p.width > best->width) best = &p;
+    if (best) cocoa::SetAppIcon((const uint32_t*)best->argb.data(), best->width, best->height);
+  }
+
+  void IconChanged(Window* w) override {
+    if (Native* n = (Native*)w->native) SetAppIcon(n);
   }
 
   void Present(Window* w, const RECT& r) override {

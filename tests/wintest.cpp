@@ -2632,6 +2632,60 @@ static void TestSymbolFont() {
   ::DeleteObject(arial);
 }
 
+#ifdef _WINPORT
+// Pixels of a color in the left of a window's caption, where the system
+// menu box is.
+static int CaptionPixels(HWND h, COLORREF c) {
+  HDC dc = ::GetWindowDC(h);
+  int n = 0;
+  int bottom = ::GetSystemMetrics(SM_CYFRAME) + ::GetSystemMetrics(SM_CYCAPTION);
+  for (int y = 0; y < bottom; y++)
+    for (int x = 0; x < 40; x++)
+      if (::GetPixel(dc, x, y) == c) n++;
+  ::ReleaseDC(h, dc);
+  return n;
+}
+
+// The caption's system menu box shows the window's small icon, or its
+// class's, and draws again when the icon changes.
+static void TestCaptionIcon() {
+  std::vector<DWORD> red(16 * 16, 0x00FF0000), blue(16 * 16, 0x000000FF);
+  BYTE zeros[16 * 16 / 8] = {0};
+  ICONINFO ii = {TRUE, 0, 0, ::CreateBitmap(16, 16, 1, 1, zeros), ::CreateBitmap(16, 16, 1, 32, red.data())};
+  HICON redIcon = ::CreateIconIndirect(&ii);
+  ::DeleteObject(ii.hbmColor);
+  ii.hbmColor = ::CreateBitmap(16, 16, 1, 32, blue.data());
+  HICON blueIcon = ::CreateIconIndirect(&ii);
+  ::DeleteObject(ii.hbmColor);
+  ::DeleteObject(ii.hbmMask);
+  CHECK(redIcon && blueIcon);
+
+  WNDCLASSEXW wc = {sizeof wc};
+  wc.lpfnWndProc = ::DefWindowProcW;
+  wc.hInstance = ::GetModuleHandleW(NULL);
+  wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+  wc.lpszClassName = L"CaptionIconTest";
+  wc.hIconSm = blueIcon;
+  CHECK(::RegisterClassExW(&wc));
+  HWND h = ::CreateWindowExW(0, L"CaptionIconTest", L"Icon", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 10, 10, 200, 120, NULL,
+                             NULL, wc.hInstance, NULL);
+  CHECK(h != NULL);
+  ::UpdateWindow(h);
+  int box = ::GetSystemMetrics(SM_CXSMICON) * ::GetSystemMetrics(SM_CYSMICON);
+  CHECK(CaptionPixels(h, RGB(0, 0, 255)) >= box);  // the class's
+  CHECK(CaptionPixels(h, RGB(255, 0, 0)) == 0);
+  ::SendMessageW(h, WM_SETICON, ICON_SMALL, (LPARAM)redIcon);
+  CHECK(CaptionPixels(h, RGB(255, 0, 0)) >= box);  // the window's own
+  CHECK(CaptionPixels(h, RGB(0, 0, 255)) == 0);
+  ::SendMessageW(h, WM_SETICON, ICON_SMALL, 0);
+  CHECK(CaptionPixels(h, RGB(0, 0, 255)) >= box);
+  ::DestroyWindow(h);
+  ::UnregisterClassW(L"CaptionIconTest", wc.hInstance);
+  ::DestroyIcon(redIcon);
+  ::DestroyIcon(blueIcon);
+}
+#endif
+
 static void TestModalFocus() {
   // An empty template: the controls are made in WM_INITDIALOG.
   static WORD tmpl[32];
@@ -3880,6 +3934,9 @@ int main() {
   TestShapesAndDrops();
   TestModalFocus();
   TestSymbolFont();
+#ifdef _WINPORT
+  TestCaptionIcon();
+#endif
   TestCWnd();
 #ifdef _WINPORT
   TestClickThroughGroupBox();

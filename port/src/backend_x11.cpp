@@ -39,7 +39,7 @@ namespace {
   F(XSetTransientForHint) F(XSetWMNormalHints) F(XSetWMHints) F(XStoreName) F(XDefineCursor)                  \
   F(XCreateFontCursor) F(XRaiseWindow) F(XSetInputFocus) F(XWarpPointer) F(XGetWindowAttributes)               \
   F(XTranslateCoordinates) F(XSync) F(XFreeCursor) F(XSetSelectionOwner) F(XGetSelectionOwner)          \
-  F(XConvertSelection) F(XGetWindowProperty) F(XFree) F(XSendEvent) F(XCheckTypedWindowEvent) F(XCheckTypedEvent)
+  F(XConvertSelection) F(XGetWindowProperty) F(XFree) F(XDeleteProperty) F(XSendEvent) F(XCheckTypedWindowEvent) F(XCheckTypedEvent)
 
 struct XLib {
 #define F(name) decltype(&::name) name = nullptr;
@@ -163,6 +163,7 @@ struct X11Backend : Backend {
   int depth = 24;
   GC gc = NULL;
   int wakePipe[2] = {-1, -1};
+  Atom netIcon = 0;
   Atom wmDelete = 0, wmProtocols = 0, motifHints = 0, netName = 0, utf8 = 0, netType = 0, typeNormal = 0,
        typeDialog = 0, typeMenu = 0, typeTooltip = 0, typeCombo = 0;
   std::map<::Window, Native*> byXid;
@@ -215,6 +216,7 @@ struct X11Backend : Backend {
     wmProtocols = x.XInternAtom(dpy, "WM_PROTOCOLS", False);
     motifHints = x.XInternAtom(dpy, "_MOTIF_WM_HINTS", False);
     netName = x.XInternAtom(dpy, "_NET_WM_NAME", False);
+    netIcon = x.XInternAtom(dpy, "_NET_WM_ICON", False);
     utf8 = x.XInternAtom(dpy, "UTF8_STRING", False);
     netType = x.XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
     typeNormal = x.XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_NORMAL", False);
@@ -306,6 +308,31 @@ struct X11Backend : Backend {
                       (int)u8.size());
   }
 
+  // The window's icons for the taskbar and the window switcher: each one's
+  // width, height and ARGB pixels, as CARDINALs (longs to Xlib).
+  void SetIcon(Native* n) {
+    if (!n->managed) return;
+    std::vector<long> data;
+    for (const CursorPicture& p : DesktopIcons(n->w)) {
+      data.push_back(p.width);
+      data.push_back(p.height);
+      for (DWORD px : p.argb) data.push_back((long)(unsigned long)px);
+    }
+    if (data.empty())
+      x.XDeleteProperty(dpy, n->xid, netIcon);
+    else
+      x.XChangeProperty(dpy, n->xid, netIcon, XA_CARDINAL, 32, PropModeReplace, (const unsigned char*)data.data(),
+                        (int)data.size());
+  }
+
+  void IconChanged(Window* w) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    Native* n = NativeOf(w);
+    if (!n || !dpy) return;
+    SetIcon(n);
+    x.XFlush(dpy);
+  }
+
   void SetSizeHints(Native* n) {
     XSizeHints hints = {};
     Window* w = n->w;
@@ -358,6 +385,7 @@ struct X11Backend : Backend {
     Atom type = TypeOf(w);
     x.XChangeProperty(dpy, n->xid, netType, XA_ATOM, 32, PropModeReplace, (const unsigned char*)&type, 1);
     SetTitle(n);
+    SetIcon(n);
     byXid[n->xid] = n;
     w->native = n;
     return n;

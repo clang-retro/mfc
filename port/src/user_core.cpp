@@ -417,8 +417,17 @@ static ULONG_PTR ClassLong(Window* w, int index, bool set, ULONG_PTR value, bool
   switch (index) {
     case GCLP_HBRBACKGROUND: FIELD(hbrBackground, HBRUSH)
     case GCLP_HCURSOR: FIELD(hCursor, HCURSOR)
-    case GCLP_HICON: FIELD(hIcon, HICON)
-    case GCLP_HICONSM: FIELD(hIconSm, HICON)
+    case GCLP_HICON:
+    case GCLP_HICONSM: {
+      HICON& f = index == GCLP_HICON ? c->wc.hIcon : c->wc.hIconSm;
+      old = (ULONG_PTR)f;
+      if (set && old != value) {
+        f = (HICON)value;
+        for (Window* t : std::vector<Window*>(TopLevels()))
+          if (t->cls == c) WindowIconChanged(t);
+      }
+      return old;
+    }
     case GCLP_HMODULE: FIELD(hInstance, HINSTANCE)
     case GCLP_WNDPROC:
       old = (ULONG_PTR)ProcHandle(c->wc.lpfnWndProc, c->unicode, unicode);

@@ -36,6 +36,9 @@ void Invalidate(Win* w, int x, int y, int width, int height);  // in the window
 // The pointer's shape: a system cursor by its IDC_ number, or else the
 // picture (ARGB, not premultiplied, top row first); hidden hides it.
 void SetCursor(bool hidden, int systemId, const uint32_t* argb, int width, int height, int hotX, int hotY);
+// The application's icon in the Dock and the application switcher, from
+// a picture as SetCursor takes it.
+void SetAppIcon(const uint32_t* argb, int width, int height);
 // The general pasteboard: its change count, its text (false when it has
 // none), and putting text there, which returns the new change count.
 long PasteboardChangeCount();
