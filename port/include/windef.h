@@ -195,6 +195,8 @@ typedef LCID* PLCID;
 typedef SCODE* PSCODE;
 
 typedef CHAR* LPSTR;
+typedef CHAR* LPCH;
+typedef CHAR* PCH;
 typedef CHAR* PSTR;
 typedef CHAR* NPSTR;
 typedef const CHAR* LPCSTR;

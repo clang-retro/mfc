@@ -428,6 +428,10 @@ BOOL WINAPI CreateProcessW(LPCWSTR, LPWSTR, LPSECURITY_ATTRIBUTES, LPSECURITY_AT
 void WINAPI GetStartupInfoA(LPSTARTUPINFOA);
 void WINAPI GetStartupInfoW(LPSTARTUPINFOW);
 LPSTR WINAPI GetCommandLineA(void);
+// A program's entry points, which it defines itself: declared here so that
+// its definitions have C names, as the layer's main calls them.
+int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int);
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int);
 LPWSTR WINAPI GetCommandLineW(void);
 UINT WINAPI WinExec(LPCSTR, UINT);
 
@@ -553,6 +557,19 @@ DWORD WINAPI ExpandEnvironmentStringsA(LPCSTR, LPSTR, DWORD);
 DWORD WINAPI ExpandEnvironmentStringsW(LPCWSTR, LPWSTR, DWORD);
 BOOL WINAPI GetComputerNameA(LPSTR, LPDWORD);
 BOOL WINAPI GetComputerNameW(LPWSTR, LPDWORD);
+// The whole environment: NAME=value strings, each ended by a NUL, and a
+// NUL after the last.
+LPCH WINAPI GetEnvironmentStrings(void);
+LPCH WINAPI GetEnvironmentStringsA(void);
+WCHAR* WINAPI GetEnvironmentStringsW(void);
+BOOL WINAPI FreeEnvironmentStringsA(LPCH);
+BOOL WINAPI FreeEnvironmentStringsW(WCHAR*);
+BOOL WINAPI GetUserNameA(LPSTR, LPDWORD);
+BOOL WINAPI GetUserNameW(LPWSTR, LPDWORD);
+#ifndef UNLEN
+#define UNLEN 256
+#endif
+BOOL WINAPI Beep(DWORD, DWORD);
 #define MAX_COMPUTERNAME_LENGTH 15
 DWORD WINAPI GetVersion(void);
 typedef struct _OSVERSIONINFOA {
@@ -952,6 +969,12 @@ BOOL WINAPI GetDefaultCommConfigW(LPCWSTR, LPCOMMCONFIG, LPDWORD);
 #define SetEnvironmentVariable __WINPORT_AW(SetEnvironmentVariable)
 #define ExpandEnvironmentStrings __WINPORT_AW(ExpandEnvironmentStrings)
 #define GetComputerName __WINPORT_AW(GetComputerName)
+#define GetUserName __WINPORT_AW(GetUserName)
+#define FreeEnvironmentStrings __WINPORT_AW(FreeEnvironmentStrings)
+#ifdef UNICODE
+#define GetEnvironmentStrings GetEnvironmentStringsW
+#endif
+typedef WCHAR* LPWCH;
 #define OSVERSIONINFO __WINPORT_AW(OSVERSIONINFO)
 #define POSVERSIONINFO __WINPORT_AW(POSVERSIONINFO)
 #define LPOSVERSIONINFO __WINPORT_AW(LPOSVERSIONINFO)

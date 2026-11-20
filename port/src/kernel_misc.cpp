@@ -13,6 +13,10 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <pwd.h>
+#ifdef __APPLE__
+#include <crt_externs.h>
+#endif
 #include <unistd.h>
 #ifdef __APPLE__
 #include <sys/sysctl.h>
@@ -21,6 +25,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 using namespace winport;
@@ -511,6 +516,84 @@ DWORD WINAPI ExpandEnvironmentStringsW(LPCWSTR s, LPWSTR buf, DWORD n) {
   std::wstring r = Widen(Expand(Narrow(s)).c_str());
   if (buf && n > r.size()) wmemcpy(buf, r.c_str(), r.size() + 1);
   return (DWORD)r.size() + 1;
+}
+
+// The environment block a program gets is a copy, which it frees.
+extern "C++" {
+template <typename C>
+C* EnvironmentBlock() {
+#ifdef __APPLE__
+  char** env = *_NSGetEnviron();  // a library cannot see environ there
+#else
+  char** env = environ;
+#endif
+  std::basic_string<C> all;
+  for (char** e = env; e && *e; e++) {
+    if (std::is_same<C, char>::value)
+      all.append((const C*)*e, strlen(*e));
+    else
+      all.append((const C*)Widen(*e).c_str());
+    all.push_back(0);
+  }
+  if (all.empty()) all.push_back(0);
+  all.push_back(0);
+  C* block = (C*)malloc(all.size() * sizeof(C));
+  if (block) memcpy(block, all.data(), all.size() * sizeof(C));
+  return block;
+}
+}
+
+LPCH WINAPI GetEnvironmentStrings(void) { return EnvironmentBlock<char>(); }
+LPCH WINAPI GetEnvironmentStringsA(void) { return EnvironmentBlock<char>(); }
+WCHAR* WINAPI GetEnvironmentStringsW(void) { return EnvironmentBlock<WCHAR>(); }
+BOOL WINAPI FreeEnvironmentStringsA(LPCH block) {
+  free(block);
+  return TRUE;
+}
+BOOL WINAPI FreeEnvironmentStringsW(WCHAR* block) {
+  free(block);
+  return TRUE;
+}
+
+// The user's login name; the count includes the NUL.
+static std::string UserName() {
+  struct passwd* pw = getpwuid(geteuid());
+  if (pw && pw->pw_name && *pw->pw_name) return pw->pw_name;
+  const char* u = getenv("USER");
+  if (!u || !*u) u = getenv("LOGNAME");
+  return u && *u ? u : "user";
+}
+
+BOOL WINAPI GetUserNameA(LPSTR buf, LPDWORD n) {
+  if (!n) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  std::string u = UserName();
+  if (!buf || *n <= u.size()) {
+    *n = (DWORD)u.size() + 1;
+    SetLastError(ERROR_INSUFFICIENT_BUFFER);
+    return FALSE;
+  }
+  memcpy(buf, u.c_str(), u.size() + 1);
+  *n = (DWORD)u.size() + 1;
+  return TRUE;
+}
+
+BOOL WINAPI GetUserNameW(LPWSTR buf, LPDWORD n) {
+  if (!n) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  std::wstring u = Widen(UserName().c_str());
+  if (!buf || *n <= u.size()) {
+    *n = (DWORD)u.size() + 1;
+    SetLastError(ERROR_INSUFFICIENT_BUFFER);
+    return FALSE;
+  }
+  wmemcpy(buf, u.c_str(), u.size() + 1);
+  *n = (DWORD)u.size() + 1;
+  return TRUE;
 }
 
 BOOL WINAPI GetComputerNameA(LPSTR buf, LPDWORD n) {

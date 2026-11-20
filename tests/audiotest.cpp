@@ -3,7 +3,7 @@
 // rate change), RIFF files through mmio, the multimedia timers, and, on a
 // device, waveOut and waveIn: a tone played in mu-law and recorded back
 // (on Linux and macOS through the loopback device), positions, pause,
-// reset, loops, a partly filled recording buffer, and PlaySound.
+// reset, loops, a partly filled recording buffer, PlaySound and Beep.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -502,6 +502,11 @@ static void TestWave() {
   CHECK(PlaySoundA((LPCSTR)image, NULL, SND_MEMORY | SND_ASYNC | SND_LOOP | SND_NODEFAULT));
   Sleep(150);
   CHECK(PlaySoundA(NULL, NULL, 0));
+
+  // Beep plays its tone through the device.
+  t0 = GetTickCount();
+  CHECK(Beep(800, 100));
+  CHECK(GetTickCount() - t0 >= 80);
 }
 
 int main() {

@@ -3,11 +3,13 @@
 // STARTF_USESTDHANDLES, a broken pipe; and, on Linux and macOS, a serial
 // port (a pseudo-terminal named as COM9): its DCB, BuildCommDCB, its
 // time-outs, reads and writes, and WaitCommEvent overlapped, ended by
-// data and by SetCommMask.
+// data and by SetCommMask; and the environment block, GetUserName and
+// the standard folders.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include <afx.h>
+#include <shlobj.h>
 #include <stdio.h>
 #include <string.h>
 #ifdef _WINPORT
@@ -307,6 +309,62 @@ static void TestPort() {
 }
 #endif
 
+// The environment as a block, and the user's name.
+static void TestEnvironment() {
+  CHECK(::SetEnvironmentVariableA("IOTEST_VAR", "yes"));
+  LPCH block = ::GetEnvironmentStringsA();
+  CHECK(block != NULL);
+  bool found = false;
+  for (const char* p = block; p && *p; p += strlen(p) + 1)
+    if (strcmp(p, "IOTEST_VAR=yes") == 0) found = true;
+  CHECK(found);
+  CHECK(::FreeEnvironmentStringsA(block));
+  LPWCH wide = ::GetEnvironmentStringsW();
+  CHECK(wide != NULL);
+  found = false;
+  for (const WCHAR* p = wide; p && *p; p += lstrlenW(p) + 1)
+    if (lstrcmpW(p, L"IOTEST_VAR=yes") == 0) found = true;
+  CHECK(found);
+  CHECK(::FreeEnvironmentStringsW(wide));
+
+  char name[257];
+  DWORD n = 1;
+  CHECK(!::GetUserNameA(name, &n) && ::GetLastError() == ERROR_INSUFFICIENT_BUFFER && n > 1);
+  n = sizeof name;
+  CHECK(::GetUserNameA(name, &n));
+  CHECK(name[0] != 0 && n == strlen(name) + 1);
+  WCHAR wname[257];
+  n = 257;
+  CHECK(::GetUserNameW(wname, &n) && n == (DWORD)lstrlenW(wname) + 1);
+
+  // The standard folders.
+  char path[MAX_PATH];
+  CHECK(::SHGetFolderPathA(NULL, CSIDL_APPDATA | CSIDL_FLAG_CREATE, NULL, SHGFP_TYPE_CURRENT, path) == S_OK);
+  DWORD attr = ::GetFileAttributesA(path);
+  CHECK(attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY));
+  CHECK(::SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, SHGFP_TYPE_CURRENT, path) == S_OK && path[0]);
+  WCHAR wpath[MAX_PATH];
+  CHECK(::SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA | CSIDL_FLAG_CREATE, NULL, SHGFP_TYPE_CURRENT, wpath) == S_OK);
+  CHECK(::SHGetSpecialFolderPathA(NULL, path, CSIDL_APPDATA, FALSE));
+#ifdef _WINPORT
+  // The home folder, and the XDG folders where they are named.
+  CHECK(::SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, SHGFP_TYPE_CURRENT, path) == S_OK);
+  CHECK(strcmp(path, getenv("HOME")) == 0);
+#ifndef __APPLE__
+  char tmp[MAX_PATH], want[MAX_PATH];
+  ::GetTempPathA(MAX_PATH, tmp);
+  snprintf(want, sizeof want, "%s/iotest-config-%d", tmp, (int)getpid());
+  setenv("XDG_CONFIG_HOME", want, 1);
+  CHECK(::SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, SHGFP_TYPE_CURRENT, path) == S_FALSE);  // not there yet
+  CHECK(::SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, SHGFP_TYPE_CURRENT, wpath) == E_FAIL);
+  CHECK(::SHGetFolderPathA(NULL, CSIDL_APPDATA | CSIDL_FLAG_CREATE, NULL, SHGFP_TYPE_CURRENT, path) == S_OK);
+  CHECK(strcmp(path, want) == 0);
+  rmdir(want);
+  unsetenv("XDG_CONFIG_HOME");
+#endif
+#endif
+}
+
 int main(int argc, char** argv) {
   if (argc > 1 && strcmp(argv[1], "-child") == 0) return Child();
   TestPipes();
@@ -314,6 +372,7 @@ int main(int argc, char** argv) {
   TestChild();
   printf("child: %d failure(s) so far\n", g_failures);
   TestBuildDcb();
+  TestEnvironment();
 #ifdef _WINPORT
   TestPort();
   printf("port: %d failure(s) so far\n", g_failures);

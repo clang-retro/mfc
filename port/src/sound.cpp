@@ -1,5 +1,5 @@
 // sound.cpp - PlaySound and sndPlaySound, which play a WAVE file, resource
-// or image in memory through waveOut, and the multimedia timers.
+// or image in memory through waveOut, Beep, and the multimedia timers.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -8,9 +8,11 @@
 
 #include "winport.h"
 
+#include <math.h>
 #include <string.h>
 #include <time.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -275,6 +277,41 @@ BOOL WINAPI sndPlaySoundA(LPCSTR name, UINT flags) {
 
 BOOL WINAPI sndPlaySoundW(LPCWSTR name, UINT flags) {
   return PlaySoundW(name, nullptr, flags & (SND_ASYNC | SND_NODEFAULT | SND_MEMORY | SND_LOOP | SND_NOSTOP));
+}
+
+// A tone on the sound device; without one, the time passes all the same.
+BOOL WINAPI Beep(DWORD frequency, DWORD ms) {
+  if (frequency < 37 || frequency > 32767) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  const int rate = 22050;
+  WAVEFORMATEX f = {WAVE_FORMAT_PCM, 1, rate, rate * 2, 2, 16, 0};
+  std::vector<short> tone((size_t)rate * ms / 1000);
+  for (size_t i = 0; i < tone.size(); i++) {
+    double s = sin(2 * 3.14159265358979 * frequency * (double)i / rate);
+    // Soft edges, so that the tone does not click.
+    double edge = std::min<double>(1.0, std::min<double>(i, tone.size() - i) / (rate / 200.0));
+    tone[i] = (short)(12000 * s * edge);
+  }
+  HWAVEOUT out;
+  HANDLE done = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+  if (tone.empty() || waveOutOpen(&out, WAVE_MAPPER, &f, (DWORD_PTR)done, 0, CALLBACK_EVENT) != MMSYSERR_NOERROR) {
+    CloseHandle(done);
+    Sleep(ms);
+    return TRUE;
+  }
+  WAVEHDR h;
+  memset(&h, 0, sizeof h);
+  h.lpData = (LPSTR)tone.data();
+  h.dwBufferLength = (DWORD)(tone.size() * sizeof(short));
+  waveOutPrepareHeader(out, &h, sizeof h);
+  waveOutWrite(out, &h, sizeof h);
+  while (!(h.dwFlags & WHDR_DONE)) WaitForSingleObject(done, 50);
+  waveOutUnprepareHeader(out, &h, sizeof h);
+  waveOutClose(out);
+  CloseHandle(done);
+  return TRUE;
 }
 
 DWORD WINAPI timeGetTime(void) {
