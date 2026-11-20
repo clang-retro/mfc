@@ -500,10 +500,15 @@ struct FontKey {
 namespace {
 
 // The families to draw a symbol from when the font asked for has none.
+// Wingdings' pictures (U+1F4xx to U+1F5xx) are mostly in the emoji block,
+// so the outline emoji fonts follow, and last GNU Unifont's plane 1, which
+// has them all. Colour emoji fonts are bitmaps, which cannot be drawn
+// as outlines, and are left out.
 const wchar_t* const kSymbolFallbacks[] = {L"Symbola", L"Noto Sans Symbols 2", L"Noto Sans Symbols2",
                                            L"Noto Sans Symbols", L"DejaVu Sans", L"Segoe UI Symbol",
                                            L"Apple Symbols", L"Arial Unicode MS", L"FreeSerif", L"FreeSans",
-                                           L"OpenSymbol", L"Noto Sans Math", L"STIX Two Math", NULL};
+                                           L"OpenSymbol", L"Noto Sans Math", L"STIX Two Math", L"Noto Emoji",
+                                           L"OpenMoji", L"Twemoji Mozilla", L"Unifont Upper", NULL};
 
 // An installed font that has the character, or NULL.
 FontSource* FallbackFor(UINT32 ch) {
@@ -521,7 +526,8 @@ FontSource* FallbackFor(UINT32 ch) {
     for (const wchar_t* const* f = kSymbolFallbacks; *f && !out; f++)
       if (const FontFile* ff = PickStyle(Index().files, *f, FW_NORMAL, false))
         if (FontSource* s = LoadSource(*ff))
-          if (stbtt_FindGlyphIndex(&s->info, (int)ch)) out = s;
+          if (int g = stbtt_FindGlyphIndex(&s->info, (int)ch))
+            if (!stbtt_IsGlyphEmpty(&s->info, g)) out = s;
   }
   std::lock_guard<std::mutex> g(*lock);
   (*found)[ch] = out;
