@@ -24,36 +24,34 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      # The .debs are cached as in mingw-wine; that job's cache, which has
-      # Wine in it too, does when this one has none yet.
+      # Wine, Xvfb and the rest come from a cache of their installed files
+      # (tools/ci-install.sh), so a run with one skips apt altogether. The key
+      # names the package list, the script and the runner image; bump the
+      # number to start a fresh cache.
+      - name: Find the package cache key
+        id: pkg-key
+        env:
+          PKGS: wine wine32:i386 xvfb xauth imagemagick python3
+        run: |
+          echo "pkgs=$PKGS" >> "$GITHUB_OUTPUT"
+          echo "key=pkgs-dos-v1-$ImageOS-$ImageVersion-$(echo "$PKGS" | sha256sum | cut -c1-12)-${{ hashFiles('tools/ci-install.sh') }}" >> "$GITHUB_OUTPUT"
       - name: Restore the package cache
-        id: apt-cache
+        id: pkg-cache
         uses: actions/cache/restore@v4
         with:
-          path: ~/apt-cache
-          key: apt-dos-v1-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
-          restore-keys: |
-            apt-dos-v1-${{ runner.os }}-
-            apt-v1-${{ runner.os }}-
+          path: ~/pkg-cache
+          key: ${{ steps.pkg-key.outputs.key }}
       # Unpacks the nightly, puts its bin on PATH and sets $CLANG_DOS.
       - uses: clang-retro/dos-sdk/.github/actions/setup-toolchain@main
       - name: Install Wine and Xvfb
         timeout-minutes: 25
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-          if [ -d ~/apt-cache ]; then
-            sudo cp ~/apt-cache/*.deb /var/cache/apt/archives/ 2>/dev/null || true
-          fi
-          sudo apt-get install -y --no-install-recommends wine wine32:i386 xvfb xauth imagemagick python3
-          mkdir -p ~/apt-cache
-          cp /var/cache/apt/archives/*.deb ~/apt-cache/ 2>/dev/null || true
+        run: sh tools/ci-install.sh ~/pkg-cache ${{ steps.pkg-key.outputs.pkgs }}
       - name: Save the package cache
-        if: steps.apt-cache.outputs.cache-hit != 'true'
+        if: steps.pkg-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ~/apt-cache
-          key: apt-dos-v1-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          path: ~/pkg-cache
+          key: ${{ steps.pkg-key.outputs.key }}
       - name: Find the Wine version
         id: wine
         run: echo "version=$(wine --version)" >> "$GITHUB_OUTPUT"
@@ -64,8 +62,21 @@ jobs:
           key: wineprefix-v1-${{ runner.os }}-${{ steps.wine.outputs.version }}
       - name: Build
         run: make -j"$(nproc)" BIN="$CLANG_DOS/bin" SYSROOT="$CLANG_DOS/sysroots/win2k-xp"
+      # WTL's headers, kept per fetch-wtl.sh (which names the version).
+      - name: Restore WTL
+        id: wtl-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/wtl
+          key: wtl-v1-${{ hashFiles('tools/fetch-wtl.sh') }}
       - name: Fetch WTL (for wtltest)
         run: sh tools/fetch-wtl.sh
+      - name: Save WTL
+        if: steps.wtl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/wtl
+          key: wtl-v1-${{ hashFiles('tools/fetch-wtl.sh') }}
       - name: Test
         run: |
           export MFC_TEST_WINEPREFIX="$HOME/wineprefix"
@@ -84,35 +95,34 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      # The packages' .debs are cached between runs, so an install only
-      # downloads what changed. The key names the package list; bump the
+      # Wine, Xvfb and the rest come from a cache of their installed files
+      # (tools/ci-install.sh), so a run with one skips apt altogether. The key
+      # names the package list, the script and the runner image; bump the
       # number to start a fresh cache.
+      - name: Find the package cache key
+        id: pkg-key
+        env:
+          PKGS: g++-mingw-w64-i686-posix wine wine32:i386 xvfb xauth imagemagick python3
+        run: |
+          echo "pkgs=$PKGS" >> "$GITHUB_OUTPUT"
+          echo "key=pkgs-mingw-v1-$ImageOS-$ImageVersion-$(echo "$PKGS" | sha256sum | cut -c1-12)-${{ hashFiles('tools/ci-install.sh') }}" >> "$GITHUB_OUTPUT"
       - name: Restore the package cache
-        id: apt-cache
+        id: pkg-cache
         uses: actions/cache/restore@v4
         with:
-          path: ~/apt-cache
-          key: apt-v1-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
-          restore-keys: apt-v1-${{ runner.os }}-
+          path: ~/pkg-cache
+          key: ${{ steps.pkg-key.outputs.key }}
+      # Unpacks the nightly, puts its bin on PATH and sets $CLANG_DOS.
       - uses: clang-retro/dos-sdk/.github/actions/setup-toolchain@main
       - name: Install MinGW-w64, Wine and Xvfb
         timeout-minutes: 25
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-          if [ -d ~/apt-cache ]; then
-            sudo cp ~/apt-cache/*.deb /var/cache/apt/archives/ 2>/dev/null || true
-          fi
-          sudo apt-get install -y --no-install-recommends \
-            g++-mingw-w64-i686-posix wine wine32:i386 xvfb xauth imagemagick python3
-          mkdir -p ~/apt-cache
-          cp /var/cache/apt/archives/*.deb ~/apt-cache/ 2>/dev/null || true
+        run: sh tools/ci-install.sh ~/pkg-cache ${{ steps.pkg-key.outputs.pkgs }}
       - name: Save the package cache
-        if: steps.apt-cache.outputs.cache-hit != 'true'
+        if: steps.pkg-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ~/apt-cache
-          key: ${{ steps.apt-cache.outputs.cache-primary-key }}
+          path: ~/pkg-cache
+          key: ${{ steps.pkg-key.outputs.key }}
       # The Wine prefix takes a while to create; keep it too, per Wine version.
       - name: Find the Wine version
         id: wine
@@ -124,8 +134,21 @@ jobs:
           key: wineprefix-v1-${{ runner.os }}-${{ steps.wine.outputs.version }}
       - name: Build
         run: make -j"$(nproc)" TARGET=i686-w64-mingw32 STDLIB= BIN="$CLANG_DOS/bin"
+      # WTL's headers, kept per fetch-wtl.sh (which names the version).
+      - name: Restore WTL
+        id: wtl-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/wtl
+          key: wtl-v1-${{ hashFiles('tools/fetch-wtl.sh') }}
       - name: Fetch WTL (for wtltest)
         run: sh tools/fetch-wtl.sh
+      - name: Save WTL
+        if: steps.wtl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/wtl
+          key: wtl-v1-${{ hashFiles('tools/fetch-wtl.sh') }}
       - name: Test
         run: |
           export MFC_TEST_WINEPREFIX="$HOME/wineprefix"
