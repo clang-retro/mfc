@@ -14,6 +14,7 @@
 #include <ole2.h>
 #include <oleauto.h>
 #include <olectl.h>
+#include <atlcomtime.h>
 #include <type_traits>
 #include <utility>
 
@@ -140,133 +141,6 @@ void AFXAPI AfxThrowOleException(SCODE sc);
 void AFXAPI AfxCheckError(SCODE sc);
 void AFXAPI AfxThrowOleDispatchException(WORD wCode, LPCTSTR lpszDescription, UINT nHelpID = 0);
 void AFXAPI AfxThrowOleDispatchException(WORD wCode, UINT nDescriptionID, UINT nHelpID = (UINT)-1);
-
-// ---------------------------------------------------------------------
-// COleDateTimeSpan: a length of time in days.
-
-class COleDateTimeSpan {
-public:
-  enum DateTimeSpanStatus { valid = 0, invalid = 1, null = 2 };
-
-  COleDateTimeSpan() : m_span(0), m_status(valid) {}
-  COleDateTimeSpan(double dblSpanSrc) : m_span(dblSpanSrc), m_status(valid) {}
-  COleDateTimeSpan(long lDays, int nHours, int nMins, int nSecs) {
-    SetDateTimeSpan(lDays, nHours, nMins, nSecs);
-  }
-
-  double m_span;
-  DateTimeSpanStatus m_status;
-
-  void SetStatus(DateTimeSpanStatus status) { m_status = status; }
-  DateTimeSpanStatus GetStatus() const { return m_status; }
-
-  double GetTotalDays() const { return m_span; }
-  double GetTotalHours() const { return m_span * 24; }
-  double GetTotalMinutes() const { return m_span * 24 * 60; }
-  double GetTotalSeconds() const { return m_span * 24 * 60 * 60; }
-  long GetDays() const { return (long)m_span; }
-  long GetHours() const;
-  long GetMinutes() const;
-  long GetSeconds() const;
-
-  const COleDateTimeSpan& operator=(double dblSpanSrc) {
-    m_span = dblSpanSrc;
-    m_status = valid;
-    return *this;
-  }
-  BOOL operator==(const COleDateTimeSpan& s) const {
-    return m_status == s.m_status && m_span == s.m_span;
-  }
-  BOOL operator!=(const COleDateTimeSpan& s) const { return !(*this == s); }
-  BOOL operator<(const COleDateTimeSpan& s) const { return m_span < s.m_span; }
-  BOOL operator>(const COleDateTimeSpan& s) const { return m_span > s.m_span; }
-  BOOL operator<=(const COleDateTimeSpan& s) const { return m_span <= s.m_span; }
-  BOOL operator>=(const COleDateTimeSpan& s) const { return m_span >= s.m_span; }
-
-  COleDateTimeSpan operator+(const COleDateTimeSpan& s) const;
-  COleDateTimeSpan operator-(const COleDateTimeSpan& s) const;
-  const COleDateTimeSpan& operator+=(const COleDateTimeSpan& s) { return *this = *this + s; }
-  const COleDateTimeSpan& operator-=(const COleDateTimeSpan& s) { return *this = *this - s; }
-  COleDateTimeSpan operator-() const { return COleDateTimeSpan(-m_span); }
-  operator double() const { return m_span; }
-
-  void SetDateTimeSpan(long lDays, int nHours, int nMins, int nSecs);
-
-  // %D days, %H hours, %M minutes, %S seconds, %% a percent sign.
-  CString Format(LPCTSTR lpszFormat) const;
-  CString Format(UINT nID) const;
-};
-
-// ---------------------------------------------------------------------
-// COleDateTime: a DATE, days since 30 December 1899 with the time as the
-// fraction, valid from the year 100 to 9999.
-
-class COleDateTime {
-public:
-  enum DateTimeStatus { valid = 0, invalid = 1, null = 2 };
-
-  static COleDateTime PASCAL GetCurrentTime();
-
-  COleDateTime() : m_dt(0), m_status(valid) {}
-  COleDateTime(const VARIANT& varSrc);
-  COleDateTime(DATE dtSrc) : m_dt(dtSrc), m_status(valid) {}
-  COleDateTime(time_t timeSrc);
-  COleDateTime(const SYSTEMTIME& systimeSrc);
-  COleDateTime(const FILETIME& filetimeSrc);
-  COleDateTime(int nYear, int nMonth, int nDay, int nHour, int nMin, int nSec) {
-    SetDateTime(nYear, nMonth, nDay, nHour, nMin, nSec);
-  }
-  COleDateTime(WORD wDosDate, WORD wDosTime);
-
-  DATE m_dt;
-  DateTimeStatus m_status;
-
-  void SetStatus(DateTimeStatus status) { m_status = status; }
-  DateTimeStatus GetStatus() const { return m_status; }
-
-  BOOL GetAsSystemTime(SYSTEMTIME& st) const;
-  int GetYear() const;
-  int GetMonth() const;  // 1 = January
-  int GetDay() const;
-  int GetHour() const;
-  int GetMinute() const;
-  int GetSecond() const;
-  int GetDayOfWeek() const;  // 1 = Sunday
-  int GetDayOfYear() const;  // 1 = 1 January
-
-  const COleDateTime& operator=(const VARIANT& varSrc);
-  const COleDateTime& operator=(DATE dtSrc);
-  const COleDateTime& operator=(const time_t& timeSrc);
-  const COleDateTime& operator=(const SYSTEMTIME& systimeSrc);
-  const COleDateTime& operator=(const FILETIME& filetimeSrc);
-
-  BOOL operator==(const COleDateTime& date) const {
-    return m_status == date.m_status && m_dt == date.m_dt;
-  }
-  BOOL operator!=(const COleDateTime& date) const { return !(*this == date); }
-  // Negative dates count their time forwards, so compare as real time.
-  BOOL operator<(const COleDateTime& date) const;
-  BOOL operator>(const COleDateTime& date) const;
-  BOOL operator<=(const COleDateTime& date) const;
-  BOOL operator>=(const COleDateTime& date) const;
-
-  COleDateTime operator+(const COleDateTimeSpan& dateSpan) const;
-  COleDateTime operator-(const COleDateTimeSpan& dateSpan) const;
-  const COleDateTime& operator+=(const COleDateTimeSpan& s) { return *this = *this + s; }
-  const COleDateTime& operator-=(const COleDateTimeSpan& s) { return *this = *this - s; }
-  COleDateTimeSpan operator-(const COleDateTime& date) const;
-  operator DATE() const { return m_dt; }
-
-  int SetDateTime(int nYear, int nMonth, int nDay, int nHour, int nMin, int nSec);
-  int SetDate(int nYear, int nMonth, int nDay) { return SetDateTime(nYear, nMonth, nDay, 0, 0, 0); }
-  int SetTime(int nHour, int nMin, int nSec) { return SetDateTime(1899, 12, 30, nHour, nMin, nSec); }
-
-  // dwFlags: LOCALE_NOUSEROVERRIDE, VAR_TIMEVALUEONLY, VAR_DATEVALUEONLY.
-  BOOL ParseDateTime(LPCTSTR lpszDate, DWORD dwFlags = 0, LCID lcid = LANG_USER_DEFAULT);
-  CString Format(DWORD dwFlags = 0, LCID lcid = LANG_USER_DEFAULT) const;
-  CString Format(LPCTSTR lpszFormat) const;  // strftime codes
-  CString Format(UINT nFormatID) const;
-};
 
 // ---------------------------------------------------------------------
 // COleCurrency: a CURRENCY, an integer count of 1/10000 units.
