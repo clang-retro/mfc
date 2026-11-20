@@ -3,7 +3,8 @@
 // OpenURL, requests with headers and bodies, status codes and headers,
 // cookies, the status callback, errors, and FTP directories, files,
 // listings and transfers in passive and active mode, and on the port
-// gopher's menus, files, searches and gopher+ attributes.
+// gopher's menus, files, searches and gopher+ attributes, and HTTPS
+// against openssl s_server.
 #include <winsock2.h>
 #include <afx.h>
 #include <afxwin.h>
@@ -11,6 +12,14 @@
 #include <afxsock.h>  // for ws2_32, which the test servers use
 #include <stdio.h>
 #include <afxtempl.h>
+#ifdef _WINPORT
+#include <signal.h>
+#include <spawn.h>
+#include <stdlib.h>
+#include <sys/wait.h>
+#include <unistd.h>
+extern char** environ;
+#endif
 
 // The directory of a path, with its separator: '\\' on Windows, '/' elsewhere.
 static CString ExeDir(const CString& strPath) {
@@ -768,6 +777,135 @@ static void TestFtp(CTestSession& session, u_short nFtpPort) {
 }
 
 #ifdef _WINPORT
+// HTTPS against openssl s_server, with a certificate of its own for
+// localhost: not from a known authority, and not for 127.0.0.1.
+static pid_t g_tlsServer = 0;
+
+static BOOL StartTlsServer(u_short& nPort) {
+  const char* out = getenv("MFC_TEST_OUT");
+  CStringA dir = out && *out ? out : ".";
+  SOCKET probe = Listen(nPort);  // a free port
+  ::closesocket(probe);
+  CStringA cmd;
+  cmd.Format("cd '%s' && printf 'secret hello' > tls-hello.txt && "
+             "openssl req -x509 -newkey rsa:2048 -nodes -keyout tls-key.pem -out tls-cert.pem -days 30 "
+             "-subj /CN=localhost -addext subjectAltName=DNS:localhost -addext extendedKeyUsage=serverAuth "
+             ">tls-req.log 2>&1 && exec openssl s_server -quiet -accept %u -cert tls-cert.pem -key tls-key.pem "
+             "-WWW >tls-server.log 2>&1",
+             (LPCSTR)dir, nPort);
+  char* argv[] = {(char*)"sh", (char*)"-c", (char*)(LPCSTR)cmd, NULL};
+  if (posix_spawnp(&g_tlsServer, "sh", NULL, NULL, argv, environ) != 0) return FALSE;
+  // Up when it takes a connection.
+  for (int i = 0; i < 200; i++) {
+    int status;
+    if (waitpid(g_tlsServer, &status, WNOHANG) == g_tlsServer) {
+      g_tlsServer = 0;
+      return FALSE;
+    }
+    SOCKET s = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sin_family = AF_INET;
+    sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    sa.sin_port = htons(nPort);
+    BOOL bUp = ::connect(s, (sockaddr*)&sa, sizeof(sa)) == 0;
+    ::closesocket(s);
+    if (bUp) return TRUE;
+    ::Sleep(50);
+  }
+  return FALSE;
+}
+
+static void StopTlsServer() {
+  if (g_tlsServer == 0) return;
+  kill(g_tlsServer, SIGTERM);
+  int status;
+  waitpid(g_tlsServer, &status, 0);
+  g_tlsServer = 0;
+}
+
+// One GET over the raw API: the error, or 0 and the body.
+static DWORD HttpsGet(HINTERNET hSession, LPCTSTR pszHost, u_short nPort, DWORD dwSecurity, DWORD dwFlags,
+                      CStringA* pBody, DWORD* pdwQueried = NULL) {
+  HINTERNET hConn = ::InternetConnect(hSession, pszHost, nPort, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+  if (hConn == NULL) return ::GetLastError();
+  HINTERNET hReq = ::HttpOpenRequest(hConn, _T("GET"), _T("/tls-hello.txt"), NULL, NULL, NULL,
+                                     INTERNET_FLAG_SECURE | dwFlags, 0);
+  DWORD dwError = 0;
+  if (hReq == NULL) {
+    dwError = ::GetLastError();
+  } else {
+    if (dwSecurity)
+      ::InternetSetOption(hReq, INTERNET_OPTION_SECURITY_FLAGS, &dwSecurity, sizeof(dwSecurity));
+    if (!::HttpSendRequest(hReq, NULL, 0, NULL, 0)) {
+      dwError = ::GetLastError();
+    } else {
+      char buf[256];
+      DWORD n = 0;
+      while (::InternetReadFile(hReq, buf, sizeof(buf), &n) && n > 0) *pBody += CStringA(buf, n);
+      if (pdwQueried) {
+        DWORD dwLen = sizeof(DWORD);
+        ::InternetQueryOption(hReq, INTERNET_OPTION_SECURITY_FLAGS, pdwQueried, &dwLen);
+      }
+    }
+    ::InternetCloseHandle(hReq);
+  }
+  ::InternetCloseHandle(hConn);
+  return dwError;
+}
+
+static void TestHttps(CTestSession& session) {
+  u_short nPort = 0;
+  if (!StartTlsServer(nPort)) {
+    printf("note: no openssl s_server to test HTTPS with; skipping\n");
+    StopTlsServer();
+    return;
+  }
+  CStringA body;
+  // Its authority is not known; then not for this host; then let go.
+  CHECK(HttpsGet(session, _T("localhost"), nPort, 0, 0, &body) == ERROR_INTERNET_INVALID_CA);
+  DWORD dwQueried = 0;
+  CHECK(HttpsGet(session, _T("localhost"), nPort, SECURITY_FLAG_IGNORE_UNKNOWN_CA, 0, &body, &dwQueried) == 0);
+  CHECK(body == "secret hello");
+  CHECK((dwQueried & SECURITY_FLAG_SECURE) && (dwQueried & SECURITY_FLAG_IGNORE_UNKNOWN_CA));
+  CHECK(HttpsGet(session, _T("127.0.0.1"), nPort, SECURITY_FLAG_IGNORE_UNKNOWN_CA, 0, &body) ==
+        ERROR_INTERNET_SEC_CERT_CN_INVALID);
+  body.Empty();
+  CHECK(HttpsGet(session, _T("127.0.0.1"), nPort, SECURITY_FLAG_IGNORE_UNKNOWN_CA,
+                 INTERNET_FLAG_IGNORE_CERT_CN_INVALID, &body) == 0);
+  CHECK(body == "secret hello");
+  body.Empty();
+  CHECK(HttpsGet(session, _T("127.0.0.1"), nPort, SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_CN_INVALID,
+                 0, &body) == 0);
+
+  // Through the classes: CHttpConnection, OpenRequest with
+  // INTERNET_FLAG_SECURE, and the security flags on the CHttpFile.
+  CHttpConnection* pConn = session.GetHttpConnection(_T("localhost"), INTERNET_FLAG_SECURE, nPort);
+  CHttpFile* pFile = pConn->OpenRequest(CHttpConnection::HTTP_VERB_GET, _T("/tls-hello.txt"), NULL, 1, NULL, NULL,
+                                        INTERNET_FLAG_SECURE);
+  BOOL bThrown = FALSE;
+  try {
+    pFile->SendRequest();
+  } catch (CInternetException* e) {
+    bThrown = e->m_dwError == ERROR_INTERNET_INVALID_CA;
+    e->Delete();
+  }
+  CHECK(bThrown);
+  CHECK(pFile->SetOption(INTERNET_OPTION_SECURITY_FLAGS, SECURITY_FLAG_IGNORE_UNKNOWN_CA));
+  CHECK(pFile->SendRequest());
+  DWORD dwStatus = 0;
+  CHECK(pFile->QueryInfoStatusCode(dwStatus) && dwStatus == 200);
+  CString strLine;
+  CHECK(pFile->ReadString(strLine) && strLine == _T("secret hello"));
+  pFile->Close();
+  delete pFile;
+  pConn->Close();
+  delete pConn;
+  StopTlsServer();
+}
+#endif
+
+#ifdef _WINPORT
 static void TestGopher(CTestSession& session, u_short nPort) {
   // Locators.
   TCHAR szLoc[MAX_GOPHER_LOCATOR_LENGTH + 1];
@@ -891,6 +1029,7 @@ int main() {
     TestFtp(session, nFtpPort);
 #ifdef _WINPORT
     TestGopher(session, g_nGopherPort);
+    TestHttps(session);
 #endif
     session.Close();
   } catch (CException* e) {
