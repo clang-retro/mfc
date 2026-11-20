@@ -69,7 +69,9 @@ def compile_rc(args, res):
             cmd += ["/D", d]
         # Relative names in the script are found from its own directory.
         cmd += ["/I", os.path.dirname(os.path.abspath(args.input)) or "."]
-        cmd += ["/FO", res, args.input]
+        # The input after "--": an absolute path such as /Users/... would
+        # otherwise read as an option (/U).
+        cmd += ["/FO", res, "--", args.input]
         r = subprocess.run(cmd)
         if r.returncode != 0:
             sys.exit(r.returncode)
