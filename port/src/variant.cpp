@@ -505,7 +505,22 @@ HRESULT WINAPI VariantCopy(VARIANTARG* dst, const VARIANTARG* src) {
       if (dst->punkVal != NULL) dst->punkVal->AddRef();
       return S_OK;
     case VT_RECORD:
-      return E_NOTIMPL;
+      // A new record of the same type, its fields copied.
+      *dst = *src;
+      dst->pvRecord = NULL;
+      if (src->pRecInfo == NULL) {
+        dst->vt = VT_EMPTY;
+        return E_INVALIDARG;
+      }
+      if (src->pvRecord != NULL) {
+        hr = src->pRecInfo->RecordCreateCopy(src->pvRecord, &dst->pvRecord);
+        if (FAILED(hr)) {
+          dst->vt = VT_EMPTY;
+          return hr;
+        }
+      }
+      dst->pRecInfo->AddRef();
+      return S_OK;
     default:
       *dst = *src;
       return S_OK;

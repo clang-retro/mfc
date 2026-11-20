@@ -246,6 +246,8 @@ void FreeBlock(T* p) {
 // The library and its types.
 
 class Info;
+// A type's ITypeComp (ti) or a library's (lib); each AddRef'd.
+ITypeComp* NewTypeComp(ITypeInfo* ti, ITypeLib* lib);
 
 class Lib final : public ITypeLib, public ICreateTypeLib2 {
 public:
@@ -346,8 +348,9 @@ public:
     return S_OK;
   }
   STDMETHOD(GetTypeComp)(ITypeComp** out) override {
-    if (out) *out = NULL;
-    return E_NOTIMPL;
+    if (out == NULL) return E_INVALIDARG;
+    *out = NewTypeComp(NULL, this);
+    return S_OK;
   }
   STDMETHOD(GetDocumentation)(INT index, BSTR* pName, BSTR* pDoc, DWORD* pHelp, BSTR* pFile) override {
     if (index != -1 && (index < 0 || (size_t)index >= types.size())) return TYPE_E_ELEMENTNOTFOUND;
@@ -530,8 +533,9 @@ public:
     return S_OK;
   }
   STDMETHOD(GetTypeComp)(ITypeComp** out) override {
-    if (out) *out = NULL;
-    return E_NOTIMPL;
+    if (out == NULL) return E_INVALIDARG;
+    *out = NewTypeComp(this, NULL);
+    return S_OK;
   }
   STDMETHOD(GetFuncDesc)(UINT i, FUNCDESC** out) override {
     if (out == NULL) return E_INVALIDARG;
@@ -931,6 +935,148 @@ public:
 private:
   std::atomic<ULONG> refs_{1};
 };
+
+// ---------------------------------------------------------------------
+// Binding names (ITypeComp): a type's members, its bases' after its
+// own; a library's enumerations' and modules' members, and its modules
+// and enumerations themselves, by name.
+
+class TypeComp final : public ITypeComp {
+ public:
+  TypeComp(ITypeInfo* ti, ITypeLib* lib) : ti_(ti), lib_(lib) {
+    if (ti_) ti_->AddRef();
+    if (lib_) lib_->AddRef();
+  }
+  STDMETHOD(QueryInterface)(REFIID riid, void** out) override {
+    if (out == NULL) return E_POINTER;
+    if (IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_ITypeComp)) {
+      *out = static_cast<ITypeComp*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *out = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() override { return ++refs_; }
+  STDMETHOD_(ULONG, Release)() override {
+    ULONG n = --refs_;
+    if (n == 0) delete this;
+    return n;
+  }
+  STDMETHOD(Bind)(LPOLESTR name, ULONG, WORD flags, ITypeInfo** ti, DESCKIND* kind, BINDPTR* bp) override {
+    if (name == NULL || ti == NULL || kind == NULL || bp == NULL) return E_INVALIDARG;
+    *ti = NULL;
+    *kind = DESCKIND_NONE;
+    bp->lpfuncdesc = NULL;
+    if (ti_) return BindIn(ti_, name, flags, true, 0, ti, kind, bp);
+    UINT n = lib_->GetTypeInfoCount();
+    for (UINT i = 0; i < n; i++) {
+      ITypeInfo* t = NULL;
+      if (FAILED(lib_->GetTypeInfo(i, &t))) continue;
+      TYPEKIND k = TKIND_MAX;
+      lib_->GetTypeInfoType(i, &k);
+      HRESULT hr = S_OK;
+      if (k == TKIND_ENUM || k == TKIND_MODULE) {
+        BSTR tn = NULL;
+        t->GetDocumentation(MEMBERID_NIL, &tn, NULL, NULL, NULL);
+        bool same = tn && SameName(std::wstring(tn, SysStringLen(tn)), name);
+        SysFreeString(tn);
+        if (same) {
+          *kind = DESCKIND_TYPECOMP;
+          bp->lptcomp = NewTypeComp(t, NULL);
+        } else {
+          hr = BindIn(t, name, flags, false, 0, ti, kind, bp);
+        }
+      }
+      t->Release();
+      if (FAILED(hr) || *kind != DESCKIND_NONE) return hr;
+    }
+    return S_OK;
+  }
+  STDMETHOD(BindType)(LPOLESTR name, ULONG, ITypeInfo** ti, ITypeComp** tc) override {
+    if (name == NULL || ti == NULL || tc == NULL) return E_INVALIDARG;
+    *ti = NULL;
+    *tc = NULL;
+    if (lib_ == NULL) return S_OK;  // a type binds no types
+    UINT n = lib_->GetTypeInfoCount();
+    for (UINT i = 0; i < n; i++) {
+      BSTR tn = NULL;
+      lib_->GetDocumentation((INT)i, &tn, NULL, NULL, NULL);
+      bool same = tn && SameName(std::wstring(tn, SysStringLen(tn)), name);
+      SysFreeString(tn);
+      if (same) return lib_->GetTypeInfo(i, ti);
+    }
+    return S_OK;
+  }
+
+ private:
+  ~TypeComp() {
+    if (ti_) ti_->Release();
+    if (lib_) lib_->Release();
+  }
+  static bool Named(ITypeInfo* t, MEMBERID id, LPCOLESTR name) {
+    BSTR n = NULL;
+    UINT got = 0;
+    if (FAILED(t->GetNames(id, &n, 1, &got)) || got == 0) return false;
+    bool same = SameName(std::wstring(n, SysStringLen(n)), name);
+    SysFreeString(n);
+    return same;
+  }
+  // A member of t (or of its bases) called name, of a kind flags allows.
+  static HRESULT BindIn(ITypeInfo* t, LPCOLESTR name, WORD flags, bool bases, int depth, ITypeInfo** ti,
+                        DESCKIND* kind, BINDPTR* bp) {
+    TYPEATTR* a = NULL;
+    HRESULT hr = t->GetTypeAttr(&a);
+    if (FAILED(hr)) return hr;
+    WORD funcs = a->cFuncs, vars = a->cVars, impls = a->cImplTypes;
+    TYPEKIND tk = a->typekind;
+    t->ReleaseTypeAttr(a);
+    bool wrongKind = false;
+    for (UINT i = 0; i < funcs; i++) {
+      FUNCDESC* fd = NULL;
+      if (FAILED(t->GetFuncDesc(i, &fd))) continue;
+      if (Named(t, fd->memid, name)) {
+        if (flags == 0 || (fd->invkind & flags)) {
+          *ti = t;
+          t->AddRef();
+          *kind = DESCKIND_FUNCDESC;
+          bp->lpfuncdesc = fd;
+          return S_OK;
+        }
+        wrongKind = true;
+      }
+      t->ReleaseFuncDesc(fd);
+    }
+    for (UINT i = 0; i < vars; i++) {
+      VARDESC* vd = NULL;
+      if (FAILED(t->GetVarDesc(i, &vd))) continue;
+      if (Named(t, vd->memid, name)) {
+        *ti = t;
+        t->AddRef();
+        *kind = DESCKIND_VARDESC;
+        bp->lpvardesc = vd;
+        return S_OK;
+      }
+      t->ReleaseVarDesc(vd);
+    }
+    if (bases && tk != TKIND_COCLASS && depth < 32)
+      for (UINT i = 0; i < impls; i++) {
+        HREFTYPE href;
+        ITypeInfo* base = NULL;
+        if (FAILED(t->GetRefTypeOfImplType(i, &href)) || FAILED(t->GetRefTypeInfo(href, &base))) continue;
+        hr = BindIn(base, name, flags, true, depth + 1, ti, kind, bp);
+        base->Release();
+        if (FAILED(hr) || *kind != DESCKIND_NONE) return hr;
+      }
+    return wrongKind ? TYPE_E_TYPEMISMATCH : S_OK;
+  }
+
+  std::atomic<ULONG> refs_{1};
+  ITypeInfo* ti_;
+  ITypeLib* lib_;
+};
+
+ITypeComp* NewTypeComp(ITypeInfo* ti, ITypeLib* lib) { return new TypeComp(ti, lib); }
 
 ITypeInfo* Lib::NewInfo(size_t i, bool ifaceView) { return static_cast<ITypeInfo*>(new Info(this, i, ifaceView)); }
 

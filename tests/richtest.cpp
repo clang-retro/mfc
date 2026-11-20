@@ -32,6 +32,96 @@ public:
   void SetPrinting() { m_bPrinting = TRUE; }
 };
 
+#ifdef _WINPORT
+// {0B7E52C1-6A4D-4F08-9E35-C1D2E3F40516}: a class nothing serves, which
+// the test object emulates.
+static const CLSID CLSID_Emulated = {0x0b7e52c1, 0x6a4d, 0x4f08, {0x9e, 0x35, 0xc1, 0xd2, 0xe3, 0xf4, 0x05, 0x16}};
+
+static CLSID ObjectClass(IRichEditOle* pReOle, CStringW* pstrType) {
+  REOBJECT reo = {sizeof(REOBJECT)};
+  CLSID clsid = CLSID_NULL;
+  if (pReOle->GetObject(0, &reo, REO_GETOBJ_PSTG | REO_GETOBJ_POLEOBJ) == S_OK) {
+    clsid = reo.clsid;
+    CLSID stored = CLSID_NULL;
+    CHECK(reo.pstg != NULL && ::ReadClassStg(reo.pstg, &stored) == S_OK && ::IsEqualCLSID(stored, clsid));
+    CLIPFORMAT cf = 0;
+    LPOLESTR psz = NULL;
+    if (pstrType != NULL && reo.pstg != NULL && SUCCEEDED(::ReadFmtUserTypeStg(reo.pstg, &cf, &psz)) && psz) {
+      *pstrType = psz;
+      ::CoTaskMemFree(psz);
+    }
+    CHECK(reo.poleobj != NULL);
+    if (reo.poleobj != NULL) reo.poleobj->Release();
+    if (reo.pstg != NULL) reo.pstg->Release();
+  }
+  return clsid;
+}
+
+// An object converted to a class the test object emulates, and back.
+static void TestConvertObject(IRichEditOle* pReOle, CRichEditCtrl& ctrl) {
+  CHECK(pReOle->ActivateAs(CLSID_Emulated, CLSID_TestObject) == S_OK);
+  CLSID clsid;
+  CHECK(::CoGetTreatAsClass(CLSID_Emulated, &clsid) == S_OK && ::IsEqualCLSID(clsid, CLSID_TestObject));
+  CHECK(pReOle->ConvertObject(0, CLSID_Emulated, "Emulated Thing") == S_OK);
+  CStringW strType;
+  CHECK(::IsEqualCLSID(ObjectClass(pReOle, &strType), CLSID_Emulated));
+  CHECK(strType == L"Emulated Thing");
+  CHECK(pReOle->GetObjectCount() == 1);
+  CHECK(pReOle->ConvertObject(0, CLSID_TestObject, NULL) == S_OK);
+  CHECK(::IsEqualCLSID(ObjectClass(pReOle, NULL), CLSID_TestObject));
+  CHECK(pReOle->ActivateAs(CLSID_Emulated, CLSID_NULL) == S_OK);
+  CHECK(::CoGetTreatAsClass(CLSID_Emulated, &clsid) == S_FALSE && ::IsEqualCLSID(clsid, CLSID_Emulated));
+
+  // A range's data, imported into the text again.
+  LPDATAOBJECT pData = NULL;
+  CHARRANGE cr = {0, 1};
+  CHECK(pReOle->GetClipboardData(&cr, RECO_COPY, &pData) == S_OK && pData != NULL);
+  if (pData != NULL) {
+    FORMATETC fe = {CF_UNICODETEXT, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM m;
+    CHECK(pData->GetData(&fe, &m) == S_OK);
+    if (m.tymed == TYMED_HGLOBAL) {
+      CHECK(wcscmp((LPCWSTR)::GlobalLock(m.hGlobal), L"a") == 0);
+      ::GlobalUnlock(m.hGlobal);
+      ::ReleaseStgMedium(&m);
+    }
+    // Over the "b" it was copied from: "a", the object, "a".
+    ctrl.SetSel(2, 3);
+    CHECK(pReOle->ImportDataObject(pData, 0, NULL) == S_OK);
+    CString str;
+    ctrl.GetWindowText(str);
+    CHECK(str.GetLength() == 3 && str[0] == _T('a') && str[2] == _T('a'));
+    CHECK(pReOle->GetObjectCount() == 1);
+    CHECK(pReOle->ImportDataObject(pData, CF_BITMAP, NULL) == DV_E_FORMATETC);
+    ctrl.SetSel(2, 3);
+    pData->Release();
+    // The clipboard takes more data beside what another program put there.
+    if (::OpenClipboard(NULL)) {
+      ::EmptyClipboard();
+      HGLOBAL h = ::GlobalAlloc(GMEM_MOVEABLE, 4);
+      memcpy(::GlobalLock(h), "abc", 4);
+      ::GlobalUnlock(h);
+      ::SetClipboardData(CF_TEXT, h);
+      ::CloseClipboard();
+    }
+    LPDATAOBJECT pClip = NULL;
+    CHECK(::OleGetClipboard(&pClip) == S_OK && pClip != NULL);
+    if (pClip != NULL) {
+      CLIPFORMAT cfExtra = (CLIPFORMAT)::RegisterClipboardFormat(_T("RichTest Extra"));
+      FORMATETC fe2 = {cfExtra, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+      STGMEDIUM m2 = {TYMED_HGLOBAL};
+      m2.hGlobal = ::GlobalAlloc(GMEM_MOVEABLE, 4);
+      memcpy(::GlobalLock(m2.hGlobal), "xyz", 4);
+      ::GlobalUnlock(m2.hGlobal);
+      CHECK(pClip->SetData(&fe2, &m2, TRUE) == S_OK);
+      CHECK(::IsClipboardFormatAvailable(cfExtra) && ::IsClipboardFormatAvailable(CF_TEXT));
+      CHECK(pClip->QueryGetData(&fe2) == S_OK);
+      pClip->Release();
+    }
+  }
+}
+#endif
+
 static CString ReadFileText(LPCTSTR lpszPath) {
   CString str;
   CFile file;
@@ -350,6 +440,13 @@ public:
         CHECK(pLoaded != NULL);
         if (pLoaded != NULL) CHECK(pLoaded->GetDocument() == Doc());
         ::DeleteFile(strRtf);
+#ifdef _WINPORT
+        pReOle = ctrl.GetIRichEditOle();
+        if (pReOle != NULL) {
+          TestConvertObject(pReOle, ctrl);
+          pReOle->Release();
+        }
+#endif
         Doc()->SetModifiedFlag(FALSE);
         break;
       }

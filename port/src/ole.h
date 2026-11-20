@@ -9,6 +9,7 @@
 #include <ole2.h>
 #include <oleidl.h>
 #include <objidl.h>
+#include <ocidl.h>
 #include <string.h>
 #include <algorithm>
 #include <vector>
@@ -111,6 +112,10 @@ class VectorEnum final : public IEnum {
   static void Free(OLEVERB& v) { CoTaskMemFree(v.lpszVerbName); }
   static void Copied(LPOLESTR& s) { s = s ? CoStrDup(s) : NULL; }
   static void Free(LPOLESTR& s) { CoTaskMemFree(s); }
+  static void Copied(CONNECTDATA& c) {
+    if (c.pUnk) c.pUnk->AddRef();
+  }
+  static void Free(CONNECTDATA& c) { SafeRelease(c.pUnk); }
   static void Copied(FORMATETC& f) { f.ptd = NULL; }
   static void Free(FORMATETC&) {}
 
@@ -122,6 +127,7 @@ typedef VectorEnum<IEnumSTATDATA, STATDATA, &IID_IEnumSTATDATA> StatDataEnum;
 typedef VectorEnum<IEnumOLEVERB, OLEVERB, &IID_IEnumOLEVERB> VerbEnum;
 typedef VectorEnum<IEnumFORMATETC, FORMATETC, &IID_IEnumFORMATETC> FormatEnum;
 typedef VectorEnum<IEnumString, LPOLESTR, &IID_IEnumString> StringEnum;
+typedef VectorEnum<IEnumConnections, CONNECTDATA, &IID_IEnumConnections> ConnectionEnum;
 
 inline bool SameFormat(const FORMATETC& a, const FORMATETC& b) {
   return a.cfFormat == b.cfFormat && a.dwAspect == b.dwAspect && a.lindex == b.lindex;
