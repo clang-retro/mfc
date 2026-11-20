@@ -540,7 +540,15 @@ try.
   alpha through PNG and back and drawn with AlphaBlend, 24 bits through
   BMP, JPEG and a stream, an 8-bit image's color table, SetPixelIndexed
   and a transparent color, a device-dependent bitmap saved, and the file
-  dialogs' filter strings); CPath; CSid and the
+  dialogs' filter strings); COleDateTime and COleDateTimeSpan; the
+  synchronization objects of `atlsync.h` across a second thread;
+  Base64, hex, UUEncode, quoted-printable, the B encoding, EscapeXML and
+  UTF-8; MD5 and SHA-1 of a known string, and RC4 through a key derived
+  from a hash; CSocketAddr; CAtlRegExp (groups, anchors, alternation,
+  lazy repeats, negation, abbreviations and the parse errors); CUrl
+  cracked and rebuilt, escaping, AtlCanonicalizeUrl and AtlCombineUrl;
+  a CWorkerThread with an event and a timer, and a CThreadPool summing
+  its requests; CPath; CSid and the
   well-known SIDs, CDacl, CSecurityDesc to SDDL and back, an event created
   through CSecurityAttributes and its DACL read and replaced, a file's
   owner and DACL, and the process's CAccessToken; and CAtlServiceModuleT,
@@ -807,7 +815,18 @@ request with the stock MinGW-w64 toolchain.
   (CComSafeArray, CComSafeArrayBound); `atlfile.h` (CAtlFile,
   CAtlTemporaryFile, CAtlFileMapping); CComPtr<IDispatch>'s helpers and
   CComDispatchDriver; `atltime.h` (CTime, CTimeSpan, CFileTime,
-  CFileTimeSpan); `atlimage.h` (CImage: DIB sections made, attached and
+  CFileTimeSpan); `atlcomtime.h` (COleDateTime and COleDateTimeSpan,
+  which MFC's `afxdisp.h` takes from here); `atlsync.h`
+  (CCriticalSection, CEvent, CMutex, CSemaphore and CMutexLock, in
+  namespace ATL only, as MFC has its own of the same names); `atlenc.h`
+  (Base64, UUEncode, quoted-printable, hex, BEncode, EscapeXML and
+  AtlUnicodeToUTF8); `atlcrypt.h` (CCryptProv, CCryptHash and the MD5,
+  SHA and HMAC hashes, CCryptKey and the derived, random, imported and
+  user keys); `atlsocket.h` (CSocketAddr over getaddrinfo); `atlrx.h`
+  (CAtlRegExp and CAtlREMatchContext, ATL's syntax with {} for match
+  groups); `atlutil.h` (CUrl, AtlEscapeUrl, AtlUnescapeUrl,
+  AtlCanonicalizeUrl, AtlCombineUrl, AtlGetErrorDescription, the thread
+  traits, CWorkerThread and CThreadPool); `atlimage.h` (CImage: DIB sections made, attached and
   drawn with BitBlt, StretchBlt, AlphaBlend, TransparentBlt, MaskBlt and
   PlgBlt, and BMP, GIF, JPEG, PNG and TIFF read and written through
   GDI+, which starts on first use; an image with an alpha channel keeps

@@ -12,10 +12,18 @@
 //   - CPath from atlpath.h;
 //   - atlsecurity.h: CSid, CDacl, CSecurityDesc, CSecurityAttributes,
 //     AtlGetDacl/AtlSetDacl and CAccessToken;
+//   - atltime.h, atlcomtime.h and atlimage.h: CTime, CFileTime,
+//     COleDateTime and CImage;
+//   - atlsync.h, atlenc.h, atlcrypt.h, atlsocket.h, atlrx.h and atlutil.h:
+//     the synchronization objects, the encodings, CryptoAPI hashes and
+//     keys, CSocketAddr, CAtlRegExp, CUrl and the URL helpers,
+//     CWorkerThread and CThreadPool;
 //   - CAtlServiceModuleT: /Service, the service started by the service
 //     control manager and stopped, and /UnregServer. The service is this
 //     program again, started with -AsService.
 // Writes atlutiltest.log in MFC_TEST_OUT; exits with 1 on a failure.
+// Winsock 2 comes before windows.h.
+#include <atlsocket.h>
 #include <atlbase.h>
 #include <atlstr.h>
 #include <atlcoll.h>
@@ -25,6 +33,12 @@
 #include <atlsecurity.h>
 #include <atltime.h>
 #include <atlimage.h>
+#include <atlcomtime.h>
+#include <atlsync.h>
+#include <atlenc.h>
+#include <atlcrypt.h>
+#include <atlrx.h>
+#include <atlutil.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include "atlutiltest.h"
@@ -1157,6 +1171,385 @@ static void TestImage() {
   ::DeleteFile(szJpg);
 }
 
+static void TestComTime() {
+  // COleDateTime and COleDateTimeSpan without MFC.
+  COleDateTime dt(2003, 7, 15, 13, 45, 30);
+  CHECK(dt.GetStatus() == COleDateTime::valid);
+  CHECK(dt.GetYear() == 2003 && dt.GetMonth() == 7 && dt.GetDay() == 15);
+  CHECK(dt.GetHour() == 13 && dt.GetMinute() == 45 && dt.GetSecond() == 30);
+  CHECK(dt.GetDayOfWeek() == 3 && dt.GetDayOfYear() == 196);
+  CHECK(dt.Format(_T("%Y-%m-%d %H:%M:%S")) == _T("2003-07-15 13:45:30"));
+  COleDateTimeSpan span(1, 2, 3, 4);
+  CHECK(span.GetDays() == 1 && span.GetHours() == 2 && span.GetMinutes() == 3 &&
+        span.GetSeconds() == 4);
+  CHECK(span.Format(_T("%D %H:%M:%S")) == _T("1 02:03:04"));
+  COleDateTime dt2 = dt + span;
+  CHECK(dt2.GetDay() == 16 && dt2.GetHour() == 15);
+  CHECK(dt2 > dt && (dt2 - dt).GetTotalSeconds() > 93783.9);
+  COleDateTime bad(2003, 2, 30, 0, 0, 0);
+  CHECK(bad.GetStatus() == COleDateTime::invalid);
+  CHECK(COleDateTime(1899, 12, 30, 0, 0, 0).m_dt == 0.0);
+  COleDateTime parsed;
+  CHECK(parsed.ParseDateTime(_T("2003-07-15 13:45:30"), 0, LANG_USER_DEFAULT));
+  CHECK(parsed.GetYear() == 2003 && parsed.GetMinute() == 45);
+  SYSTEMTIME st;
+  CHECK(dt.GetAsSystemTime(st) && st.wYear == 2003 && st.wDayOfWeek == 2);
+  CHECK(COleDateTime::GetCurrentTime().GetYear() >= 2003);
+  ATL::COleDateTime copy = dt;
+  CHECK(copy == dt);
+}
+
+static DWORD WINAPI SyncThread(LPVOID pv) {
+  ATL::CEvent* pEvents = (ATL::CEvent*)pv;
+  ::WaitForSingleObject(pEvents[0], INFINITE);
+  pEvents[1].Set();
+  return 0;
+}
+
+static void TestSync() {
+  ATL::CCriticalSection cs;
+  cs.Enter();
+  CHECK(cs.TryEnter());  // recursive
+  cs.Leave();
+  cs.Leave();
+
+  ATL::CEvent events[2];
+  CHECK(events[0].Create(NULL, FALSE, FALSE, NULL) && events[1].Create(NULL, TRUE, FALSE, NULL));
+  HANDLE hThread = ::CreateThread(NULL, 0, SyncThread, events, 0, NULL);
+  CHECK(::WaitForSingleObject(events[1], 0) == WAIT_TIMEOUT);
+  events[0].Set();
+  CHECK(::WaitForSingleObject(events[1], 5000) == WAIT_OBJECT_0);
+  CHECK(::WaitForSingleObject(events[1], 0) == WAIT_OBJECT_0);  // manual reset
+  events[1].Reset();
+  CHECK(::WaitForSingleObject(events[1], 0) == WAIT_TIMEOUT);
+  ::WaitForSingleObject(hThread, 5000);
+  ::CloseHandle(hThread);
+
+  ATL::CMutex mtx(FALSE);
+  {
+    ATL::CMutexLock lock(mtx);
+    CHECK(::WaitForSingleObject(mtx, 0) == WAIT_OBJECT_0);  // owner may take it again
+    mtx.Release();
+  }
+  ATL::CMutex named;
+  CHECK(named.Create(NULL, FALSE, _T("atlutiltest-mutex")));
+  ATL::CMutex opened;
+  CHECK(opened.Open(SYNCHRONIZE, FALSE, _T("atlutiltest-mutex")));
+
+  ATL::CSemaphore sem(2, 3);
+  CHECK(::WaitForSingleObject(sem, 0) == WAIT_OBJECT_0);
+  CHECK(::WaitForSingleObject(sem, 0) == WAIT_OBJECT_0);
+  CHECK(::WaitForSingleObject(sem, 0) == WAIT_TIMEOUT);
+  LONG nOld = -1;
+  CHECK(sem.Release(1, &nOld) && nOld == 0);
+
+  bool bThrown = false;
+  try {
+    ATL::CSemaphore badSem(5, 1);  // more than the most
+  } catch (CAtlException& e) {
+    bThrown = FAILED((HRESULT)e);
+  }
+  CHECK(bThrown);
+}
+
+static void TestEncodings() {
+  // Base64, with and without line breaks and padding.
+  const BYTE abData[] = "Many hands make light work.";
+  int nLen = (int)sizeof(abData) - 1;
+  char sz[256];
+  int n = sizeof(sz);
+  CHECK(Base64Encode(abData, nLen, sz, &n, ATL_BASE64_FLAG_NOCRLF));
+  CHECK(n == 36 && memcmp(sz, "TWFueSBoYW5kcyBtYWtlIGxpZ2h0IHdvcmsu", 36) == 0);
+  n = sizeof(sz);
+  CHECK(Base64Encode((const BYTE*)"ab", 2, sz, &n, ATL_BASE64_FLAG_NOCRLF) && n == 4 &&
+        memcmp(sz, "YWI=", 4) == 0);
+  n = sizeof(sz);
+  CHECK(Base64Encode((const BYTE*)"ab", 2, sz, &n, ATL_BASE64_FLAG_NOCRLF | ATL_BASE64_FLAG_NOPAD) &&
+        n == 3);
+  n = sizeof(sz);
+  CHECK(Base64Encode(abData, nLen, sz, &n) && n == 38 && sz[36] == '\r' && sz[37] == '\n');
+  CHECK(Base64EncodeGetRequiredLength(nLen) >= n);
+  BYTE ab[256];
+  int nOut = sizeof(ab);
+  CHECK(Base64Decode(sz, n, ab, &nOut) && nOut == nLen && memcmp(ab, abData, nLen) == 0);
+  int nSmall = 0;
+  CHECK(!Base64Encode(abData, nLen, sz, &nSmall) && nSmall >= 36);
+
+  // Hex.
+  n = sizeof(sz);
+  CHECK(AtlHexEncode((const BYTE*)"\x01\xAB\xff", 3, sz, &n) && n == 6 && memcmp(sz, "01ABFF", 6) == 0);
+  nOut = sizeof(ab);
+  CHECK(AtlHexDecode("01abFF", 6, ab, &nOut) && nOut == 3 && ab[1] == 0xab && ab[2] == 0xff);
+
+  // UUEncode, round trip.
+  static char szUU[1024];
+  n = sizeof(szUU);
+  CHECK(UUEncode(abData, nLen, szUU, &n, _T("work.txt"), ATLSMTP_UUENCODE_HEADER | ATLSMTP_UUENCODE_END));
+  CHECK(n > 0 && memcmp(szUU, "begin 666 work.txt\r\n", 20) == 0);
+  CHECK(szUU[20] == (char)(0x20 + nLen));
+  nOut = sizeof(ab);
+  CHECK(UUDecode((BYTE*)szUU, n, ab, &nOut) && nOut == nLen && memcmp(ab, abData, nLen) == 0);
+
+  // Quoted-printable.
+  const char* pszQP = "caf\xe9 = ok \r\nnext";
+  n = sizeof(sz);
+  CHECK(QPEncode((BYTE*)pszQP, (int)strlen(pszQP), sz, &n));
+  sz[n] = 0;
+  CHECK(strcmp(sz, "caf=E9 =3D ok=20\r\nnext") == 0);
+  char szBack[64];
+  nOut = sizeof(szBack);
+  CHECK(QPDecode((BYTE*)sz, n, szBack, &nOut) && nOut == (int)strlen(pszQP) &&
+        memcmp(szBack, pszQP, nOut) == 0);
+
+  // The B encoding, XML escaping, UTF-8.
+  n = sizeof(sz);
+  CHECK(BEncode((BYTE*)"hi", 2, sz, &n, "utf-8") && n == 16 && memcmp(sz, "=?utf-8?B?aGk=?=", 16) == 0);
+  wchar_t wsz[64];
+  int nEsc = EscapeXML(L"<a href=\"x\">&</a>", 17, wsz, 64, ATL_ESC_FLAG_ATTR);
+  CHECK(nEsc > 0 && wcsncmp(wsz, L"&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;", nEsc) == 0);
+  char szUtf8[16];
+  int nU = AtlUnicodeToUTF8(L"\x00e9", 1, szUtf8, 16);
+  CHECK(nU == 2 && (BYTE)szUtf8[0] == 0xc3 && (BYTE)szUtf8[1] == 0xa9);
+  CHECK(AtlHexValue('c') == 12 && AtlHexValue('x') == -1);
+}
+
+static void TestCrypt() {
+  CCryptProv prov;
+  HRESULT hr = prov.InitVerifyContext();
+  CHECK(SUCCEEDED(hr));
+  if (FAILED(hr)) return;
+  BYTE abRandom[16] = {0};
+  CHECK(SUCCEEDED(prov.GenRandom(sizeof(abRandom), abRandom)));
+
+  // MD5 and SHA-1 of "abc", from RFC 1321 and FIPS 180.
+  CCryptMD5Hash md5;
+  CHECK(SUCCEEDED(md5.Initialize(prov)));
+  CHECK(SUCCEEDED(md5.AddData((const BYTE*)"abc", 3)));
+  BYTE ab[64];
+  DWORD dw = sizeof(ab);
+  CHECK(SUCCEEDED(md5.GetValue(ab, &dw)) && dw == 16);
+  static const BYTE md5abc[] = {0x90, 0x01, 0x50, 0x98, 0x3c, 0xd2, 0x4f, 0xb0,
+                                0xd6, 0x96, 0x3f, 0x7d, 0x28, 0xe1, 0x7f, 0x72};
+  CHECK(memcmp(ab, md5abc, 16) == 0);
+  CCryptSHA1Hash sha;
+  CHECK(SUCCEEDED(sha.Initialize(prov)));
+  CHECK(SUCCEEDED(sha.AddData((const BYTE*)"abc", 3)));
+  DWORD dwSize = 0;
+  CHECK(SUCCEEDED(sha.GetSize(&dwSize)) && dwSize == 20);
+  dw = sizeof(ab);
+  CHECK(SUCCEEDED(sha.GetValue(ab, &dw)) && dw == 20 && ab[0] == 0xa9 && ab[1] == 0x99 &&
+        ab[19] == 0x9d);
+  ALG_ID alg = 0;
+  CHECK(SUCCEEDED(sha.GetAlgId(&alg)) && alg == CALG_SHA1);
+
+  // A key derived from a hash: encrypt, then decrypt.
+  CCryptMD5Hash keyHash;
+  CHECK(SUCCEEDED(keyHash.Initialize(prov, _T("password"))));
+  CCryptDerivedKey key;
+  hr = key.Initialize(prov, keyHash, CALG_RC4);
+  CHECK(SUCCEEDED(hr));
+  if (SUCCEEDED(hr)) {
+    BYTE abBuf[64];
+    memcpy(abBuf, "secret message", 14);
+    DWORD dwLen = 14;
+    CHECK(SUCCEEDED(key.Encrypt(TRUE, abBuf, &dwLen, sizeof(abBuf))));
+    CHECK(memcmp(abBuf, "secret message", 14) != 0);
+    CCryptDerivedKey key2;
+    CCryptMD5Hash keyHash2;
+    keyHash2.Initialize(prov, _T("password"));
+    CHECK(SUCCEEDED(key2.Initialize(prov, keyHash2, CALG_RC4)));
+    CHECK(SUCCEEDED(key2.Decrypt(TRUE, abBuf, &dwLen)) && dwLen == 14 &&
+          memcmp(abBuf, "secret message", 14) == 0);
+  }
+  CCryptHash copy = sha;  // duplicated
+  CHECK(copy.GetHandle() != 0 && copy.GetHandle() != sha.GetHandle());
+}
+
+static void TestSocketAddr() {
+  WSADATA wsa;
+  CHECK(::WSAStartup(MAKEWORD(2, 2), &wsa) == 0);
+  CSocketAddr addr;
+  CHECK(addr.FindINET4Addr(_T("127.0.0.1"), 8080, AI_NUMERICHOST) == 0);
+  addrinfo* pai = addr.GetAddrInfo();
+  CHECK(pai != NULL && pai->ai_family == AF_INET);
+  if (pai != NULL) {
+    sockaddr_in* psin = (sockaddr_in*)pai->ai_addr;
+    CHECK(ntohs(psin->sin_port) == 8080 && psin->sin_addr.s_addr == htonl(INADDR_LOOPBACK));
+  }
+  CHECK(addr.GetAddrInfoList() == pai);
+  CHECK(addr.FindAddr(_T("not a host name!"), 80, AI_NUMERICHOST, PF_INET, SOCK_STREAM, 0) ==
+        SOCKET_ERROR);
+  CHECK(addr.GetAddrInfo() == NULL);
+  ::WSACleanup();
+}
+
+static void TestRegExp() {
+  CAtlRegExp<> re;
+  CAtlREMatchContext<> mc;
+  CHECK(re.Parse(_T("{[0-9]+}-{[a-z]+}")) == REPARSE_ERROR_OK);
+  CHECK(re.GetGroupCount() == 2);
+  const TCHAR* pszIn = _T("id 42-abc!");
+  const TCHAR* pszEnd = NULL;
+  CHECK(re.Match(pszIn, &mc, &pszEnd));
+  CHECK(mc.m_uNumGroups == 2);
+  CHECK(mc.m_Match.szStart == pszIn + 3 && mc.m_Match.szEnd == pszIn + 9 && pszEnd == pszIn + 9);
+  const TCHAR *s, *e;
+  mc.GetMatch(0, &s, &e);
+  CHECK(s == pszIn + 3 && e == pszIn + 5);
+  mc.GetMatch(1, &s, &e);
+  CHECK(s == pszIn + 6 && e == pszIn + 9);
+
+  CHECK(re.Parse(_T("^ab*c$")) == REPARSE_ERROR_OK);
+  CHECK(re.Match(_T("abbbc"), &mc) && re.Match(_T("ac"), &mc) && !re.Match(_T("xabc"), &mc));
+  CHECK(re.Parse(_T("(cat|dog)s?")) == REPARSE_ERROR_OK);
+  CHECK(re.Match(_T("hotdogs"), &mc) && mc.m_Match.szEnd - mc.m_Match.szStart == 4);
+  CHECK(re.Parse(_T("HELLO"), FALSE) == REPARSE_ERROR_OK && re.Match(_T("say hello"), &mc));
+  CHECK(re.Parse(_T("{\\d+}\\.{\\d+}")) == REPARSE_ERROR_OK);
+  CHECK(re.Match(_T("v3.14"), &mc));
+  mc.GetMatch(1, &s, &e);
+  CHECK(e - s == 2 && s[0] == '1');
+  // Lazy and greedy.
+  CHECK(re.Parse(_T("<{.*?}>")) == REPARSE_ERROR_OK && re.Match(_T("<a><b>"), &mc));
+  mc.GetMatch(0, &s, &e);
+  CHECK(e - s == 1);
+  CHECK(re.Parse(_T("<{.*}>")) == REPARSE_ERROR_OK && re.Match(_T("<a><b>"), &mc));
+  mc.GetMatch(0, &s, &e);
+  CHECK(e - s == 4);
+  // Negation, classes, quoted strings.
+  CHECK(re.Parse(_T("a!b")) == REPARSE_ERROR_OK);
+  CHECK(!re.Match(_T("ab"), &mc) && re.Match(_T("ac"), &mc));
+  CHECK(re.Parse(_T("^[^0-9]+$")) == REPARSE_ERROR_OK && re.Match(_T("abc"), &mc) &&
+        !re.Match(_T("a1c"), &mc));
+  CHECK(re.Parse(_T("{\\q}")) == REPARSE_ERROR_OK && re.Match(_T("say \"hi there\" now"), &mc));
+  mc.GetMatch(0, &s, &e);
+  CHECK(e - s == 10);
+  CHECK(re.Parse(_T("(a*)*b")) == REPARSE_ERROR_OK && re.Match(_T("aaab"), &mc));
+  // Errors.
+  CHECK(re.Parse(_T("(ab")) == REPARSE_ERROR_PAREN_EXPECTED);
+  CHECK(re.Parse(_T("{ab")) == REPARSE_ERROR_BRACE_EXPECTED);
+  CHECK(re.Parse(_T("[ab")) == REPARSE_ERROR_BRACKET_EXPECTED);
+  CHECK(re.Parse(_T("*a")) == REPARSE_ERROR_EMPTY_REPEATOP);
+  CHECK(re.Parse(_T("[z-a]")) == REPARSE_ERROR_INVALID_RANGE);
+}
+
+static void TestUrl() {
+  CUrl url;
+  CHECK(url.CrackUrl(_T("http://user:pw@www.example.com:8080/dir/page.htm?q=1#top")));
+  CHECK(url.GetScheme() == ATL_URL_SCHEME_HTTP);
+  CHECK(lstrcmp(url.GetSchemeName(), _T("http")) == 0);
+  CHECK(lstrcmp(url.GetHostName(), _T("www.example.com")) == 0);
+  CHECK(url.GetPortNumber() == 8080);
+  CHECK(lstrcmp(url.GetUserName(), _T("user")) == 0 && lstrcmp(url.GetPassword(), _T("pw")) == 0);
+  CHECK(lstrcmp(url.GetUrlPath(), _T("/dir/page.htm")) == 0);
+  CHECK(lstrcmp(url.GetExtraInfo(), _T("?q=1#top")) == 0);
+  TCHAR sz[512];
+  DWORD dw = 512;
+  CHECK(url.CreateUrl(sz, &dw));
+  CHECK(lstrcmp(sz, _T("http://user:pw@www.example.com:8080/dir/page.htm?q=1#top")) == 0);
+  CHECK(dw == (DWORD)lstrlen(sz) && url.GetUrlLength() == dw);
+
+  CUrl https;
+  CHECK(https.CrackUrl(_T("https://example.com")));
+  CHECK(https.GetPortNumber() == ATL_URL_DEFAULT_HTTPS_PORT);
+  https.SetUrlPath(_T("/a b"));
+  dw = 512;
+  CHECK(https.CreateUrl(sz, &dw, ATL_URL_ESCAPE) && lstrcmp(sz, _T("https://example.com/a%20b")) == 0);
+  CHECK(!url.CrackUrl(_T("no scheme here")));
+
+  dw = 512;
+  CHECK(AtlEscapeUrl("a b<c>", (LPSTR)sz, &dw, 512) && strcmp((LPSTR)sz, "a%20b%3Cc%3E") == 0);
+  char szBack[64];
+  dw = 64;
+  CHECK(AtlUnescapeUrl("a%20b%3cc", szBack, &dw, 64) && strcmp(szBack, "a b<c") == 0 && dw == 5);
+  dw = 512;
+  CHECK(AtlCanonicalizeUrl(_T("HTTP://Example.COM/a/./b/../c"), sz, &dw));
+  CHECK(lstrcmp(sz, _T("http://example.com/a/c")) == 0);
+  dw = 512;
+  CHECK(AtlCombineUrl(_T("http://example.com/a/b/c.htm"), _T("../d.htm"), sz, &dw));
+  CHECK(lstrcmp(sz, _T("http://example.com/a/d.htm")) == 0);
+  dw = 512;
+  CHECK(AtlCombineUrl(_T("http://example.com/a/b/c.htm"), _T("/e"), sz, &dw) &&
+        lstrcmp(sz, _T("http://example.com/e")) == 0);
+  CHECK(AtlIsFullPath(_T("C:\\x")) && AtlIsFullPath(_T("\\\\srv\\share")) && !AtlIsFullPath(_T("x\\y")));
+  CHECK(AtlGetErrorDescription(HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)).GetLength() > 0);
+}
+
+// A worker thread client counting its event and timer.
+class CCountingClient : public IWorkerThreadClient {
+public:
+  LONG m_nEvent, m_nTimer, m_nClosed;
+  HANDLE m_hEvent, m_hDone;
+  CCountingClient() : m_nEvent(0), m_nTimer(0), m_nClosed(0) {
+    m_hEvent = ::CreateEvent(NULL, FALSE, FALSE, NULL);
+    m_hDone = ::CreateEvent(NULL, TRUE, FALSE, NULL);
+  }
+  ~CCountingClient() { ::CloseHandle(m_hDone); }
+  HRESULT Execute(DWORD_PTR dwParam, HANDLE) {
+    if (dwParam == 1) {
+      ::InterlockedIncrement(&m_nEvent);
+    } else if (::InterlockedIncrement(&m_nTimer) == 3) {
+      ::SetEvent(m_hDone);
+    }
+    return S_OK;
+  }
+  HRESULT CloseHandle(HANDLE h) {
+    ::InterlockedIncrement(&m_nClosed);
+    ::CloseHandle(h);
+    return S_OK;
+  }
+};
+
+// A thread pool worker adding up its requests.
+static LONG g_nPoolSum, g_nPoolWorkers, g_nPoolTerminated;
+static HANDLE g_hPoolDone;
+class CSumWorker {
+public:
+  typedef DWORD_PTR RequestType;
+  BOOL Initialize(void* pvParam) {
+    CHECK(pvParam == (void*)&g_nPoolSum);
+    ::InterlockedIncrement(&g_nPoolWorkers);
+    return TRUE;
+  }
+  void Execute(RequestType request, void*, OVERLAPPED*) {
+    if (::InterlockedExchangeAdd(&g_nPoolSum, (LONG)request) + (LONG)request == 5050)
+      ::SetEvent(g_hPoolDone);
+  }
+  void Terminate(void*) { ::InterlockedIncrement(&g_nPoolTerminated); }
+};
+
+static void TestThreads() {
+  CWorkerThread<> worker;
+  CHECK(SUCCEEDED(worker.Initialize()));
+  CCountingClient client;
+  CHECK(SUCCEEDED(worker.AddHandle(client.m_hEvent, &client, 1)));
+  HANDLE hTimer = NULL;
+  CHECK(SUCCEEDED(worker.AddTimer(20, &client, 2, &hTimer)) && hTimer != NULL);
+  ::SetEvent(client.m_hEvent);
+  CHECK(::WaitForSingleObject(client.m_hDone, 5000) == WAIT_OBJECT_0);
+  CHECK(client.m_nEvent == 1 && client.m_nTimer >= 3);
+  CHECK(SUCCEEDED(worker.RemoveHandle(hTimer)) && client.m_nClosed == 1);
+  CHECK(worker.GetThreadId() != 0 && worker.GetThreadHandle() != NULL);
+  CHECK(SUCCEEDED(worker.Shutdown()));
+  CHECK(client.m_nClosed == 2);  // the event too
+
+  g_hPoolDone = ::CreateEvent(NULL, TRUE, FALSE, NULL);
+  {
+    CThreadPool<CSumWorker> pool;
+    CHECK(SUCCEEDED(pool.Initialize(&g_nPoolSum, 3)));
+    CHECK(pool.GetNumThreads() == 3 && g_nPoolWorkers == 3);
+    for (DWORD_PTR i = 1; i <= 100; i++) CHECK(pool.QueueRequest(i));
+    CHECK(::WaitForSingleObject(g_hPoolDone, 5000) == WAIT_OBJECT_0);
+    CHECK(g_nPoolSum == 5050);
+    int nSize = 0;
+    CHECK(SUCCEEDED(pool.SetSize(1)) && SUCCEEDED(pool.GetSize(&nSize)) && nSize == 1);
+    CHECK(g_nPoolTerminated == 2);
+    pool.Shutdown();
+    CHECK(g_nPoolTerminated == 3);
+  }
+  ::CloseHandle(g_hPoolDone);
+  Log("threads: timer ticks %ld, pool sum %ld", client.m_nTimer, g_nPoolSum);
+}
+
 int main() {
   // Started by the service control manager: be the service.
   if (_tcsstr(::GetCommandLine(), TEXT("-AsService")) != NULL) return _AtlModule.WinMain(SW_HIDE);
@@ -1186,6 +1579,18 @@ int main() {
   Log("times: %d failure(s) so far", g_nFailures);
   TestImage();
   Log("images: %d failure(s) so far", g_nFailures);
+  TestComTime();
+  TestSync();
+  Log("COleDateTime, sync: %d failure(s) so far", g_nFailures);
+  TestEncodings();
+  TestCrypt();
+  Log("encodings, crypt: %d failure(s) so far", g_nFailures);
+  TestSocketAddr();
+  TestRegExp();
+  TestUrl();
+  Log("sockets, regexp, urls: %d failure(s) so far", g_nFailures);
+  TestThreads();
+  Log("worker threads, pool: %d failure(s) so far", g_nFailures);
   TestPath();
   Log("paths: %d failure(s) so far", g_nFailures);
   TestSecurity();
