@@ -7,7 +7,8 @@
 // made for the call, whose contents come back and are copied into the
 // caller's. Enumerators come back as copies of what they enumerate.
 // Clipboard formats a program registered go by name, since each program
-// numbers its own. Monikers and containers do not cross.
+// numbers its own. Monikers go by value too, as OleSaveToStream writes
+// them; containers do not cross.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -189,6 +190,70 @@ std::vector<BYTE> StreamBytes(IStream* s, ULARGE_INTEGER* at) {
   back.QuadPart = (LONGLONG)pos.QuadPart;
   s->Seek(back, STREAM_SEEK_SET, NULL);
   return v;
+}
+
+// Monikers go by value: what OleSaveToStream writes of them (their
+// class, then their data), or none.
+void PutMoniker(Writer& w, IMoniker* mk) {
+  IStream* s = NULL;
+  std::vector<BYTE> v;
+  if (mk && SUCCEEDED(CreateStreamOnHGlobal(NULL, TRUE, &s))) {
+    if (SUCCEEDED(OleSaveToStream(mk, s))) v = StreamBytes(s, NULL);
+    s->Release();
+  }
+  w.U32(v.empty() ? 0 : 1);
+  if (!v.empty()) w.Bytes(v.data(), (uint32_t)v.size());
+}
+
+HRESULT TakeMoniker(Reader& r, IMoniker** out) {
+  *out = NULL;
+  if (r.U32() == 0) return r.bad ? kBadReply : S_OK;
+  std::vector<BYTE> v = r.Bytes();
+  if (r.bad) return kBadReply;
+  IStream* s = NULL;
+  HRESULT hr = CreateStreamOnHGlobal(NewGlobal(v), TRUE, &s);
+  if (FAILED(hr)) return hr;
+  hr = OleLoadFromStream(s, IID_IMoniker, (void**)out);
+  s->Release();
+  return hr;
+}
+
+// An advise enumerator goes as a copy of its connections; their sinks
+// go as interfaces (usually home, to the program that made them).
+void PutStatData(Writer& w, IEnumSTATDATA* e, DWORD to) {
+  std::vector<STATDATA> items;
+  STATDATA sd;
+  while (e && items.size() < 4096 && e->Next(1, &sd, NULL) == S_OK) items.push_back(sd);
+  w.U32((uint32_t)items.size());
+  for (STATDATA& d : items) {
+    PutFormatEtc(w, &d.formatetc);
+    w.U32(d.advf);
+    PutInterface(w, d.pAdvSink, IID_IAdviseSink, to);
+    w.U32(d.dwConnection);
+    FreeFormatEtc(&d.formatetc);
+    SafeRelease(d.pAdvSink);
+  }
+}
+
+HRESULT GetStatData(Reader& r, IEnumSTATDATA** out) {
+  uint32_t n = r.U32();
+  if (n > 4096) return kBadReply;
+  std::vector<STATDATA> items;
+  HRESULT hr = S_OK;
+  for (uint32_t i = 0; i < n && !r.bad; i++) {
+    STATDATA d = {};
+    GetFormatEtc(r, &d.formatetc);
+    FreeFormatEtc(&d.formatetc);  // the copy keeps no target device
+    d.advf = r.U32();
+    hr = GetInterface(r, (void**)&d.pAdvSink);
+    d.dwConnection = r.U32();
+    if (FAILED(hr)) break;
+    items.push_back(d);
+  }
+  if (r.bad && SUCCEEDED(hr)) hr = kBadReply;
+  if (SUCCEEDED(hr)) *out = new winport::ole::StatDataEnum(items);  // holds its own references
+  for (STATDATA& d : items) SafeRelease(d.pAdvSink);
+  return hr;
 }
 
 // A medium by value; false for one that cannot go (a GDI bitmap).
@@ -384,7 +449,11 @@ struct AdviseSinkProxy : ProxyBase, IAdviseSink {
     w.U32((uint32_t)lindex);
     pm->Invoke(IID_IAdviseSink, 4, w, NULL);
   }
-  STDMETHOD_(void, OnRename)(IMoniker*) override { pm->Invoke(IID_IAdviseSink, 5, Writer(), NULL); }
+  STDMETHOD_(void, OnRename)(IMoniker* mk) override {
+    Writer w;
+    PutMoniker(w, mk);
+    pm->Invoke(IID_IAdviseSink, 5, w, NULL);
+  }
   STDMETHOD_(void, OnSave)() override { pm->Invoke(IID_IAdviseSink, 6, Writer(), NULL); }
   STDMETHOD_(void, OnClose)() override { pm->Invoke(IID_IAdviseSink, 7, Writer(), NULL); }
 };
@@ -409,9 +478,13 @@ HRESULT AdviseSinkStub(StubCall& c) {
       s->OnViewChange(aspect, lindex);
       return S_OK;
     }
-    case 5:
-      s->OnRename(NULL);
+    case 5: {
+      IMoniker* mk = NULL;
+      TakeMoniker(r, &mk);
+      s->OnRename(mk);
+      SafeRelease(mk);
       return S_OK;
+    }
     case 6:
       s->OnSave();
       return S_OK;
@@ -429,9 +502,18 @@ struct ClientSiteProxy : ProxyBase, IOleClientSite {
   explicit ClientSiteProxy(ProxyManager* p) : ProxyBase(p) {}
   PROXY_UNKNOWN
   STDMETHOD(SaveObject)() override { return pm->Invoke(IID_IOleClientSite, 3, Writer(), NULL); }
-  STDMETHOD(GetMoniker)(DWORD, DWORD, IMoniker** out) override {
-    if (out) *out = NULL;
-    return E_NOTIMPL;  // monikers do not cross
+  STDMETHOD(GetMoniker)(DWORD assign, DWORD which, IMoniker** out) override {
+    if (out == NULL) return E_POINTER;
+    *out = NULL;
+    Writer w;
+    w.U32(assign);
+    w.U32(which);
+    std::vector<BYTE> reply;
+    HRESULT hr = pm->Invoke(IID_IOleClientSite, 4, w, &reply);
+    if (FAILED(hr)) return hr;
+    Reader r(reply);
+    HRESULT hr2 = TakeMoniker(r, out);
+    return FAILED(hr2) ? hr2 : hr;
   }
   STDMETHOD(GetContainer)(IOleContainer** out) override {
     if (out) *out = NULL;
@@ -451,6 +533,15 @@ HRESULT ClientSiteStub(StubCall& c) {
   switch (c.method) {
     case 3:
       return s->SaveObject();
+    case 4: {
+      DWORD assign = c.in->U32();
+      DWORD which = c.in->U32();
+      IMoniker* mk = NULL;
+      HRESULT hr = s->GetMoniker(assign, which, &mk);
+      PutMoniker(*c.out, SUCCEEDED(hr) ? mk : NULL);
+      SafeRelease(mk);
+      return hr;
+    }
     case 6:
       return s->ShowObject();
     case 7:
@@ -647,8 +738,13 @@ struct DataObjectProxy : ProxyBase, IDataObject {
     return pm->Invoke(IID_IDataObject, 10, w, NULL);
   }
   STDMETHOD(EnumDAdvise)(IEnumSTATDATA** out) override {
-    if (out) *out = NULL;
-    return OLE_E_ADVISENOTSUPPORTED;
+    if (out == NULL) return E_POINTER;
+    *out = NULL;
+    std::vector<BYTE> reply;
+    HRESULT hr = pm->Invoke(IID_IDataObject, 11, Writer(), &reply);
+    if (hr != S_OK) return hr;
+    Reader r(reply);
+    return GetStatData(r, out);
   }
 };
 
@@ -740,6 +836,13 @@ HRESULT DataObjectStub(StubCall& c) {
     case 10:
       hr = d->DUnadvise(r.U32());
       break;
+    case 11: {
+      IEnumSTATDATA* e = NULL;
+      hr = d->EnumDAdvise(&e);
+      PutStatData(w, hr == S_OK ? e : NULL, c.peer);
+      SafeRelease(e);
+      break;
+    }
   }
   if (haveFe) FreeFormatEtc(&fe);
   return hr;
@@ -780,10 +883,24 @@ struct OleObjectProxy : ProxyBase, IOleObject {
     w.U32(save);
     return Call(6, w);
   }
-  STDMETHOD(SetMoniker)(DWORD, IMoniker*) override { return E_NOTIMPL; }  // monikers do not cross
-  STDMETHOD(GetMoniker)(DWORD, DWORD, IMoniker** out) override {
-    if (out) *out = NULL;
-    return E_NOTIMPL;
+  STDMETHOD(SetMoniker)(DWORD which, IMoniker* mk) override {
+    Writer w;
+    w.U32(which);
+    PutMoniker(w, mk);
+    return Call(7, w);
+  }
+  STDMETHOD(GetMoniker)(DWORD assign, DWORD which, IMoniker** out) override {
+    if (out == NULL) return E_POINTER;
+    *out = NULL;
+    Writer w;
+    w.U32(assign);
+    w.U32(which);
+    std::vector<BYTE> reply;
+    HRESULT hr = Call(8, w, &reply);
+    if (FAILED(hr)) return hr;
+    Reader r(reply);
+    HRESULT hr2 = TakeMoniker(r, out);
+    return FAILED(hr2) ? hr2 : hr;
   }
   STDMETHOD(InitFromData)(IDataObject* data, BOOL creation, DWORD reserved) override {
     Writer w;
@@ -895,8 +1012,13 @@ struct OleObjectProxy : ProxyBase, IOleObject {
     return Call(20, w);
   }
   STDMETHOD(EnumAdvise)(IEnumSTATDATA** out) override {
-    if (out) *out = NULL;
-    return E_NOTIMPL;
+    if (out == NULL) return E_POINTER;
+    *out = NULL;
+    std::vector<BYTE> reply;
+    HRESULT hr = Call(21, Writer(), &reply);
+    if (hr != S_OK) return hr;
+    Reader r(reply);
+    return GetStatData(r, out);
   }
   STDMETHOD(GetMiscStatus)(DWORD aspect, DWORD* status) override {
     if (status == NULL) return E_POINTER;
@@ -945,6 +1067,23 @@ HRESULT OleObjectStub(StubCall& c) {
     }
     case 6:
       return o->Close(r.U32());
+    case 7: {
+      DWORD which = r.U32();
+      IMoniker* mk = NULL;
+      HRESULT hr = TakeMoniker(r, &mk);
+      if (SUCCEEDED(hr)) hr = o->SetMoniker(which, mk);
+      SafeRelease(mk);
+      return hr;
+    }
+    case 8: {
+      DWORD assign = r.U32();
+      DWORD which = r.U32();
+      IMoniker* mk = NULL;
+      HRESULT hr = o->GetMoniker(assign, which, &mk);
+      PutMoniker(w, SUCCEEDED(hr) ? mk : NULL);
+      SafeRelease(mk);
+      return hr;
+    }
     case 9: {
       IDataObject* data = NULL;
       HRESULT hr = GetInterface(r, (void**)&data);
@@ -1035,6 +1174,13 @@ HRESULT OleObjectStub(StubCall& c) {
     }
     case 20:
       return o->Unadvise(r.U32());
+    case 21: {
+      IEnumSTATDATA* e = NULL;
+      HRESULT hr = o->EnumAdvise(&e);
+      PutStatData(w, hr == S_OK ? e : NULL, c.peer);
+      SafeRelease(e);
+      return hr;
+    }
     case 22: {
       DWORD status = 0;
       HRESULT hr = o->GetMiscStatus(r.U32(), &status);

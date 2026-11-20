@@ -138,8 +138,10 @@ registry (kept in `~/.config/winport/registry.reg`), resources, sockets
 (with `WSAAsyncSelect`), ODBC through the system's driver manager
 (unixODBC or iODBC, loaded when first used; `WINPORT_ODBC` names its
 library when it is elsewhere),
-WinInet's HTTP, HTTPS, FTP and gopher, and COM within one process,
-in-process servers in a shared library included, work, and so does the window manager: window
+WinInet's HTTP, HTTPS, FTP and gopher, and COM, both within a process
+(in-process servers in a shared library included) and between
+processes (local servers COM starts, with IDispatch, OLE documents'
+interfaces, type information and monikers crossing), work, and so does the window manager: window
 classes and windows, messages and the message loop, timers, hooks,
 focus, painting, and drawing in software with device contexts, bitmaps,
 DIBs, regions, fills and blits, lines, curves, shapes and paths, and
@@ -395,7 +397,8 @@ try.
   conversion, by-reference arguments, errors, exceptions, the default
   member, derived classes), interface maps, aggregation, a
   COleObjectFactory in the same process and its registry entries, and
-  the program started again by COM as a local server, on the console.
+  the program started again by COM as a local server (with type
+  information from it, natively), on the console.
 * `conntest`: connection points and type libraries, on the console: a
   connection map through IConnectionPointContainer and
   IConnectionPoint (enumeration, limits, cookies), AfxConnectionAdvise
@@ -568,7 +571,9 @@ try.
   starts again as the server: registration, an embedded object made,
   shown, changed, updated and closed through COleServerDoc and
   COleServerItem, the server's embedded menu and data, the object
-  loaded again by a second server process, and its clipboard copy.
+  loaded again by a second server process, and its clipboard copy;
+  natively also a server's object held directly, its advise
+  connections enumerated and its moniker asked for across processes.
 * `linktest`: links to a server's files and their items, bound as a
   container's link binds them: to an open document through the running
   object table, and to a closed file whose class the shell registration
