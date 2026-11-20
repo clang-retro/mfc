@@ -308,6 +308,7 @@ static void TestTimers() {
   LONG ticks = g_ticks;
   LONG most = (LONG)((timeGetTime() - start) / 10) + 5;
   CHECK(ticks >= 5 && ticks <= most);
+  if (ticks < 5 || ticks > most) printf("  %ld ticks in %lu ms\n", (long)ticks, (unsigned long)(timeGetTime() - start));
   Sleep(50);
   CHECK(g_ticks == ticks);  // none after the kill
   CHECK(timeKillEvent(id) != TIMERR_NOERROR);
