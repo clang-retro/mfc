@@ -474,9 +474,12 @@ static void TestWave() {
   CHECK(waveOutClose(out) == MMSYSERR_INVALHANDLE);
 
   // A recording stopped early hands back what it has.
+  // Each buffer takes half of rec, 0.4 s, so that a machine slow to wake
+  // its threads still sees the first part-filled.
+  const DWORD half = sizeof rec / 2;
   if (waveInGetNumDevs() > 0 && waveInOpen(&in, WAVE_MAPPER, &pcm, 0, 0, CALLBACK_NULL) == MMSYSERR_NOERROR) {
     for (int i = 0; i < 2; i++) {
-      Header(&inHdr[i], rec[i], sizeof rec[i]);
+      Header(&inHdr[i], (BYTE*)rec + i * half, half);
       waveInPrepareHeader(in, &inHdr[i], sizeof(WAVEHDR));
       waveInAddBuffer(in, &inHdr[i], sizeof(WAVEHDR));
     }
@@ -488,10 +491,10 @@ static void TestWave() {
       Sleep(10);
       waveInGetPosition(in, &at, sizeof at);
     }
-    CHECK(at.u.cb > 0 && at.u.cb < sizeof rec[0]);
+    CHECK(at.u.cb > 0 && at.u.cb < half);
     CHECK(waveInStop(in) == MMSYSERR_NOERROR);
     CHECK(inHdr[0].dwFlags & WHDR_DONE);
-    CHECK(inHdr[0].dwBytesRecorded > 0 && inHdr[0].dwBytesRecorded < sizeof rec[0]);
+    CHECK(inHdr[0].dwBytesRecorded > 0 && inHdr[0].dwBytesRecorded < half);
     CHECK(waveInClose(in) == WAVERR_STILLPLAYING);
     CHECK(waveInReset(in) == MMSYSERR_NOERROR);
     CHECK(inHdr[1].dwFlags & WHDR_DONE);
