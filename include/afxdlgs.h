@@ -9,6 +9,24 @@
 #include <commdlg.h>
 #include <prsht.h>
 #include <richedit.h>
+// The Vista file dialog's interfaces. The SDK declares them only for
+// NTDDI_VERSION >= Vista; CFileDialog needs just their names and the
+// customization state type, which it declares itself when they are out.
+#ifndef _WINPORT
+#include <shobjidl.h>
+#endif
+struct IFileDialog;
+struct IFileOpenDialog;
+struct IFileSaveDialog;
+struct IFileDialogCustomize;
+#if defined(_WINPORT) || !defined(__IFileDialogCustomize_INTERFACE_DEFINED__)
+typedef enum CDCONTROLSTATEF {
+  CDCS_INACTIVE = 0x0,
+  CDCS_ENABLED = 0x1,
+  CDCS_VISIBLE = 0x2,
+  CDCS_ENABLEDVISIBLE = 0x3
+} CDCONTROLSTATEF;
+#endif
 
 class CCommonDialog : public CDialog {
   DECLARE_DYNAMIC(CCommonDialog)
@@ -56,11 +74,82 @@ public:
   virtual void OnFolderChange();
   virtual void OnTypeChange();
 
+  // The Vista-style dialog (IFileDialog). With bVistaStyle, DoModal shows
+  // it when Windows has it and no hook or template is set; otherwise the
+  // classic dialog. The Get* functions return an AddRef'd pointer, NULL
+  // when the dialog is the classic one.
+  IFileOpenDialog* GetIFileOpenDialog();
+  IFileSaveDialog* GetIFileSaveDialog();
+  IFileDialogCustomize* GetIFileDialogCustomize();
+
+  HRESULT AddCheckButton(DWORD dwIDCtl, const CString& strLabel, BOOL bChecked);
+  HRESULT AddComboBox(DWORD dwIDCtl);
+  HRESULT AddControlItem(DWORD dwIDCtl, DWORD dwIDItem, const CString& strLabel);
+  HRESULT AddEditBox(DWORD dwIDCtl, const CString& strText);
+  HRESULT AddMenu(DWORD dwIDCtl, const CString& strLabel);
+  HRESULT AddPushButton(DWORD dwIDCtl, const CString& strLabel);
+  HRESULT AddRadioButtonList(DWORD dwIDCtl);
+  HRESULT AddSeparator(DWORD dwIDCtl);
+  HRESULT AddText(DWORD dwIDCtl, const CString& strText);
+  HRESULT EnableOpenDropDown(DWORD dwIDCtl);
+  HRESULT EndVisualGroup();
+  HRESULT GetCheckButtonState(DWORD dwIDCtl, BOOL& bChecked);
+  HRESULT GetControlItemState(DWORD dwIDCtl, DWORD dwIDItem, CDCONTROLSTATEF& dwState);
+  HRESULT GetControlState(DWORD dwIDCtl, CDCONTROLSTATEF& dwState);
+  HRESULT GetEditBoxText(DWORD dwIDCtl, CString& strText);
+  HRESULT GetSelectedControlItem(DWORD dwIDCtl, DWORD& dwIDItem);
+  HRESULT MakeProminent(DWORD dwIDCtl);
+  HRESULT RemoveControlItem(DWORD dwIDCtl, DWORD dwIDItem);
+  HRESULT SetCheckButtonState(DWORD dwIDCtl, BOOL bChecked);
+  HRESULT SetControlItemState(DWORD dwIDCtl, DWORD dwIDItem, CDCONTROLSTATEF dwState);
+  HRESULT SetControlItemText(DWORD dwIDCtl, DWORD dwIDItem, const CString& strLabel);
+  HRESULT SetControlLabel(DWORD dwIDCtl, const CString& strLabel);
+  HRESULT SetControlState(DWORD dwIDCtl, CDCONTROLSTATEF dwState);
+  HRESULT SetEditBoxText(DWORD dwIDCtl, const CString& strText);
+  HRESULT SetSelectedControlItem(DWORD dwIDCtl, DWORD dwIDItem);
+  HRESULT StartVisualGroup(DWORD dwIDCtl, const CString& strLabel);
+
+  // The Vista dialog's control events.
+  virtual void OnButtonClicked(DWORD dwIDCtl);
+  virtual void OnCheckButtonToggled(DWORD dwIDCtl, BOOL bChecked);
+  virtual void OnControlActivating(DWORD dwIDCtl);
+  virtual void OnItemSelected(DWORD dwIDCtl, DWORD dwIDItem);
+
   BOOL m_bOpenFileDialog;
   CString m_strFilter;
   TCHAR m_szFileTitle[64];
   TCHAR m_szFileName[MAX_PATH];
   CString m_strDefExt;
+
+protected:
+  // Copies m_ofn into the Vista dialog before it shows, and its answer
+  // back into m_ofn.
+  virtual void ApplyOFNToShellDialog();
+  virtual void UpdateOFNFromShellDialog();
+
+  BOOL m_bVistaStyle;
+  BOOL m_bPickFoldersMode;
+  BOOL m_bPickNonFileSysFoldersMode;
+  IFileDialog* m_pIFileDialog;  // created on first use
+  BOOL m_bCoInit;               // this dialog initialized COM
+  CString m_strVistaResult;     // the path list the dialog gave back
+
+  IFileDialog* _AfxEnsureShellDialog();
+  BOOL _AfxUseShellDialog();
+  INT_PTR _AfxDoModalShell();
+  friend class _AfxFileDialogEvents;
+};
+
+// The Vista folder chooser: a CFileDialog with FOS_PICKFOLDERS. Where
+// Windows has no IFileDialog it falls back to SHBrowseForFolder.
+class CFolderPickerDialog : public CFileDialog {
+  DECLARE_DYNAMIC(CFolderPickerDialog)
+public:
+  explicit CFolderPickerDialog(LPCTSTR lpszFolder = NULL, DWORD dwFlags = 0,
+                               CWnd* pParentWnd = NULL, DWORD dwSize = 0,
+                               BOOL fNonFileSystemFolders = FALSE);
+  virtual ~CFolderPickerDialog();
+  virtual INT_PTR DoModal();
 };
 
 // ---------------------------------------------------------------------

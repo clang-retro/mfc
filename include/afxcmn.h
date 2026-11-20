@@ -1112,6 +1112,64 @@ public:
 };
 
 // ---------------------------------------------------------------------
+// CNetAddressCtrl: the Vista network address edit control (shell32's
+// msctls_netaddress). Create fails where the control does not exist.
+
+#ifndef NCM_GETADDRESS
+#define WC_NETADDRESS L"msctls_netaddress"
+#define NCM_GETADDRESS (WM_USER + 1)
+#define NCM_SETALLOWTYPE (WM_USER + 2)
+#define NCM_GETALLOWTYPE (WM_USER + 3)
+#define NCM_DISPLAYERRORTIP (WM_USER + 4)
+typedef struct tagNC_ADDRESS {
+  struct NET_ADDRESS_INFO_* pAddrInfo;
+  USHORT PortNumber;
+  BYTE PrefixLength;
+} NC_ADDRESS, *PNC_ADDRESS;
+#endif
+#ifndef NET_STRING_IPV4_ADDRESS
+#define NET_STRING_IPV4_ADDRESS 0x00000001
+#define NET_STRING_IPV4_SERVICE 0x00000002
+#define NET_STRING_IPV4_NETWORK 0x00000004
+#define NET_STRING_IPV6_ADDRESS 0x00000008
+#define NET_STRING_IPV6_ADDRESS_NO_SCOPE 0x00000010
+#define NET_STRING_IPV6_SERVICE 0x00000020
+#define NET_STRING_IPV6_SERVICE_NO_SCOPE 0x00000040
+#define NET_STRING_IPV6_NETWORK 0x00000080
+#define NET_STRING_NAMED_ADDRESS 0x00000100
+#define NET_STRING_NAMED_SERVICE 0x00000200
+#define NET_STRING_IP_ADDRESS (NET_STRING_IPV4_ADDRESS | NET_STRING_IPV6_ADDRESS)
+#define NET_STRING_IP_ADDRESS_NO_SCOPE (NET_STRING_IPV4_ADDRESS | NET_STRING_IPV6_ADDRESS_NO_SCOPE)
+#define NET_STRING_IP_SERVICE (NET_STRING_IPV4_SERVICE | NET_STRING_IPV6_SERVICE)
+#define NET_STRING_IP_SERVICE_NO_SCOPE (NET_STRING_IPV4_SERVICE | NET_STRING_IPV6_SERVICE_NO_SCOPE)
+#define NET_STRING_IP_NETWORK (NET_STRING_IPV4_NETWORK | NET_STRING_IPV6_NETWORK)
+#define NET_STRING_ANY_ADDRESS \
+  (NET_STRING_NAMED_ADDRESS | NET_STRING_IP_ADDRESS)
+#define NET_STRING_ANY_ADDRESS_NO_SCOPE \
+  (NET_STRING_NAMED_ADDRESS | NET_STRING_IP_ADDRESS_NO_SCOPE)
+#define NET_STRING_ANY_SERVICE (NET_STRING_NAMED_SERVICE | NET_STRING_IP_SERVICE)
+#define NET_STRING_ANY_SERVICE_NO_SCOPE (NET_STRING_NAMED_SERVICE | NET_STRING_IP_SERVICE_NO_SCOPE)
+#endif
+
+class CNetAddressCtrl : public CEdit {
+  DECLARE_DYNAMIC(CNetAddressCtrl)
+public:
+  CNetAddressCtrl() {}
+  virtual ~CNetAddressCtrl() {}
+  virtual BOOL Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID);
+  virtual BOOL CreateEx(DWORD dwExStyle, DWORD dwStyle, const RECT& rect, CWnd* pParentWnd,
+                        UINT nID);
+  HRESULT DisplayErrorTip() { return (HRESULT)::SendMessage(m_hWnd, NCM_DISPLAYERRORTIP, 0, 0); }
+  HRESULT GetAddress(PNC_ADDRESS pAddress) const {
+    return (HRESULT)::SendMessage(m_hWnd, NCM_GETADDRESS, 0, (LPARAM)pAddress);
+  }
+  DWORD GetAllowType() const { return (DWORD)::SendMessage(m_hWnd, NCM_GETALLOWTYPE, 0, 0); }
+  HRESULT SetAllowType(DWORD dwAddrMask) {
+    return (HRESULT)::SendMessage(m_hWnd, NCM_SETALLOWTYPE, (WPARAM)dwAddrMask, 0);
+  }
+};
+
+// ---------------------------------------------------------------------
 // CLinkCtrl: the SysLink control (comctl32 6, so a program needs a
 // manifest that asks for it): text with <a> links.
 

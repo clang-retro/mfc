@@ -37,8 +37,12 @@ IMPLEMENT_DYNAMIC(CFileDialog, CCommonDialog)
 CFileDialog::CFileDialog(BOOL bOpenFileDialog, LPCTSTR lpszDefExt, LPCTSTR lpszFileName,
                          DWORD dwFlags, LPCTSTR lpszFilter, CWnd* pParentWnd, DWORD dwSize,
                          BOOL bVistaStyle)
-    : CCommonDialog(pParentWnd) {
-  (void)bVistaStyle;
+    : CCommonDialog(pParentWnd),
+      m_bVistaStyle(bVistaStyle),
+      m_bPickFoldersMode(FALSE),
+      m_bPickNonFileSysFoldersMode(FALSE),
+      m_pIFileDialog(NULL),
+      m_bCoInit(FALSE) {
   memset(&m_ofn, 0, sizeof(m_ofn));
   // The Windows 95 / NT 4 size works everywhere.
   m_ofn.lStructSize = dwSize != 0 ? dwSize : OPENFILENAME_SIZE_VERSION_400;
@@ -70,9 +74,8 @@ CFileDialog::CFileDialog(BOOL bOpenFileDialog, LPCTSTR lpszDefExt, LPCTSTR lpszF
   }
 }
 
-CFileDialog::~CFileDialog() {}
-
 INT_PTR CFileDialog::DoModal() {
+  if (_AfxUseShellDialog()) return _AfxDoModalShell();
   m_ofn.hInstance = AfxGetResourceHandle();
   return _AfxRunCommonDialog(m_pParentWnd, &m_ofn.hwndOwner, [this]() {
     return m_bOpenFileDialog ? ::GetOpenFileName(&m_ofn) : ::GetSaveFileName(&m_ofn);
@@ -110,6 +113,7 @@ CString CFileDialog::GetFileTitle() const {
 
 CString CFileDialog::GetFolderPath() const {
   CString strPath = GetPathName();
+  if (m_bPickFoldersMode) return strPath;  // the chosen folder itself
   int i = strPath.ReverseFind(_T('\\'));
   int j = strPath.ReverseFind(_T('/'));
   if (j > i) i = j;

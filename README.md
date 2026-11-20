@@ -417,6 +417,15 @@ try.
   fields; CFontDialog starting from a LOGFONT; and the modeless
   CFindReplaceDialog telling its owner about Find Next, Replace, Replace
   All and its closing.
+* `vistatest`: the Vista pieces: a CSplitButton dropping down its menu
+  (a resource menu, then the program's own) with the chosen command
+  reaching the parent, the split style, size and glyph; a command link's
+  note, the ideal size, text margin and image list; CNetAddressCtrl
+  where shell32 has it; and the Vista-style CFileDialog driven by a
+  timer: opening a file with a check box and edit box added (the first
+  OK turned down), two files at once, saving with the default
+  extension, cancelling, and CFolderPickerDialog. On XP the test checks
+  the classic fallback instead.
 * `oletest`: an OLE container: objects of a class the test registers
   itself, embedded in a COleDocument, drawn by its view, opened and
   changed through their verbs and the verb menu, saved to flat and
@@ -721,6 +730,9 @@ request with the stock MinGW-w64 toolchain.
   CPropertySheet/CPropertyPage, wizards included; Wizard97's watermark,
   header bitmap and header titles, through CPropertySheetEx and
   CPropertyPageEx or MFC 7's constructors on the base classes.
+  CFileDialog in the Vista style (IFileOpenDialog / IFileSaveDialog,
+  with its events going to the same virtuals and the IFileDialogCustomize
+  calls as members), and CFolderPickerDialog.
 * `afxdialogex.h`: CDialogEx, with a background color or bitmap.
   `afxtaskdialog.h` (from `afxwin.h`): CTaskDialog over comctl32 6's
   TaskDialogIndirect, found when it runs, so the program still starts
@@ -728,7 +740,10 @@ request with the stock MinGW-w64 toolchain.
   DoModal shows the text in a message box with the common buttons.
 * `afxcmn.h`, `afxcview.h`: the common controls (CReBarCtrl,
   CLinkCtrl, CPagerCtrl and CDragListBox among them), CImageList,
-  CListView, CTreeView. `afxmt.h`: synchronization objects.
+  CListView, CTreeView. CButton has the comctl32 6 and Vista messages
+  (command link notes, split button parts, the shield), CSplitButton
+  drops down a menu, and CNetAddressCtrl wraps shell32's network address
+  control. `afxmt.h`: synchronization objects.
 * `afxinet.h`: the internet classes over WinINet: CInternetSession
   (OpenURL, options, cookies, the status callback), CHttpConnection and
   CHttpFile, CFtpConnection, CFtpFileFind, CGopherConnection,
@@ -1043,6 +1058,11 @@ ATLVERIFY, ATLENSURE and ATLTRY, the trace categories (CTraceCategory,
   for any other image.
 * CTaskDialog on a system without the task dialog shows a message box
   rather than asserting.
+* CFileDialog asks for the Vista dialog when it runs: where Windows has
+  none (XP), or a hook or template is set, it shows the classic one, and
+  the customization members return E_NOTIMPL. CFolderPickerDialog falls
+  back to SHBrowseForFolder there. The portable layer always shows the
+  classic dialog.
 
 ## Plans
 

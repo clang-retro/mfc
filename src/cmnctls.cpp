@@ -889,3 +889,25 @@ CImageList* CComboBoxEx::SetImageList(CImageList* pImageList) {
 CImageList* CComboBoxEx::GetImageList() const {
   return CImageList::FromHandle((HIMAGELIST)::SendMessage(m_hWnd, CBEM_GETIMAGELIST, 0, 0));
 }
+
+// ---------------------------------------------------------------------
+// CNetAddressCtrl
+
+IMPLEMENT_DYNAMIC(CNetAddressCtrl, CEdit)
+
+BOOL CNetAddressCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID) {
+  return CreateEx(0, dwStyle, rect, pParentWnd, nID);
+}
+
+BOOL CNetAddressCtrl::CreateEx(DWORD dwExStyle, DWORD dwStyle, const RECT& rect,
+                               CWnd* pParentWnd, UINT nID) {
+  // shell32 registers the class on Vista and later; find it at run time so
+  // the program still loads on older Windows.
+  typedef BOOL(WINAPI * PFNINIT)(void);
+  HMODULE hShell = ::GetModuleHandle(_T("shell32.dll"));
+  if (hShell == NULL) hShell = ::LoadLibrary(_T("shell32.dll"));
+  PFNINIT pfnInit =
+      hShell != NULL ? (PFNINIT)(void*)::GetProcAddress(hShell, "InitNetworkAddressControl") : NULL;
+  if (pfnInit == NULL || !pfnInit()) return FALSE;
+  return CWnd::CreateEx(dwExStyle, _T("msctls_netaddress"), NULL, dwStyle, rect, pParentWnd, nID);
+}
