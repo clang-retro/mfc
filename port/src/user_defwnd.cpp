@@ -393,8 +393,12 @@ RECT SysMenuRect(Window* w) { return Layout(w).sysmenu; }
 
 void DrawFrame(Window* w) {
   if (!ReallyVisible(w)) return;
-  HWND h = w->hwnd;
-  HDC dc = GetWindowDC(h);
+  HDC dc = GetWindowDC(w->hwnd);
+  DrawFrameTo(w, dc);
+  ReleaseDC(w->hwnd, dc);
+}
+
+void DrawFrameTo(Window* w, HDC dc) {
   Frame f = Layout(w);
   RECT r = f.window;
   bool active = IsActive(w);
@@ -447,7 +451,6 @@ void DrawFrame(Window* w) {
   DrawScrollBar(w, dc, f.vscroll, true);
   DrawScrollBar(w, dc, f.hscroll, false);
   if (!RectEmpty(f.grip)) Fill(dc, f.grip.left, f.grip.top, f.grip.right, f.grip.bottom, COLOR_BTNFACE);
-  ReleaseDC(h, dc);
 }
 
 }  // namespace winport
@@ -577,8 +580,11 @@ static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
       RECT r;
       GetClientRect(h, &r);
       HDC dc = (HDC)wp;
-      // In the DC's logical units.
-      DPtoLP(dc, (LPPOINT)&r, 2);
+      // The window's own DC has the client area at its device origin: the
+      // area in the DC's logical units. Another DC (a memory DC in
+      // WM_PRINT, say) has it at the logical origin, as WM_PRINTCLIENT
+      // draws.
+      if (WindowFromDC(dc) == h) DPtoLP(dc, (LPPOINT)&r, 2);
       FillRect(dc, &r, br);
       return 1;
     }
@@ -836,11 +842,38 @@ static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
     }
     case WM_QUERYDRAGICON:
       return (LRESULT)(w->cls ? w->cls->wc.hIcon : NULL);
-    case WM_PRINT:
+    case WM_PRINT: {
+      // Into the DC at its origin: the frame, then the client area (offset
+      // by the frame, when it is drawn too), then the children, each in
+      // its place, bottom first.
       if ((lp & PRF_CHECKVISIBLE) && !IsWindowVisible(h)) return 0;
+      HDC dc = (HDC)wp;
+      POINT org = {0, 0};
+      if (lp & PRF_NONCLIENT) {
+        DrawFrameTo(w, dc);
+        org.x = w->client.left;
+        org.y = w->client.top;
+      }
+      POINT old;
+      OffsetViewportOrgEx(dc, org.x, org.y, &old);
       if (lp & PRF_ERASEBKGND) SendTo(w, WM_ERASEBKGND, wp, 0, unicode);
       if (lp & PRF_CLIENT) SendTo(w, WM_PRINTCLIENT, wp, lp, unicode);
+      if (lp & PRF_CHILDREN) {
+        for (HWND c = GetWindow(h, GW_CHILD) ? GetWindow(GetWindow(h, GW_CHILD), GW_HWNDLAST) : NULL; c;
+             c = GetWindow(c, GW_HWNDPREV)) {
+          if (!IsWindowVisible(c)) continue;
+          RECT cr;
+          GetWindowRect(c, &cr);
+          MapWindowPoints(HWND_DESKTOP, h, (POINT*)&cr, 2);
+          POINT inner;
+          OffsetViewportOrgEx(dc, cr.left, cr.top, &inner);
+          SendMessageW(c, WM_PRINT, wp, (lp & ~PRF_CHECKVISIBLE) | PRF_NONCLIENT);
+          SetViewportOrgEx(dc, inner.x, inner.y, NULL);
+        }
+      }
+      SetViewportOrgEx(dc, old.x, old.y, NULL);
       return 0;
+    }
   }
   return 0;
 }
@@ -1264,6 +1297,56 @@ BOOL WINAPI EnableScrollBar(HWND h, UINT bar, UINT arrows) {
   if (bar == SB_HORZ || bar == SB_BOTH) w->hscroll.enabled = on;
   if (bar == SB_VERT || bar == SB_BOTH) w->vscroll.enabled = on;
   RedrawBars(w);
+  return TRUE;
+}
+
+BOOL WINAPI GetScrollBarInfo(HWND h, LONG object, PSCROLLBARINFO sbi) {
+  if (!sbi || sbi->cbSize != sizeof(SCROLLBARINFO)) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  Window* w = GetWindowOrFail(h);
+  if (!w) return FALSE;
+  bool vertical;
+  RECT r;  // in screen coordinates
+  SCROLLINFO si = {sizeof si, SIF_ALL};
+  bool enabled = true, shown = true;
+  if (object == OBJID_VSCROLL || object == OBJID_HSCROLL) {
+    vertical = object == OBJID_VSCROLL;
+    Frame f = Layout(w);
+    r = vertical ? f.vscroll : f.hscroll;
+    RECT wr = ScreenRect(w);
+    OffsetRect(&r, wr.left, wr.top);
+    const ScrollBar* sb = BarOf(w, vertical ? SB_VERT : SB_HORZ);
+    si = sb->info;
+    enabled = sb->enabled;
+    shown = (w->style & (vertical ? WS_VSCROLL : WS_HSCROLL)) != 0;
+  } else if (object == OBJID_CLIENT) {
+    // A scroll bar control.
+    vertical = (w->style & SBS_VERT) != 0;
+    GetClientRect(h, &r);
+    MapWindowPoints(h, HWND_DESKTOP, (POINT*)&r, 2);
+    if (!SendMessageW(h, SBM_GETSCROLLINFO, 0, (LPARAM)&si)) return FALSE;
+    enabled = IsWindowEnabled(h) != FALSE;
+    shown = IsWindowVisible(h) != FALSE;
+  } else {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  sbi->rcScrollBar = r;
+  int len = vertical ? r.bottom - r.top : r.right - r.left;
+  int arrow = vertical ? r.right - r.left : r.bottom - r.top;
+  if (arrow * 2 > len) arrow = len / 2;
+  int pos = 0, thumb = 0;
+  ThumbOf(si, len - 2 * arrow, &pos, &thumb);
+  sbi->dxyLineButton = arrow;
+  sbi->xyThumbTop = arrow + pos;
+  sbi->xyThumbBottom = arrow + pos + thumb;
+  sbi->reserved = 0;
+  DWORD state = (shown ? 0 : STATE_SYSTEM_INVISIBLE) | (enabled ? 0 : STATE_SYSTEM_UNAVAILABLE);
+  if (RectEmpty(r)) state |= STATE_SYSTEM_OFFSCREEN;
+  for (int i = 0; i <= CCHILDREN_SCROLLBAR; i++) sbi->rgstate[i] = state;
+  if (thumb == 0) sbi->rgstate[3] |= STATE_SYSTEM_INVISIBLE;
   return TRUE;
 }
 

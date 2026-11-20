@@ -563,6 +563,7 @@ typedef struct _gettextlengthex {
 #define TM_MULTILEVELUNDO 8
 #define TM_SINGLECODEPAGE 16
 #define TM_MULTICODEPAGE 32
+typedef int TEXTMODE;  // a combination of the TM_ flags
 
 #ifdef UNICODE
 #define TEXTRANGE TEXTRANGEW

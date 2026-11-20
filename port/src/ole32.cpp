@@ -15,6 +15,11 @@
 #include <objbase.h>
 #include <ole2.h>
 #include <fcntl.h>
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#else
+#include <malloc.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +42,58 @@ DWORD WINAPI OleBuildVersion(void) { return MAKELONG(0, 23); }
 LPVOID WINAPI CoTaskMemAlloc(SIZE_T cb) { return malloc(cb ? cb : 1); }
 LPVOID WINAPI CoTaskMemRealloc(LPVOID pv, SIZE_T cb) { return realloc(pv, cb ? cb : 1); }
 void WINAPI CoTaskMemFree(LPVOID pv) { free(pv); }
+
+}  // extern "C"
+
+namespace {
+
+// The task allocator as an object; it lives as long as the process.
+struct TaskMalloc : IMalloc {
+  STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
+    if (!ppv) return E_POINTER;
+    if (IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_IMalloc)) {
+      *ppv = this;
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHODIMP_(ULONG) AddRef() override { return 2; }
+  STDMETHODIMP_(ULONG) Release() override { return 1; }
+  STDMETHODIMP_(void*) Alloc(SIZE_T cb) override { return CoTaskMemAlloc(cb); }
+  STDMETHODIMP_(void*) Realloc(void* pv, SIZE_T cb) override {
+    if (pv && cb == 0) {
+      CoTaskMemFree(pv);
+      return NULL;
+    }
+    return CoTaskMemRealloc(pv, cb);
+  }
+  STDMETHODIMP_(void) Free(void* pv) override { CoTaskMemFree(pv); }
+  STDMETHODIMP_(SIZE_T) GetSize(void* pv) override {
+    if (!pv) return (SIZE_T)-1;
+#ifdef __APPLE__
+    return malloc_size(pv);
+#else
+    return malloc_usable_size(pv);
+#endif
+  }
+  // Any block could be the C library's: "don't know".
+  STDMETHODIMP_(int) DidAlloc(void* pv) override { return pv ? -1 : 0; }
+  STDMETHODIMP_(void) HeapMinimize() override {}
+};
+TaskMalloc g_taskMalloc;
+
+}  // namespace
+
+extern "C" {
+
+HRESULT WINAPI CoGetMalloc(DWORD context, LPMALLOC* out) {
+  if (!out) return E_INVALIDARG;
+  *out = NULL;
+  if (context != 1) return E_INVALIDARG;  // MEMCTX_TASK
+  *out = &g_taskMalloc;
+  return S_OK;
+}
 
 HRESULT WINAPI CoCreateGuid(GUID* g) {
   if (g == NULL) return E_INVALIDARG;

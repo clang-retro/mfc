@@ -210,6 +210,7 @@ void FreeWindowDC(HDC dc);
 // Frame metrics: the non-client border widths for a style.
 RECT FrameInsets(DWORD style, DWORD exStyle, bool menu);
 void DrawFrame(Window* w);
+void DrawFrameTo(Window* w, HDC dc);  // the frame into dc, at its origin
 // Where the menu bar and the system menu's box lie, in window coordinates.
 RECT MenuBarRect(Window* w);
 RECT SysMenuRect(Window* w);

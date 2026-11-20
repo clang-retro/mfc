@@ -384,3 +384,105 @@ void WINAPI DrawInsert(HWND parent, HWND lb, int item) {
 }
 
 }  // extern "C"
+
+// ---------------------------------------------------------------------
+// Flat scroll bars: the window's own scroll bars, drawn the usual way.
+// The properties are kept for FlatSB_GetScrollProp; they change nothing.
+
+namespace {
+
+const WCHAR kFlatSBProp[] = L"winport.flatsb";
+
+// The property for one WSB_PROP_ bit: its index, and its value with
+// nothing set.
+int FlatIndex(UINT prop) {
+  for (int i = 0; i < 12; i++)
+    if (prop == (1u << i)) return i;
+  return -1;
+}
+
+INT_PTR FlatDefault(HWND h, UINT prop) {
+  switch (prop) {
+    case WSB_PROP_CYVSCROLL: return GetSystemMetrics(SM_CYVSCROLL);
+    case WSB_PROP_CXHSCROLL: return GetSystemMetrics(SM_CXHSCROLL);
+    case WSB_PROP_CYHSCROLL: return GetSystemMetrics(SM_CYHSCROLL);
+    case WSB_PROP_CXVSCROLL: return GetSystemMetrics(SM_CXVSCROLL);
+    case WSB_PROP_CXHTHUMB: return GetSystemMetrics(SM_CXHTHUMB);
+    case WSB_PROP_CYVTHUMB: return GetSystemMetrics(SM_CYVTHUMB);
+    case WSB_PROP_VBKGCOLOR:
+    case WSB_PROP_HBKGCOLOR: return GetSysColor(COLOR_SCROLLBAR);
+    case WSB_PROP_VSTYLE:
+    case WSB_PROP_HSTYLE: return FSB_REGULAR_MODE;
+    case WSB_PROP_WINSTYLE: return GetWindowLongW(h, GWL_STYLE) & (WS_HSCROLL | WS_VSCROLL);
+  }
+  return 0;
+}
+
+struct FlatProps {
+  INT_PTR value[12];
+  bool set[12];
+};
+
+}  // namespace
+
+extern "C" {
+
+BOOL WINAPI InitializeFlatSB(HWND h) {
+  if (!IsWindow(h)) return FALSE;
+  if (!GetPropW(h, kFlatSBProp)) SetPropW(h, kFlatSBProp, (HANDLE) new FlatProps());
+  return TRUE;
+}
+
+HRESULT WINAPI UninitializeFlatSB(HWND h) {
+  delete (FlatProps*)RemovePropW(h, kFlatSBProp);
+  return S_OK;
+}
+
+BOOL WINAPI FlatSB_EnableScrollBar(HWND h, int bar, UINT arrows) { return EnableScrollBar(h, (UINT)bar, arrows); }
+BOOL WINAPI FlatSB_ShowScrollBar(HWND h, int bar, BOOL show) { return ShowScrollBar(h, bar, show); }
+BOOL WINAPI FlatSB_GetScrollRange(HWND h, int bar, LPINT min, LPINT max) { return GetScrollRange(h, bar, min, max); }
+BOOL WINAPI FlatSB_GetScrollInfo(HWND h, int bar, LPSCROLLINFO si) { return GetScrollInfo(h, bar, si); }
+int WINAPI FlatSB_GetScrollPos(HWND h, int bar) { return GetScrollPos(h, bar); }
+int WINAPI FlatSB_SetScrollPos(HWND h, int bar, int pos, BOOL redraw) { return SetScrollPos(h, bar, pos, redraw); }
+int WINAPI FlatSB_SetScrollInfo(HWND h, int bar, LPSCROLLINFO si, BOOL redraw) {
+  return SetScrollInfo(h, bar, si, redraw);
+}
+int WINAPI FlatSB_SetScrollRange(HWND h, int bar, int min, int max, BOOL redraw) {
+  return SetScrollRange(h, bar, min, max, redraw);
+}
+
+BOOL WINAPI FlatSB_GetScrollProp(HWND h, int prop, LPINT out) {
+  int i = FlatIndex((UINT)prop);
+  if (!out || i < 0 || !IsWindow(h)) return FALSE;
+  FlatProps* p = (FlatProps*)GetPropW(h, kFlatSBProp);
+  *out = (int)(p && p->set[i] ? p->value[i] : FlatDefault(h, (UINT)prop));
+  return TRUE;
+}
+
+BOOL WINAPI FlatSB_SetScrollProp(HWND h, UINT prop, INT_PTR value, BOOL redraw) {
+  int i = FlatIndex(prop);
+  FlatProps* p = (FlatProps*)GetPropW(h, kFlatSBProp);
+  if (i < 0 || !p) return FALSE;
+  p->value[i] = value;
+  p->set[i] = true;
+  if (redraw) SetWindowPos(h, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+  return TRUE;
+}
+
+// Text over its shadow, which lies offset by (dx, dy); DrawText's answer.
+int WINAPI DrawShadowText(HDC dc, LPCWSTR text, UINT n, RECT* rc, DWORD flags, COLORREF color, COLORREF shadow,
+                          int dx, int dy) {
+  if (!dc || !text || !rc) return 0;
+  int mode = SetBkMode(dc, TRANSPARENT);
+  COLORREF old = SetTextColor(dc, shadow);
+  RECT s = *rc;
+  OffsetRect(&s, dx, dy);
+  DrawTextW(dc, text, (int)n, &s, flags & ~DT_CALCRECT);
+  SetTextColor(dc, color);
+  int r = DrawTextW(dc, text, (int)n, rc, flags);
+  SetTextColor(dc, old);
+  SetBkMode(dc, mode);
+  return r;
+}
+
+}  // extern "C"

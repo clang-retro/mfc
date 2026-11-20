@@ -112,6 +112,26 @@ typedef struct _OFNOTIFYW {
   LPOPENFILENAMEW lpOFN;
   LPWSTR pszFile;
 } OFNOTIFYW, *LPOFNOTIFYW;
+typedef struct _OFNOTIFYEXA {
+  NMHDR hdr;
+  LPOPENFILENAMEA lpOFN;
+  LPVOID psf;
+  LPVOID pidl;
+} OFNOTIFYEXA, *LPOFNOTIFYEXA;
+typedef struct _OFNOTIFYEXW {
+  NMHDR hdr;
+  LPOPENFILENAMEW lpOFN;
+  LPVOID psf;
+  LPVOID pidl;
+} OFNOTIFYEXW, *LPOFNOTIFYEXW;
+// Page Setup's paint hook: what it is about to draw.
+#define WM_PSD_PAGESETUPDLG (WM_USER)
+#define WM_PSD_FULLPAGERECT (WM_USER + 1)
+#define WM_PSD_MINMARGINRECT (WM_USER + 2)
+#define WM_PSD_MARGINRECT (WM_USER + 3)
+#define WM_PSD_GREEKTEXTRECT (WM_USER + 4)
+#define WM_PSD_ENVSTAMPRECT (WM_USER + 5)
+#define WM_PSD_YAFULLPAGERECT (WM_USER + 6)
 #define CDN_FIRST (0U - 601U)
 #define CDN_INITDONE (CDN_FIRST - 0x0000)
 #define CDN_SELCHANGE (CDN_FIRST - 0x0001)
@@ -570,6 +590,8 @@ DWORD WINAPI CommDlgExtendedError(void);
 #define LPOPENFILENAME __WINPORT_AW(LPOPENFILENAME)
 #define OFNOTIFY __WINPORT_AW(OFNOTIFY)
 #define LPOFNOTIFY __WINPORT_AW(LPOFNOTIFY)
+#define OFNOTIFYEX __WINPORT_AW(OFNOTIFYEX)
+#define LPOFNOTIFYEX __WINPORT_AW(LPOFNOTIFYEX)
 #define CHOOSECOLOR __WINPORT_AW(CHOOSECOLOR)
 #define LPCHOOSECOLOR __WINPORT_AW(LPCHOOSECOLOR)
 #define FINDREPLACE __WINPORT_AW(FINDREPLACE)
@@ -594,5 +616,22 @@ DWORD WINAPI CommDlgExtendedError(void);
 #define PageSetupDlg __WINPORT_AW(PageSetupDlg)
 
 }  // extern "C"
+
+// PrintDlgEx's callback object (PRINTDLGEX::lpCallback) and the services
+// it can ask of the dialog.
+#include <unknwn.h>
+extern "C" const IID IID_IPrintDialogCallback, IID_IPrintDialogServices;
+interface IPrintDialogCallback : public IUnknown {
+  STDMETHOD(InitDone)() = 0;
+  STDMETHOD(SelectionChange)() = 0;
+  STDMETHOD(HandleMessage)(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam, LRESULT* pResult) = 0;
+};
+interface IPrintDialogServices : public IUnknown {
+  STDMETHOD(GetCurrentDevMode)(LPDEVMODE pDevMode, UINT* pcbSize) = 0;
+  STDMETHOD(GetCurrentPrinterName)(LPTSTR pPrinterName, UINT* pcchSize) = 0;
+  STDMETHOD(GetCurrentPortName)(LPTSTR pPortName, UINT* pcchSize) = 0;
+};
+WINPORT_UUIDOF(IPrintDialogCallback)
+WINPORT_UUIDOF(IPrintDialogServices)
 
 #endif

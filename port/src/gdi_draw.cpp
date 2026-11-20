@@ -1233,6 +1233,98 @@ int WINAPI Escape(HDC hdc, int code, int, LPCSTR in, LPVOID) {
 
 int WINAPI ExtEscape(HDC hdc, int, int, LPCSTR, int, LPSTR) { return DCOf(hdc) ? 0 : -1; }
 
+// No device here takes drawing escapes: 0, not supported.
+int WINAPI DrawEscape(HDC hdc, int, int, LPCSTR) { return DCOf(hdc) ? 0 : -1; }
+
+// There is no color management (ICM), so a palette's colors stand.
+BOOL WINAPI ColorCorrectPalette(HDC hdc, HPALETTE pal, DWORD first, DWORD n) {
+  if (!DCOf(hdc) || GetObjectType(pal) != OBJ_PAL) return FALSE;
+  return first + n <= (DWORD)GetPaletteEntries(pal, 0, 0, NULL);
+}
+
+// ---------------------------------------------------------------------
+// GradientFill: rectangles shaded across or down, and triangles shaded
+// between their corners, in logical coordinates.
+
+namespace {
+
+COLORREF Mix(const TRIVERTEX& a, const TRIVERTEX& b, long num, long den) {
+  if (den <= 0) return RGB(a.Red >> 8, a.Green >> 8, a.Blue >> 8);
+  auto ch = [&](COLOR16 x, COLOR16 y) { return (BYTE)(((long)x + ((long)y - (long)x) * num / den) >> 8); };
+  return RGB(ch(a.Red, b.Red), ch(a.Green, b.Green), ch(a.Blue, b.Blue));
+}
+
+void FillSpan(HDC hdc, int l, int t, int r, int b, COLORREF c) {
+  RECT rc = {l, t, r, b};
+  HBRUSH br = CreateSolidBrush(c);
+  FillRect(hdc, &rc, br);
+  DeleteObject(br);
+}
+
+void GradientRect(HDC hdc, const TRIVERTEX& v1, const TRIVERTEX& v2, bool vertical) {
+  const TRIVERTEX& a = (vertical ? v1.y <= v2.y : v1.x <= v2.x) ? v1 : v2;
+  const TRIVERTEX& b = &a == &v1 ? v2 : v1;
+  int l = std::min(v1.x, v2.x), r = std::max(v1.x, v2.x);
+  int t = std::min(v1.y, v2.y), bt = std::max(v1.y, v2.y);
+  if (vertical) {
+    for (int y = t; y < bt; y++) FillSpan(hdc, l, y, r, y + 1, Mix(a, b, y - t, bt - t - 1));
+  } else {
+    for (int x = l; x < r; x++) FillSpan(hdc, x, t, x + 1, bt, Mix(a, b, x - l, r - l - 1));
+  }
+}
+
+// Each pixel whose center is inside, colored by its barycentric weights.
+void GradientTriangle(HDC hdc, const TRIVERTEX& a, const TRIVERTEX& b, const TRIVERTEX& c) {
+  long long area = (long long)(b.x - a.x) * (c.y - a.y) - (long long)(c.x - a.x) * (b.y - a.y);
+  if (area == 0) return;
+  int l = std::min({a.x, b.x, c.x}), r = std::max({a.x, b.x, c.x});
+  int t = std::min({a.y, b.y, c.y}), bt = std::max({a.y, b.y, c.y});
+  for (int y = t; y < bt; y++) {
+    for (int x = l; x < r; x++) {
+      // Doubled, for the pixel's center.
+      long long px = 2 * x + 1, py = 2 * y + 1;
+      long long w0 = (2LL * b.x - px) * (2LL * c.y - py) - (2LL * c.x - px) * (2LL * b.y - py);
+      long long w1 = (2LL * c.x - px) * (2LL * a.y - py) - (2LL * a.x - px) * (2LL * c.y - py);
+      long long w2 = (2LL * a.x - px) * (2LL * b.y - py) - (2LL * b.x - px) * (2LL * a.y - py);
+      long long den = 4 * area;
+      if (den < 0) w0 = -w0, w1 = -w1, w2 = -w2, den = -den;
+      if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+      auto ch = [&](COLOR16 p, COLOR16 q, COLOR16 s) {
+        return (BYTE)(((long long)p * w0 + (long long)q * w1 + (long long)s * w2) / den >> 8);
+      };
+      SetPixelV(hdc, x, y, RGB(ch(a.Red, b.Red, c.Red), ch(a.Green, b.Green, c.Green), ch(a.Blue, b.Blue, c.Blue)));
+    }
+  }
+}
+
+}  // namespace
+
+BOOL WINAPI GradientFill(HDC hdc, PTRIVERTEX v, ULONG nv, PVOID mesh, ULONG nm, ULONG mode) {
+  if (!DCOf(hdc) || !v || !mesh) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  mode &= GRADIENT_FILL_OP_FLAG;
+  if (mode == GRADIENT_FILL_RECT_H || mode == GRADIENT_FILL_RECT_V) {
+    const GRADIENT_RECT* g = (const GRADIENT_RECT*)mesh;
+    for (ULONG i = 0; i < nm; i++) {
+      if (g[i].UpperLeft >= nv || g[i].LowerRight >= nv) return FALSE;
+      GradientRect(hdc, v[g[i].UpperLeft], v[g[i].LowerRight], mode == GRADIENT_FILL_RECT_V);
+    }
+    return TRUE;
+  }
+  if (mode == GRADIENT_FILL_TRIANGLE) {
+    const GRADIENT_TRIANGLE* g = (const GRADIENT_TRIANGLE*)mesh;
+    for (ULONG i = 0; i < nm; i++) {
+      if (g[i].Vertex1 >= nv || g[i].Vertex2 >= nv || g[i].Vertex3 >= nv) return FALSE;
+      GradientTriangle(hdc, v[g[i].Vertex1], v[g[i].Vertex2], v[g[i].Vertex3]);
+    }
+    return TRUE;
+  }
+  SetLastError(ERROR_INVALID_PARAMETER);
+  return FALSE;
+}
+
 BOOL WINAPI GetAspectRatioFilterEx(HDC hdc, LPSIZE s) {
   if (!DCOf(hdc) || !s) return FALSE;
   s->cx = s->cy = 0;

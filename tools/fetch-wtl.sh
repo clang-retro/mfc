@@ -24,7 +24,12 @@ fi
 mkdir -p "$DIR"
 pkg=$DIR/wtl.$VERSION.nupkg
 curl -fsSL --retry 3 -o "$pkg" "$URL"
-echo "$SHA256  $pkg" | sha256sum -c - >/dev/null
+# sha256sum, or on macOS shasum.
+if command -v sha256sum >/dev/null 2>&1; then
+  echo "$SHA256  $pkg" | sha256sum -c - >/dev/null
+else
+  echo "$SHA256  $pkg" | shasum -a 256 -c - >/dev/null
+fi
 rm -rf "$DIR/include" "$DIR/unpack"
 mkdir -p "$DIR/unpack"
 (cd "$DIR/unpack" && unzip -q "../wtl.$VERSION.nupkg" 'lib/native/include/*')

@@ -44,6 +44,12 @@ HRESULT WINAPI VarBstrFromCy(CY, LCID, ULONG, BSTR*);
 HRESULT WINAPI VarR8FromStr(LPCOLESTR, LCID, ULONG, DOUBLE*);
 HRESULT WINAPI VarBstrFromR8(DOUBLE, LCID, ULONG, BSTR*);
 HRESULT WINAPI VarI4FromStr(LPCOLESTR, LCID, ULONG, LONG*);
+HRESULT WINAPI VarDecFromStr(LPCOLESTR, LCID, ULONG, DECIMAL*);
+HRESULT WINAPI VarBstrFromDec(const DECIMAL*, LCID, ULONG, BSTR*);
+HRESULT WINAPI VarDecCmp(const DECIMAL*, const DECIMAL*);
+HRESULT WINAPI VarDecFromI4(LONG, DECIMAL*);
+HRESULT WINAPI VarDecFromR8(DOUBLE, DECIMAL*);
+HRESULT WINAPI VarR8FromDec(const DECIMAL*, DOUBLE*);
 HRESULT WINAPI VarCyFromR8(DOUBLE, CY*);
 HRESULT WINAPI VarR8FromCy(CY, DOUBLE*);
 #define VARCMP_LT 0
@@ -105,5 +111,16 @@ HRESULT WINAPI RevokeActiveObject(DWORD, void*);
 HRESULT WINAPI GetActiveObject(REFCLSID, void*, IUnknown**);
 
 }  // extern "C"
+
+// Where long is wider than LONG (64-bit Linux and macOS), code written
+// for Windows passes a long for a LONG.
+#if defined(__LP64__)
+inline HRESULT VarI4FromStr(LPCOLESTR s, LCID lcid, ULONG flags, long* out) {
+  LONG v = 0;
+  HRESULT hr = VarI4FromStr(s, lcid, flags, &v);
+  if (SUCCEEDED(hr) && out) *out = v;
+  return hr;
+}
+#endif
 
 #endif

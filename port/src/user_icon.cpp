@@ -1250,3 +1250,23 @@ HICON WINAPI ExtractIconA(HINSTANCE, LPCSTR file, UINT index) {
   if (!file) return NULL;
   return ExtractCore(winport::Widen(file), index);
 }
+
+// The file's own icon (the program's, here) or, for any other file, the
+// system's application icon; *index says which of the file's icons.
+// The path stays as it is: no file is associated with another here.
+HICON WINAPI ExtractAssociatedIconW(HINSTANCE inst, LPWSTR file, LPWORD index) {
+  if (!file || !index) return NULL;
+  HICON icon = ExtractIconW(inst, file, *index);
+  if (icon) return icon;
+  *index = 0;
+  return CopyIcon(LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION));
+}
+HICON WINAPI ExtractAssociatedIconA(HINSTANCE inst, LPSTR file, LPWORD index) {
+  if (!file || !index) return NULL;
+  HICON icon = ExtractIconA(inst, file, *index);
+  if (icon) return icon;
+  *index = 0;
+  return CopyIcon(LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION));
+}
+
+HICON WINAPI DuplicateIcon(HINSTANCE, HICON icon) { return CopyIcon(icon); }

@@ -214,6 +214,18 @@ and HMAC), RC4 and AES keys (derived, imported or random) and
 `CryptGenRandom`, but no RSA: there are no key pairs. `shlwapi`'s path
 and string functions, access control lists and SDDL work as well.
 
+The shell namespace is the file system: the desktop is the root `/`,
+an item ID list holds one item for each component of a path, and shell
+folders (`SHGetDesktopFolder`, `IShellFolder`) list, parse, compare and
+rename what is in them. There are no shortcuts (`SFGAO_LINK`), since
+symbolic links need none. `SHBrowseForFolder` shows a tree of the
+folders below its root and answers the `BFFM_` messages. There are no
+visual styles: the controls draw the classic look, as Windows does with
+styles turned off, so `OpenThemeData` opens nothing and `IsThemeActive`
+is false. There is one monitor, the screen. A layered window keeps its
+attributes but draws opaque. There is no OpenGL: no pixel format can be
+chosen and `wglCreateContext` fails.
+
 A regular DLL builds as a shared library (`-shared`, exporting
 `DllMain` and the `.def` file's names; the program links with
 `-rdynamic` on Linux, and the library with `-undefined dynamic_lookup`
@@ -340,7 +352,8 @@ when there is no display. For a Linux or macOS target it builds `core`,
 `docobtest`, `linktest`, `bindtest`, `richtest`, `richsrvtest`,
 `autotest`, `srvtest`, `atlwintest`, `atltest`, `conntest`, `ctltest`,
 `wltest`, `dragtest`, `daotest`, `dvtest`, `htmltest`, `atlctltest`,
-`cdlgtest`, `iotest` and `audiotest` against the portable layer, and `exttest`, `core`, `sditest`,
+`atlutiltest`, `cdlgtest`, `iotest`, `audiotest` and `wtltest` against
+the portable layer, and `exttest`, `core`, `sditest`,
 `dlgtest` and `dlltest` again with the shared libraries
 (`SHARED_TESTS`), and runs them directly; `NATIVE_TESTS` names others to
 try.
@@ -366,8 +379,13 @@ try.
   DCs, a job printed to a file, and the Print and Page Setup dialogs
   driven through their hooks; a window shaped by SetWindowRgn (hit
   testing and clipping) and files dropped on a window (WM_DROPFILES,
-  DragQueryFile and DragQueryPoint); and a CWnd with a message map, on
-  the console.
+  DragQueryFile and DragQueryPoint); a CWnd with a message map; and,
+  on Linux and macOS, the monitor, layered windows, PrintWindow, scroll
+  bar and cursor information, flat scroll bars, GradientFill, shadowed
+  text, glyph indices and fractional widths, a metafile's description,
+  themes and OpenGL (both absent), DECIMAL conversions and comparison,
+  and the shell namespace (ID lists, shell folders and their items) with
+  SHBrowseForFolder driven through its callback, on the console.
 * `disptest`: the automation helpers in `afxdisp.h` (COleDateTime and
   its span, COleCurrency, COleVariant, COleSafeArray) and a
   COleDispatchDriver calling an IDispatch written in the test, on the
@@ -669,8 +687,8 @@ try.
   owner and DACL, and the process's CAccessToken; and CAtlServiceModuleT,
   installed with /Service, started and stopped by the service control
   manager, and removed with /UnregServer.
-* `wtltest`: WTL 10 over this ATL, built when `tools/fetch-wtl.sh` has
-  fetched WTL's headers (skipped otherwise): a CFrameWindowImpl frame
+* `wtltest`: WTL 10 over this ATL, on Windows and natively, built when
+  `tools/fetch-wtl.sh` has fetched WTL's headers (skipped otherwise): a CFrameWindowImpl frame
   with CUpdateUI, a message filter and an idle handler, a command bar,
   a toolbar from a toolbar resource in a rebar, a status bar, and a
   splitter of a tree view and a list view; the message cracker maps
@@ -1006,6 +1024,13 @@ what Visual C++ gives it:
   `#define _MSC_VER 1400`, `#include <atlapp.h>`, `#undef _MSC_VER`.
 * `WINVER` and `_WIN32_WINNT` 0x0501 and `_WIN32_IE` 0x0600 or more.
 * `atlstr.h` included before WTL's headers, for the CString overloads.
+
+On Linux and macOS, WTL builds with `-fms-compatibility
+-fms-compatibility-version=19.29`, and `res2cpp.py` needs WTL's include
+directory (`-I build/wtl/include`) for resources that include its
+headers. A dialog template WTL builds in memory (CIndirectDialogImpl)
+writes its text as `WCHAR`, which is 32 bits there; the dialog functions
+read such a template too.
 
 What WTL needs from ATL is here: `_ATL_VER` is 0x0800 (ATL 8, Visual
 C++ 2005, unless a program defines another), `ATL::Checked` (the

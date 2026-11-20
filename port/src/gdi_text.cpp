@@ -14,6 +14,7 @@
 #include "user.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -1109,4 +1110,118 @@ BOOL WINAPI GrayStringW(HDC hdc, HBRUSH brush, GRAYSTRINGPROC proc, LPARAM data,
 }
 BOOL WINAPI GrayStringA(HDC hdc, HBRUSH brush, GRAYSTRINGPROC proc, LPARAM data, int n, int x, int y, int w, int h) {
   return GrayCore(hdc, brush, proc, data, n, x, y, w, h, false);
+}
+
+// ---------------------------------------------------------------------
+// Glyph indices and fractional widths
+//
+// A glyph index here is the UTF-16 code unit it draws (and ExtTextOut
+// takes ETO_GLYPH_INDEX text as characters), so the *I functions measure
+// the characters of those numbers.
+
+DWORD WINAPI GetGlyphIndicesW(HDC hdc, LPCWSTR s, int n, LPWORD out, DWORD flags) {
+  DCObj* dc = DCOf(hdc);
+  if (!dc || !out || n < 0 || (n > 0 && !s)) return GDI_ERROR;
+  RealFont* f = FontOf(dc);
+  for (int i = 0; i < n; i++)
+    out[i] = (flags & GGI_MARK_NONEXISTING_GLYPHS) && !f->HasGlyph(s[i]) ? 0xFFFF : (WORD)s[i];
+  return (DWORD)n;
+}
+DWORD WINAPI GetGlyphIndicesA(HDC hdc, LPCSTR s, int n, LPWORD out, DWORD flags) {
+  if (n < 0 || (n > 0 && !s)) return GDI_ERROR;
+  AnsiText t = FromAnsi(hdc, s, n);
+  return GetGlyphIndicesW(hdc, t.w.c_str(), (int)t.w.size(), out, flags);
+}
+
+namespace {
+std::wstring FromIndices(const WORD* g, int n) {
+  std::wstring w;
+  for (int i = 0; i < n; i++) w += (wchar_t)g[i];
+  return w;
+}
+}  // namespace
+
+BOOL WINAPI GetTextExtentPointI(HDC hdc, LPWORD g, int n, LPSIZE size) {
+  if (n < 0 || (n > 0 && !g)) return FALSE;
+  std::wstring w = FromIndices(g, n);
+  return GetTextExtentPoint32W(hdc, w.c_str(), n, size);
+}
+BOOL WINAPI GetTextExtentExPointI(HDC hdc, LPWORD g, int n, int maxExt, LPINT fit, LPINT dx, LPSIZE size) {
+  if (n < 0 || (n > 0 && !g)) return FALSE;
+  std::wstring w = FromIndices(g, n);
+  return GetTextExtentExPointW(hdc, w.c_str(), n, maxExt, fit, dx, size);
+}
+
+// From first to last, or with g the n indices in it.
+BOOL WINAPI GetCharWidthI(HDC hdc, UINT first, UINT n, LPWORD g, LPINT out) {
+  if (!out) return FALSE;
+  for (UINT i = 0; i < n; i++) {
+    UINT c = g ? g[i] : first + i;
+    if (!GetCharWidth32W(hdc, c, c, &out[i])) return FALSE;
+  }
+  return TRUE;
+}
+BOOL WINAPI GetCharABCWidthsI(HDC hdc, UINT first, UINT n, LPWORD g, LPABC out) {
+  if (!out) return FALSE;
+  for (UINT i = 0; i < n; i++) {
+    UINT c = g ? g[i] : first + i;
+    if (!GetCharABCWidthsW(hdc, c, c, &out[i])) return FALSE;
+  }
+  return TRUE;
+}
+
+// The fonts place glyphs on whole pixels, so the fractions are whole.
+BOOL WINAPI GetCharWidthFloatW(HDC hdc, UINT first, UINT last, PFLOAT out) {
+  if (!out || last < first) return FALSE;
+  for (UINT c = first; c <= last; c++) {
+    INT w;
+    if (!GetCharWidth32W(hdc, c, c, &w)) return FALSE;
+    out[c - first] = (FLOAT)w;
+  }
+  return TRUE;
+}
+BOOL WINAPI GetCharWidthFloatA(HDC hdc, UINT first, UINT last, PFLOAT out) {
+  return GetCharWidthFloatW(hdc, first & 0xFF, last & 0xFF, out);
+}
+BOOL WINAPI GetCharABCWidthsFloatW(HDC hdc, UINT first, UINT last, LPABCFLOAT out) {
+  if (!out || last < first) return FALSE;
+  for (UINT c = first; c <= last; c++) {
+    ABC abc;
+    if (!GetCharABCWidthsW(hdc, c, c, &abc)) return FALSE;
+    out[c - first].abcfA = (FLOAT)abc.abcA;
+    out[c - first].abcfB = (FLOAT)abc.abcB;
+    out[c - first].abcfC = (FLOAT)abc.abcC;
+  }
+  return TRUE;
+}
+BOOL WINAPI GetCharABCWidthsFloatA(HDC hdc, UINT first, UINT last, LPABCFLOAT out) {
+  return GetCharABCWidthsFloatW(hdc, first & 0xFF, last & 0xFF, out);
+}
+
+// The runs of the Basic Multilingual Plane the font has glyphs for. With
+// gs NULL, the size the answer needs.
+DWORD WINAPI GetFontUnicodeRanges(HDC hdc, LPGLYPHSET gs) {
+  DCObj* dc = DCOf(hdc);
+  if (!dc) return 0;
+  RealFont* f = FontOf(dc);
+  std::vector<WCRANGE> runs;
+  DWORD total = 0;
+  for (UINT32 c = 0; c <= 0xFFFF; c++) {
+    if (c >= 0xD800 && c <= 0xDFFF) continue;
+    if (!f->HasGlyph(c)) continue;
+    if (!runs.empty() && runs.back().wcLow + runs.back().cGlyphs == c && runs.back().cGlyphs < 0xFFFF) {
+      runs.back().cGlyphs++;
+    } else {
+      runs.push_back(WCRANGE{(WCHAR)c, 1});
+    }
+    total++;
+  }
+  DWORD size = (DWORD)(offsetof(GLYPHSET, ranges) + sizeof(WCRANGE) * (runs.empty() ? 1 : runs.size()));
+  if (!gs) return size;
+  gs->cbThis = size;
+  gs->flAccel = 0;
+  gs->cGlyphsSupported = total;
+  gs->cRanges = (DWORD)runs.size();
+  for (size_t i = 0; i < runs.size(); i++) gs->ranges[i] = runs[i];
+  return size;
 }

@@ -1404,6 +1404,16 @@ int WINAPI ExtEscape(HDC, int, int, LPCSTR, int, LPSTR);
 #define GetCharWidth __WINPORT_AW(GetCharWidth)
 #define GetCharWidth32 __WINPORT_AW(GetCharWidth32)
 #define GetCharABCWidths __WINPORT_AW(GetCharABCWidths)
+#define GetCharABCWidthsFloat __WINPORT_AW(GetCharABCWidthsFloat)
+#define GetCharWidthFloat __WINPORT_AW(GetCharWidthFloat)
+#define GetGlyphIndices __WINPORT_AW(GetGlyphIndices)
+#define CreateFontIndirectEx __WINPORT_AW(CreateFontIndirectEx)
+#define ENUMLOGFONTEXDV __WINPORT_AW(ENUMLOGFONTEXDV)
+#define PENUMLOGFONTEXDV __WINPORT_AW(PENUMLOGFONTEXDV)
+#define LPENUMLOGFONTEXDV __WINPORT_AW(LPENUMLOGFONTEXDV)
+#define GetEnhMetaFileDescription __WINPORT_AW(GetEnhMetaFileDescription)
+#define wglUseFontBitmaps __WINPORT_AW(wglUseFontBitmaps)
+#define wglUseFontOutlines __WINPORT_AW(wglUseFontOutlines)
 #define GetKerningPairs __WINPORT_AW(GetKerningPairs)
 #define GetOutlineTextMetrics __WINPORT_AW(GetOutlineTextMetrics)
 #define GetGlyphOutline __WINPORT_AW(GetGlyphOutline)
@@ -1444,6 +1454,197 @@ int WINAPI ExtEscape(HDC, int, int, LPCSTR, int, LPSTR);
 #define NPDEVMODE __WINPORT_AW(NPDEVMODE)
 #define DOCINFO __WINPORT_AW(DOCINFO)
 #define LPDOCINFO __WINPORT_AW(LPDOCINFO)
+
+
+// Gradients
+typedef USHORT COLOR16;
+typedef struct _TRIVERTEX {
+  LONG x;
+  LONG y;
+  COLOR16 Red;
+  COLOR16 Green;
+  COLOR16 Blue;
+  COLOR16 Alpha;
+} TRIVERTEX, *PTRIVERTEX, *LPTRIVERTEX;
+typedef struct _GRADIENT_TRIANGLE {
+  ULONG Vertex1;
+  ULONG Vertex2;
+  ULONG Vertex3;
+} GRADIENT_TRIANGLE, *PGRADIENT_TRIANGLE, *LPGRADIENT_TRIANGLE;
+typedef struct _GRADIENT_RECT {
+  ULONG UpperLeft;
+  ULONG LowerRight;
+} GRADIENT_RECT, *PGRADIENT_RECT, *LPGRADIENT_RECT;
+#define GRADIENT_FILL_RECT_H 0x00000000
+#define GRADIENT_FILL_RECT_V 0x00000001
+#define GRADIENT_FILL_TRIANGLE 0x00000002
+#define GRADIENT_FILL_OP_FLAG 0x000000ff
+BOOL WINAPI GradientFill(HDC, PTRIVERTEX, ULONG, PVOID, ULONG, ULONG);
+
+// Fonts with design axes
+#define MM_MAX_NUMAXES 16
+typedef struct tagDESIGNVECTOR {
+  DWORD dvReserved;
+  DWORD dvNumAxes;
+  LONG dvValues[MM_MAX_NUMAXES];
+} DESIGNVECTOR, *PDESIGNVECTOR, *LPDESIGNVECTOR;
+typedef struct tagENUMLOGFONTEXDVA {
+  ENUMLOGFONTEXA elfEnumLogfontEx;
+  DESIGNVECTOR elfDesignVector;
+} ENUMLOGFONTEXDVA, *PENUMLOGFONTEXDVA, *LPENUMLOGFONTEXDVA;
+typedef struct tagENUMLOGFONTEXDVW {
+  ENUMLOGFONTEXW elfEnumLogfontEx;
+  DESIGNVECTOR elfDesignVector;
+} ENUMLOGFONTEXDVW, *PENUMLOGFONTEXDVW, *LPENUMLOGFONTEXDVW;
+HFONT WINAPI CreateFontIndirectExA(const ENUMLOGFONTEXDVA*);
+HFONT WINAPI CreateFontIndirectExW(const ENUMLOGFONTEXDVW*);
+
+// Widths and glyphs. A glyph index here is the character's UTF-16 code
+// unit: the layer's fonts are reached by character.
+#define GGI_MARK_NONEXISTING_GLYPHS 0x0001
+typedef struct tagWCRANGE {
+  WCHAR wcLow;
+  USHORT cGlyphs;
+} WCRANGE, *PWCRANGE, *LPWCRANGE;
+typedef struct tagGLYPHSET {
+  DWORD cbThis;
+  DWORD flAccel;
+  DWORD cGlyphsSupported;
+  DWORD cRanges;
+  WCRANGE ranges[1];
+} GLYPHSET, *PGLYPHSET, *LPGLYPHSET;
+BOOL WINAPI GetCharWidthFloatA(HDC, UINT, UINT, PFLOAT);
+BOOL WINAPI GetCharWidthFloatW(HDC, UINT, UINT, PFLOAT);
+BOOL WINAPI GetCharABCWidthsFloatA(HDC, UINT, UINT, LPABCFLOAT);
+BOOL WINAPI GetCharABCWidthsFloatW(HDC, UINT, UINT, LPABCFLOAT);
+DWORD WINAPI GetFontUnicodeRanges(HDC, LPGLYPHSET);
+DWORD WINAPI GetGlyphIndicesA(HDC, LPCSTR, int, LPWORD, DWORD);
+DWORD WINAPI GetGlyphIndicesW(HDC, LPCWSTR, int, LPWORD, DWORD);
+BOOL WINAPI GetTextExtentPointI(HDC, LPWORD, int, LPSIZE);
+BOOL WINAPI GetTextExtentExPointI(HDC, LPWORD, int, int, LPINT, LPINT, LPSIZE);
+BOOL WINAPI GetCharWidthI(HDC, UINT, UINT, LPWORD, LPINT);
+BOOL WINAPI GetCharABCWidthsI(HDC, UINT, UINT, LPWORD, LPABC);
+
+int WINAPI DrawEscape(HDC, int, int, LPCSTR);
+BOOL WINAPI ColorCorrectPalette(HDC, HPALETTE, DWORD, DWORD);
+UINT WINAPI GetEnhMetaFileDescriptionA(HENHMETAFILE, UINT, LPSTR);
+UINT WINAPI GetEnhMetaFileDescriptionW(HENHMETAFILE, UINT, LPWSTR);
+UINT WINAPI GetEnhMetaFilePaletteEntries(HENHMETAFILE, UINT, LPPALETTEENTRY);
+
+// Pixel formats and OpenGL contexts. The layer has no OpenGL: a device
+// context has no pixel formats, and no context can be made.
+typedef struct tagPIXELFORMATDESCRIPTOR {
+  WORD nSize;
+  WORD nVersion;
+  DWORD dwFlags;
+  BYTE iPixelType;
+  BYTE cColorBits;
+  BYTE cRedBits;
+  BYTE cRedShift;
+  BYTE cGreenBits;
+  BYTE cGreenShift;
+  BYTE cBlueBits;
+  BYTE cBlueShift;
+  BYTE cAlphaBits;
+  BYTE cAlphaShift;
+  BYTE cAccumBits;
+  BYTE cAccumRedBits;
+  BYTE cAccumGreenBits;
+  BYTE cAccumBlueBits;
+  BYTE cAccumAlphaBits;
+  BYTE cDepthBits;
+  BYTE cStencilBits;
+  BYTE cAuxBuffers;
+  BYTE iLayerType;
+  BYTE bReserved;
+  DWORD dwLayerMask;
+  DWORD dwVisibleMask;
+  DWORD dwDamageMask;
+} PIXELFORMATDESCRIPTOR, *PPIXELFORMATDESCRIPTOR, *LPPIXELFORMATDESCRIPTOR;
+#define PFD_TYPE_RGBA 0
+#define PFD_TYPE_COLORINDEX 1
+#define PFD_MAIN_PLANE 0
+#define PFD_OVERLAY_PLANE 1
+#define PFD_UNDERLAY_PLANE (-1)
+#define PFD_DOUBLEBUFFER 0x00000001
+#define PFD_STEREO 0x00000002
+#define PFD_DRAW_TO_WINDOW 0x00000004
+#define PFD_DRAW_TO_BITMAP 0x00000008
+#define PFD_SUPPORT_GDI 0x00000010
+#define PFD_SUPPORT_OPENGL 0x00000020
+#define PFD_GENERIC_FORMAT 0x00000040
+#define PFD_NEED_PALETTE 0x00000080
+#define PFD_NEED_SYSTEM_PALETTE 0x00000100
+#define PFD_SWAP_EXCHANGE 0x00000200
+#define PFD_SWAP_COPY 0x00000400
+#define PFD_SWAP_LAYER_BUFFERS 0x00000800
+#define PFD_GENERIC_ACCELERATED 0x00001000
+#define PFD_DEPTH_DONTCARE 0x20000000
+#define PFD_DOUBLEBUFFER_DONTCARE 0x40000000
+#define PFD_STEREO_DONTCARE 0x80000000
+typedef struct tagLAYERPLANEDESCRIPTOR {
+  WORD nSize;
+  WORD nVersion;
+  DWORD dwFlags;
+  BYTE iPixelType;
+  BYTE cColorBits;
+  BYTE cRedBits;
+  BYTE cRedShift;
+  BYTE cGreenBits;
+  BYTE cGreenShift;
+  BYTE cBlueBits;
+  BYTE cBlueShift;
+  BYTE cAlphaBits;
+  BYTE cAlphaShift;
+  BYTE cAccumBits;
+  BYTE cAccumRedBits;
+  BYTE cAccumGreenBits;
+  BYTE cAccumBlueBits;
+  BYTE cAccumAlphaBits;
+  BYTE cDepthBits;
+  BYTE cStencilBits;
+  BYTE cAuxBuffers;
+  BYTE iLayerPlane;
+  BYTE bReserved;
+  COLORREF crTransparent;
+} LAYERPLANEDESCRIPTOR, *PLAYERPLANEDESCRIPTOR, *LPLAYERPLANEDESCRIPTOR;
+typedef struct _POINTFLOAT {
+  FLOAT x;
+  FLOAT y;
+} POINTFLOAT, *PPOINTFLOAT;
+typedef struct _GLYPHMETRICSFLOAT {
+  FLOAT gmfBlackBoxX;
+  FLOAT gmfBlackBoxY;
+  POINTFLOAT gmfptGlyphOrigin;
+  FLOAT gmfCellIncX;
+  FLOAT gmfCellIncY;
+} GLYPHMETRICSFLOAT, *PGLYPHMETRICSFLOAT, *LPGLYPHMETRICSFLOAT;
+#define WGL_FONT_LINES 0
+#define WGL_FONT_POLYGONS 1
+int WINAPI ChoosePixelFormat(HDC, const PIXELFORMATDESCRIPTOR*);
+int WINAPI DescribePixelFormat(HDC, int, UINT, LPPIXELFORMATDESCRIPTOR);
+int WINAPI GetPixelFormat(HDC);
+BOOL WINAPI SetPixelFormat(HDC, int, const PIXELFORMATDESCRIPTOR*);
+BOOL WINAPI SwapBuffers(HDC);
+UINT WINAPI GetEnhMetaFilePixelFormat(HENHMETAFILE, UINT, PIXELFORMATDESCRIPTOR*);
+HGLRC WINAPI wglCreateContext(HDC);
+HGLRC WINAPI wglCreateLayerContext(HDC, int);
+BOOL WINAPI wglDeleteContext(HGLRC);
+BOOL WINAPI wglCopyContext(HGLRC, HGLRC, UINT);
+HGLRC WINAPI wglGetCurrentContext(void);
+HDC WINAPI wglGetCurrentDC(void);
+PROC WINAPI wglGetProcAddress(LPCSTR);
+BOOL WINAPI wglMakeCurrent(HDC, HGLRC);
+BOOL WINAPI wglShareLists(HGLRC, HGLRC);
+BOOL WINAPI wglUseFontBitmapsA(HDC, DWORD, DWORD, DWORD);
+BOOL WINAPI wglUseFontBitmapsW(HDC, DWORD, DWORD, DWORD);
+BOOL WINAPI wglUseFontOutlinesA(HDC, DWORD, DWORD, DWORD, FLOAT, FLOAT, int, LPGLYPHMETRICSFLOAT);
+BOOL WINAPI wglUseFontOutlinesW(HDC, DWORD, DWORD, DWORD, FLOAT, FLOAT, int, LPGLYPHMETRICSFLOAT);
+BOOL WINAPI wglDescribeLayerPlane(HDC, int, int, UINT, LPLAYERPLANEDESCRIPTOR);
+int WINAPI wglSetLayerPaletteEntries(HDC, int, int, int, const COLORREF*);
+int WINAPI wglGetLayerPaletteEntries(HDC, int, int, int, COLORREF*);
+BOOL WINAPI wglRealizeLayerPalette(HDC, int, BOOL);
+BOOL WINAPI wglSwapLayerBuffers(HDC, UINT);
 
 }  // extern "C"
 

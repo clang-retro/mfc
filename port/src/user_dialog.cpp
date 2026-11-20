@@ -109,14 +109,35 @@ struct DlgTemplate {
   std::wstring face;
   std::vector<ItemTemplate> items;
   size_t size = 0;  // the template's length in bytes
+  bool bad = false;  // not readable as asked (32-bit names)
 };
 
-const WORD* ReadSzOrOrd(const WORD* p, std::wstring* s, WORD* ord) {
+// A name or an ordinal. The names are UTF-16, as Windows has them; with
+// wide32, 32-bit wchar_t, as code that builds a template in memory with
+// sizeof(WCHAR) writes them here (WTL's CMemDlgTemplate does).
+const WORD* ReadSzOrOrd(const WORD* p, std::wstring* s, WORD* ord, bool wide32 = false, bool* bad = NULL,
+                        bool one = false) {
   s->clear();
   if (ord) *ord = 0;
   if (*p == 0xFFFF) {
     if (ord) *ord = p[1];
     return p + 2;
+  }
+  // (A menu or class of none is still one zero WORD.)
+  if (wide32 && !(*p == 0 && one)) {
+    // A unit no character has (as UTF-16 text read this way gives) ends
+    // the reading: the template is not one of these.
+    for (size_t n = 0;; n++) {
+      uint32_t c;
+      memcpy(&c, p, sizeof c);
+      if (c > 0x10FFFF || n > 4096) {
+        if (bad) *bad = true;
+        return p;
+      }
+      p += 2;
+      if (!c) return p;
+      s->push_back((wchar_t)c);
+    }
   }
   while (*p) s->push_back((wchar_t)*p++);
   return p + 1;
@@ -147,7 +168,7 @@ T Get(const WORD*& p) {
   return v;
 }
 
-DlgTemplate Parse(const void* tmpl) {
+DlgTemplate ParseAs(const void* tmpl, bool wide32) {
   DlgTemplate t;
   const WORD* p = (const WORD*)tmpl;
   bool ex = p[0] == 1 && p[1] == 0xFFFF;
@@ -166,9 +187,9 @@ DlgTemplate Parse(const void* tmpl) {
   t.y = Get<short>(p);
   t.cx = Get<short>(p);
   t.cy = Get<short>(p);
-  p = ReadSzOrOrd(p, &t.menu, &t.menuId);
-  p = ReadSzOrOrd(p, &t.cls, &t.clsId);
-  p = ReadSzOrOrd(p, &t.title, NULL);
+  p = ReadSzOrOrd(p, &t.menu, &t.menuId, wide32, &t.bad, true);
+  p = ReadSzOrOrd(p, &t.cls, &t.clsId, wide32, &t.bad, true);
+  p = ReadSzOrOrd(p, &t.title, NULL, wide32, &t.bad);
   if (t.style & (DS_SETFONT | DS_SHELLFONT)) {
     t.hasFont = true;
     t.pointSize = Get<WORD>(p);
@@ -177,9 +198,9 @@ DlgTemplate Parse(const void* tmpl) {
       t.italic = Get<BYTE>(p);
       t.charset = Get<BYTE>(p);
     }
-    p = ReadSzOrOrd(p, &t.face, NULL);
+    p = ReadSzOrOrd(p, &t.face, NULL, wide32, &t.bad);
   }
-  for (WORD i = 0; i < count; i++) {
+  for (WORD i = 0; i < count && !t.bad; i++) {
     p = Align4(tmpl, p);
     ItemTemplate it;
     if (ex) {
@@ -196,9 +217,9 @@ DlgTemplate Parse(const void* tmpl) {
     it.cy = Get<short>(p);
     it.id = ex ? Get<DWORD>(p) : Get<WORD>(p);
     WORD ord;
-    p = ReadSzOrOrd(p, &it.cls, &ord);
+    p = ReadSzOrOrd(p, &it.cls, &ord, wide32, &t.bad);
     if (ord) it.cls = ClassFromOrdinal(ord);
-    p = ReadSzOrOrd(p, &it.text, &ord);
+    p = ReadSzOrOrd(p, &it.text, &ord, wide32, &t.bad);
     if (ord) {
       it.text = std::wstring(1, (wchar_t)0xFFFF);
       it.text.push_back((wchar_t)ord);
@@ -212,6 +233,33 @@ DlgTemplate Parse(const void* tmpl) {
   }
   t.size = (size_t)((const BYTE*)p - (const BYTE*)tmpl);
   return t;
+}
+
+// Whether each control's class (and the dialog's own) is one there is.
+bool ClassesKnown(const DlgTemplate& t, HINSTANCE inst) {
+  WNDCLASSEXW wc = {sizeof wc};
+  auto known = [&](const std::wstring& c) {
+    return !c.empty() && (GetClassInfoExW(inst, c.c_str(), &wc) || GetClassInfoExW(NULL, c.c_str(), &wc));
+  };
+  if (!t.clsId && !t.cls.empty() && !known(t.cls)) return false;
+  for (const ItemTemplate& it : t.items)
+    if (!known(it.cls)) return false;
+  return true;
+}
+
+// A template, its names read as UTF-16 unless only 32-bit names make
+// sense of its classes.
+DlgTemplate Parse(const void* tmpl, HINSTANCE inst = NULL) {
+  struct KeepError {
+    DWORD e = GetLastError();
+    ~KeepError() { SetLastError(e); }
+  } keep;
+  DlgTemplate t = ParseAs(tmpl, false);
+  if (ClassesKnown(t, inst)) return t;
+  RegisterSystemClasses();
+  if (ClassesKnown(t, inst)) return t;
+  DlgTemplate w = ParseAs(tmpl, true);
+  return !w.bad && ClassesKnown(w, inst) ? w : t;
 }
 
 // ---------------------------------------------------------------------
@@ -493,7 +541,7 @@ static HWND CreateDialogCore(HINSTANCE inst, const void* tmpl, HWND owner, DLGPR
     return NULL;
   }
   RegisterSystemClasses();
-  DlgTemplate t = Parse(tmpl);
+  DlgTemplate t = Parse(tmpl, inst);
   // The font, and the units it makes.
   HFONT font = NULL;
   if (t.hasFont) {
