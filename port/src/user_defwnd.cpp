@@ -398,6 +398,18 @@ void DrawFrame(Window* w) {
   ReleaseDC(w->hwnd, dc);
 }
 
+// The icon in the caption's system menu box: the window's small icon, as
+// WM_GETICON gives it when the window is this thread's, or else its
+// class's, or the system's application icon.
+HICON CaptionIcon(Window* w) {
+  HICON icon = NULL;
+  if (w->tid == GetCurrentThreadId()) icon = (HICON)SendMessageW(w->hwnd, WM_GETICON, ICON_SMALL2, 0);
+  else icon = w->iconSmall ? w->iconSmall : w->iconBig;
+  if (!icon && w->cls) icon = w->cls->wc.hIconSm ? w->cls->wc.hIconSm : w->cls->wc.hIcon;
+  if (!icon) icon = LoadIconW(NULL, MAKEINTRESOURCEW(32512));  // IDI_APPLICATION
+  return icon;
+}
+
 void DrawFrameTo(Window* w, HDC dc) {
   Frame f = Layout(w);
   RECT r = f.window;
@@ -434,6 +446,12 @@ void DrawFrameTo(Window* w, HDC dc) {
       if (font) DeleteObject(font);
       SetTextColor(dc, old);
       SetBkMode(dc, mode);
+    }
+    if (!RectEmpty(f.sysmenu)) {
+      int cx = GetSystemMetrics(SM_CXSMICON), cy = GetSystemMetrics(SM_CYSMICON);
+      RECT& m = f.sysmenu;
+      DrawIconEx(dc, (m.left + m.right - cx) / 2, (m.top + m.bottom - cy) / 2, CaptionIcon(w), cx, cy, 0, NULL,
+                 DI_NORMAL);
     }
     if (!RectEmpty(f.close)) DrawCaptionBox(dc, f.close, 0);
     if (!RectEmpty(f.max)) DrawCaptionBox(dc, f.max, (w->style & WS_MAXIMIZE) ? 2 : 1);
@@ -838,6 +856,7 @@ static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
         old = w->iconBig;
         w->iconBig = (HICON)lp;
       }
+      if (old != (HICON)lp) WindowIconChanged(w);
       return (LRESULT)old;
     }
     case WM_QUERYDRAGICON:

@@ -230,6 +230,8 @@ wl_interface xdg_surface_iface = {"xdg_surface", 1, 5, kSurfaceRequests, 1, kSur
 wl_interface xdg_toplevel_iface = {"xdg_toplevel", 1, 14, kToplevelRequests, 2, kToplevelEvents};
 wl_interface xdg_popup_iface = {"xdg_popup", 1, 2, kPopupRequests, 2, kPopupEvents};
 
+extern const wl_interface* iconTypes[6];
+
 void FillXdgTypes() {
   xdgTypes[6] = &wl_surface_interface;
   xdgTypes[12] = &wl_seat_interface;
@@ -237,7 +239,54 @@ void FillXdgTypes() {
   xdgTypes[18] = &wl_seat_interface;
   xdgTypes[21] = &wl_output_interface;
   xdgTypes[22] = &wl_seat_interface;
+  iconTypes[4] = &wl_buffer_interface;
 }
+
+// ---------------------------------------------------------------
+// xdg-toplevel-icon, version 1 (staging): a toplevel's icon, from pictures
+// in shared-memory buffers.
+
+enum { ICON_MANAGER_DESTROY, ICON_MANAGER_CREATE_ICON, ICON_MANAGER_SET_ICON };
+enum { ICON_DESTROY, ICON_SET_NAME, ICON_ADD_BUFFER };
+
+extern wl_interface xdg_toplevel_icon_manager_iface, xdg_toplevel_icon_iface;
+const wl_interface* iconTypes[6] = {
+    NULL,                                               // 0: untyped arguments
+    &xdg_toplevel_icon_iface,                           // 1: create_icon
+    &xdg_toplevel_iface, &xdg_toplevel_icon_iface,      // 2: set_icon
+    NULL, NULL,                                         // 4: add_buffer (wl_buffer)
+};
+const wl_message kIconManagerRequests[] = {
+    {"destroy", "", iconTypes}, {"create_icon", "n", iconTypes + 1}, {"set_icon", "o?o", iconTypes + 2}};
+const wl_message kIconManagerEvents[] = {{"icon_size", "i", iconTypes}, {"done", "", iconTypes}};
+const wl_message kIconRequests[] = {
+    {"destroy", "", iconTypes}, {"set_name", "s", iconTypes}, {"add_buffer", "oi", iconTypes + 4}};
+wl_interface xdg_toplevel_icon_manager_iface = {"xdg_toplevel_icon_manager_v1", 1, 3, kIconManagerRequests, 2,
+                                                kIconManagerEvents};
+wl_interface xdg_toplevel_icon_iface = {"xdg_toplevel_icon_v1", 1, 3, kIconRequests, 0, NULL};
+
+// ---------------------------------------------------------------
+// xdg-decoration, unstable version 1: asking the compositor to leave the
+// frame to the window, which draws its own.
+
+enum { DECORATION_MANAGER_DESTROY, DECORATION_MANAGER_GET_TOPLEVEL_DECORATION };
+enum { DECORATION_DESTROY, DECORATION_SET_MODE, DECORATION_UNSET_MODE };
+enum { DECORATION_MODE_CLIENT_SIDE = 1 };
+
+extern wl_interface zxdg_decoration_manager_iface, zxdg_toplevel_decoration_iface;
+const wl_interface* decorationTypes[] = {
+    NULL,                                                   // 0: untyped arguments
+    &zxdg_toplevel_decoration_iface, &xdg_toplevel_iface,  // 1: get_toplevel_decoration
+};
+const wl_message kDecorationManagerRequests[] = {
+    {"destroy", "", decorationTypes}, {"get_toplevel_decoration", "no", decorationTypes + 1}};
+const wl_message kDecorationRequests[] = {
+    {"destroy", "", decorationTypes}, {"set_mode", "u", decorationTypes}, {"unset_mode", "", decorationTypes}};
+const wl_message kDecorationEvents[] = {{"configure", "u", decorationTypes}};
+wl_interface zxdg_decoration_manager_iface = {"zxdg_decoration_manager_v1", 1, 2, kDecorationManagerRequests, 0,
+                                              NULL};
+wl_interface zxdg_toplevel_decoration_iface = {"zxdg_toplevel_decoration_v1", 1, 3, kDecorationRequests, 1,
+                                               kDecorationEvents};
 
 // A request on an xdg object; iface is the new object's, if it makes one.
 template <typename... A>
@@ -337,6 +386,10 @@ struct Native {
   bool shown = false;
   int pendingWidth = 0, pendingHeight = 0;  // from the toplevel's configure
   Buffer buffers[2];
+  // The toplevel's icon and its pictures, kept until the next replaces it.
+  void* icon = NULL;
+  std::vector<Buffer> iconBuffers;
+  void* decoration = NULL;  // zxdg_toplevel_decoration_v1
   wl_callback* frame = NULL;
   RECT damage = {0, 0, 0, 0};  // still to be shown
 };
@@ -355,6 +408,8 @@ struct WaylandBackend : Backend {
   wl_keyboard* keyboard = NULL;
   wl_output* output = NULL;
   void* wmBase = NULL;
+  void* decorationManager = NULL;  // zxdg_decoration_manager_v1, likewise
+  void* iconManager = NULL;  // xdg_toplevel_icon_manager_v1, when the compositor has it
   // The clipboard
   wl_data_device_manager* dataManager = NULL;
   wl_data_device* dataDevice = NULL;
@@ -452,6 +507,12 @@ struct WaylandBackend : Backend {
       b->wmBase = wl_registry_bind(r, name, &xdg_wm_base_iface, 1);
       static void (*const listener[])(void) = {(void (*)(void))Ping};
       winport_wl_proxy_add_listener((wl_proxy*)b->wmBase, (void (**)(void))listener, b);
+    } else if (strcmp(iface, "zxdg_decoration_manager_v1") == 0 && !b->decorationManager) {
+      b->decorationManager = wl_registry_bind(r, name, &zxdg_decoration_manager_iface, 1);
+    } else if (strcmp(iface, "xdg_toplevel_icon_manager_v1") == 0 && !b->iconManager) {
+      b->iconManager = wl_registry_bind(r, name, &xdg_toplevel_icon_manager_iface, 1);
+      static void (*const listener[])(void) = {(void (*)(void))IconSize, (void (*)(void))IconSizesDone};
+      winport_wl_proxy_add_listener((wl_proxy*)b->iconManager, (void (**)(void))listener, b);
     } else if (strcmp(iface, "wl_seat") == 0 && !b->seat) {
       b->seat = (wl_seat*)wl_registry_bind(r, name, &wl_seat_interface, std::min<uint32_t>(version, 5));
       static const wl_seat_listener sl = {SeatCaps, SeatName};
@@ -466,6 +527,12 @@ struct WaylandBackend : Backend {
     }
   }
   static void GlobalRemove(void*, wl_registry*, uint32_t) {}
+  // The mode the compositor chose. It may insist on drawing the frame
+  // itself; the window's caption is then drawn beneath its title bar.
+  static void DecorationConfigure(void*, void*, uint32_t) {}
+  // The sizes the compositor prefers; any square picture will do.
+  static void IconSize(void*, void*, int32_t) {}
+  static void IconSizesDone(void*, void*) {}
   static void Ping(void* data, void* base, uint32_t serial) {
     (void)data;
     Req(base, XDG_WM_BASE_PONG, NULL, serial);
@@ -623,8 +690,18 @@ struct WaylandBackend : Backend {
       n->toplevel = Req(n->xdgSurface, XDG_SURFACE_GET_TOPLEVEL, &xdg_toplevel_iface, NULL);
       static void (*const tl[])(void) = {(void (*)(void))ToplevelConfigure, (void (*)(void))ToplevelClose};
       winport_wl_proxy_add_listener((wl_proxy*)n->toplevel, (void (**)(void))tl, n);
+      if (decorationManager) {
+        // Without this, a compositor that draws frames (KDE's, wlroots')
+        // puts its title bar above the window's own caption.
+        n->decoration = Req(decorationManager, DECORATION_MANAGER_GET_TOPLEVEL_DECORATION,
+                            &zxdg_toplevel_decoration_iface, NULL, n->toplevel);
+        static void (*const dl[])(void) = {(void (*)(void))DecorationConfigure};
+        winport_wl_proxy_add_listener((wl_proxy*)n->decoration, (void (**)(void))dl, n);
+        Req(n->decoration, DECORATION_SET_MODE, NULL, (uint32_t)DECORATION_MODE_CLIENT_SIDE);
+      }
       Req(n->toplevel, XDG_TOPLEVEL_SET_TITLE, NULL, Utf8(w->text).c_str());
       Req(n->toplevel, XDG_TOPLEVEL_SET_APP_ID, NULL, appId.c_str());
+      SetIcon(n);
       if (w->owner) {
         Native* o = NativeOf(w->owner->TopLevel());
         if (o && o->toplevel) Req(n->toplevel, XDG_TOPLEVEL_SET_PARENT, NULL, o->toplevel);
@@ -640,6 +717,9 @@ struct WaylandBackend : Backend {
     for (Native* c : std::set<Native*>(natives))
       if (c->parent == n && c->shown) Unmap(c);
     if (n->popup) Done(n->popup, XDG_POPUP_DESTROY);
+    FreeIcon(n);
+    if (n->decoration) Done(n->decoration, DECORATION_DESTROY);  // before its toplevel
+    n->decoration = NULL;
     if (n->toplevel) Done(n->toplevel, XDG_TOPLEVEL_DESTROY);
     if (n->xdgSurface) Done(n->xdgSurface, XDG_SURFACE_DESTROY);
     n->popup = n->toplevel = n->xdgSurface = NULL;
@@ -701,6 +781,77 @@ struct WaylandBackend : Backend {
       SizeLimits(n);
       wl_surface_commit(n->surface);
     }
+    wl.wl_display_flush(dpy);
+  }
+
+  void FreeIcon(Native* n) {
+    if (n->icon) Done(n->icon, ICON_DESTROY);
+    n->icon = NULL;
+    for (Buffer& b : n->iconBuffers) FreeBuffer(b);
+    n->iconBuffers.clear();
+  }
+
+  // A picture in a square buffer, centred, its alpha premultiplied as the
+  // compositor wants it.
+  bool IconBuffer(const CursorPicture& p, Buffer& b) {
+    int side = std::max(p.width, p.height);
+    if (side <= 0) return false;
+    size_t size = (size_t)side * side * 4;
+    int fd = memfd_create("winport-icon", MFD_CLOEXEC);
+    if (fd < 0) return false;
+    void* data = ftruncate(fd, (off_t)size) == 0 ? mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0) : MAP_FAILED;
+    if (data == MAP_FAILED) {
+      close(fd);
+      return false;
+    }
+    DWORD* out = (DWORD*)data;
+    memset(out, 0, size);
+    int ox = (side - p.width) / 2, oy = (side - p.height) / 2;
+    for (int y = 0; y < p.height; y++)
+      for (int x = 0; x < p.width; x++) {
+        DWORD c = p.argb[(size_t)y * p.width + x], a = c >> 24;
+        out[(size_t)(y + oy) * side + x + ox] = (a << 24) | ((((c >> 16) & 0xFF) * a / 255) << 16) |
+                                                ((((c >> 8) & 0xFF) * a / 255) << 8) | ((c & 0xFF) * a / 255);
+      }
+    wl_shm_pool* pool = wl_shm_create_pool(shm, fd, (int32_t)size);
+    b.buffer = wl_shm_pool_create_buffer(pool, 0, side, side, side * 4, WL_SHM_FORMAT_ARGB8888);
+    wl_shm_pool_destroy(pool);
+    close(fd);
+    b.data = data;
+    b.size = size;
+    b.width = b.height = side;
+    return true;
+  }
+
+  // The window's icons for the compositor's task bar and switcher, where
+  // it takes them; otherwise it goes by the app ID.
+  void SetIcon(Native* n) {
+    if (!iconManager || !n->toplevel) return;
+    void* old = n->icon;
+    std::vector<Buffer> oldBuffers;
+    oldBuffers.swap(n->iconBuffers);
+    n->icon = NULL;
+    std::vector<CursorPicture> pics = DesktopIcons(n->w);
+    if (!pics.empty()) {
+      n->icon = Req(iconManager, ICON_MANAGER_CREATE_ICON, &xdg_toplevel_icon_iface, NULL);
+      for (const CursorPicture& p : pics) {
+        Buffer b;
+        if (!IconBuffer(p, b)) continue;
+        Req(n->icon, ICON_ADD_BUFFER, NULL, b.buffer, (int32_t)1);
+        n->iconBuffers.push_back(b);
+      }
+    }
+    Req(iconManager, ICON_MANAGER_SET_ICON, NULL, n->toplevel, n->icon);
+    if (old) Done(old, ICON_DESTROY);
+    for (Buffer& b : oldBuffers) FreeBuffer(b);
+  }
+
+  void IconChanged(Window* w) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    Native* n = NativeOf(w);
+    if (!n || !n->toplevel) return;
+    SetIcon(n);
+    wl_surface_commit(n->surface);
     wl.wl_display_flush(dpy);
   }
 
