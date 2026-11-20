@@ -2522,6 +2522,52 @@ static void TestClickThroughGroupBox() {
   ::DestroyWindow(top);
 }
 
+// Focus after a modal dialog: the control that had it in the owner (a
+// dialog itself) gets it back when the modal dialog ends.
+static HWND g_ownerEdit2 = NULL;
+static INT_PTR CALLBACK OwnerDlgProc(HWND h, UINT msg, WPARAM, LPARAM) {
+  if (msg == WM_INITDIALOG) {
+    ::CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 10, 10, 100, 20, h, (HMENU)1, NULL, NULL);
+    g_ownerEdit2 =
+        ::CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 10, 40, 100, 20, h, (HMENU)2, NULL, NULL);
+    return TRUE;
+  }
+  return FALSE;
+}
+static INT_PTR CALLBACK ShortModalProc(HWND h, UINT msg, WPARAM, LPARAM) {
+  if (msg == WM_INITDIALOG) {
+    ::CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 10, 10, 100, 20, h, (HMENU)1, NULL, NULL);
+    ::SetTimer(h, 1, 50, NULL);
+    return TRUE;
+  }
+  if (msg == WM_TIMER) {
+    ::KillTimer(h, 1);
+    ::EndDialog(h, 7);
+    return TRUE;
+  }
+  return FALSE;
+}
+
+static void TestModalFocus() {
+  // An empty template: the controls are made in WM_INITDIALOG.
+  static WORD tmpl[32];
+  memset(tmpl, 0, sizeof tmpl);
+  DLGTEMPLATE* t = (DLGTEMPLATE*)tmpl;
+  t->style = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME;
+  t->cx = 150;
+  t->cy = 80;
+  HWND owner = ::CreateDialogIndirectParamW(NULL, t, NULL, OwnerDlgProc, 0);
+  CHECK(owner != NULL);
+  ::ShowWindow(owner, SW_SHOW);
+  ::SetForegroundWindow(owner);
+  ::SetFocus(g_ownerEdit2);
+  CHECK(::GetFocus() == g_ownerEdit2);
+  CHECK(::DialogBoxIndirectParamW(NULL, t, owner, ShortModalProc, 0) == 7);
+  CHECK(::GetActiveWindow() == owner);
+  CHECK(::GetFocus() == g_ownerEdit2);
+  ::DestroyWindow(owner);
+}
+
 static void TestCWnd() {
   CTestWnd wnd;
   CString cls = AfxRegisterWndClass(CS_HREDRAW | CS_VREDRAW, NULL, (HBRUSH)(COLOR_WINDOW + 1));
@@ -2920,6 +2966,7 @@ int main() {
   TestPropertySheets();
   TestPrinting();
   TestShapesAndDrops();
+  TestModalFocus();
   TestCWnd();
 #ifdef _WINPORT
   TestClickThroughGroupBox();

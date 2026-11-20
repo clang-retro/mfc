@@ -880,9 +880,11 @@ BOOL WINAPI EnableWindow(HWND h, BOOL enable) {
   } else if (!enable && !wasDisabled) {
     SendTo(w, WM_CANCELMODE, 0, 0);
     w->style |= WS_DISABLED;
+    // The window itself loses the focus; a child keeps it, so that a
+    // dialog being deactivated (by the modal dialog its owner is disabled
+    // for) remembers which control had it.
     Queue* q = QueueFor(w->tid);
-    Window* f = GetWindow(q->focus);
-    if (f && (f == w || IsChild(h, f->hwnd))) SetFocus(NULL);
+    if (q->focus == h) SetFocus(NULL);
     SendTo(w, WM_ENABLE, FALSE, 0);
   }
   return wasDisabled;
