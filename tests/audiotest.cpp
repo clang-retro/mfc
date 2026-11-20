@@ -296,12 +296,15 @@ static void TestTimers() {
   CHECK(timeGetDevCaps(&caps, sizeof caps) == TIMERR_NOERROR && caps.wPeriodMin >= 1);
   CHECK(timeBeginPeriod(1) == TIMERR_NOERROR);
 
+  DWORD start = timeGetTime();
   UINT id = timeSetEvent(10, 1, Tick, 42, TIME_PERIODIC);
   CHECK(id != 0);
   Sleep(300);
   CHECK(timeKillEvent(id) == TIMERR_NOERROR);
+  // About one tick each 10 ms of however long the sleep really took.
   LONG ticks = g_ticks;
-  CHECK(ticks >= 5 && ticks <= 40);
+  LONG most = (LONG)((timeGetTime() - start) / 10) + 5;
+  CHECK(ticks >= 5 && ticks <= most);
   Sleep(50);
   CHECK(g_ticks == ticks);  // none after the kill
   CHECK(timeKillEvent(id) != TIMERR_NOERROR);
@@ -475,7 +478,14 @@ static void TestWave() {
       waveInAddBuffer(in, &inHdr[i], sizeof(WAVEHDR));
     }
     CHECK(waveInStart(in) == MMSYSERR_NOERROR);
-    Sleep(50);
+    // Until some sound is in, however slow the machine.
+    MMTIME at = {};
+    at.wType = TIME_BYTES;
+    for (int i = 0; i < 200 && at.u.cb == 0; i++) {
+      Sleep(10);
+      waveInGetPosition(in, &at, sizeof at);
+    }
+    CHECK(at.u.cb > 0 && at.u.cb < sizeof rec[0]);
     CHECK(waveInStop(in) == MMSYSERR_NOERROR);
     CHECK(inHdr[0].dwFlags & WHDR_DONE);
     CHECK(inHdr[0].dwBytesRecorded > 0 && inHdr[0].dwBytesRecorded < sizeof rec[0]);

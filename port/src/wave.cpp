@@ -311,7 +311,7 @@ struct WaveIn {
       g.lock();
       inRead = false;
       changed.notify_all();
-      if (gen != generation || !started) continue;
+      if (gen != generation) continue;
       if (got == 0) {
         changed.wait_for(g, std::chrono::milliseconds(kChunkMs));
         continue;
@@ -751,8 +751,8 @@ MMRESULT WINAPI waveInStop(HWAVEIN h) {
   if (!w) return MMSYSERR_INVALHANDLE;
   std::unique_lock<std::mutex> g(w->lock);
   if (w->started) {
+    // What the read in progress brings in is kept, as on Windows.
     w->started = false;
-    w->generation++;
     WaveIn::Hold hold(w, g);
   }
   w->Flush(g, false);
