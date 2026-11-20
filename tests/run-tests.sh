@@ -105,14 +105,15 @@ if [ $NATIVE = 1 ]; then
     fi
     mkdir -p "$outdir"
     srcs=tests/$name.cpp
-    # WTL, built as Visual C++ builds it (tools/fetch-wtl.sh fetches it).
+    # WTL, built as Visual C++ builds it (tools/fetch-wtl.sh fetches it);
+    # the C library headers still want __GNUC__ (macOS: va_list).
     extra= rcextra=
     if [ $name = wtltest ]; then
       if [ ! -f "$WTL_INCLUDE/atlapp.h" ]; then
         echo "skip   $label-$v (no WTL headers; run tools/fetch-wtl.sh)"
         return
       fi
-      extra="-isystem $WTL_INCLUDE -fms-compatibility -fms-compatibility-version=19.29"
+      extra="-isystem $WTL_INCLUDE -fms-compatibility -fms-compatibility-version=19.29 -fgnuc-version=4.2.1"
       rcextra="-I $WTL_INCLUDE"
     fi
     # Resources become C++ that registers them as the program starts.
