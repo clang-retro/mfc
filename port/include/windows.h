@@ -18,6 +18,7 @@
 #include <winreg.h>
 #include <winver.h>
 #ifndef WIN32_LEAN_AND_MEAN
+#include <mmsystem.h>
 #include <commdlg.h>
 #include <shellapi.h>
 #include <winspool.h>

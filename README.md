@@ -139,6 +139,18 @@ reads, writes and event waits on a port opened with
 `FILE_FLAG_OVERLAPPED` run in the background until `GetOverlappedResult`
 or the event says they are done.
 
+Sound goes through ALSA on Linux (libasound, loaded when first used;
+`WINPORT_AUDIO_DEVICE` names the device) and through audio queues on
+macOS. `waveOut` and `waveIn` take any format the built-in ACM driver
+reads (PCM of 8 to 32 bits and float, A-law, mu-law and IMA ADPCM, at
+any rate and channels) and convert it for the device, with callbacks,
+loops, pause, positions and volume. The ACM itself enumerates, suggests
+and converts those formats. `mmio` reads and writes RIFF files on disk
+and in memory; `PlaySound` plays WAVE files, resources and images; and
+`timeSetEvent` timers run on their own threads. `WINPORT_AUDIO=null`
+chooses a loopback device that keeps time like a sound card and records
+what was played.
+
 A regular DLL builds as a shared library (`-shared`, exporting
 `DllMain` and the `.def` file's names; the program links with
 `-rdynamic` on Linux, and the library with `-undefined dynamic_lookup`
@@ -259,7 +271,7 @@ when there is no display. For a Linux or macOS target it builds `core`,
 `docobtest`, `linktest`, `bindtest`, `richtest`, `richsrvtest`,
 `autotest`, `srvtest`, `atlwintest`, `atltest`, `conntest`, `ctltest`,
 `wltest`, `dragtest`, `daotest`, `dvtest`, `htmltest`, `atlctltest`,
-`cdlgtest` and `iotest` against the portable layer, and `exttest`, `core`, `sditest`,
+`cdlgtest`, `iotest` and `audiotest` against the portable layer, and `exttest`, `core`, `sditest`,
 `dlgtest` and `dlltest` again with the shared libraries
 (`SHARED_TESTS`), and runs them directly; `NATIVE_TESTS` names others to
 try.
@@ -452,6 +464,14 @@ try.
   return at once, wait, or end when the line goes quiet, a command out
   and a reply in, and WaitCommEvent overlapped, ended by data, by
   SetCommMask and by CancelIo.
+* `audiotest`: voice audio, on the console: ACM format details,
+  enumeration and suggestion, and streams through mu-law, IMA ADPCM and
+  a rate change; a WAVE file written and read through mmio, its buffer
+  used directly, and a file in memory; periodic and one-shot timers;
+  and, where there is a sound device, a mu-law tone played while
+  recording (checked against what was recorded on the loopback device),
+  positions, pause, reset, a loop, a recording stopped early, and
+  PlaySound.
 * `oletest`: an OLE container: objects of a class the test registers
   itself, embedded in a COleDocument, drawn by its view, opened and
   changed through their verbs and the verb menu, saved to flat and
