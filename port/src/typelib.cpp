@@ -1770,6 +1770,66 @@ private:
 
 }  // namespace
 
+
+// Type information between processes goes by value: the library it
+// comes from, as the layer saves libraries, and which of its types.
+namespace winport {
+namespace com {
+
+bool WriteTypeInfo(Writer& w, ITypeInfo* ti) {
+  Info* info = NULL;
+  if (ti == NULL || FAILED(ti->QueryInterface(kIID_LayerTypeInfo, (void**)&info)) || info == NULL) {
+    w.U32(0);
+    return ti == NULL;
+  }
+  Lib* lib = info->lib;
+  if (lib->builtin) {
+    w.U32(2);  // stdole: the receiver has it
+  } else {
+    if (lib->creating)
+      for (size_t i = 0; i < lib->types.size(); i++) {
+        Info layout(lib, i, true);
+        layout.LayOutVtable();
+      }
+    Writer b;
+    lib->Save(b);
+    w.U32(1);
+    w.Bytes(b.b.data(), (uint32_t)b.b.size());
+    w.Str(lib->file.c_str());
+  }
+  w.U32((uint32_t)info->index);
+  w.U32(info->ifaceView ? 1 : 0);
+  info->Release();
+  return true;
+}
+
+HRESULT ReadTypeInfo(Reader& r, ITypeInfo** out) {
+  *out = NULL;
+  uint32_t kind = r.U32();
+  if (kind == 0) return r.bad ? winport::com::kBadReply : S_OK;
+  Lib* lib = NULL;
+  if (kind == 2) {
+    lib = StdOle();
+    lib->AddRef();
+  } else {
+    std::vector<BYTE> bytes = r.Bytes();
+    std::wstring path = r.Str();
+    ITypeLib* tl = NULL;
+    if (r.bad || FAILED(FromBytes(bytes, path, &tl))) return winport::com::kBadReply;
+    lib = static_cast<Lib*>(tl);
+  }
+  uint32_t index = r.U32();
+  bool view = r.U32() != 0;
+  HRESULT hr = S_OK;
+  if (r.bad || index >= lib->types.size()) hr = winport::com::kBadReply;
+  else *out = lib->NewInfo(index, view);
+  lib->Release();
+  return hr;
+}
+
+}  // namespace com
+}  // namespace winport
+
 extern "C" {
 
 HRESULT WINAPI CreateTypeLib2(SYSKIND syskind, LPCOLESTR file, ICreateTypeLib2** out) {

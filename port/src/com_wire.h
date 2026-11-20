@@ -170,6 +170,15 @@ void PutInterfaceOut(Writer& w, HRESULT hr, IUnknown* p, REFIID iid, DWORD to);
 bool PutVariant(Writer& w, const VARIANT* v, DWORD to);
 HRESULT GetVariant(Reader& r, VARIANT* v);
 
+// What a call that came back garbled fails with: RPC_E_SERVERFAULT.
+const HRESULT kBadReply = (HRESULT)0x80010105L;
+
+// Type information, by value (typelib.cpp): the library it is from and
+// which of its types. WriteTypeInfo says false (and writes none) for
+// type information the layer did not make.
+bool WriteTypeInfo(Writer& w, ITypeInfo* ti);
+HRESULT ReadTypeInfo(Reader& r, ITypeInfo** out);
+
 // Runs the calls waiting for this thread, when it is the apartment.
 void Drain();
 

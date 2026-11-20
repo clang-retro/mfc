@@ -426,6 +426,177 @@ static DWORD ProcessExitCode(DWORD dwPid) {
   return dwCode;
 }
 
+#ifdef _WINPORT
+// ---------------------------------------------------------------------
+// The server's object held directly, without the object handler between:
+// its advise connections, its data's, and monikers, across processes.
+
+class CDirectSink : public IAdviseSink, public IOleClientSite {
+public:
+  LONG m_nRef;
+  int m_nRenamed, m_nClosed;
+  CString m_strRenamed;
+  CDirectSink() : m_nRef(1), m_nRenamed(0), m_nClosed(0) {}
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (::IsEqualIID(iid, IID_IUnknown) || ::IsEqualIID(iid, IID_IAdviseSink))
+      *ppv = static_cast<IAdviseSink*>(this);
+    else if (::IsEqualIID(iid, IID_IOleClientSite))
+      *ppv = static_cast<IOleClientSite*>(this);
+    else {
+      *ppv = NULL;
+      return E_NOINTERFACE;
+    }
+    AddRef();
+    return S_OK;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return (ULONG)::InterlockedIncrement(&m_nRef); }
+  STDMETHOD_(ULONG, Release)() { return (ULONG)::InterlockedDecrement(&m_nRef); }
+  // IAdviseSink
+  STDMETHOD_(void, OnDataChange)(FORMATETC*, STGMEDIUM*) {}
+  STDMETHOD_(void, OnViewChange)(DWORD, LONG) {}
+  STDMETHOD_(void, OnRename)(IMoniker* pmk) {
+    m_nRenamed++;
+    LPBC pbc = NULL;
+    LPOLESTR psz = NULL;
+    if (pmk != NULL && SUCCEEDED(::CreateBindCtx(0, &pbc)) && SUCCEEDED(pmk->GetDisplayName(pbc, NULL, &psz))) {
+      m_strRenamed = psz;
+      ::CoTaskMemFree(psz);
+    }
+    if (pbc != NULL) pbc->Release();
+  }
+  STDMETHOD_(void, OnSave)() {}
+  STDMETHOD_(void, OnClose)() { m_nClosed++; }
+  // IOleClientSite: the container is a file, Report.cnt.
+  STDMETHOD(SaveObject)() { return S_OK; }
+  STDMETHOD(GetMoniker)(DWORD, DWORD dwWhich, IMoniker** ppmk) {
+    *ppmk = NULL;
+    LPMONIKER lpFile = NULL;
+    if (FAILED(::CreateFileMoniker(L"/tmp/Report.cnt", &lpFile))) return E_FAIL;
+    if (dwWhich == OLEWHICHMK_CONTAINER) {
+      *ppmk = lpFile;
+      return S_OK;
+    }
+    LPMONIKER lpItem = NULL;
+    HRESULT hr = ::CreateItemMoniker(L"!", L"Item 1", &lpItem);
+    if (SUCCEEDED(hr)) hr = ::CreateGenericComposite(lpFile, lpItem, ppmk);
+    if (lpItem != NULL) lpItem->Release();
+    lpFile->Release();
+    return hr;
+  }
+  STDMETHOD(GetContainer)(IOleContainer** pp) {
+    *pp = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD(ShowObject)() { return S_OK; }
+  STDMETHOD(OnShowWindow)(BOOL) { return S_OK; }
+  STDMETHOD(RequestNewObjectLayout)() { return E_NOTIMPL; }
+};
+
+static CString DisplayName(LPMONIKER lpmk) {
+  CString str;
+  LPBC pbc = NULL;
+  LPOLESTR psz = NULL;
+  if (lpmk != NULL && SUCCEEDED(::CreateBindCtx(0, &pbc)) && SUCCEEDED(lpmk->GetDisplayName(pbc, NULL, &psz))) {
+    str = psz;
+    ::CoTaskMemFree(psz);
+  }
+  if (pbc != NULL) pbc->Release();
+  return str;
+}
+
+// How many connections an enumerator gives, and whether one is to pSink.
+static int CountAdvise(LPENUMSTATDATA pEnum, IAdviseSink* pSink, BOOL* pbFound) {
+  *pbFound = FALSE;
+  int n = 0;
+  STATDATA sd;
+  while (pEnum->Next(1, &sd, NULL) == S_OK) {
+    n++;
+    if (sd.pAdvSink == pSink) *pbFound = TRUE;
+    if (sd.pAdvSink != NULL) sd.pAdvSink->Release();
+  }
+  return n;
+}
+
+// Returns the server's process, which ends once the object goes.
+static DWORD TestDirectObject() {
+  LPOLEOBJECT lpObject = NULL;
+  HRESULT hr = ::CoCreateInstance(CLSID_SrvDoc, NULL, CLSCTX_LOCAL_SERVER, IID_IOleObject, (void**)&lpObject);
+  TestLog("direct object: %08lx", (unsigned long)hr);
+  CHECK(hr == S_OK && lpObject != NULL);
+  if (lpObject == NULL) return 0;
+  CDirectSink sink;
+  DWORD dwPid = 0;
+  LPDATAOBJECT lpData = NULL;
+  CHECK(lpObject->QueryInterface(IID_IDataObject, (void**)&lpData) == S_OK);
+  if (lpData != NULL) {
+    FORMATETC fe = {CfProcess(), NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM stg;
+    if (SUCCEEDED(lpData->GetData(&fe, &stg))) {
+      dwPid = *(DWORD*)::GlobalLock(stg.hGlobal);
+      ::GlobalUnlock(stg.hGlobal);
+      ::ReleaseStgMedium(&stg);
+    }
+  }
+  CHECK(dwPid != 0 && dwPid != ::GetCurrentProcessId());
+  TrackProcess(dwPid);
+  CHECK(lpObject->SetClientSite(&sink) == S_OK);
+
+  // The advise connections come back with the sinks that made them.
+  DWORD dwConn = 0, dwDataConn = 0;
+  CHECK(lpObject->Advise(&sink, &dwConn) == S_OK && dwConn != 0);
+  LPENUMSTATDATA pEnum = NULL;
+  CHECK(lpObject->EnumAdvise(&pEnum) == S_OK && pEnum != NULL);
+  if (pEnum != NULL) {
+    BOOL bFound;
+    int n = CountAdvise(pEnum, &sink, &bFound);
+    TestLog("advise connections: %d, ours %d", n, bFound);
+    CHECK(n == 1 && bFound);
+    pEnum->Release();
+  }
+  if (lpData != NULL) {
+    FORMATETC fe = {CfColor(), NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    CHECK(lpData->DAdvise(&fe, ADVF_NODATA, &sink, &dwDataConn) == S_OK && dwDataConn != 0);
+    pEnum = NULL;
+    CHECK(lpData->EnumDAdvise(&pEnum) == S_OK && pEnum != NULL);
+    if (pEnum != NULL) {
+      STATDATA sd;
+      CHECK(pEnum->Next(1, &sd, NULL) == S_OK);
+      CHECK(sd.formatetc.cfFormat == CfColor() && sd.advf == ADVF_NODATA && sd.dwConnection == dwDataConn);
+      CHECK(sd.pAdvSink == static_cast<IAdviseSink*>(&sink));
+      if (sd.pAdvSink != NULL) sd.pAdvSink->Release();
+      CHECK(pEnum->Next(1, &sd, NULL) == S_FALSE);
+      pEnum->Release();
+    }
+    CHECK(lpData->DUnadvise(dwDataConn) == S_OK);
+  }
+
+  // Monikers: the server asks this site for one and hands it back.
+  LPMONIKER lpmk = NULL;
+  CHECK(lpObject->GetMoniker(OLEGETMONIKER_ONLYIFTHERE, OLEWHICHMK_OBJFULL, &lpmk) == S_OK && lpmk != NULL);
+  CString strName = DisplayName(lpmk);
+  TestLog("object moniker: %s", (const char*)CStringA(strName));
+  CHECK(strName == _T("/tmp/Report.cnt!Item 1"));
+  if (lpmk != NULL) {
+    CHECK(lpObject->SetMoniker(OLEWHICHMK_OBJFULL, lpmk) == S_OK);
+    lpmk->Release();
+  }
+
+  CHECK(lpObject->Unadvise(dwConn) == S_OK);
+  pEnum = NULL;
+  CHECK(lpObject->EnumAdvise(&pEnum) == S_OK && pEnum != NULL);
+  if (pEnum != NULL) {
+    BOOL bFound;
+    CHECK(CountAdvise(pEnum, &sink, &bFound) == 0);
+    pEnum->Release();
+  }
+  CHECK(lpObject->Close(OLECLOSE_NOSAVE) == S_OK);
+  lpObject->SetClientSite(NULL);
+  if (lpData != NULL) lpData->Release();
+  lpObject->Release();
+  return dwPid;
+}
+#endif
+
 class CCntrFrame : public CFrameWnd {
 public:
   int m_nStep, m_nWait;
@@ -433,12 +604,12 @@ public:
   CCntrDoc* m_pDoc;
   CCntrItem* m_pItem;
   CCntrItem* m_pClone;
-  DWORD m_dwPid, m_dwPid2;
+  DWORD m_dwPid, m_dwPid2, m_dwPid3;
   HWND m_hServer;
 
   CCntrFrame()
       : m_nStep(0), m_nWait(0), m_bBusy(FALSE), m_pDoc(NULL), m_pItem(NULL), m_pClone(NULL),
-        m_dwPid(0), m_dwPid2(0), m_hServer(NULL) {}
+        m_dwPid(0), m_dwPid2(0), m_dwPid3(0), m_hServer(NULL) {}
 
   afx_msg int OnCreate(LPCREATESTRUCT lpcs) {
     if (CFrameWnd::OnCreate(lpcs) == -1) return -1;
@@ -620,6 +791,18 @@ public:
         if (!Wait(ProcessEnded(m_dwPid2), "the servers to end"))
           return;
         CHECK(ProcessEnded(m_dwPid2) && ProcessExitCode(m_dwPid2) == 0);
+#ifdef _WINPORT
+        m_dwPid3 = TestDirectObject();
+#endif
+        m_nStep++;
+        break;
+      }
+      case 8: {
+        if (m_dwPid3 != 0 && !Wait(ProcessEnded(m_dwPid3), "the third server to end")) return;
+        if (m_dwPid3 != 0) {
+          TestLog("third server exit code %lu", ProcessExitCode(m_dwPid3));
+          CHECK(ProcessEnded(m_dwPid3) && ProcessExitCode(m_dwPid3) == 0);
+        }
         POSITION pos = g_processes.GetStartPosition();
         while (pos != NULL) {
           DWORD dwPid;

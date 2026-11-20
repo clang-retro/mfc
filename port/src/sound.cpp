@@ -24,6 +24,14 @@
 #include <thread>
 #include <vector>
 
+#if defined(__APPLE__) && defined(__has_include)
+#if __has_include(<pthread/qos.h>)
+#include <pthread.h>
+#include <pthread/qos.h>
+#define WINPORT_HAVE_QOS 1
+#endif
+#endif
+
 namespace {
 
 // ---- PlaySound ----
@@ -229,6 +237,15 @@ Timers& TheTimers() {
 
 void RunTimer(std::shared_ptr<Timer> t) {
   Timers& ts = TheTimers();
+#ifdef WINPORT_HAVE_QOS
+  // Windows runs these callbacks at time-critical priority. macOS gives a
+  // thread of a program not in the foreground (one started from a shell
+  // or a service, say) a lower quality of service, whose timed waits it
+  // lets run late to save power: tens of milliseconds, a 10 ms timer's
+  // ticks lost. Asking for interactive service keeps the waits on time.
+  if (__builtin_available(macOS 10.10, *))
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
   auto due = std::chrono::steady_clock::now();
   for (;;) {
     due += std::chrono::milliseconds(t->delay);

@@ -18,6 +18,64 @@ static int g_failures = 0;
   } while (0)
 
 // ---------------------------------------------------------------------
+// An object with type information, from a library made in memory: what
+// it gives crosses to another process by value.
+
+// {3B8E1F42-5C7A-4D09-8E61-7A2C4B9D0E35}
+static const IID IID_DTyped = {0x3b8e1f42, 0x5c7a, 0x4d09, {0x8e, 0x61, 0x7a, 0x2c, 0x4b, 0x9d, 0x0e, 0x35}};
+
+static ITypeLib* MakeTypeLib() {
+  ICreateTypeLib2* pctl = NULL;
+  if (FAILED(::CreateTypeLib2(SYS_WIN32, L"autotest.tlb", &pctl))) return NULL;
+  pctl->SetName((LPOLESTR)L"AutoTestLib");
+  ICreateTypeInfo* pcti = NULL;
+  if (SUCCEEDED(pctl->CreateTypeInfo((LPOLESTR)L"DTyped", TKIND_DISPATCH, &pcti))) {
+    pcti->SetGuid(IID_DTyped);
+    pcti->SetDocString((LPOLESTR)L"A typed thing");
+    ELEMDESC params[2] = {};
+    params[0].tdesc.vt = VT_I4;
+    params[1].tdesc.vt = VT_I4;
+    FUNCDESC fd = {};
+    fd.memid = 1;
+    fd.funckind = FUNC_DISPATCH;
+    fd.invkind = INVOKE_FUNC;
+    fd.callconv = CC_STDCALL;
+    fd.cParams = 2;
+    fd.lprgelemdescParam = params;
+    fd.elemdescFunc.tdesc.vt = VT_I4;
+    LPOLESTR names[] = {(LPOLESTR)L"Add", (LPOLESTR)L"a", (LPOLESTR)L"b"};
+    pcti->AddFuncDesc(0, &fd);
+    pcti->SetFuncAndParamNames(0, names, 3);
+    pcti->Release();
+  }
+  ITypeLib* ptl = NULL;
+  pctl->QueryInterface(IID_ITypeLib, (void**)&ptl);
+  pctl->Release();
+  return ptl;
+}
+
+class CTyped : public CCmdTarget {
+public:
+  CTyped() { EnableAutomation(); }
+  long Add(long a, long b) { return a + b; }
+  virtual UINT GetTypeInfoCount() { return 1; }
+  virtual BOOL GetDispatchIID(IID* pIID) {
+    *pIID = IID_DTyped;
+    return TRUE;
+  }
+  virtual HRESULT GetTypeLib(LCID, LPTYPELIB* ppTypeLib) {
+    *ppTypeLib = MakeTypeLib();
+    return *ppTypeLib ? S_OK : TYPE_E_CANTLOADLIBRARY;
+  }
+  virtual void OnFinalRelease() { delete this; }
+  DECLARE_DISPATCH_MAP()
+};
+
+BEGIN_DISPATCH_MAP(CTyped, CCmdTarget)
+  DISP_FUNCTION_ID(CTyped, "Add", 1, Add, VT_I4, VTS_I4 VTS_I4)
+END_DISPATCH_MAP()
+
+// ---------------------------------------------------------------------
 // An automation object.
 
 class CCalc : public CCmdTarget {
@@ -69,6 +127,7 @@ public:
   }
   void Fail() { AfxThrowOleDispatchException(1234, _T("It failed")); }
   LPDISPATCH Self() { return GetIDispatch(TRUE); }
+  LPDISPATCH Typed() { return (new CTyped)->GetIDispatch(FALSE); }  // its one reference
   CY Money(CY c) {
     c.int64 *= 2;
     return c;
@@ -118,6 +177,7 @@ BEGIN_DISPATCH_MAP(CCalc, CCmdTarget)
   DISP_FUNCTION(CCalc, "Money", Money, VT_CY, VTS_CY)
   DISP_FUNCTION_ID(CCalc, "Answer", 42, Answer, VT_I4, VTS_NONE)
   DISP_FUNCTION(CCalc, "ProcessId", ProcessId, VT_I4, VTS_NONE)
+  DISP_FUNCTION(CCalc, "Typed", Typed, VT_DISPATCH, VTS_NONE)
   DISP_PROPERTY_EX(CCalc, "Version", GetVersion, SetNotSupported, VT_BSTR)
   DISP_DEFVALUE(CCalc, "Total")
 END_DISPATCH_MAP()
@@ -642,6 +702,43 @@ static void TestLocalServer() {
   ::SysFreeString(info.bstrSource);
   ::SysFreeString(info.bstrDescription);
   ::SysFreeString(info.bstrHelpFile);
+
+#ifdef _WINPORT
+  // Type information comes across as a copy. (Windows marshals ITypeInfo
+  // itself, without its [local] methods.)
+  CHECK(Call(p, IdOf(p, L"Typed"), DISPATCH_METHOD, &r) == S_OK && r.vt == VT_DISPATCH);
+  if (r.vt == VT_DISPATCH && r.pdispVal != NULL) {
+    LPDISPATCH pTyped = r.pdispVal;
+    UINT nInfo = 0;
+    CHECK(pTyped->GetTypeInfoCount(&nInfo) == S_OK && nInfo == 1);
+    ITypeInfo* pti = NULL;
+    CHECK(pTyped->GetTypeInfo(0, 0, &pti) == S_OK && pti != NULL);
+    if (pti != NULL) {
+      TYPEATTR* pta = NULL;
+      CHECK(pti->GetTypeAttr(&pta) == S_OK);
+      if (pta != NULL) {
+        CHECK(::IsEqualIID(pta->guid, IID_DTyped) && pta->typekind == TKIND_DISPATCH && pta->cFuncs == 1);
+        pti->ReleaseTypeAttr(pta);
+      }
+      BSTR bstrName = NULL, bstrDoc = NULL;
+      CHECK(pti->GetDocumentation(MEMBERID_NIL, &bstrName, &bstrDoc, NULL, NULL) == S_OK);
+      CHECK(bstrName && wcscmp(bstrName, L"DTyped") == 0 && bstrDoc && wcscmp(bstrDoc, L"A typed thing") == 0);
+      ::SysFreeString(bstrName);
+      ::SysFreeString(bstrDoc);
+      LPOLESTR pszAdd = (LPOLESTR)L"Add";
+      MEMBERID id = 0;
+      CHECK(pti->GetIDsOfNames(&pszAdd, 1, &id) == S_OK && id == 1);
+      // The copy calls the remote object through its IDispatch.
+      VARIANT args[2] = {I4(5), I4(6)};
+      DISPPARAMS dp = {args, NULL, 2, 0};
+      VARIANT sum;
+      ::VariantInit(&sum);
+      CHECK(pti->Invoke(pTyped, 1, DISPATCH_METHOD, &dp, &sum, NULL, NULL) == S_OK && sum.lVal == 11);
+      pti->Release();
+    }
+    pTyped->Release();
+  }
+#endif
 
   HANDLE hProcess = ::OpenProcess(SYNCHRONIZE, FALSE, dwPid);
   p->Release();

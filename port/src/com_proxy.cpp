@@ -343,10 +343,19 @@ struct DispatchProxy : ProxyBase, IDispatch {
     *n = SUCCEEDED(hr) ? r.U32() : 0;
     return hr;
   }
-  // Type information does not cross: there is no proxy for ITypeInfo.
-  STDMETHOD(GetTypeInfo)(UINT, LCID, ITypeInfo** out) override {
-    if (out) *out = NULL;
-    return E_NOTIMPL;
+  // Type information comes by value (see typelib.cpp).
+  STDMETHOD(GetTypeInfo)(UINT index, LCID lcid, ITypeInfo** out) override {
+    if (out == NULL) return E_POINTER;
+    *out = NULL;
+    Writer w;
+    w.U32(index);
+    w.U32(lcid);
+    std::vector<BYTE> reply;
+    HRESULT hr = pm->Invoke(IID_IDispatch, 4, w, &reply);
+    if (FAILED(hr)) return hr;
+    Reader r(reply);
+    HRESULT hr2 = ReadTypeInfo(r, out);
+    return FAILED(hr2) ? hr2 : hr;
   }
   STDMETHOD(GetIDsOfNames)(REFIID, LPOLESTR* names, UINT count, LCID lcid, DISPID* ids) override {
     if ((names == NULL || ids == NULL) && count) return E_POINTER;
@@ -423,6 +432,19 @@ HRESULT DispatchStub(StubCall& c) {
       UINT n = 0;
       HRESULT hr = d->GetTypeInfoCount(&n);
       w.U32(n);
+      return hr;
+    }
+    case 4: {
+      UINT index = r.U32();
+      LCID lcid = r.U32();
+      ITypeInfo* ti = NULL;
+      HRESULT hr = d->GetTypeInfo(index, lcid, &ti);
+      if (SUCCEEDED(hr) && !WriteTypeInfo(w, ti)) hr = E_NOTIMPL;  // not the layer's
+      if (FAILED(hr)) {
+        w.b.clear();
+        w.U32(0);
+      }
+      if (ti) ti->Release();
       return hr;
     }
     case 5: {
