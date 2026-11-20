@@ -59,6 +59,7 @@ class CWnd;
 class CDialog;
 class CStatic;
 class CButton;
+class CImageList;
 class CListBox;
 class CCheckListBox;
 class CComboBox;
@@ -1803,6 +1804,70 @@ public:
   virtual BOOL OnChildNotify(UINT, WPARAM, LPARAM, LRESULT*);
 };
 
+// The button messages and structures of the XP and Vista common controls,
+// for SDK headers that leave them out (the XP sysroot, the portable layer).
+#ifndef BCM_FIRST
+#define BCM_FIRST 0x1600
+#endif
+#ifndef BCN_FIRST
+#define BCN_FIRST (0U - 1250U)
+#endif
+#ifndef BCM_GETIDEALSIZE
+#define BUTTON_IMAGELIST_ALIGN_LEFT 0
+#define BUTTON_IMAGELIST_ALIGN_RIGHT 1
+#define BUTTON_IMAGELIST_ALIGN_TOP 2
+#define BUTTON_IMAGELIST_ALIGN_BOTTOM 3
+#define BUTTON_IMAGELIST_ALIGN_CENTER 4
+typedef struct {
+  HIMAGELIST himl;
+  RECT margin;
+  UINT uAlign;
+} BUTTON_IMAGELIST, *PBUTTON_IMAGELIST;
+#define BCM_GETIDEALSIZE (BCM_FIRST + 0x1)
+#define BCM_SETIMAGELIST (BCM_FIRST + 0x2)
+#define BCM_GETIMAGELIST (BCM_FIRST + 0x3)
+#define BCM_SETTEXTMARGIN (BCM_FIRST + 0x4)
+#define BCM_GETTEXTMARGIN (BCM_FIRST + 0x5)
+#endif
+#ifndef BST_HOT
+#define BST_HOT 0x0200
+#endif
+#ifndef BCN_DROPDOWN
+#define BST_DROPDOWNPUSHED 0x0400
+#define BS_SPLITBUTTON 0x0000000CL
+#define BS_DEFSPLITBUTTON 0x0000000DL
+#define BS_COMMANDLINK 0x0000000EL
+#define BS_DEFCOMMANDLINK 0x0000000FL
+#define BCSIF_GLYPH 0x0001
+#define BCSIF_IMAGE 0x0002
+#define BCSIF_STYLE 0x0004
+#define BCSIF_SIZE 0x0008
+#define BCSS_NOSPLIT 0x0001
+#define BCSS_STRETCH 0x0002
+#define BCSS_ALIGNLEFT 0x0004
+#define BCSS_IMAGE 0x0008
+typedef struct tagBUTTON_SPLITINFO {
+  UINT mask;
+  HIMAGELIST himlGlyph;
+  UINT uSplitStyle;
+  SIZE size;
+} BUTTON_SPLITINFO, *PBUTTON_SPLITINFO;
+typedef struct tagNMBCDROPDOWN {
+  NMHDR hdr;
+  RECT rcButton;
+} NMBCDROPDOWN, *LPNMBCDROPDOWN;
+#define BCM_SETDROPDOWNSTATE (BCM_FIRST + 0x6)
+#define BCM_SETSPLITINFO (BCM_FIRST + 0x7)
+#define BCM_GETSPLITINFO (BCM_FIRST + 0x8)
+#define BCM_SETNOTE (BCM_FIRST + 0x9)
+#define BCM_GETNOTE (BCM_FIRST + 0xa)
+#define BCM_GETNOTELENGTH (BCM_FIRST + 0xb)
+#define BCN_DROPDOWN (BCN_FIRST + 0x0002)
+#endif
+#ifndef BCM_SETSHIELD
+#define BCM_SETSHIELD (BCM_FIRST + 0xc)
+#endif
+
 class CButton : public CWnd {
   DECLARE_DYNAMIC(CButton)
 public:
@@ -1829,8 +1894,74 @@ public:
     return (HCURSOR)::SendMessage(m_hWnd, BM_SETIMAGE, IMAGE_CURSOR, (LPARAM)hCursor);
   }
   HCURSOR GetCursor() { return (HCURSOR)::SendMessage(m_hWnd, BM_GETIMAGE, IMAGE_CURSOR, 0); }
+
+  // The comctl32 version 6 messages (XP), then the Vista ones: split
+  // buttons, command link notes and the elevation shield.
+  BOOL GetIdealSize(LPSIZE psize) const {
+    return (BOOL)::SendMessage(m_hWnd, BCM_GETIDEALSIZE, 0, (LPARAM)psize);
+  }
+  BOOL GetImageList(PBUTTON_IMAGELIST pbuttonImagelist) const {
+    return (BOOL)::SendMessage(m_hWnd, BCM_GETIMAGELIST, 0, (LPARAM)pbuttonImagelist);
+  }
+  BOOL SetImageList(PBUTTON_IMAGELIST pbuttonImagelist) {
+    return (BOOL)::SendMessage(m_hWnd, BCM_SETIMAGELIST, 0, (LPARAM)pbuttonImagelist);
+  }
+  BOOL GetTextMargin(LPRECT pmargin) const {
+    return (BOOL)::SendMessage(m_hWnd, BCM_GETTEXTMARGIN, 0, (LPARAM)pmargin);
+  }
+  BOOL SetTextMargin(LPRECT pmargin) {
+    return (BOOL)::SendMessage(m_hWnd, BCM_SETTEXTMARGIN, 0, (LPARAM)pmargin);
+  }
+  CString GetNote() const;
+  BOOL GetNote(LPTSTR lpszNote, UINT* cchNote) const;
+  BOOL SetNote(LPCTSTR lpszNote);
+  UINT GetNoteLength() const { return (UINT)::SendMessage(m_hWnd, BCM_GETNOTELENGTH, 0, 0); }
+  BOOL GetSplitInfo(PBUTTON_SPLITINFO pInfo) const {
+    return (BOOL)::SendMessage(m_hWnd, BCM_GETSPLITINFO, 0, (LPARAM)pInfo);
+  }
+  BOOL SetSplitInfo(PBUTTON_SPLITINFO pInfo) {
+    return (BOOL)::SendMessage(m_hWnd, BCM_SETSPLITINFO, 0, (LPARAM)pInfo);
+  }
+  UINT GetSplitStyle() const;
+  BOOL SetSplitStyle(UINT uSplitStyle);
+  BOOL GetSplitSize(LPSIZE pSize) const;
+  BOOL SetSplitSize(LPSIZE pSize);
+  CImageList* GetSplitImageList() const;
+  BOOL SetSplitImageList(CImageList* pSplitImageList);
+  TCHAR GetSplitGlyph() const;
+  BOOL SetSplitGlyph(TCHAR chGlyph);
+  BOOL SetDropDownState(BOOL fDropDown) {
+    return (BOOL)::SendMessage(m_hWnd, BCM_SETDROPDOWNSTATE, (WPARAM)fDropDown, 0);
+  }
+  BOOL SetShield(BOOL fElevationRequired) {
+    return (BOOL)::SendMessage(m_hWnd, BCM_SETSHIELD, 0, (LPARAM)fElevationRequired);
+  }
+
   virtual void DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct);
   virtual BOOL OnChildNotify(UINT, WPARAM, LPARAM, LRESULT*);
+};
+
+// A BS_SPLITBUTTON button whose arrow drops down a menu; the menu's
+// commands go to the button's parent.
+class CSplitButton : public CButton {
+  DECLARE_DYNAMIC(CSplitButton)
+public:
+  CSplitButton();
+  CSplitButton(UINT nMenuId, UINT nSubMenuId);
+  explicit CSplitButton(CMenu* pMenu);
+  virtual ~CSplitButton();
+  virtual BOOL Create(LPCTSTR lpszCaption, DWORD dwStyle, const RECT& rect, CWnd* pParentWnd,
+                      UINT nID);
+  void SetDropDownMenu(UINT nMenuId, UINT nSubMenuId);
+  void SetDropDownMenu(CMenu* pMenu);
+
+protected:
+  afx_msg void OnDropDown(NMHDR* pNMHDR, LRESULT* pResult);
+  DECLARE_MESSAGE_MAP()
+
+  CMenu* m_pMenu;
+  UINT m_nMenuId;
+  UINT m_nSubMenuId;
 };
 
 class CListBox : public CWnd {

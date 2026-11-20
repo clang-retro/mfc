@@ -1,0 +1,16 @@
+// vistatest.rc - resources for vistatest.
+#include <windows.h>
+#include <afxres.h>
+#include "vistatest.h"
+
+// Split buttons and command links are comctl32 version 6 controls.
+1 24 "vistatest.manifest"
+
+IDR_SPLITMENU MENU
+BEGIN
+  POPUP "Split"
+  BEGIN
+    MENUITEM "&One", ID_SPLIT_ONE
+    MENUITEM "&Two", ID_SPLIT_TWO
+  END
+END
