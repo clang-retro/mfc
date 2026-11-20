@@ -2721,6 +2721,54 @@ static void TestPrinting() {
 }
 
 #ifdef _WINPORT
+// PlgBlt: a 4x2 bitmap copied as it is, then turned a quarter clockwise,
+// then through a mask.
+static void TestPlgBlt() {
+  HDC screen = ::GetDC(NULL);
+  HDC src = ::CreateCompatibleDC(screen), dst = ::CreateCompatibleDC(screen);
+  HBITMAP sbm = ::CreateCompatibleBitmap(screen, 4, 2), dbm = ::CreateCompatibleBitmap(screen, 8, 8);
+  HGDIOBJ sold = ::SelectObject(src, sbm), dold = ::SelectObject(dst, dbm);
+  for (int y = 0; y < 2; y++)
+    for (int x = 0; x < 4; x++) ::SetPixel(src, x, y, RGB(x * 60, y * 200, 7));
+  RECT all = {0, 0, 8, 8};
+  ::FillRect(dst, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  POINT same[3] = {{0, 0}, {4, 0}, {0, 2}};
+  CHECK(::PlgBlt(dst, same, src, 0, 0, 4, 2, NULL, 0, 0));
+  CHECK(::GetPixel(dst, 3, 1) == RGB(180, 200, 7) && ::GetPixel(dst, 0, 0) == RGB(0, 0, 7));
+  CHECK(::GetPixel(dst, 4, 0) == RGB(255, 255, 255));
+  // A quarter turn: the upper left goes to (2,0), the upper right down to
+  // (2,4), the lower left to (0,0).
+  ::FillRect(dst, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  POINT turned[3] = {{2, 0}, {2, 4}, {0, 0}};
+  CHECK(::PlgBlt(dst, turned, src, 0, 0, 4, 2, NULL, 0, 0));
+  CHECK(::GetPixel(dst, 1, 0) == RGB(0, 0, 7));      // source (0,0)
+  CHECK(::GetPixel(dst, 0, 0) == RGB(0, 200, 7));    // source (0,1)
+  CHECK(::GetPixel(dst, 1, 3) == RGB(180, 0, 7));    // source (3,0)
+  CHECK(::GetPixel(dst, 2, 0) == RGB(255, 255, 255));  // outside
+  // A mask with only its left half set.
+  HBITMAP mask = ::CreateBitmap(4, 2, 1, 1, NULL);
+  HDC mdc = ::CreateCompatibleDC(screen);
+  HGDIOBJ mold = ::SelectObject(mdc, mask);
+  ::PatBlt(mdc, 0, 0, 4, 2, BLACKNESS);
+  ::PatBlt(mdc, 0, 0, 2, 2, WHITENESS);
+  ::SelectObject(mdc, mold);
+  ::DeleteDC(mdc);
+  ::FillRect(dst, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  CHECK(::PlgBlt(dst, same, src, 0, 0, 4, 2, mask, 0, 0));
+  CHECK(::GetPixel(dst, 1, 1) == RGB(60, 200, 7));
+  CHECK(::GetPixel(dst, 3, 1) == RGB(255, 255, 255));
+  ::DeleteObject(mask);
+  ::SelectObject(src, sold);
+  ::SelectObject(dst, dold);
+  ::DeleteObject(sbm);
+  ::DeleteObject(dbm);
+  ::DeleteDC(src);
+  ::DeleteDC(dst);
+  ::ReleaseDC(NULL, screen);
+}
+#endif
+
+#ifdef _WINPORT
 // WinHelp, which opens the help document next to the .hlp file: here
 // through WINPORT_HELP, a command that notes what it was given.
 static std::string WaitForLine(const std::string& log, size_t n) {
@@ -2817,6 +2865,7 @@ int main() {
   TestCWnd();
 #ifdef _WINPORT
   TestWinHelp();
+  TestPlgBlt();
 #endif
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;

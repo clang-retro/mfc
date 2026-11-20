@@ -279,7 +279,11 @@ public:
 };
 
 static void TestErrors() {
-  // Nothing listens on a port that was just freed.
+  // Nothing listens on a port that was just freed. The connecting socket
+  // is bound first, so that it cannot be given that same port: a socket
+  // connecting to its own address and port connects to itself.
+  CSocket refused;
+  CHECK(refused.Create());
   UINT nPort = 0;
   {
     CAsyncSocket probe;
@@ -287,8 +291,6 @@ static void TestErrors() {
     CString s;
     probe.GetSockName(s, nPort);
   }
-  CSocket refused;
-  CHECK(refused.Create());
   CHECK(!refused.Connect(_T("127.0.0.1"), nPort));
   CHECK(CAsyncSocket::GetLastError() == WSAECONNREFUSED);
 

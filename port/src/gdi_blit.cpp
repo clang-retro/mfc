@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
+
 using namespace winport;
 
 namespace winport {
@@ -617,9 +619,81 @@ BOOL WINAPI MaskBlt(HDC dst, int x, int y, int w, int h, HDC src, int sx, int sy
   return TRUE;
 }
 
-BOOL WINAPI PlgBlt(HDC, const POINT*, HDC, int, int, int, int, HBITMAP, int, int) {
-  SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-  return FALSE;
+// PlgBlt: the source rectangle onto a parallelogram, whose first three
+// corners are where the rectangle's upper left, upper right and lower left
+// go. Each destination pixel in it takes the source pixel its centre
+// comes from (and only where the mask, if there is one, is set).
+static HBITMAP Dib32(HDC ref, int w, int h, DWORD** bits) {
+  BITMAPINFO bi;
+  memset(&bi, 0, sizeof bi);
+  bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bi.bmiHeader.biWidth = w;
+  bi.bmiHeader.biHeight = -h;
+  bi.bmiHeader.biPlanes = 1;
+  bi.bmiHeader.biBitCount = 32;
+  bi.bmiHeader.biCompression = BI_RGB;
+  return CreateDIBSection(ref, &bi, DIB_RGB_COLORS, (void**)bits, NULL, 0);
+}
+
+BOOL WINAPI PlgBlt(HDC dst, const POINT* pts, HDC src, int sx, int sy, int w, int h, HBITMAP mask, int mx,
+                   int my) {
+  if (!pts || !DCOf(dst) || !DCOf(src) || w <= 0 || h <= 0) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  double ax = pts[1].x - pts[0].x, ay = pts[1].y - pts[0].y;
+  double bx = pts[2].x - pts[0].x, by = pts[2].y - pts[0].y;
+  double det = ax * by - ay * bx;
+  if (det == 0) return TRUE;  // a line: nothing to fill
+  int left = pts[0].x, right = pts[0].x, top = pts[0].y, bottom = pts[0].y;
+  int fx = (int)(pts[0].x + ax + bx), fy = (int)(pts[0].y + ay + by);  // the fourth corner
+  int xs[] = {pts[1].x, pts[2].x, fx}, ys[] = {pts[1].y, pts[2].y, fy};
+  for (int i = 0; i < 3; i++) {
+    left = std::min(left, xs[i]);
+    right = std::max(right, xs[i]);
+    top = std::min(top, ys[i]);
+    bottom = std::max(bottom, ys[i]);
+  }
+  int bw = right - left, bh = bottom - top;
+  if (bw <= 0 || bh <= 0) return TRUE;
+  DWORD *sbits = NULL, *dbits = NULL, *mbits = NULL;
+  HDC sdc = CreateCompatibleDC(dst), ddc = CreateCompatibleDC(dst);
+  HBITMAP sbm = Dib32(dst, w, h, &sbits), dbm = Dib32(dst, bw, bh, &dbits), mbm = NULL;
+  HGDIOBJ sold = SelectObject(sdc, sbm), dold = SelectObject(ddc, dbm);
+  BitBlt(sdc, 0, 0, w, h, src, sx, sy, SRCCOPY);
+  BitBlt(ddc, 0, 0, bw, bh, dst, left, top, SRCCOPY);
+  if (mask) {
+    // The mask's bits for the source rectangle, as black and white.
+    HDC mdc = CreateCompatibleDC(dst), m1 = CreateCompatibleDC(dst);
+    mbm = Dib32(dst, w, h, &mbits);
+    HGDIOBJ mold = SelectObject(mdc, mbm), m1old = SelectObject(m1, mask);
+    BitBlt(mdc, 0, 0, w, h, m1, mx, my, SRCCOPY);
+    SelectObject(m1, m1old);
+    SelectObject(mdc, mold);
+    DeleteDC(m1);
+    DeleteDC(mdc);
+  }
+  GdiFlush();
+  if (sbits && dbits) {
+    for (int y = 0; y < bh; y++)
+      for (int x = 0; x < bw; x++) {
+        double dx = left + x + 0.5 - pts[0].x, dy = top + y + 0.5 - pts[0].y;
+        double s = (dx * by - dy * bx) / det, t = (ax * dy - ay * dx) / det;
+        if (s < 0 || t < 0 || s >= 1 || t >= 1) continue;
+        int u = std::min(w - 1, (int)(s * w)), v = std::min(h - 1, (int)(t * h));
+        if (mbits && !(mbits[v * w + u] & 0xFFFFFF)) continue;
+        dbits[y * bw + x] = sbits[v * w + u];
+      }
+  }
+  BitBlt(dst, left, top, bw, bh, ddc, 0, 0, SRCCOPY);
+  SelectObject(sdc, sold);
+  SelectObject(ddc, dold);
+  DeleteObject(sbm);
+  DeleteObject(dbm);
+  if (mbm) DeleteObject(mbm);
+  DeleteDC(sdc);
+  DeleteDC(ddc);
+  return TRUE;
 }
 
 int WINAPI StretchDIBits(HDC hdc, int x, int y, int w, int h, int sx, int sy, int sw, int sh, const void* bits,
