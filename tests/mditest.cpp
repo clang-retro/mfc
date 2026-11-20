@@ -292,6 +292,9 @@ public:
       case 4: {
         TestSaveWindowBitmap(m_hWnd, _T("mditest-preview.bmp"));
         CControlBar* pBar = GetControlBar(AFX_IDW_PREVIEW_BAR);
+        // What the idle time does, in case this timer came first on a busy
+        // machine: the bar's buttons follow the preview's state.
+        SendMessageToDescendants(WM_IDLEUPDATECMDUI, TRUE, 0, TRUE, TRUE);
         CHECK(pBar != NULL && !pBar->GetDlgItem(AFX_ID_PREVIEW_NEXT)->IsWindowEnabled());
         SendMessage(WM_COMMAND, AFX_ID_PREVIEW_CLOSE);
         CHECK(::IsWindowVisible(m_hWndMDIClient));
