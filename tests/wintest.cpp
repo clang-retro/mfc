@@ -1640,6 +1640,7 @@ static void TestCommonControls() {
   ti.lParam = 22;
   CHECK(::SendMessageW(tabs, TCM_INSERTITEMW, 1, (LPARAM)&ti) == 1);
   CHECK(::SendMessageW(tabs, TCM_GETITEMCOUNT, 0, 0) == 2 && ::SendMessageW(tabs, TCM_GETCURSEL, 0, 0) == 0);
+  CHECK(TabCtrl_GetItemCount(tabs) == 2 && TabCtrl_GetCurSel(tabs) == 0);
   TCITEMW tg = {};
   tg.mask = TCIF_TEXT | TCIF_PARAM;
   tg.pszText = buf;
@@ -1997,6 +1998,13 @@ static void TestListView() {
   }
   CHECK(Notified(LVN_INSERTITEM));
   CHECK(::SendMessageW(lv, LVM_GETITEMCOUNT, 0, 0) == 4);
+  // The same through commctrl.h's helper macros.
+  CHECK(ListView_GetItemCount(lv) == 4 && ListView_GetHeader(lv) == header);
+  CHECK(ListView_GetColumnWidth(lv, 1) == 80);
+  ListView_SetItemState(lv, 2, LVIS_SELECTED, LVIS_SELECTED);
+  CHECK(ListView_GetItemState(lv, 2, LVIS_SELECTED) == LVIS_SELECTED && ListView_GetSelectedCount(lv) == 1);
+  CHECK(ListView_GetNextItem(lv, -1, LVNI_SELECTED) == 2);
+  ListView_SetItemState(lv, 2, 0, LVIS_SELECTED);
   LVITEMW get = {};
   get.iSubItem = 1;
   get.pszText = buf;

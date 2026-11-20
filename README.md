@@ -129,6 +129,16 @@ document's name in `~/Documents`. PrintDlg and PageSetupDlg show their
 dialogs, with hooks and the usual control IDs from `dlgs.h`, or return
 the default printer. `WINPORT_PRINTERS=pdf` leaves CUPS out.
 
+Anonymous pipes (`CreatePipe`, `PeekNamedPipe`) give a child started
+with `STARTF_USESTDHANDLES` its standard input and output. Serial ports
+work over termios: `COM1` is the device `WINPORT_COM1` names, or else
+`/dev/ttyS0` on Linux and the first `/dev/cu.*` device on macOS, and a
+device's own path (`/dev/ttyUSB0`) opens as a port too. Its `DCB`,
+`COMMTIMEOUTS`, modem lines and `WaitCommEvent` work as on Windows, and
+reads, writes and event waits on a port opened with
+`FILE_FLAG_OVERLAPPED` run in the background until `GetOverlappedResult`
+or the event says they are done.
+
 A regular DLL builds as a shared library (`-shared`, exporting
 `DllMain` and the `.def` file's names; the program links with
 `-rdynamic` on Linux, and the library with `-undefined dynamic_lookup`
@@ -248,8 +258,8 @@ when there is no display. For a Linux or macOS target it builds `core`,
 `socktest`, `occtest`, `dlltest`, `inettest`, `oletest`, `iptest`,
 `docobtest`, `linktest`, `bindtest`, `richtest`, `richsrvtest`,
 `autotest`, `srvtest`, `atlwintest`, `atltest`, `conntest`, `ctltest`,
-`wltest`, `dragtest`, `daotest`, `dvtest`, `htmltest`, `atlctltest` and
-`cdlgtest` against the portable layer, and `exttest`, `core`, `sditest`,
+`wltest`, `dragtest`, `daotest`, `dvtest`, `htmltest`, `atlctltest`,
+`cdlgtest` and `iotest` against the portable layer, and `exttest`, `core`, `sditest`,
 `dlgtest` and `dlltest` again with the shared libraries
 (`SHARED_TESTS`), and runs them directly; `NATIVE_TESTS` names others to
 try.
@@ -434,6 +444,14 @@ try.
   OK turned down), two files at once, saving with the default
   extension, cancelling, and CFolderPickerDialog. On XP the test checks
   the classic fallback instead.
+* `iotest`: pipes and serial ports, on the console: CreatePipe and
+  PeekNamedPipe (peeked data still read, a broken pipe each way), a
+  child (the test itself) with pipes for its standard handles, polled
+  and read, and BuildCommDCB; on Linux and macOS also a serial port (a
+  pseudo-terminal named as COM9): its DCB and properties, time-outs that
+  return at once, wait, or end when the line goes quiet, a command out
+  and a reply in, and WaitCommEvent overlapped, ended by data, by
+  SetCommMask and by CancelIo.
 * `oletest`: an OLE container: objects of a class the test registers
   itself, embedded in a COleDocument, drawn by its view, opened and
   changed through their verbs and the verb menu, saved to flat and

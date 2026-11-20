@@ -2,19 +2,24 @@
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
-#include "winport.h"
+#include "file.h"
 
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
+#include <poll.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <termios.h>
 #include <unistd.h>
 #include <wctype.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -141,26 +146,29 @@ void UnixFromFileTime(const FILETIME& ft, long long* sec, long* nsec) {
   *nsec = (long)(r * 100);
 }
 
+File::~File() {
+  if (comm) CloseComm(this);
+  if (fd > 2) close(fd);
+  if (deleteOnClose && !path.empty()) unlink(path.c_str());
+}
+
+File* GetFile(HANDLE h) { return static_cast<File*>(FromHandle(h, kFile)); }
+
+void CompleteOverlapped(LPOVERLAPPED ov, DWORD error, DWORD n) {
+  if (!ov) return;
+  ov->InternalHigh = n;
+  // Errors are kept apart from STATUS_PENDING, which is also a Win32 code.
+  ov->Internal = error ? 0xE0000000u | error : 0;
+  HANDLE e = (HANDLE)((UINT_PTR)ov->hEvent & ~(UINT_PTR)1);
+  if (e) SetEvent(e);
+}
+
 }  // namespace winport
 
 namespace {
 
 ssize_t read_fd(int fd, void* b, size_t n) { return ::read(fd, b, n); }
 bool access_ok(const std::string& p) { return access(p.c_str(), F_OK) == 0; }
-
-struct File : Object {
-  int fd;
-  std::string path;
-  bool deleteOnClose = false;
-  bool append = false;
-  File(int f) : Object(kFile), fd(f) {}
-  ~File() override {
-    if (fd > 2) close(fd);
-    if (deleteOnClose && !path.empty()) unlink(path.c_str());
-  }
-};
-
-File* GetFile(HANDLE h);
 
 // The standard handles are files over descriptors 0 to 2 that are never
 // closed.
@@ -174,10 +182,6 @@ File* StdFile(int n) {
     }
   });
   return files[n];
-}
-
-File* GetFile(HANDLE h) {
-  return static_cast<File*>(FromHandle(h, kFile));
 }
 
 timespec ToTimespec(const FILETIME* ft) {
@@ -242,7 +246,12 @@ HANDLE OpenFile(const std::string& path, DWORD acc, DWORD disposition, DWORD fla
     }
     o = O_RDONLY;
   }
+  // A device opens without becoming the controlling terminal, and
+  // without waiting for a modem's carrier.
+  bool device = path.compare(0, 5, "/dev/") == 0;
+  if (device) o |= O_NOCTTY | O_NONBLOCK;
   int fd = open(path.c_str(), o | O_CLOEXEC, 0666);
+  if (fd >= 0 && device && !IsTerminal(fd)) fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
   if (fd < 0) {
     SetLastError(errno == ENOENT && path.find('/') != std::string::npos &&
                          [&] {
@@ -256,6 +265,8 @@ HANDLE OpenFile(const std::string& path, DWORD acc, DWORD disposition, DWORD fla
   File* f = new File(fd);
   f->path = path;
   f->deleteOnClose = (flags & FILE_FLAG_DELETE_ON_CLOSE) != 0;
+  f->overlapped = (flags & FILE_FLAG_OVERLAPPED) != 0;
+  if (device && IsTerminal(fd)) OpenComm(f);
   // CREATE_ALWAYS and OPEN_ALWAYS report an existing file this way.
   SetLastError((existed && (disposition == CREATE_ALWAYS || disposition == OPEN_ALWAYS)) ? ERROR_ALREADY_EXISTS
                                                                                         : ERROR_SUCCESS);
@@ -263,6 +274,11 @@ HANDLE OpenFile(const std::string& path, DWORD acc, DWORD disposition, DWORD fla
 }
 
 }  // namespace
+
+int winport::FileDescriptor(HANDLE h) {
+  File* f = GetFile(h);
+  return f ? f->fd : -1;
+}
 
 HANDLE winport::DuplicateFile(Object* o) {
   File* f = static_cast<File*>(o);
@@ -278,14 +294,24 @@ HANDLE winport::DuplicateFile(Object* o) {
 
 extern "C" {
 
-HANDLE WINAPI CreateFileA(LPCSTR name, DWORD access, DWORD, LPSECURITY_ATTRIBUTES, DWORD disposition, DWORD flags,
-                          HANDLE) {
-  return OpenFile(PosixPath(name), access, disposition, flags);
+HANDLE WINAPI CreateFileA(LPCSTR name, DWORD access, DWORD, LPSECURITY_ATTRIBUTES sa, DWORD disposition,
+                          DWORD flags, HANDLE) {
+  std::string port = CommDevice(name ? name : "");
+  if (!port.empty()) {
+    if (port == "-") {
+      SetLastError(ERROR_FILE_NOT_FOUND);
+      return INVALID_HANDLE_VALUE;
+    }
+    disposition = OPEN_EXISTING;
+  }
+  (void)sa;
+  return OpenFile(port.empty() ? PosixPath(name) : port, access, disposition, flags);
 }
 
-HANDLE WINAPI CreateFileW(LPCWSTR name, DWORD access, DWORD, LPSECURITY_ATTRIBUTES, DWORD disposition, DWORD flags,
-                          HANDLE) {
-  return OpenFile(PosixPath(name), access, disposition, flags);
+HANDLE WINAPI CreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disposition,
+                          DWORD flags, HANDLE t) {
+  std::string n = Narrow(name);
+  return CreateFileA(name ? n.c_str() : NULL, access, share, sa, disposition, flags, t);
 }
 
 HANDLE WINAPI GetStdHandle(DWORD n) {
@@ -301,14 +327,30 @@ BOOL WINAPI ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD read, LPOVERLAPPED o
   File* f = GetFile(h);
   if (read) *read = 0;
   if (!f) return FALSE;
+  if (f->comm) return CommRead(f, buf, n, read, ov);
+  if (!f->peeked.empty()) {
+    // What PeekNamedPipe took out first.
+    DWORD k = (DWORD)std::min<size_t>(n, f->peeked.size());
+    memcpy(buf, f->peeked.data(), k);
+    f->peeked.erase(0, k);
+    if (read) *read = k;
+    return TRUE;
+  }
   ssize_t r;
-  if (ov) r = pread(f->fd, buf, n, (off_t)(((ULONGLONG)ov->OffsetHigh << 32) | ov->Offset));
+  if (ov && !f->pipe) r = pread(f->fd, buf, n, (off_t)(((ULONGLONG)ov->OffsetHigh << 32) | ov->Offset));
   else do r = read_fd(f->fd, buf, n); while (r < 0 && errno == EINTR);
   if (r < 0) {
     SetErrorFromErrno();
+    if (ov) CompleteOverlapped(ov, GetLastError(), 0);
+    return FALSE;
+  }
+  if (r == 0 && n > 0 && f->pipe) {
+    // The writing end is closed.
+    SetLastError(ERROR_BROKEN_PIPE);
     return FALSE;
   }
   if (read) *read = (DWORD)r;
+  if (ov) CompleteOverlapped(ov, ERROR_SUCCESS, (DWORD)r);
   return TRUE;
 }
 
@@ -316,23 +358,27 @@ BOOL WINAPI WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD written, LPOVERLAP
   File* f = GetFile(h);
   if (written) *written = 0;
   if (!f) return FALSE;
+  if (f->comm) return CommWrite(f, buf, n, written, ov);
   size_t done = 0;
   while (done < n) {
     ssize_t r;
-    if (ov)
+    if (ov && !f->pipe)
       r = pwrite(f->fd, (const char*)buf + done, n - done,
                  (off_t)((((ULONGLONG)ov->OffsetHigh << 32) | ov->Offset) + done));
     else
       r = write(f->fd, (const char*)buf + done, n - done);
     if (r < 0) {
       if (errno == EINTR) continue;
-      SetErrorFromErrno();
+      // A pipe whose reading end is closed (SIGPIPE is ignored for pipes).
+      SetLastError(errno == EPIPE ? ERROR_NO_DATA : ErrorFromErrno(errno));
       if (written) *written = (DWORD)done;
+      if (ov) CompleteOverlapped(ov, GetLastError(), (DWORD)done);
       return FALSE;
     }
     done += (size_t)r;
   }
   if (written) *written = (DWORD)done;
+  if (ov) CompleteOverlapped(ov, ERROR_SUCCESS, (DWORD)done);
   return TRUE;
 }
 
@@ -380,6 +426,11 @@ BOOL WINAPI SetEndOfFile(HANDLE h) {
 BOOL WINAPI FlushFileBuffers(HANDLE h) {
   File* f = GetFile(h);
   if (!f) return FALSE;
+  if (IsTerminal(f->fd)) {
+    // A serial port: everything written goes out.
+    tcdrain(f->fd);
+    return TRUE;
+  }
   if (f->fd > 2 && fsync(f->fd) != 0 && errno != EINVAL) {
     SetErrorFromErrno();
     return FALSE;
@@ -978,5 +1029,126 @@ UINT WINAPI _lwrite(HFILE h, LPCSTR b, UINT n) {
 LONG WINAPI _llseek(HFILE h, LONG off, int origin) { return (LONG)lseek((int)h, off, origin); }
 
 HFILE WINAPI _lclose(HFILE h) { return close((int)h) == 0 ? 0 : HFILE_ERROR; }
+
+}  // extern "C"
+
+// ---------------------------------------------------------------------
+// Anonymous pipes and overlapped results
+
+extern "C" {
+
+BOOL WINAPI CreatePipe(PHANDLE r, PHANDLE w, LPSECURITY_ATTRIBUTES sa, DWORD size) {
+  if (!r || !w) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  int fds[2];
+  if (pipe(fds) != 0) {
+    SetErrorFromErrno();
+    return FALSE;
+  }
+  for (int fd : fds) fcntl(fd, F_SETFD, FD_CLOEXEC);
+#ifdef F_SETPIPE_SZ
+  if (size > 65536) fcntl(fds[1], F_SETPIPE_SZ, (int)size);
+#else
+  (void)size;
+#endif
+  // A write to a pipe nobody reads fails, as on Windows, and does not
+  // stop the program.
+  static pthread_once_t once = PTHREAD_ONCE_INIT;
+  pthread_once(&once, [] {
+    struct sigaction old;
+    if (sigaction(SIGPIPE, NULL, &old) == 0 && old.sa_handler == SIG_DFL) signal(SIGPIPE, SIG_IGN);
+  });
+  File* fr = new File(fds[0]);
+  File* fw = new File(fds[1]);
+  fr->pipe = fw->pipe = true;
+  (void)sa;
+  *r = NewHandle(fr);
+  *w = NewHandle(fw);
+  return TRUE;
+}
+
+BOOL WINAPI PeekNamedPipe(HANDLE h, LPVOID buf, DWORD size, LPDWORD got, LPDWORD avail, LPDWORD left) {
+  File* f = GetFile(h);
+  if (!f) return FALSE;
+  int n = 0;
+  if (ioctl(f->fd, FIONREAD, &n) != 0) {
+    SetLastError(ERROR_INVALID_HANDLE);
+    return FALSE;
+  }
+  if (n == 0 && f->peeked.empty()) {
+    // Readable with nothing to read: the writing end is closed.
+    pollfd p = {f->fd, POLLIN, 0};
+    if (poll(&p, 1, 0) > 0 && (p.revents & (POLLIN | POLLHUP))) {
+      SetLastError(ERROR_BROKEN_PIPE);
+      return FALSE;
+    }
+  }
+  if (buf && size > f->peeked.size() && n > 0) {
+    // Takes what the caller wants to see out of the pipe, for ReadFile.
+    size_t want = std::min<size_t>(size - f->peeked.size(), (size_t)n);
+    std::string more(want, '\0');
+    ssize_t r;
+    do r = read(f->fd, &more[0], want); while (r < 0 && errno == EINTR);
+    if (r > 0) {
+      f->peeked.append(more, 0, (size_t)r);
+      n -= (int)r;
+    }
+  }
+  DWORD shown = (DWORD)std::min<size_t>(size, f->peeked.size());
+  if (buf && shown) memcpy(buf, f->peeked.data(), shown);
+  if (got) *got = buf ? shown : 0;
+  if (avail) *avail = (DWORD)(f->peeked.size() + (size_t)n);
+  if (left) *left = 0;
+  return TRUE;
+}
+
+BOOL WINAPI SetHandleInformation(HANDLE h, DWORD, DWORD) {
+  // Every handle is passed to a child the same way: its standard handles
+  // through STARTUPINFO, and no others.
+  return FromHandle(h) != NULL;
+}
+
+BOOL WINAPI GetHandleInformation(HANDLE h, LPDWORD flags) {
+  if (!FromHandle(h) || !flags) return FALSE;
+  *flags = 0;
+  return TRUE;
+}
+
+BOOL WINAPI GetOverlappedResult(HANDLE, LPOVERLAPPED ov, LPDWORD n, BOOL wait) {
+  if (!ov) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  while (((volatile LPOVERLAPPED)ov)->Internal == STATUS_PENDING) {
+    if (!wait) {
+      SetLastError(ERROR_IO_INCOMPLETE);
+      return FALSE;
+    }
+    HANDLE e = (HANDLE)((UINT_PTR)ov->hEvent & ~(UINT_PTR)1);
+    if (e)
+      WaitForSingleObject(e, 50);
+    else
+      usleep(1000);
+  }
+  __atomic_thread_fence(__ATOMIC_ACQUIRE);
+  if (n) *n = (DWORD)ov->InternalHigh;
+  DWORD err = (DWORD)ov->Internal & 0x1FFFFFFF;
+  if (err) {
+    SetLastError(err);
+    return FALSE;
+  }
+  return TRUE;
+}
+
+BOOL WINAPI CancelIo(HANDLE h) {
+  File* f = GetFile(h);
+  if (!f) return FALSE;
+  if (f->comm) CancelComm(f);
+  return TRUE;
+}
+
+BOOL WINAPI CancelIoEx(HANDLE h, LPOVERLAPPED) { return CancelIo(h); }
 
 }  // extern "C"

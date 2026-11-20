@@ -13,6 +13,7 @@
 
 #include <dlfcn.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
 #include <spawn.h>
@@ -901,7 +902,7 @@ void WINAPI GetStartupInfoW(LPSTARTUPINFOW si) {
 }
 
 BOOL WINAPI CreateProcessA(LPCSTR app, LPSTR cmd, LPSECURITY_ATTRIBUTES, LPSECURITY_ATTRIBUTES, BOOL, DWORD flags,
-                           LPVOID env, LPCSTR dir, LPSTARTUPINFOA, LPPROCESS_INFORMATION pi) {
+                           LPVOID env, LPCSTR dir, LPSTARTUPINFOA si, LPPROCESS_INFORMATION pi) {
   std::vector<std::string> args = SplitCommandLine(cmd ? cmd : "");
   std::string prog = app ? PosixPath(app) : args.empty() ? std::string() : PosixPath(args[0].c_str());
   if (prog.empty()) {
@@ -931,8 +932,25 @@ BOOL WINAPI CreateProcessA(LPCSTR app, LPSTR cmd, LPSECURITY_ATTRIBUTES, LPSECUR
     SetErrorFromErrno();
     return FALSE;
   }
+  // The child's standard handles: pipes and files the caller names, and
+  // nothing for a handle it leaves out.
+  posix_spawn_file_actions_t actions;
+  posix_spawn_file_actions_t* pa = NULL;
+  if (si && (si->dwFlags & STARTF_USESTDHANDLES)) {
+    posix_spawn_file_actions_init(&actions);
+    pa = &actions;
+    HANDLE std[3] = {si->hStdInput, si->hStdOutput, si->hStdError};
+    for (int i = 0; i < 3; i++) {
+      int fd = std[i] && std[i] != INVALID_HANDLE_VALUE ? FileDescriptor(std[i]) : -1;
+      if (fd >= 0)
+        posix_spawn_file_actions_adddup2(pa, fd, i);
+      else
+        posix_spawn_file_actions_addopen(pa, i, "/dev/null", i == 0 ? O_RDONLY : O_WRONLY, 0);
+    }
+  }
   pid_t pid;
-  int r = posix_spawnp(&pid, prog.c_str(), NULL, NULL, argv.data(), env ? envp.data() : environ);
+  int r = posix_spawnp(&pid, prog.c_str(), pa, NULL, argv.data(), env ? envp.data() : environ);
+  if (pa) posix_spawn_file_actions_destroy(pa);
   if (!savedDir.empty() && chdir(savedDir.c_str()) != 0) {
   }
   if (r != 0) {
@@ -961,7 +979,7 @@ BOOL WINAPI CreateProcessA(LPCSTR app, LPSTR cmd, LPSECURITY_ATTRIBUTES, LPSECUR
 }
 
 BOOL WINAPI CreateProcessW(LPCWSTR app, LPWSTR cmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta, BOOL inherit,
-                           DWORD flags, LPVOID env, LPCWSTR dir, LPSTARTUPINFOW, LPPROCESS_INFORMATION pi) {
+                           DWORD flags, LPVOID env, LPCWSTR dir, LPSTARTUPINFOW siw, LPPROCESS_INFORMATION pi) {
   std::string a = Narrow(app), c = Narrow(cmd), d = Narrow(dir);
   // A Unicode environment is converted only when the caller says so.
   std::string envA;
@@ -975,6 +993,13 @@ BOOL WINAPI CreateProcessW(LPCWSTR app, LPWSTR cmd, LPSECURITY_ATTRIBUTES pa, LP
   }
   STARTUPINFOA si = {};
   si.cb = sizeof si;
+  if (siw) {
+    // The same, but for the strings, which a child here does not use.
+    si.dwX = siw->dwX, si.dwY = siw->dwY, si.dwXSize = siw->dwXSize, si.dwYSize = siw->dwYSize;
+    si.dwFlags = siw->dwFlags;
+    si.wShowWindow = siw->wShowWindow;
+    si.hStdInput = siw->hStdInput, si.hStdOutput = siw->hStdOutput, si.hStdError = siw->hStdError;
+  }
   return CreateProcessA(app ? a.c_str() : NULL, cmd ? (LPSTR)c.c_str() : NULL, pa, ta, inherit, flags, env,
                         dir ? d.c_str() : NULL, &si, pi);
 }
