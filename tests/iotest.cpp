@@ -53,8 +53,10 @@ static void TestPipes() {
   CHECK(::PeekNamedPipe(r, NULL, 0, NULL, &avail, NULL) && avail == 0);
   CHECK(::WriteFile(w, "hello pipe", 10, &n, NULL) && n == 10);
   char buf[32] = {};
+  // (What is left of the message means nothing on a byte pipe: Windows
+  // and Wine give the message length, 0, less what was read.)
   CHECK(::PeekNamedPipe(r, buf, 5, &n, &avail, &left));
-  CHECK(n == 5 && memcmp(buf, "hello", 5) == 0 && avail == 10 && left == 0);
+  CHECK(n == 5 && memcmp(buf, "hello", 5) == 0 && avail == 10);
   memset(buf, 0, sizeof buf);
   CHECK(::ReadFile(r, buf, sizeof buf, &n, NULL));
   // What was peeked comes first; the rest may need a second read.
@@ -134,9 +136,15 @@ static void TestChild() {
 static void TestBuildDcb() {
   DCB dcb = {};
   dcb.DCBlength = sizeof dcb;
-  CHECK(::BuildCommDCB(TEXT("baud=19200 parity=E data=7 stop=2 dtr=off rts=hs"), &dcb));
+  CHECK(::BuildCommDCB(TEXT("baud=19200 parity=E data=7 stop=2 dtr=off rts=on"), &dcb));
   CHECK(dcb.BaudRate == 19200 && dcb.Parity == EVENPARITY && dcb.ByteSize == 7 && dcb.StopBits == TWOSTOPBITS);
-  CHECK(dcb.fDtrControl == DTR_CONTROL_DISABLE && dcb.fRtsControl == RTS_CONTROL_HANDSHAKE);
+  CHECK(dcb.fDtrControl == DTR_CONTROL_DISABLE && dcb.fRtsControl == RTS_CONTROL_ENABLE);
+  // Windows (as the MODE command) also takes handshaking for the lines;
+  // Wine takes only on and off.
+  if (!::GetProcAddress(::GetModuleHandleA("ntdll.dll"), "wine_get_version")) {
+    CHECK(::BuildCommDCB(TEXT("baud=9600 dtr=hs rts=hs"), &dcb));
+    CHECK(dcb.fDtrControl == DTR_CONTROL_HANDSHAKE && dcb.fRtsControl == RTS_CONTROL_HANDSHAKE);
+  }
   CHECK(::BuildCommDCB(TEXT("COM2:9600,n,8,1"), &dcb));
   CHECK(dcb.BaudRate == 9600 && dcb.Parity == NOPARITY && dcb.ByteSize == 8 && dcb.StopBits == ONESTOPBIT);
   CHECK(!::BuildCommDCB(TEXT("baud=9600 color=blue"), &dcb));
