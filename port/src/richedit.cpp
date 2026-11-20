@@ -1415,6 +1415,11 @@ HRESULT InsertObject(RichEdit* e, REOBJECT* reo) {
   return S_OK;
 }
 
+HRESULT ConvertObjectTo(RichEdit* e, Obj* o, REFCLSID clsid, LPCSTR userType);
+HRESULT ActivateObjectsAs(RichEdit* e, REFCLSID clsid, REFCLSID as);
+HRESULT RangeDataObject(RichEdit* e, CHARRANGE* cr, LPDATAOBJECT* out);
+HRESULT ImportData(RichEdit* e, LPDATAOBJECT data, CLIPFORMAT cf, HGLOBAL icon);
+
 class ReOle final : public IRichEditOle {
  public:
   explicit ReOle(RichEdit* e) : e_(e) {}
@@ -1471,8 +1476,15 @@ class ReOle final : public IRichEditOle {
     if (!e_) return E_UNEXPECTED;
     return ::InsertObject(e_, reo);
   }
-  STDMETHOD(ConvertObject)(LONG, REFCLSID, LPCSTR) override { return E_NOTIMPL; }
-  STDMETHOD(ActivateAs)(REFCLSID, REFCLSID) override { return E_NOTIMPL; }
+  STDMETHOD(ConvertObject)(LONG iob, REFCLSID clsid, LPCSTR userType) override {
+    Obj* o = At(iob);
+    if (!o) return E_INVALIDARG;
+    return ConvertObjectTo(e_, o, clsid, userType);
+  }
+  STDMETHOD(ActivateAs)(REFCLSID clsid, REFCLSID as) override {
+    if (!e_) return E_UNEXPECTED;
+    return ActivateObjectsAs(e_, clsid, as);
+  }
   STDMETHOD(SetHostNames)(LPCSTR app, LPCSTR obj) override {
     if (!e_) return E_UNEXPECTED;
     e_->hostApp = app ? app : "";
@@ -1508,11 +1520,16 @@ class ReOle final : public IRichEditOle {
   }
   STDMETHOD(InPlaceDeactivate)() override { return S_OK; }
   STDMETHOD(ContextSensitiveHelp)(BOOL) override { return S_OK; }
-  STDMETHOD(GetClipboardData)(CHARRANGE*, DWORD, LPDATAOBJECT* out) override {
-    if (out) *out = NULL;
-    return E_NOTIMPL;
+  STDMETHOD(GetClipboardData)(CHARRANGE* cr, DWORD, LPDATAOBJECT* out) override {
+    if (!out) return E_INVALIDARG;
+    *out = NULL;
+    if (!e_) return E_UNEXPECTED;
+    return RangeDataObject(e_, cr, out);
   }
-  STDMETHOD(ImportDataObject)(LPDATAOBJECT, CLIPFORMAT, HGLOBAL) override { return E_NOTIMPL; }
+  STDMETHOD(ImportDataObject)(LPDATAOBJECT data, CLIPFORMAT cf, HGLOBAL icon) override {
+    if (!e_) return E_UNEXPECTED;
+    return ImportData(e_, data, cf, icon);
+  }
 
  private:
   int Locate(LONG iob, REOBJECT* reo) {
@@ -1849,6 +1866,37 @@ bool CanPaste(UINT cf) {
   return false;
 }
 
+// The text in a global of one format: rich text (with its formats in
+// attrs), Unicode, or ANSI.
+bool TextOf(RichEdit* e, UINT cf, HGLOBAL g, std::wstring* text, std::vector<Attr>* attrs) {
+  if (!g) return false;
+  SIZE_T size = GlobalSize(g);
+  const void* p = GlobalLock(g);
+  if (!p) return false;
+  bool got = false;
+  if (cf == RtfFormat()) {
+    std::string bytes((const char*)p, strnlen((const char*)p, size));
+    int tail;
+    got = ReadRtfInto(e, bytes, false, true, text, attrs, &tail);
+  } else if (cf == CF_UNICODETEXT) {
+    *text = std::wstring((const wchar_t*)p, wcsnlen((const wchar_t*)p, size / sizeof(wchar_t)));
+    got = true;
+  } else if (cf == CF_TEXT || cf == CF_OEMTEXT) {
+    *text = Widen(std::string((const char*)p, strnlen((const char*)p, size)).c_str());
+    got = true;
+  }
+  GlobalUnlock(g);
+  return got;
+}
+
+void PasteText(RichEdit* e, const std::wstring& text, const std::vector<Attr>& attrs) {
+  if (attrs.empty()) {
+    ReplaceSel(e, text, true, false);
+  } else {
+    Replace(e, e->SelMin(), e->SelMax(), text, attrs, true, false);
+  }
+}
+
 void Paste(RichEdit* e, UINT cf) {
   if (e->ReadOnly()) {
     MessageBeep(0);
@@ -1858,41 +1906,246 @@ void Paste(RichEdit* e, UINT cf) {
   std::wstring text;
   std::vector<Attr> attrs;
   bool got = false;
-  if ((cf == 0 || cf == RtfFormat()) && IsClipboardFormatAvailable(RtfFormat())) {
-    HANDLE g = GetClipboardData(RtfFormat());
-    const char* p = g ? (const char*)GlobalLock(g) : NULL;
-    if (p) {
-      std::string bytes(p, strnlen(p, GlobalSize(g)));
-      GlobalUnlock(g);
-      int tail;
-      got = ReadRtfInto(e, bytes, false, true, &text, &attrs, &tail);
-    }
-  }
-  if (!got && (cf == 0 || cf == CF_UNICODETEXT)) {
-    HANDLE g = GetClipboardData(CF_UNICODETEXT);
-    const wchar_t* p = g ? (const wchar_t*)GlobalLock(g) : NULL;
-    if (p) {
-      text = p;
-      GlobalUnlock(g);
-      got = true;
-    }
-  }
-  if (!got && (cf == 0 || cf == CF_TEXT || cf == CF_OEMTEXT || cf == CF_UNICODETEXT)) {
-    HANDLE g = GetClipboardData(CF_TEXT);
-    const char* p = g ? (const char*)GlobalLock(g) : NULL;
-    if (p) {
-      text = Widen(p);
-      GlobalUnlock(g);
-      got = true;
-    }
-  }
+  if ((cf == 0 || cf == RtfFormat()) && IsClipboardFormatAvailable(RtfFormat()))
+    got = TextOf(e, RtfFormat(), (HGLOBAL)GetClipboardData(RtfFormat()), &text, &attrs);
+  if (!got && (cf == 0 || cf == CF_UNICODETEXT))
+    got = TextOf(e, CF_UNICODETEXT, (HGLOBAL)GetClipboardData(CF_UNICODETEXT), &text, &attrs);
+  if (!got && (cf == 0 || cf == CF_TEXT || cf == CF_OEMTEXT || cf == CF_UNICODETEXT))
+    got = TextOf(e, CF_TEXT, (HGLOBAL)GetClipboardData(CF_TEXT), &text, &attrs);
   CloseClipboard();
-  if (!got) return;
-  if (attrs.empty()) {
-    ReplaceSel(e, text, true, false);
-  } else {
-    Replace(e, e->SelMin(), e->SelMax(), text, attrs, true, false);
+  if (got) PasteText(e, text, attrs);
+}
+
+// ---------------------------------------------------------------------
+// The clipboard through IRichEditOle: a range's data object, data
+// imported from one, and objects converted or emulated.
+
+// A data object of some globals, one a format.
+class RangeData final : public IDataObject {
+ public:
+  void Add(CLIPFORMAT cf, const void* p, size_t n) { items_.push_back({cf, std::vector<BYTE>((const BYTE*)p, (const BYTE*)p + n)}); }
+  STDMETHOD(QueryInterface)(REFIID riid, void** out) override {
+    if (!out) return E_POINTER;
+    if (IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_IDataObject)) {
+      *out = static_cast<IDataObject*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *out = NULL;
+    return E_NOINTERFACE;
   }
+  REFCOUNTED(IDataObject)
+  STDMETHOD(GetData)(FORMATETC* fe, STGMEDIUM* m) override {
+    if (!fe || !m) return E_INVALIDARG;
+    memset(m, 0, sizeof *m);
+    const Item* i = Find(fe);
+    if (!i) return DV_E_FORMATETC;
+    m->tymed = TYMED_HGLOBAL;
+    m->hGlobal = GlobalOf(i->bytes.data(), i->bytes.size());
+    return m->hGlobal ? S_OK : E_OUTOFMEMORY;
+  }
+  STDMETHOD(GetDataHere)(FORMATETC* fe, STGMEDIUM* m) override {
+    if (!fe || !m || m->tymed != TYMED_HGLOBAL) return DV_E_TYMED;
+    const Item* i = Find(fe);
+    if (!i) return DV_E_FORMATETC;
+    if (GlobalSize(m->hGlobal) < i->bytes.size()) return STG_E_MEDIUMFULL;
+    memcpy(GlobalLock(m->hGlobal), i->bytes.data(), i->bytes.size());
+    GlobalUnlock(m->hGlobal);
+    return S_OK;
+  }
+  STDMETHOD(QueryGetData)(FORMATETC* fe) override {
+    if (!fe) return E_INVALIDARG;
+    return Find(fe) ? S_OK : DV_E_FORMATETC;
+  }
+  STDMETHOD(GetCanonicalFormatEtc)(FORMATETC* in, FORMATETC* out) override {
+    if (!in || !out) return E_INVALIDARG;
+    *out = *in;
+    out->ptd = NULL;
+    return DATA_S_SAMEFORMATETC;
+  }
+  STDMETHOD(SetData)(FORMATETC*, STGMEDIUM*, BOOL) override { return E_NOTIMPL; }
+  STDMETHOD(EnumFormatEtc)(DWORD dir, IEnumFORMATETC** out) override {
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (dir != DATADIR_GET) return E_NOTIMPL;
+    std::vector<FORMATETC> v;
+    for (const Item& i : items_) v.push_back(FORMATETC{i.cf, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL});
+    *out = new winport::ole::FormatEnum(v);
+    return S_OK;
+  }
+  STDMETHOD(DAdvise)(FORMATETC*, DWORD, IAdviseSink*, DWORD*) override { return OLE_E_ADVISENOTSUPPORTED; }
+  STDMETHOD(DUnadvise)(DWORD) override { return OLE_E_ADVISENOTSUPPORTED; }
+  STDMETHOD(EnumDAdvise)(IEnumSTATDATA**) override { return OLE_E_ADVISENOTSUPPORTED; }
+
+ private:
+  struct Item {
+    CLIPFORMAT cf;
+    std::vector<BYTE> bytes;
+  };
+  const Item* Find(const FORMATETC* fe) const {
+    if (!(fe->tymed & TYMED_HGLOBAL) || fe->dwAspect != DVASPECT_CONTENT) return NULL;
+    for (const Item& i : items_)
+      if (i.cf == fe->cfFormat) return &i;
+    return NULL;
+  }
+  std::vector<Item> items_;
+};
+
+HRESULT RangeDataObject(RichEdit* e, CHARRANGE* cr, LPDATAOBJECT* out) {
+  int a = e->SelMin(), b = e->SelMax();
+  if (cr) {
+    a = std::max(0, std::min((int)cr->cpMin, e->N()));
+    b = cr->cpMax < 0 ? e->N() : std::max(a, std::min((int)cr->cpMax, e->N()));
+  }
+  RangeData* d = new RangeData;
+  std::string rtf = RtfOf(e, a, b, false, true);
+  std::wstring w = PlainOf(e, a, b, true, kOmit);
+  std::string ansi = Narrow(w.c_str());
+  d->Add((CLIPFORMAT)RtfFormat(), rtf.c_str(), rtf.size() + 1);
+  d->Add(CF_UNICODETEXT, w.c_str(), (w.size() + 1) * sizeof(wchar_t));
+  d->Add(CF_TEXT, ansi.c_str(), ansi.size() + 1);
+  *out = d;
+  return S_OK;
+}
+
+// A new storage for an object: the callback's, or one in memory.
+HRESULT NewObjectStorage(RichEdit* e, IStorage** out) {
+  *out = NULL;
+  if (e->callback) return e->callback->GetNewStorage(out);
+  ILockBytes* lb = NULL;
+  HRESULT hr = CreateILockBytesOnHGlobal(NULL, TRUE, &lb);
+  if (FAILED(hr)) return hr;
+  hr = StgCreateDocfileOnILockBytes(lb, STGM_CREATE | STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, out);
+  lb->Release();
+  return hr;
+}
+
+HRESULT ImportData(RichEdit* e, LPDATAOBJECT data, CLIPFORMAT cf, HGLOBAL icon) {
+  if (!data) return E_INVALIDARG;
+  if (e->ReadOnly()) return E_FAIL;
+  // Text first: rich, Unicode, then ANSI, or the one format asked for.
+  const UINT texts[] = {RtfFormat(), CF_UNICODETEXT, CF_TEXT};
+  for (UINT t : texts) {
+    if (cf && cf != t) continue;
+    FORMATETC fe = {(CLIPFORMAT)t, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM m = {};
+    if (FAILED(data->GetData(&fe, &m))) continue;
+    std::wstring text;
+    std::vector<Attr> attrs;
+    bool got = m.tymed == TYMED_HGLOBAL && TextOf(e, t, m.hGlobal, &text, &attrs);
+    ReleaseStgMedium(&m);
+    if (got) {
+      PasteText(e, text, attrs);
+      return S_OK;
+    }
+  }
+  // Then an object made from the data.
+  if (cf && cf != RegisterClipboardFormatW(L"Embed Source") && cf != RegisterClipboardFormatW(L"Embedded Object"))
+    return DV_E_FORMATETC;
+  if (OleQueryCreateFromData(data) != S_OK) return DV_E_FORMATETC;
+  IStorage* stg = NULL;
+  HRESULT hr = NewObjectStorage(e, &stg);
+  if (FAILED(hr) || !stg) return FAILED(hr) ? hr : E_FAIL;
+  IOleObject* ole = NULL;
+  Site* site = new Site(e);
+  hr = OleCreateFromData(data, IID_IOleObject, OLERENDER_DRAW, NULL, site, stg, (void**)&ole);
+  REOBJECT reo = {};
+  reo.cbStruct = sizeof reo;
+  reo.cp = (LONG)REO_CP_SELECTION;
+  reo.poleobj = ole;
+  reo.pstg = stg;
+  reo.polesite = site;
+  reo.dvaspect = DVASPECT_CONTENT;
+  if (SUCCEEDED(hr) && icon) {
+    // Shown as the icon given.
+    IOleCache* cache = NULL;
+    if (SUCCEEDED(ole->QueryInterface(IID_IOleCache, (void**)&cache))) {
+      FORMATETC fe = {CF_METAFILEPICT, NULL, DVASPECT_ICON, -1, TYMED_MFPICT};
+      DWORD conn = 0;
+      STGMEDIUM m = {};
+      m.tymed = TYMED_MFPICT;
+      m.hMetaFilePict = icon;
+      if (SUCCEEDED(cache->Cache(&fe, ADVF_PRIMEFIRST, &conn)) && SUCCEEDED(cache->SetData(&fe, &m, FALSE)))
+        reo.dvaspect = DVASPECT_ICON;
+      cache->Release();
+    }
+  }
+  if (SUCCEEDED(hr)) hr = ::InsertObject(e, &reo);
+  if (ole) {
+    if (FAILED(hr)) ole->Close(OLECLOSE_NOSAVE);
+    ole->Release();
+  }
+  site->Release();
+  stg->Release();
+  return hr;
+}
+
+// Saves an object into its storage (unless it is saved already) and
+// loads it again, as the class the storage now names, or the one
+// emulating it.
+HRESULT SaveObject(Obj* o) {
+  IPersistStorage* ps = NULL;
+  HRESULT hr = o->ole ? o->ole->QueryInterface(IID_IPersistStorage, (void**)&ps) : E_FAIL;
+  if (FAILED(hr)) return hr;
+  hr = OleSave(ps, o->stg, TRUE);
+  ps->SaveCompleted(NULL);
+  ps->Release();
+  if (SUCCEEDED(hr)) o->stg->Commit(STGC_DEFAULT);
+  return hr;
+}
+
+HRESULT ReloadObject(RichEdit* e, Obj* o, bool save) {
+  if (!o->ole || !o->stg) return E_INVALIDARG;
+  HRESULT hr = save ? SaveObject(o) : S_OK;
+  if (FAILED(hr)) return hr;
+  if (o->viewAdvise) {
+    IViewObject* v = NULL;
+    if (SUCCEEDED(o->ole->QueryInterface(IID_IViewObject, (void**)&v))) {
+      v->SetAdvise(o->aspect, 0, NULL);
+      v->Release();
+    }
+    o->viewAdvise = 0;
+  }
+  o->ole->Close(OLECLOSE_NOSAVE);
+  SafeRelease(o->ole);
+  hr = OleLoad(o->stg, IID_IOleObject, o->site, (void**)&o->ole);
+  if (FAILED(hr) || !o->ole) return FAILED(hr) ? hr : E_FAIL;
+  SetUpObject(e, o);
+  Relayout(e);
+  return S_OK;
+}
+
+HRESULT ConvertObjectTo(RichEdit* e, Obj* o, REFCLSID clsid, LPCSTR userType) {
+  if (!o->stg) return E_INVALIDARG;
+  if (e->ReadOnly()) return E_FAIL;
+  // Saved as it is, then marked as the new class.
+  HRESULT hr = SaveObject(o);
+  if (FAILED(hr)) return hr;
+  hr = WriteClassStg(o->stg, clsid);
+  if (FAILED(hr)) return hr;
+  CLIPFORMAT cf = 0;
+  LPOLESTR old = NULL;
+  ReadFmtUserTypeStg(o->stg, &cf, &old);
+  CoTaskMemFree(old);
+  if (userType) {
+    std::wstring w = Widen(userType);
+    WriteFmtUserTypeStg(o->stg, cf, (LPOLESTR)w.c_str());
+  }
+  o->stg->Commit(STGC_DEFAULT);
+  o->clsid = clsid;
+  return ReloadObject(e, o, false);
+}
+
+HRESULT ActivateObjectsAs(RichEdit* e, REFCLSID clsid, REFCLSID as) {
+  HRESULT hr = CoTreatAsClass(clsid, as);
+  if (FAILED(hr)) return hr;
+  for (int cp : ObjectPositions(e)) {
+    Obj* o = e->attr[cp].obj.get();
+    if (!IsEqualCLSID(o->clsid, clsid)) continue;
+    HRESULT r = ReloadObject(e, o, true);
+    if (FAILED(r)) hr = r;
+  }
+  return hr;
 }
 
 void Clear(RichEdit* e) {

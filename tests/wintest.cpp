@@ -22,6 +22,8 @@
 #ifdef _WINPORT
 #include <uxtheme.h>
 #include <unistd.h>
+#include <olectl.h>
+#include <urlmon.h>
 #endif
 #include <stdio.h>
 #include <string.h>
@@ -3417,6 +3419,434 @@ static void TestShellNamespace() {
   rmdir((dir + "/sub").c_str());
   rmdir(dir.c_str());
 }
+
+// ---------------------------------------------------------------------
+// OLE odds and ends: connections enumerated, a frozen picture, a
+// binding suspended, names bound in type information, records copied,
+// and pictures that are not bitmaps saved and loaded again.
+
+class CPropSink : public IPropertyNotifySink {
+public:
+  LONG m_nRef = 1;
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (::IsEqualIID(iid, IID_IUnknown) || ::IsEqualIID(iid, IID_IPropertyNotifySink)) {
+      *ppv = this;
+      AddRef();
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return (ULONG)++m_nRef; }
+  STDMETHOD_(ULONG, Release)() { return (ULONG)--m_nRef; }
+  STDMETHOD(OnChanged)(DISPID) { return S_OK; }
+  STDMETHOD(OnRequestEdit)(DISPID) { return S_OK; }
+};
+
+class CBindSink : public IBindStatusCallback {
+public:
+  LONG m_nRef = 1;
+  IBinding* m_pBinding = NULL;
+  int m_nData = 0;
+  BOOL m_bStopped = FALSE;
+  BOOL m_bSuspend = TRUE;
+  HRESULT m_hrSuspend = E_FAIL;
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (::IsEqualIID(iid, IID_IUnknown) || ::IsEqualIID(iid, IID_IBindStatusCallback)) {
+      *ppv = this;
+      AddRef();
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return (ULONG)++m_nRef; }
+  STDMETHOD_(ULONG, Release)() { return (ULONG)--m_nRef; }
+  STDMETHOD(OnStartBinding)(DWORD, IBinding* pib) {
+    m_pBinding = pib;
+    pib->AddRef();
+    if (m_bSuspend) m_hrSuspend = pib->Suspend();
+    return S_OK;
+  }
+  STDMETHOD(GetPriority)(LONG*) { return E_NOTIMPL; }
+  STDMETHOD(OnLowResource)(DWORD) { return S_OK; }
+  STDMETHOD(OnProgress)(ULONG, ULONG, ULONG, LPCWSTR) { return S_OK; }
+  STDMETHOD(OnStopBinding)(HRESULT, LPCWSTR) {
+    m_bStopped = TRUE;
+    return S_OK;
+  }
+  STDMETHOD(GetBindInfo)(DWORD* pgrf, BINDINFO* pbi) {
+    *pgrf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE;
+    (void)pbi;
+    return S_OK;
+  }
+  STDMETHOD(OnDataAvailable)(DWORD, DWORD, FORMATETC*, STGMEDIUM*) {
+    m_nData++;
+    return S_OK;
+  }
+  STDMETHOD(OnObjectAvailable)(REFIID, IUnknown*) { return S_OK; }
+};
+
+// A record of one LONG.
+class CLongRecord : public IRecordInfo {
+public:
+  LONG m_nRef = 1;
+  int m_nCopies = 0;
+  STDMETHOD(QueryInterface)(REFIID iid, void** ppv) {
+    if (::IsEqualIID(iid, IID_IUnknown) || ::IsEqualIID(iid, IID_IRecordInfo)) {
+      *ppv = this;
+      AddRef();
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() { return (ULONG)++m_nRef; }
+  STDMETHOD_(ULONG, Release)() { return (ULONG)--m_nRef; }
+  STDMETHOD(RecordInit)(PVOID pv) {
+    *(LONG*)pv = 0;
+    return S_OK;
+  }
+  STDMETHOD(RecordClear)(PVOID pv) {
+    *(LONG*)pv = 0;
+    return S_OK;
+  }
+  STDMETHOD(RecordCopy)(PVOID pvOld, PVOID pvNew) {
+    *(LONG*)pvNew = *(LONG*)pvOld;
+    return S_OK;
+  }
+  STDMETHOD(GetGuid)(GUID*) { return E_NOTIMPL; }
+  STDMETHOD(GetName)(BSTR*) { return E_NOTIMPL; }
+  STDMETHOD(GetSize)(ULONG* pcb) {
+    *pcb = sizeof(LONG);
+    return S_OK;
+  }
+  STDMETHOD(GetTypeInfo)(ITypeInfo**) { return E_NOTIMPL; }
+  STDMETHOD(GetField)(PVOID, LPCOLESTR, VARIANT*) { return E_NOTIMPL; }
+  STDMETHOD(GetFieldNoCopy)(PVOID, LPCOLESTR, VARIANT*, PVOID*) { return E_NOTIMPL; }
+  STDMETHOD(PutField)(ULONG, PVOID, LPCOLESTR, VARIANT*) { return E_NOTIMPL; }
+  STDMETHOD(PutFieldNoCopy)(ULONG, PVOID, LPCOLESTR, VARIANT*) { return E_NOTIMPL; }
+  STDMETHOD(GetFieldNames)(ULONG*, BSTR*) { return E_NOTIMPL; }
+  STDMETHOD_(BOOL, IsMatchingType)(IRecordInfo* p) { return p == this; }
+  STDMETHOD_(PVOID, RecordCreate)() { return ::CoTaskMemAlloc(sizeof(LONG)); }
+  STDMETHOD(RecordCreateCopy)(PVOID pvSource, PVOID* ppvDest) {
+    m_nCopies++;
+    *ppvDest = RecordCreate();
+    return *ppvDest ? RecordCopy(pvSource, *ppvDest) : E_OUTOFMEMORY;
+  }
+  STDMETHOD(RecordDestroy)(PVOID pv) {
+    ::CoTaskMemFree(pv);
+    return S_OK;
+  }
+};
+
+static HENHMETAFILE MakeEmf(int cx, int cy) {
+  RECT rc = {0, 0, cx, cy};  // HIMETRIC
+  HDC dc = ::CreateEnhMetaFileW(NULL, NULL, &rc, NULL);
+  if (dc == NULL) return NULL;
+  ::Rectangle(dc, 0, 0, 50, 50);
+  return ::CloseEnhMetaFile(dc);
+}
+
+// Saves a picture to a stream and loads it again.
+static IPicture* RoundTrip(IPicture* pic, LONG* pcbSaved) {
+  *pcbSaved = 0;
+  IStream* s = NULL;
+  if (FAILED(::CreateStreamOnHGlobal(NULL, TRUE, &s))) return NULL;
+  IPicture* out = NULL;
+  if (SUCCEEDED(pic->SaveAsFile(s, TRUE, pcbSaved)) && *pcbSaved > 0) {
+    LARGE_INTEGER zero = {};
+    s->Seek(zero, STREAM_SEEK_SET, NULL);
+    ::OleLoadPicture(s, *pcbSaved, FALSE, IID_IPicture, (void**)&out);
+  }
+  s->Release();
+  return out;
+}
+
+static void TestOleBits() {
+  CHECK(SUCCEEDED(::OleInitialize(NULL)));
+
+  // A font's property-notification connections.
+  FONTDESC fd = {sizeof(FONTDESC), (LPOLESTR)L"Arial", {120000, 0}, FW_NORMAL, ANSI_CHARSET, FALSE, FALSE, FALSE};
+  IUnknown* pFont = NULL;
+  CHECK(::OleCreateFontIndirect(&fd, IID_IUnknown, (void**)&pFont) == S_OK);
+  IConnectionPointContainer* pCPC = NULL;
+  IConnectionPoint* pCP = NULL;
+  if (pFont != NULL) pFont->QueryInterface(IID_IConnectionPointContainer, (void**)&pCPC);
+  if (pCPC != NULL) pCPC->FindConnectionPoint(IID_IPropertyNotifySink, &pCP);
+  CHECK(pCP != NULL);
+  if (pCP != NULL) {
+    CPropSink sink;
+    DWORD dwCookie = 0;
+    CHECK(pCP->Advise(&sink, &dwCookie) == S_OK);
+    IEnumConnections* pEnum = NULL;
+    CHECK(pCP->EnumConnections(&pEnum) == S_OK && pEnum != NULL);
+    if (pEnum != NULL) {
+      CONNECTDATA cd[2];
+      ULONG n = 0;
+      CHECK(pEnum->Next(2, cd, &n) == S_FALSE && n == 1);
+      if (n == 1) {
+        CHECK(cd[0].dwCookie == dwCookie && cd[0].pUnk == &sink);
+        cd[0].pUnk->Release();
+      }
+      pEnum->Release();
+    }
+    CHECK(pCP->Unadvise(dwCookie) == S_OK);
+    CHECK(sink.m_nRef == 1);
+    pCP->Release();
+  }
+  if (pCPC != NULL) pCPC->Release();
+  if (pFont != NULL) pFont->Release();
+
+  // A cached picture, frozen: a new one does not show until it thaws.
+  static const CLSID clsidNone = {0x1b2c3d4e, 0x0001, 0x0002, {0, 1, 2, 3, 4, 5, 6, 7}};
+  IOleCache* pCache = NULL;
+  CHECK(::OleCreateDefaultHandler(clsidNone, NULL, IID_IOleCache, (void**)&pCache) == S_OK);
+  if (pCache != NULL) {
+    FORMATETC fe = {CF_ENHMETAFILE, NULL, DVASPECT_CONTENT, -1, TYMED_ENHMF};
+    DWORD dwConn = 0;
+    CHECK(SUCCEEDED(pCache->Cache(&fe, ADVF_PRIMEFIRST, &dwConn)));
+    STGMEDIUM m = {};
+    m.tymed = TYMED_ENHMF;
+    m.hEnhMetaFile = MakeEmf(1000, 500);
+    CHECK(pCache->SetData(&fe, &m, TRUE) == S_OK);
+    IViewObject* pView = NULL;
+    CHECK(pCache->QueryInterface(IID_IViewObject, (void**)&pView) == S_OK);
+    IViewObject2* pView2 = NULL;
+    if (pView != NULL) pView->QueryInterface(IID_IViewObject2, (void**)&pView2);
+    if (pView != NULL && pView2 != NULL) {
+      DWORD dwFreeze = 0, dwAgain = 0;
+      CHECK(pView->Freeze(DVASPECT_ICON, -1, NULL, &dwFreeze) == OLE_E_BLANK);
+      CHECK(pView->Freeze(DVASPECT_CONTENT, -1, NULL, &dwFreeze) == S_OK);
+      CHECK(pView->Freeze(DVASPECT_CONTENT, -1, NULL, &dwAgain) == VIEW_S_ALREADY_FROZEN && dwAgain == dwFreeze);
+      m.tymed = TYMED_ENHMF;
+      m.hEnhMetaFile = MakeEmf(3000, 2000);
+      CHECK(pCache->SetData(&fe, &m, TRUE) == S_OK);
+      SIZEL size = {0, 0};
+      CHECK(pView2->GetExtent(DVASPECT_CONTENT, -1, NULL, &size) == S_OK);
+      CHECK(size.cx == 1000 && size.cy == 500);
+      CHECK(pView->Unfreeze(dwFreeze) == S_OK);
+      CHECK(pView->Unfreeze(dwFreeze) == OLE_E_NOCONNECTION);
+      CHECK(pView2->GetExtent(DVASPECT_CONTENT, -1, NULL, &size) == S_OK);
+      CHECK(size.cx == 3000 && size.cy == 2000);
+    }
+    if (pView2 != NULL) pView2->Release();
+    if (pView != NULL) pView->Release();
+    pCache->Release();
+  }
+
+  // A binding suspended as it starts: no data until it resumes.
+  char szFile[] = "/tmp/wintest-bind-XXXXXX";
+  int fdTemp = mkstemp(szFile);
+  CHECK(fdTemp >= 0);
+  if (fdTemp >= 0) {
+    CHECK(write(fdTemp, "hello", 5) == 5);
+    close(fdTemp);
+    WCHAR szUrl[64] = L"file://";
+    for (int i = 0; szFile[i]; i++) szUrl[7 + i] = szFile[i], szUrl[8 + i] = 0;
+    IMoniker* pmk = NULL;
+    CHECK(::CreateURLMoniker(NULL, szUrl, &pmk) == S_OK);
+    CBindSink bsc;
+    IBindCtx* pbc = NULL;
+    CHECK(::CreateAsyncBindCtx(0, &bsc, NULL, &pbc) == S_OK);
+    if (pmk != NULL && pbc != NULL) {
+      IStream* pstm = NULL;
+      CHECK(pmk->BindToStorage(pbc, NULL, IID_IStream, (void**)&pstm) == MK_S_ASYNCHRONOUS);
+      CHECK(bsc.m_hrSuspend == S_OK);
+      MSG msg;
+      DWORD dwStart = ::GetTickCount();
+      while (::GetTickCount() - dwStart < 200) {
+        while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) ::DispatchMessage(&msg);
+        ::Sleep(10);
+      }
+      CHECK(bsc.m_nData == 0 && !bsc.m_bStopped);
+      if (bsc.m_pBinding != NULL) {
+        CHECK(bsc.m_pBinding->Suspend() == S_FALSE);
+        CHECK(bsc.m_pBinding->Resume() == S_OK);
+        CHECK(bsc.m_pBinding->Resume() == S_FALSE);
+      }
+      dwStart = ::GetTickCount();
+      while (!bsc.m_bStopped && ::GetTickCount() - dwStart < 2000) {
+        while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) ::DispatchMessage(&msg);
+        ::Sleep(10);
+      }
+      CHECK(bsc.m_nData == 1 && bsc.m_bStopped);
+      if (bsc.m_pBinding != NULL) {
+        CHECK(bsc.m_pBinding->Resume() == E_FAIL);
+        bsc.m_pBinding->Release();
+      }
+      if (pstm != NULL) pstm->Release();
+    }
+    if (pbc != NULL) pbc->Release();
+    if (pmk != NULL) pmk->Release();
+    unlink(szFile);
+  }
+
+  // Names bound through a type's ITypeComp and a library's.
+  ICreateTypeLib2* pctl = NULL;
+  CHECK(::CreateTypeLib2(SYS_WIN32, L"wintest.tlb", &pctl) == S_OK);
+  if (pctl != NULL) {
+    static const GUID iidThing = {0x51c0ffee, 0x1234, 0x4abc, {1, 2, 3, 4, 5, 6, 7, 8}};
+    ICreateTypeInfo* pcti = NULL;
+    if (SUCCEEDED(pctl->CreateTypeInfo((LPOLESTR)L"DThing", TKIND_DISPATCH, &pcti))) {
+      pcti->SetGuid(iidThing);
+      FUNCDESC f = {};
+      f.memid = 7;
+      f.funckind = FUNC_DISPATCH;
+      f.invkind = INVOKE_FUNC;
+      f.callconv = CC_STDCALL;
+      f.elemdescFunc.tdesc.vt = VT_I4;
+      LPOLESTR names[] = {(LPOLESTR)L"Count"};
+      pcti->AddFuncDesc(0, &f);
+      pcti->SetFuncAndParamNames(0, names, 1);
+      pcti->Release();
+    }
+    if (SUCCEEDED(pctl->CreateTypeInfo((LPOLESTR)L"Colors", TKIND_ENUM, &pcti))) {
+      VARDESC v = {};
+      VARIANT val;
+      val.vt = VT_I4;
+      val.lVal = 3;
+      v.memid = 0x40000001;
+      v.lpvarValue = &val;
+      v.varkind = VAR_CONST;
+      v.elemdescVar.tdesc.vt = VT_I4;
+      pcti->AddVarDesc(0, &v);
+      pcti->SetVarName(0, (LPOLESTR)L"Green");
+      pcti->Release();
+    }
+    ITypeLib* ptl = NULL;
+    pctl->QueryInterface(IID_ITypeLib, (void**)&ptl);
+    ITypeInfo* pti = NULL;
+    if (ptl != NULL) ptl->GetTypeInfoOfGuid(iidThing, &pti);
+    CHECK(pti != NULL);
+    ITypeComp* ptc = NULL;
+    if (pti != NULL) CHECK(pti->GetTypeComp(&ptc) == S_OK && ptc != NULL);
+    if (ptc != NULL) {
+      ITypeInfo* ptiBound = NULL;
+      DESCKIND kind = DESCKIND_MAX;
+      BINDPTR bp;
+      CHECK(ptc->Bind((LPOLESTR)L"count", 0, INVOKE_FUNC, &ptiBound, &kind, &bp) == S_OK);
+      CHECK(kind == DESCKIND_FUNCDESC && ptiBound != NULL);
+      if (kind == DESCKIND_FUNCDESC && ptiBound != NULL) {
+        CHECK(bp.lpfuncdesc->memid == 7);
+        ptiBound->ReleaseFuncDesc(bp.lpfuncdesc);
+      }
+      if (ptiBound != NULL) ptiBound->Release();
+      ptiBound = NULL;
+      CHECK(ptc->Bind((LPOLESTR)L"Count", 0, INVOKE_PROPERTYPUT, &ptiBound, &kind, &bp) == TYPE_E_TYPEMISMATCH);
+      CHECK(ptc->Bind((LPOLESTR)L"Nothing", 0, 0, &ptiBound, &kind, &bp) == S_OK && kind == DESCKIND_NONE &&
+            ptiBound == NULL);
+      ptc->Release();
+    }
+    ptc = NULL;
+    if (ptl != NULL) CHECK(ptl->GetTypeComp(&ptc) == S_OK && ptc != NULL);
+    if (ptc != NULL) {
+      ITypeInfo* ptiBound = NULL;
+      ITypeComp* ptcBound = NULL;
+      CHECK(ptc->BindType((LPOLESTR)L"dthing", 0, &ptiBound, &ptcBound) == S_OK && ptiBound != NULL);
+      if (ptiBound != NULL) ptiBound->Release();
+      ptiBound = NULL;
+      DESCKIND kind = DESCKIND_MAX;
+      BINDPTR bp;
+      // An enumeration's constants are the library's names.
+      CHECK(ptc->Bind((LPOLESTR)L"Green", 0, 0, &ptiBound, &kind, &bp) == S_OK && kind == DESCKIND_VARDESC);
+      if (kind == DESCKIND_VARDESC && ptiBound != NULL) {
+        CHECK(bp.lpvardesc->lpvarValue && bp.lpvardesc->lpvarValue->lVal == 3);
+        ptiBound->ReleaseVarDesc(bp.lpvardesc);
+      }
+      if (ptiBound != NULL) ptiBound->Release();
+      ptiBound = NULL;
+      CHECK(ptc->Bind((LPOLESTR)L"Colors", 0, 0, &ptiBound, &kind, &bp) == S_OK && kind == DESCKIND_TYPECOMP);
+      if (kind == DESCKIND_TYPECOMP) bp.lptcomp->Release();
+      ptc->Release();
+    }
+    if (pti != NULL) pti->Release();
+    if (ptl != NULL) ptl->Release();
+    pctl->Release();
+  }
+
+  // A record copied with its variant.
+  CLongRecord rec;
+  LONG lValue = 99;
+  VARIANT vRec, vCopy;
+  ::VariantInit(&vRec);
+  ::VariantInit(&vCopy);
+  vRec.vt = VT_RECORD;
+  vRec.pvRecord = &lValue;
+  vRec.pRecInfo = &rec;
+  CHECK(::VariantCopy(&vCopy, &vRec) == S_OK);
+  CHECK(vCopy.vt == VT_RECORD && vCopy.pRecInfo == &rec && vCopy.pvRecord != &lValue);
+  CHECK(vCopy.pvRecord != NULL && *(LONG*)vCopy.pvRecord == 99 && rec.m_nCopies == 1 && rec.m_nRef == 2);
+  PVOID pvCopy = vCopy.pvRecord;
+  CHECK(::VariantClear(&vCopy) == S_OK && rec.m_nRef == 1);
+  ::CoTaskMemFree(pvCopy);
+
+  // Pictures that are not bitmaps go to files and back.
+  PICTDESC pd = {sizeof(PICTDESC), PICTYPE_ICON};
+  pd.icon.hicon = ::CopyIcon(::LoadIcon(NULL, IDI_APPLICATION));
+  IPicture* pic = NULL;
+  CHECK(::OleCreatePictureIndirect(&pd, IID_IPicture, TRUE, (void**)&pic) == S_OK);
+  if (pic != NULL) {
+    OLE_XSIZE_HIMETRIC cx = 0, cx2 = 0;
+    pic->get_Width(&cx);
+    LONG cb = 0;
+    IPicture* back = RoundTrip(pic, &cb);
+    CHECK(back != NULL && cb > 22);
+    SHORT type = 0;
+    if (back != NULL) {
+      CHECK(back->get_Type(&type) == S_OK && type == PICTYPE_ICON);
+      back->get_Width(&cx2);
+      CHECK(cx2 == cx);
+      back->Release();
+    }
+    pic->Release();
+  }
+  pd.picType = PICTYPE_ENHMETAFILE;
+  pd.emf.hemf = MakeEmf(2540, 1270);
+  pic = NULL;
+  CHECK(::OleCreatePictureIndirect(&pd, IID_IPicture, TRUE, (void**)&pic) == S_OK);
+  if (pic != NULL) {
+    LONG cb = 0;
+    IPicture* back = RoundTrip(pic, &cb);
+    CHECK(back != NULL);
+    if (back != NULL) {
+      SHORT type = 0;
+      OLE_XSIZE_HIMETRIC cx = 0;
+      OLE_YSIZE_HIMETRIC cy = 0;
+      CHECK(back->get_Type(&type) == S_OK && type == PICTYPE_ENHMETAFILE);
+      back->get_Width(&cx);
+      back->get_Height(&cy);
+      CHECK(cx == 2540 && cy == 1270);
+      back->Release();
+    }
+    pic->Release();
+  }
+  HDC dcMeta = ::CreateMetaFileW(NULL);
+  ::Rectangle(dcMeta, 0, 0, 100, 100);
+  pd.picType = PICTYPE_METAFILE;
+  pd.wmf.hmeta = ::CloseMetaFile(dcMeta);
+  pd.wmf.xExt = 5080;
+  pd.wmf.yExt = 2540;
+  pic = NULL;
+  CHECK(::OleCreatePictureIndirect(&pd, IID_IPicture, TRUE, (void**)&pic) == S_OK);
+  if (pic != NULL) {
+    LONG cb = 0;
+    IPicture* back = RoundTrip(pic, &cb);
+    CHECK(back != NULL);
+    if (back != NULL) {
+      SHORT type = 0;
+      OLE_XSIZE_HIMETRIC cx = 0;
+      OLE_YSIZE_HIMETRIC cy = 0;
+      CHECK(back->get_Type(&type) == S_OK && type == PICTYPE_METAFILE);
+      back->get_Width(&cx);
+      back->get_Height(&cy);
+      CHECK(cx == 5080 && cy == 2540);
+      back->Release();
+    }
+    pic->Release();
+  }
+  ::OleUninitialize();
+}
 #endif
 
 int main() {
@@ -3458,6 +3888,7 @@ int main() {
   TestDisplayAndDrawing();
   TestDecimal();
   TestShellNamespace();
+  TestOleBits();
 #endif
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;

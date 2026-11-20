@@ -77,8 +77,11 @@ public:
     return CONNECT_E_NOCONNECTION;
   }
   STDMETHOD(EnumConnections)(IEnumConnections** p) override {
-    if (p) *p = NULL;
-    return E_NOTIMPL;
+    if (p == NULL) return E_POINTER;
+    std::vector<CONNECTDATA> v;
+    for (Sink& s : sinks_) v.push_back(CONNECTDATA{s.unk, s.cookie});
+    *p = new winport::ole::ConnectionEnum(v);
+    return S_OK;
   }
 
   // The sinks, AddRef'd, so that one may unadvise while being told.
@@ -599,6 +602,103 @@ bool BitmapFile(HBITMAP hbm, std::vector<BYTE>* out) {
   return lines == bm.bmHeight;
 }
 
+// An icon file of an icon: its one image, 32 bits a pixel with its mask,
+// or a monochrome icon's two halves.
+bool IconFile(HICON icon, std::vector<BYTE>* out) {
+  ICONINFO ii;
+  if (!GetIconInfo(icon, &ii)) return false;
+  BITMAP bm;
+  bool ok = ii.hbmMask && GetObjectW(ii.hbmMask, sizeof bm, &bm);
+  int w = ok ? bm.bmWidth : 0, h = ok ? (ii.hbmColor ? bm.bmHeight : bm.bmHeight / 2) : 0;
+  ok = ok && w > 0 && h > 0;
+  std::vector<BYTE> image;
+  WORD bits = ii.hbmColor ? 32 : 1;
+  if (ok) {
+    HDC dc = GetDC(NULL);
+    DWORD maskStride = ((DWORD)w + 31) / 32 * 4;
+    struct {
+      BITMAPINFOHEADER h;
+      RGBQUAD colors[2];
+    } bi;
+    memset(&bi, 0, sizeof bi);
+    bi.h.biSize = sizeof bi.h;
+    bi.h.biWidth = w;
+    bi.h.biPlanes = 1;
+    bi.h.biCompression = BI_RGB;
+    if (ii.hbmColor) {
+      // The colors, then the mask.
+      DWORD stride = (DWORD)w * 4;
+      image.resize(sizeof bi.h + stride * h + maskStride * h);
+      bi.h.biHeight = h;
+      bi.h.biBitCount = 32;
+      ok = GetDIBits(dc, ii.hbmColor, 0, (UINT)h, image.data() + sizeof bi.h, (BITMAPINFO*)&bi, DIB_RGB_COLORS) == h;
+      bi.h.biBitCount = 1;
+      ok = ok && GetDIBits(dc, ii.hbmMask, 0, (UINT)h, image.data() + sizeof bi.h + stride * h, (BITMAPINFO*)&bi,
+                           DIB_RGB_COLORS) == h;
+      memset(&bi, 0, sizeof bi);
+      bi.h.biSize = sizeof bi.h;
+      bi.h.biWidth = w;
+      bi.h.biHeight = 2 * h;
+      bi.h.biPlanes = 1;
+      bi.h.biBitCount = 32;
+      memcpy(image.data(), &bi.h, sizeof bi.h);
+    } else {
+      // The mask is both halves: bottom up, the colors' and then the mask's.
+      image.resize(sizeof bi + maskStride * 2 * h);
+      bi.h.biHeight = 2 * h;
+      bi.h.biBitCount = 1;
+      ok = GetDIBits(dc, ii.hbmMask, 0, (UINT)(2 * h), image.data() + sizeof bi, (BITMAPINFO*)&bi,
+                     DIB_RGB_COLORS) == 2 * h;
+      bi.h.biClrUsed = 2;
+      bi.colors[1].rgbRed = bi.colors[1].rgbGreen = bi.colors[1].rgbBlue = 255;
+      memcpy(image.data(), &bi, sizeof bi);
+    }
+    ReleaseDC(NULL, dc);
+  }
+  if (ii.hbmColor) DeleteObject(ii.hbmColor);
+  if (ii.hbmMask) DeleteObject(ii.hbmMask);
+  if (!ok) return false;
+  BYTE head[22] = {0, 0, 1, 0, 1, 0};
+  head[6] = (BYTE)(w >= 256 ? 0 : w);
+  head[7] = (BYTE)(h >= 256 ? 0 : h);
+  head[10] = 1;
+  head[12] = (BYTE)bits;
+  DWORD size = (DWORD)image.size(), offset = sizeof head;
+  memcpy(head + 14, &size, 4);
+  memcpy(head + 18, &offset, 4);
+  out->assign(head, head + sizeof head);
+  out->insert(out->end(), image.begin(), image.end());
+  return true;
+}
+
+// A placeable metafile file: its header gives the size in HIMETRIC.
+const DWORD kPlaceableKey = 0x9AC6CDD7;
+bool MetafileFile(HMETAFILE mf, LONG cx, LONG cy, std::vector<BYTE>* out) {
+  UINT n = GetMetaFileBitsEx(mf, 0, NULL);
+  if (n == 0) return false;
+  WORD head[11] = {};
+  memcpy(head, &kPlaceableKey, 4);
+  // The bounding box (from 0, 0) in as fine a unit as fits 16 bits.
+  LONG w = cx < 0 ? -cx : cx, h = cy < 0 ? -cy : cy;
+  int inch = kHimetricPerInch;
+  while (inch > 1 && (MulDiv(w, inch, kHimetricPerInch) > 32767 || MulDiv(h, inch, kHimetricPerInch) > 32767))
+    inch /= 2;
+  head[5] = (WORD)MulDiv(w, inch, kHimetricPerInch);
+  head[6] = (WORD)MulDiv(h, inch, kHimetricPerInch);
+  head[7] = (WORD)inch;
+  for (int i = 0; i < 10; i++) head[10] ^= head[i];
+  out->assign((BYTE*)head, (BYTE*)head + sizeof head);
+  out->resize(sizeof head + n);
+  return GetMetaFileBitsEx(mf, n, out->data() + sizeof head) == n;
+}
+
+bool EnhMetafileFile(HENHMETAFILE emf, std::vector<BYTE>* out) {
+  UINT n = GetEnhMetaFileBits(emf, 0, NULL);
+  if (n == 0) return false;
+  out->resize(n);
+  return GetEnhMetaFileBits(emf, n, out->data()) == n;
+}
+
 class Picture final : public IPicture, public IPictureDisp, public IPersistStream {
 public:
   SHORT type_ = (SHORT)PICTYPE_UNINITIALIZED;
@@ -903,14 +1003,22 @@ private:
       *out = original_;
       return S_OK;
     }
-    if (type_ == PICTYPE_BITMAP) return BitmapFile((HBITMAP)handle_, out) ? S_OK : E_FAIL;
-    return E_NOTIMPL;
+    bool ok = false;
+    switch (type_) {
+      case PICTYPE_BITMAP: ok = BitmapFile((HBITMAP)handle_, out); break;
+      case PICTYPE_ICON: ok = IconFile((HICON)handle_, out); break;
+      case PICTYPE_METAFILE: ok = MetafileFile((HMETAFILE)handle_, width_, height_, out); break;
+      case PICTYPE_ENHMETAFILE: ok = EnhMetafileFile((HENHMETAFILE)handle_, out); break;
+      default: return E_UNEXPECTED;
+    }
+    return ok ? S_OK : E_FAIL;
   }
 
   std::atomic<ULONG> refs_{1};
 };
 
-// A picture file: a bitmap ("BM") or an icon.
+// A picture file: a bitmap ("BM"), an icon, a placeable metafile or an
+// enhanced one.
 HRESULT Picture::FromFile(const BYTE* p, size_t n) {
   if (n >= 8 && p[0] == 'l' && p[1] == 't' && p[2] == 0 && p[3] == 0) {
     DWORD len;
@@ -959,6 +1067,45 @@ HRESULT Picture::FromFile(const BYTE* p, size_t n) {
     d.cbSizeofstruct = sizeof d;
     d.picType = PICTYPE_ICON;
     d.icon.hicon = h;
+    Free();
+    HRESULT hr = Init(&d, TRUE);
+    original_.assign(p, p + n);
+    return hr;
+  }
+  DWORD key = 0;
+  if (n >= 4) memcpy(&key, p, 4);
+  if (n > 22 && key == kPlaceableKey) {
+    WORD head[11];
+    memcpy(head, p, sizeof head);
+    SHORT left = (SHORT)head[3], top = (SHORT)head[4], right = (SHORT)head[5], bottom = (SHORT)head[6];
+    WORD inch = head[7] ? head[7] : 1440;
+    HMETAFILE mf = SetMetaFileBitsEx((UINT)(n - 22), p + 22);
+    if (mf == NULL) return CTL_E_INVALIDPICTURE;
+    PICTDESC d;
+    memset(&d, 0, sizeof d);
+    d.cbSizeofstruct = sizeof d;
+    d.picType = PICTYPE_METAFILE;
+    d.wmf.hmeta = mf;
+    d.wmf.xExt = MulDiv(right - left, kHimetricPerInch, inch);
+    d.wmf.yExt = MulDiv(bottom - top, kHimetricPerInch, inch);
+    Free();
+    HRESULT hr = Init(&d, TRUE);
+    original_.assign(p, p + n);
+    return hr;
+  }
+  DWORD type = 0, sig = 0;
+  if (n >= sizeof(ENHMETAHEADER)) {
+    memcpy(&type, p, 4);
+    memcpy(&sig, p + 40, 4);
+  }
+  if (type == EMR_HEADER && sig == ENHMETA_SIGNATURE) {
+    HENHMETAFILE emf = SetEnhMetaFileBits((UINT)n, p);
+    if (emf == NULL) return CTL_E_INVALIDPICTURE;
+    PICTDESC d;
+    memset(&d, 0, sizeof d);
+    d.cbSizeofstruct = sizeof d;
+    d.picType = PICTYPE_ENHMETAFILE;
+    d.emf.hemf = emf;
     Free();
     HRESULT hr = Init(&d, TRUE);
     original_.assign(p, p + n);

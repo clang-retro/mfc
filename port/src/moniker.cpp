@@ -1107,8 +1107,20 @@ class UrlBinding final : public IBinding {
     Finish(E_ABORT);
     return S_OK;
   }
-  STDMETHOD(Suspend)() override { return E_NOTIMPL; }
-  STDMETHOD(Resume)() override { return E_NOTIMPL; }
+  // Suspended, the data waits until the binding resumes.
+  STDMETHOD(Suspend)() override {
+    if (done_) return E_FAIL;
+    if (suspended_) return S_FALSE;
+    suspended_ = true;
+    StopTimer();
+    return S_OK;
+  }
+  STDMETHOD(Resume)() override {
+    if (done_) return E_FAIL;
+    if (!suspended_) return S_FALSE;
+    suspended_ = false;
+    return Schedule() ? S_OK : E_FAIL;
+  }
   STDMETHOD(SetPriority)(LONG p) override {
     priority_ = p;
     return S_OK;
@@ -1133,13 +1145,11 @@ class UrlBinding final : public IBinding {
       return hr;
     }
     bsc_->OnProgress(0, size_, BINDSTATUS_BEGINDOWNLOADDATA, url_.c_str());
-    timer_ = SetTimer(NULL, 0, 0, Tick);
-    if (timer_ == 0) {
+    if (done_ || suspended_) return S_OK;  // aborted or suspended from the callback
+    if (!Schedule()) {
       Finish(E_FAIL);
       return E_FAIL;
     }
-    AddRef();  // the timer's
-    Bindings()[timer_] = this;
     return S_OK;
   }
   // Everything at once, for a binding that waits.
@@ -1180,6 +1190,13 @@ class UrlBinding final : public IBinding {
     if (!done_) Finish(S_OK);
     Release();
   }
+  bool Schedule() {
+    timer_ = SetTimer(NULL, 0, 0, Tick);
+    if (timer_ == 0) return false;
+    AddRef();  // the timer's
+    Bindings()[timer_] = this;
+    return true;
+  }
   void StopTimer() {
     if (timer_ == 0) return;
     KillTimer(NULL, timer_);
@@ -1214,6 +1231,7 @@ class UrlBinding final : public IBinding {
   LONG priority_ = THREAD_PRIORITY_NORMAL;
   HRESULT result_ = S_OK;
   bool done_ = false;
+  bool suspended_ = false;
 };
 
 const CLSID kUrlMoniker = {0x79EAC9E0, 0xBAF9, 0x11CE, {0x8C, 0x82, 0x00, 0xAA, 0x00, 0x4B, 0xA9, 0x0B}};

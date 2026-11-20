@@ -195,7 +195,21 @@ class ClipboardData final : public IDataObject {
     out->ptd = NULL;
     return DATA_S_SAMEFORMATETC;
   }
-  STDMETHOD(SetData)(FORMATETC*, STGMEDIUM*, BOOL) override { return E_NOTIMPL; }
+  // Data set here goes on the clipboard beside what is there: to the
+  // object that put it there, when it is this program's.
+  STDMETHOD(SetData)(FORMATETC* fe, STGMEDIUM* m, BOOL release) override {
+    if (!fe || !m) return E_INVALIDARG;
+    if (OursOnClipboard()) return g_clip->SetData(fe, m, release);
+    if (!fe->cfFormat || !(fe->tymed & m->tymed)) return DV_E_FORMATETC;
+    if (!OpenClipboard(NULL)) return CLIPBRD_E_CANT_OPEN;
+    HANDLE h = ToClipboard(fe->cfFormat, *m);
+    bool ok = h && SetClipboardData(fe->cfFormat, h) != NULL;
+    CloseClipboard();
+    if (!h) return DV_E_TYMED;
+    if (!ok) return CLIPBRD_E_CANT_SET;
+    if (release) ReleaseStgMedium(m);
+    return S_OK;
+  }
   STDMETHOD(EnumFormatEtc)(DWORD dir, IEnumFORMATETC** out) override {
     if (!out) return E_POINTER;
     *out = NULL;

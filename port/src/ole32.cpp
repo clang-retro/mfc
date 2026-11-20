@@ -327,12 +327,38 @@ void WINAPI CoFreeUnusedLibraries(void) {
 }
 void WINAPI CoFreeUnusedLibrariesEx(DWORD, DWORD) { CoFreeUnusedLibraries(); }
 
+// Emulation: HKEY_CLASSES_ROOT\CLSID\<old>\TreatAs names the class that
+// stands in for an old one.
 HRESULT WINAPI CoGetTreatAsClass(REFCLSID old, LPCLSID out) {
   if (out == NULL) return E_INVALIDARG;
   *out = old;
-  return S_FALSE;
+  WCHAR guid[40], value[64];
+  StringFromGUID2(old, guid, 40);
+  std::wstring key = std::wstring(L"CLSID\\") + guid + L"\\TreatAs";
+  LONG cb = sizeof(value);
+  CLSID as;
+  if (RegQueryValueW(HKEY_CLASSES_ROOT, key.c_str(), value, &cb) != ERROR_SUCCESS || !ParseGuid(value, &as))
+    return S_FALSE;
+  *out = as;
+  return S_OK;
 }
-HRESULT WINAPI CoTreatAsClass(REFCLSID, REFCLSID) { return REGDB_E_WRITEREGDB; }
+HRESULT WINAPI CoTreatAsClass(REFCLSID old, REFCLSID as) {
+  WCHAR guid[40], value[40];
+  StringFromGUID2(old, guid, 40);
+  std::wstring key = std::wstring(L"CLSID\\") + guid;
+  HKEY k;
+  if (RegCreateKeyW(HKEY_CLASSES_ROOT, key.c_str(), &k) != ERROR_SUCCESS) return REGDB_E_WRITEREGDB;
+  LONG r;
+  if (IsEqualCLSID(as, CLSID_NULL) || IsEqualCLSID(as, old)) {
+    r = RegDeleteKeyW(k, L"TreatAs");
+    if (r == ERROR_FILE_NOT_FOUND) r = ERROR_SUCCESS;
+  } else {
+    StringFromGUID2(as, value, 40);
+    r = RegSetValueW(k, L"TreatAs", REG_SZ, value, (DWORD)(wcslen(value) * sizeof(WCHAR)));
+  }
+  RegCloseKey(k);
+  return r == ERROR_SUCCESS ? S_OK : REGDB_E_WRITEREGDB;
+}
 
 }  // extern "C"
 
@@ -358,9 +384,11 @@ HRESULT winport::com::TakeClassObject(REFCLSID clsid, IUnknown** out, bool* last
 
 extern "C" {
 
-HRESULT WINAPI CoGetClassObject(REFCLSID clsid, DWORD context, LPVOID, REFIID riid, LPVOID* out) {
+HRESULT WINAPI CoGetClassObject(REFCLSID requested, DWORD context, LPVOID, REFIID riid, LPVOID* out) {
   if (out == NULL) return E_INVALIDARG;
   *out = NULL;
+  CLSID clsid;
+  CoGetTreatAsClass(requested, &clsid);  // the class emulating it, if one does
   IUnknown* unk = NULL;
   {
     std::lock_guard<std::mutex> g(g_classLock);

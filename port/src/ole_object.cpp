@@ -384,6 +384,7 @@ class DefaultHandler final : public IOleObject,
     sink_->Release();
     for (CacheEntry& e : entries_)
       if (e.data.tymed != TYMED_NULL) ReleaseStgMedium(&e.data);
+    for (auto& f : frozen_) ReleaseStgMedium(&f.second.data);
     for (STATDATA& s : dataAdvise_) SafeRelease(s.pAdvSink);
     SafeRelease(viewSink_);
     SafeRelease(site_);
@@ -676,6 +677,10 @@ class DefaultHandler final : public IOleObject,
   STDMETHOD(Draw)(DWORD aspect, LONG lindex, void*, DVTARGETDEVICE*, HDC, HDC hdc, LPCRECTL bounds, LPCRECTL,
                   BOOL(STDMETHODCALLTYPE*)(ULONG_PTR), ULONG_PTR) override {
     if (!hdc || !bounds) return E_INVALIDARG;
+    RECT rc = {bounds->left, bounds->top, bounds->right, bounds->bottom};
+    // A frozen aspect draws as it was.
+    auto f = frozen_.find(aspect);
+    if (f != frozen_.end()) return DrawMedium(hdc, rc, f->second.fe.cfFormat, f->second.data) ? S_OK : VIEW_E_DRAW;
     // A running object that draws itself does.
     if (server_) {
       IViewObject* v = NULL;
@@ -689,18 +694,38 @@ class DefaultHandler final : public IOleObject,
     }
     CacheEntry* e = Presentation(aspect);
     if (!e) return OLE_E_BLANK;
-    RECT rc = {bounds->left, bounds->top, bounds->right, bounds->bottom};
     return DrawMedium(hdc, rc, e->fe.cfFormat, e->data) ? S_OK : VIEW_E_DRAW;
   }
   STDMETHOD(GetColorSet)(DWORD, LONG, void*, DVTARGETDEVICE*, HDC, LOGPALETTE** out) override {
     if (out) *out = NULL;
     return S_FALSE;
   }
-  STDMETHOD(Freeze)(DWORD, LONG, void*, DWORD* out) override {
-    if (out) *out = 0;
-    return E_NOTIMPL;
+  // Freezing an aspect keeps a copy of its picture, which it draws with
+  // (and takes its extent from) until it is unfrozen; the cookie is the
+  // aspect.
+  STDMETHOD(Freeze)(DWORD aspect, LONG, void*, DWORD* out) override {
+    if (!out) return E_INVALIDARG;
+    *out = 0;
+    if (frozen_.count(aspect)) {
+      *out = aspect;
+      return VIEW_S_ALREADY_FROZEN;
+    }
+    CacheEntry* e = Presentation(aspect);
+    if (!e) return OLE_E_BLANK;
+    CacheEntry copy = *e;
+    if (FAILED(CopyMedium(&copy.data, &e->data, e->fe.cfFormat))) return E_OUTOFMEMORY;
+    frozen_[aspect] = copy;
+    *out = aspect;
+    return S_OK;
   }
-  STDMETHOD(Unfreeze)(DWORD) override { return E_NOTIMPL; }
+  STDMETHOD(Unfreeze)(DWORD cookie) override {
+    auto f = frozen_.find(cookie);
+    if (f == frozen_.end()) return OLE_E_NOCONNECTION;
+    ReleaseStgMedium(&f->second.data);
+    frozen_.erase(f);
+    NotifyView(cookie);  // what it draws now may have changed
+    return S_OK;
+  }
   STDMETHOD(SetAdvise)(DWORD aspects, DWORD advf, IAdviseSink* sink) override {
     Assign(viewSink_, sink);
     viewAspects_ = aspects;
@@ -719,7 +744,8 @@ class DefaultHandler final : public IOleObject,
   }
   STDMETHOD(GetExtent)(DWORD aspect, LONG, DVTARGETDEVICE*, LPSIZEL size) override {
     if (!size) return E_POINTER;
-    CacheEntry* e = Presentation(aspect);
+    auto f = frozen_.find(aspect);
+    CacheEntry* e = f != frozen_.end() ? &f->second : Presentation(aspect);
     if (!e) return OLE_E_BLANK;
     *size = e->extent;
     return S_OK;
@@ -1421,6 +1447,7 @@ class DefaultHandler final : public IOleObject,
   // The container's data advises, and their connections on the object.
   std::vector<STATDATA> dataAdvise_;
   std::map<DWORD, DWORD> serverData_;
+  std::map<DWORD, CacheEntry> frozen_;  // by aspect
   DWORD nextData_ = 1;
   // The cache.
   std::vector<CacheEntry> entries_;
