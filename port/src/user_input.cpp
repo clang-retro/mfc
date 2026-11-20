@@ -69,36 +69,47 @@ WPARAM MouseKeys(Queue* q) {
   return k;
 }
 
-// The window the mouse is over: the deepest visible, enabled child at
-// the point, skipping windows that answer HTTRANSPARENT.
-Window* WindowAt(Window* top, POINT screen, LRESULT* hit) {
-  Window* w = top;
-  for (;;) {
-    Window* next = NULL;
-    {
-      UserGuard g(UserLock());
-      RECT c = ScreenClient(w);
-      if (screen.x >= c.left && screen.x < c.right && screen.y >= c.top && screen.y < c.bottom) {
-        for (Window* k : w->children) {
-          if (!k->Visible() || (k->exStyle & WS_EX_TRANSPARENT)) continue;
-          RECT r = ScreenRect(k);
-          if (screen.x >= r.left && screen.x < r.right && screen.y >= r.top && screen.y < r.bottom &&
-              InShape(k, screen)) {
-            next = k;
+// The window the mouse is over, below w (which holds the point): the
+// deepest visible child at the point, taking siblings in z-order. A
+// window that answers HTTRANSPARENT passes the point to the windows
+// beneath it, its later siblings, as a group box does for the controls
+// inside it; NULL if every window from w down did.
+Window* Find(Window* w, POINT screen, LRESULT* hit) {
+  std::vector<Window*> under;
+  bool disabledChild = false;
+  {
+    UserGuard g(UserLock());
+    RECT c = ScreenClient(w);
+    if (screen.x >= c.left && screen.x < c.right && screen.y >= c.top && screen.y < c.bottom) {
+      for (Window* k : w->children) {
+        if (!k->Visible() || (k->exStyle & WS_EX_TRANSPARENT)) continue;
+        RECT r = ScreenRect(k);
+        if (screen.x >= r.left && screen.x < r.right && screen.y >= r.top && screen.y < r.bottom &&
+            InShape(k, screen)) {
+          // A disabled child takes the point from those beneath it, and
+          // its parent gets the mouse.
+          if (k->style & WS_DISABLED) {
+            disabledChild = true;
             break;
           }
+          under.push_back(k);
         }
       }
     }
-    if (!next || (next->style & WS_DISABLED)) break;
-    w = next;
   }
-  for (;;) {
-    *hit = SendTo(w, WM_NCHITTEST, 0, MAKELPARAM(screen.x, screen.y));
-    if (*hit != HTTRANSPARENT || !w->parent) break;
-    w = w->parent;
-  }
-  return w;
+  if (!disabledChild)
+    for (Window* k : under)
+      if (Window* found = Find(k, screen, hit)) return found;
+  *hit = SendTo(w, WM_NCHITTEST, 0, MAKELPARAM(screen.x, screen.y));
+  return *hit == HTTRANSPARENT ? NULL : w;
+}
+
+Window* WindowAt(Window* top, POINT screen, LRESULT* hit) {
+  Window* w = Find(top, screen, hit);
+  if (w) return w;
+  // Transparent all the way down: the top-level window has it.
+  *hit = SendTo(top, WM_NCHITTEST, 0, MAKELPARAM(screen.x, screen.y));
+  return top;
 }
 
 bool IsButtonDown(UINT msg) {
@@ -657,5 +668,94 @@ BOOL WINAPI TrackMouseEvent(LPTRACKMOUSEEVENT t) {
 }
 
 BOOL WINAPI DragDetect(HWND, POINT) { return FALSE; }
+
+}  // extern "C"
+
+// Synthesized input goes the way the backend's does: the mouse to the
+// top-level window under the cursor (or the capture's), keys to the
+// foreground window.
+namespace {
+
+Window* TopAt(POINT p) {
+  if (Window* cap = GetWindow(g_capture)) return cap->TopLevel();
+  UserGuard g(UserLock());
+  for (Window* t : TopLevels()) {
+    if (!t->Visible()) continue;
+    RECT r = ScreenRect(t);
+    if (p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom && InShape(t, p)) return t;
+  }
+  return NULL;
+}
+
+void Mouse(const MOUSEINPUT& m) {
+  POINT p = CursorPos();
+  if (m.dwFlags & MOUSEEVENTF_MOVE) {
+    if (m.dwFlags & MOUSEEVENTF_ABSOLUTE) {
+      // 0 to 65535 across the screen.
+      p.x = (LONG)((long long)m.dx * GetSystemMetrics(SM_CXSCREEN) / 65536);
+      p.y = (LONG)((long long)m.dy * GetSystemMetrics(SM_CYSCREEN) / 65536);
+    } else {
+      p.x += m.dx;
+      p.y += m.dy;
+    }
+  }
+  CursorPos() = p;
+  Window* top = TopAt(p);
+  if (!top) return;
+  int x = p.x - top->rect.left, y = p.y - top->rect.top;
+  static const struct {
+    DWORD flag;
+    UINT msg;
+  } kButtons[] = {
+      {MOUSEEVENTF_MOVE, WM_MOUSEMOVE},         {MOUSEEVENTF_LEFTDOWN, WM_LBUTTONDOWN},
+      {MOUSEEVENTF_LEFTUP, WM_LBUTTONUP},       {MOUSEEVENTF_RIGHTDOWN, WM_RBUTTONDOWN},
+      {MOUSEEVENTF_RIGHTUP, WM_RBUTTONUP},      {MOUSEEVENTF_MIDDLEDOWN, WM_MBUTTONDOWN},
+      {MOUSEEVENTF_MIDDLEUP, WM_MBUTTONUP},
+  };
+  for (const auto& b : kButtons)
+    if (m.dwFlags & b.flag) MouseInput(top, b.msg, x, y, 0);
+  if (m.dwFlags & MOUSEEVENTF_WHEEL) MouseInput(top, WM_MOUSEWHEEL, x, y, MAKEWPARAM(0, (WORD)m.mouseData));
+}
+
+void Key(const KEYBDINPUT& k) {
+  Window* top = GetWindow(g_foreground);
+  if (!top) return;
+  bool up = (k.dwFlags & KEYEVENTF_KEYUP) != 0;
+  if (k.dwFlags & KEYEVENTF_UNICODE) {
+    if (!up) CharInput(top, (wchar_t)k.wScan);
+    return;
+  }
+  LPARAM lp = 1 | (LPARAM)(k.wScan & 0xFF) << 16;
+  if (k.dwFlags & KEYEVENTF_EXTENDEDKEY) lp |= 0x01000000;
+  KeyInput(top, up ? WM_KEYUP : WM_KEYDOWN, k.wVk, lp);
+}
+
+}  // namespace
+
+extern "C" {
+
+UINT WINAPI SendInput(UINT n, LPINPUT in, int size) {
+  if (!in || size != (int)sizeof(INPUT)) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return 0;
+  }
+  for (UINT i = 0; i < n; i++) {
+    if (in[i].type == INPUT_MOUSE)
+      Mouse(in[i].mi);
+    else if (in[i].type == INPUT_KEYBOARD)
+      Key(in[i].ki);
+  }
+  return n;
+}
+
+void WINAPI mouse_event(DWORD flags, DWORD dx, DWORD dy, DWORD data, ULONG_PTR extra) {
+  MOUSEINPUT m = {(LONG)dx, (LONG)dy, data, flags, 0, extra};
+  Mouse(m);
+}
+
+void WINAPI keybd_event(BYTE vk, BYTE scan, DWORD flags, ULONG_PTR extra) {
+  KEYBDINPUT k = {vk, scan, flags, 0, extra};
+  Key(k);
+}
 
 }  // extern "C"

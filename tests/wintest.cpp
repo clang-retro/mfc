@@ -2472,6 +2472,56 @@ static void TestShapesAndDrops() {
   ::DestroyWindow(top);
 }
 
+// Clicks through a group box: it answers HTTRANSPARENT, so a click on a
+// button inside it (beneath it in z-order) reaches the button.
+static int g_groupClicks = 0;
+static LRESULT CALLBACK GroupParentProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_COMMAND && LOWORD(wp) == 101 && HIWORD(wp) == BN_CLICKED) g_groupClicks++;
+  return ::DefWindowProcW(h, msg, wp, lp);
+}
+
+static void PumpFor(DWORD ms) {
+  DWORD t0 = ::GetTickCount();
+  MSG m;
+  while (::GetTickCount() - t0 < ms) {
+    while (::PeekMessageW(&m, NULL, 0, 0, PM_REMOVE)) {
+      ::TranslateMessage(&m);
+      ::DispatchMessageW(&m);
+    }
+    ::Sleep(5);
+  }
+}
+
+static void TestClickThroughGroupBox() {
+  WNDCLASSW wc;
+  memset(&wc, 0, sizeof(wc));
+  wc.lpfnWndProc = GroupParentProc;
+  wc.hInstance = ::GetModuleHandleW(NULL);
+  wc.hbrBackground = (HBRUSH)::GetStockObject(WHITE_BRUSH);
+  wc.lpszClassName = L"WinTestGroup";
+  CHECK(::RegisterClassW(&wc) != 0);
+  HWND top = ::CreateWindowExW(WS_EX_TOPMOST, L"WinTestGroup", L"group", WS_POPUP | WS_VISIBLE, 120, 120, 300, 200,
+                               NULL, NULL, wc.hInstance, NULL);
+  HWND group = ::CreateWindowExW(0, L"BUTTON", L"Group", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 10, 10, 280, 180, top,
+                                 (HMENU)100, wc.hInstance, NULL);
+  HWND button = ::CreateWindowExW(0, L"BUTTON", L"Push", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 40, 60, 100, 30, top,
+                                  (HMENU)101, wc.hInstance, NULL);
+  CHECK(top && group && button);
+  ::SetForegroundWindow(top);
+  ::UpdateWindow(top);
+  // The group box, made first, is above the button.
+  CHECK(::GetWindow(top, GW_CHILD) == group);
+  RECT r;
+  ::GetWindowRect(button, &r);
+  ::SetCursorPos((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+  ::mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+  PumpFor(30);
+  ::mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+  PumpFor(30);
+  CHECK(g_groupClicks == 1);
+  ::DestroyWindow(top);
+}
+
 static void TestCWnd() {
   CTestWnd wnd;
   CString cls = AfxRegisterWndClass(CS_HREDRAW | CS_VREDRAW, NULL, (HBRUSH)(COLOR_WINDOW + 1));
@@ -2872,6 +2922,7 @@ int main() {
   TestShapesAndDrops();
   TestCWnd();
 #ifdef _WINPORT
+  TestClickThroughGroupBox();
   TestWinHelp();
   TestPlgBlt();
 #endif
