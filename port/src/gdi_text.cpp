@@ -47,7 +47,8 @@ struct AnsiText {
   std::vector<int> byteAt;  // one more entry than characters: the length
 };
 
-AnsiText FromAnsi(const char* s, int n) {
+// With a symbol font each byte is its own character, as Windows has it.
+AnsiText FromAnsi(const char* s, int n, bool raw = false) {
   AnsiText t;
   if (!s) n = 0;
   if (n < 0) n = (int)strlen(s);
@@ -56,6 +57,11 @@ AnsiText FromAnsi(const char* s, int n) {
   while (i < n) {
     t.byteAt.push_back(i);
     BYTE c = p[i];
+    if (raw) {
+      t.w += (wchar_t)c;
+      i++;
+      continue;
+    }
     int len = c < 0x80 ? 1 : (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : (c & 0xF8) == 0xF0 ? 4 : 0;
     UINT32 cp = 0xFFFD;
     if (len > 0 && i + len <= n) {
@@ -77,6 +83,12 @@ AnsiText FromAnsi(const char* s, int n) {
   }
   t.byteAt.push_back(n);
   return t;
+}
+
+// The text of an A function, read for the font selected into the DC.
+AnsiText FromAnsi(HDC hdc, const char* s, int n) {
+  DCObj* dc = DCOf(hdc);
+  return FromAnsi(s, n, dc && FontOf(dc)->charset == SYMBOL_CHARSET);
 }
 
 std::string ToAnsi(const std::wstring& w) { return Narrow(w.c_str(), (int)w.size()); }
@@ -318,7 +330,7 @@ BOOL WINAPI ExtTextOutW(HDC hdc, int x, int y, UINT opt, const RECT* rc, LPCWSTR
 }
 
 BOOL WINAPI ExtTextOutA(HDC hdc, int x, int y, UINT opt, const RECT* rc, LPCSTR s, UINT n, const INT* dx) {
-  AnsiText t = FromAnsi(s, (int)n);
+  AnsiText t = FromAnsi(hdc, s, (int)n);
   std::vector<INT> wdx;
   bool pdy = (opt & ETO_PDY) != 0;
   if (dx) {
@@ -374,7 +386,7 @@ BOOL WINAPI GetTextExtentExPointW(HDC hdc, LPCWSTR s, int n, int maxExt, LPINT f
 
 BOOL WINAPI GetTextExtentExPointA(HDC hdc, LPCSTR s, int n, int maxExt, LPINT fit, LPINT dx, LPSIZE size) {
   if (n < 0) return FALSE;
-  AnsiText t = FromAnsi(s, n);
+  AnsiText t = FromAnsi(hdc, s, n);
   std::vector<INT> wdx(t.w.size() + 1);
   int wfit = 0;
   if (!GetTextExtentExPointW(hdc, t.w.c_str(), (int)t.w.size(), maxExt, fit ? &wfit : NULL, wdx.data(), size))
@@ -701,14 +713,14 @@ LONG WINAPI TabbedTextOutW(HDC hdc, int x, int y, LPCWSTR s, int n, int nTabs, c
   return TabbedCore(hdc, x, y, s, n, nTabs, tabs, origin, true);
 }
 LONG WINAPI TabbedTextOutA(HDC hdc, int x, int y, LPCSTR s, int n, int nTabs, const INT* tabs, int origin) {
-  AnsiText t = FromAnsi(s, n);
+  AnsiText t = FromAnsi(hdc, s, n);
   return TabbedCore(hdc, x, y, t.w.c_str(), (int)t.w.size(), nTabs, tabs, origin, true);
 }
 DWORD WINAPI GetTabbedTextExtentW(HDC hdc, LPCWSTR s, int n, int nTabs, const INT* tabs) {
   return (DWORD)TabbedCore(hdc, 0, 0, s, n, nTabs, tabs, 0, false);
 }
 DWORD WINAPI GetTabbedTextExtentA(HDC hdc, LPCSTR s, int n, int nTabs, const INT* tabs) {
-  AnsiText t = FromAnsi(s, n);
+  AnsiText t = FromAnsi(hdc, s, n);
   return (DWORD)TabbedCore(hdc, 0, 0, t.w.c_str(), (int)t.w.size(), nTabs, tabs, 0, false);
 }
 
@@ -1002,7 +1014,7 @@ int WINAPI DrawTextW(HDC hdc, LPCWSTR s, int n, LPRECT rc, UINT fmt) {
 int WINAPI DrawTextExA(HDC hdc, LPSTR s, int n, LPRECT rc, UINT fmt, LPDRAWTEXTPARAMS params) {
   if (!s && n != 0) return 0;
   if (n < 0) n = s ? (int)strlen(s) : 0;
-  AnsiText t = FromAnsi(s, n);
+  AnsiText t = FromAnsi(hdc, s, n);
   std::wstring mod;
   int r = DrawTextCore(hdc, t.w, rc, fmt, params, (fmt & DT_MODIFYSTRING) ? &mod : NULL);
   if (params) params->uiLengthDrawn = (UINT)n;

@@ -2548,6 +2548,70 @@ static INT_PTR CALLBACK ShortModalProc(HWND h, UINT msg, WPARAM, LPARAM) {
   return FALSE;
 }
 
+// Draws text into a fresh bitmap and returns its pixels.
+static std::vector<DWORD> InkOf(HFONT font, const char* a, const wchar_t* w) {
+  BITMAPINFO bi = {};
+  bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+  bi.bmiHeader.biWidth = 64;
+  bi.bmiHeader.biHeight = -48;
+  bi.bmiHeader.biPlanes = 1;
+  bi.bmiHeader.biBitCount = 32;
+  void* bits = NULL;
+  HDC dc = ::CreateCompatibleDC(NULL);
+  HBITMAP bmp = ::CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+  HGDIOBJ oldBmp = ::SelectObject(dc, bmp);
+  HGDIOBJ oldFont = ::SelectObject(dc, font);
+  RECT rc = {0, 0, 64, 48};
+  ::FillRect(dc, &rc, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  ::SetBkMode(dc, TRANSPARENT);
+  if (a)
+    ::TextOutA(dc, 4, 4, a, (int)strlen(a));
+  else
+    ::TextOutW(dc, 4, 4, w, (int)wcslen(w));
+  ::GdiFlush();
+  std::vector<DWORD> px((const DWORD*)bits, (const DWORD*)bits + 64 * 48);
+  ::SelectObject(dc, oldFont);
+  ::SelectObject(dc, oldBmp);
+  ::DeleteObject(bmp);
+  ::DeleteDC(dc);
+  return px;
+}
+
+static bool Inked(const std::vector<DWORD>& px) {
+  for (DWORD p : px)
+    if ((p & 0xFFFFFF) != 0xFFFFFF) return true;
+  return false;
+}
+
+// Wingdings is a symbol font: its A text is read byte by byte, and its
+// characters draw whether or not Wingdings itself is installed.
+static void TestSymbolFont() {
+  HFONT wd = ::CreateFontW(-32, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, 0, 0, L"Wingdings");
+  HFONT arial = ::CreateFontW(-32, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, 0, L"Arial");
+  HDC dc = ::CreateCompatibleDC(NULL);
+  HGDIOBJ old = ::SelectObject(dc, wd);
+  TEXTMETRICW tm = {};
+  CHECK(::GetTextMetricsW(dc, &tm));
+  CHECK(tm.tmCharSet == SYMBOL_CHARSET);
+  // One byte, one character.
+  SIZE one = {}, two = {};
+  CHECK(::GetTextExtentPoint32A(dc, "\xFC", 1, &one));
+  CHECK(::GetTextExtentPoint32A(dc, "\xFC\xFC", 2, &two));
+  CHECK(one.cx > 0 && two.cx == 2 * one.cx);
+  ::SelectObject(dc, old);
+  ::DeleteDC(dc);
+  // 0xFC is the check mark: the same from the A form and from U+F0FC,
+  // and not the u with diaeresis that Arial has there.
+  std::vector<DWORD> byA = InkOf(wd, "\xFC", NULL);
+  std::vector<DWORD> byW = InkOf(wd, NULL, L"\xF0FC");
+  std::vector<DWORD> latin = InkOf(arial, NULL, L"\x00FC");
+  CHECK(Inked(byA));
+  CHECK(byA == byW);
+  CHECK(byA != latin);
+  ::DeleteObject(wd);
+  ::DeleteObject(arial);
+}
+
 static void TestModalFocus() {
   // An empty template: the controls are made in WM_INITDIALOG.
   static WORD tmpl[32];
@@ -2967,6 +3031,7 @@ int main() {
   TestPrinting();
   TestShapesAndDrops();
   TestModalFocus();
+  TestSymbolFont();
   TestCWnd();
 #ifdef _WINPORT
   TestClickThroughGroupBox();

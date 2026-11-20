@@ -207,7 +207,13 @@ Times New Roman and Courier New map to similar installed families
 the folders to search instead of the system's, separated by colons; set
 to `builtin`, text uses only the built-in fallback, the public domain
 X11 6x13 bitmap font (`port/tools/gen-builtin-font.py` makes
-`port/src/font_builtin.inc` from it).
+`port/src/font_builtin.inc` from it). Symbol and Wingdings are symbol
+fonts as on Windows: their `A` text is read a byte at a time, and when
+the font is not installed each character is drawn as its Unicode
+counterpart (the Adobe Symbol mapping, and for Wingdings the characters
+Unicode encodes, such as U+2713 for the check mark), from the stand-in
+family or a symbol font such as Symbola, Noto Sans Symbols or DejaVu
+Sans. A Wingdings character with no clear counterpart draws as its byte.
 
 The ANSI code page there is UTF-8, `WCHAR` is the system's 32-bit
 `wchar_t`, and `long` is 64 bits on 64-bit systems while `LONG` and

@@ -47,6 +47,7 @@ namespace winport {
 namespace {
 
 #include "font_builtin.inc"
+#include "font_symbol.inc"
 
 // ---------------------------------------------------------------------
 // Reading font files
@@ -496,9 +497,79 @@ struct FontKey {
 // ---------------------------------------------------------------------
 // Glyphs
 
+namespace {
+
+// The families to draw a symbol from when the font asked for has none.
+const wchar_t* const kSymbolFallbacks[] = {L"Symbola", L"Noto Sans Symbols 2", L"Noto Sans Symbols2",
+                                           L"Noto Sans Symbols", L"DejaVu Sans", L"Segoe UI Symbol",
+                                           L"Apple Symbols", L"Arial Unicode MS", L"FreeSerif", L"FreeSans",
+                                           L"OpenSymbol", L"Noto Sans Math", L"STIX Two Math", NULL};
+
+// An installed font that has the character, or NULL.
+FontSource* FallbackFor(UINT32 ch) {
+  static std::mutex* lock = new std::mutex;
+  static std::map<UINT32, FontSource*>* found = new std::map<UINT32, FontSource*>;
+  {
+    std::lock_guard<std::mutex> g(*lock);
+    auto it = found->find(ch);
+    if (it != found->end()) return it->second;
+  }
+  FontSource* out = NULL;
+  {
+    std::lock_guard<std::mutex> g(Index().lock);
+    Index().Scan();
+    for (const wchar_t* const* f = kSymbolFallbacks; *f && !out; f++)
+      if (const FontFile* ff = PickStyle(Index().files, *f, FW_NORMAL, false))
+        if (FontSource* s = LoadSource(*ff))
+          if (stbtt_FindGlyphIndex(&s->info, (int)ch)) out = s;
+  }
+  std::lock_guard<std::mutex> g(*lock);
+  (*found)[ch] = out;
+  return out;
+}
+
+}  // namespace
+
+// Where a character's outline comes from: the font itself, or for a symbol
+// font that is not installed, the Unicode character from it or another
+// font. False for the built-in bitmap font.
+bool RealFont::Source(UINT32 ch, FontSource** s, int* glyph, float* sx, float* sy) {
+  *s = src;
+  *sx = scaleX;
+  *sy = scaleY;
+  if (symbolFont) {
+    UINT32 b = ch >= 0xF020 && ch <= 0xF0FF ? ch - 0xF000 : ch;
+    if (b < 0x100) {
+      if (!symbolMap) {
+        // The font itself: its characters sit at U+F020 to U+F0FF.
+        *glyph = stbtt_FindGlyphIndex(&src->info, (int)(0xF000 + b));
+        if (!*glyph) *glyph = stbtt_FindGlyphIndex(&src->info, (int)b);
+        return true;
+      }
+      if (symbolMap[b]) ch = symbolMap[b];
+    }
+  }
+  if (src) *glyph = stbtt_FindGlyphIndex(&src->info, (int)ch);
+  if (symbolMap && (!src || !*glyph)) {
+    if (FontSource* fb = FallbackFor(ch)) {
+      // The same em size as the font asked for.
+      double em = src ? scaleY * src->unitsPerEm : (double)kBuiltinAscent * bitmapScale;
+      *s = fb;
+      *sy = (float)(em / fb->unitsPerEm);
+      *sx = *sy * (src ? scaleX / scaleY : 1.0f);
+      *glyph = stbtt_FindGlyphIndex(&fb->info, (int)ch);
+      return true;
+    }
+  }
+  return src != NULL;
+}
+
 bool RealFont::HasGlyph(UINT32 ch) {
-  if (!src) return BuiltinRows(ch, false) != NULL;
-  return stbtt_FindGlyphIndex(&src->info, (int)ch) != 0;
+  FontSource* s;
+  int glyph = 0;
+  float sx, sy;
+  if (!Source(ch, &s, &glyph, &sx, &sy)) return BuiltinRows(ch, false) != NULL;
+  return glyph != 0;
 }
 
 const GlyphImage& RealFont::Glyph(UINT32 ch) {
@@ -511,7 +582,12 @@ const GlyphImage& RealFont::Glyph(UINT32 ch) {
 }
 
 void RealFont::Render(UINT32 ch, GlyphImage* g) {
-  if (!src) {
+  FontSource* from = NULL;
+  int glyph = 0;
+  float sx = scaleX, sy = scaleY;
+  if (!Source(ch, &from, &glyph, &sx, &sy)) {
+    if (symbolFont && ch >= 0xF020 && ch <= 0xF0FF) ch -= 0xF000;
+    if (symbolMap && ch < 0x100 && symbolMap[ch]) ch = symbolMap[ch];
     const unsigned char* rows = BuiltinRows(ch, boldBitmap);
     if (!rows) rows = BuiltinRows(0xFFFD, boldBitmap);
     int s = bitmapScale;
@@ -529,19 +605,18 @@ void RealFont::Render(UINT32 ch, GlyphImage* g) {
             for (int yy = 0; yy < s; yy++)
               for (int xx = 0; xx < s; xx++) g->cov[(size_t)(y * s + yy) * g->w + x * s + xx] = 255;
   } else {
-    int glyph = stbtt_FindGlyphIndex(&src->info, (int)ch);
     int adv = 0, lsb = 0;
-    stbtt_GetGlyphHMetrics(&src->info, glyph, &adv, &lsb);
-    g->advance = Round(adv * scaleX);
+    stbtt_GetGlyphHMetrics(&from->info, glyph, &adv, &lsb);
+    g->advance = Round(adv * sx);
     int x0, y0, x1, y1;
-    stbtt_GetGlyphBitmapBox(&src->info, glyph, scaleX, scaleY, &x0, &y0, &x1, &y1);
+    stbtt_GetGlyphBitmapBox(&from->info, glyph, sx, sy, &x0, &y0, &x1, &y1);
     g->left = x0;
     g->top = y0;
     g->w = x1 - x0;
     g->h = y1 - y0;
     if (g->w > 0 && g->h > 0 && g->w < 4096 && g->h < 4096) {
       g->cov.assign((size_t)g->w * g->h, 0);
-      stbtt_MakeGlyphBitmap(&src->info, g->cov.data(), g->w, g->h, g->w, scaleX, scaleY, glyph);
+      stbtt_MakeGlyphBitmap(&from->info, g->cov.data(), g->w, g->h, g->w, sx, sy, glyph);
     } else {
       g->w = g->h = 0;
     }
@@ -688,6 +763,16 @@ RealFont* RealizeFont(const LOGFONTW& in) {
     f->maxWidth += 1;
   }
   f->face = lf.lfFaceName[0] ? std::wstring(lf.lfFaceName) : f->family;
+  // Symbol and Wingdings are symbol fonts whatever the LOGFONT says; when
+  // another family stands in, their characters are drawn as Unicode.
+  const uint32_t* map = SameName(f->face, L"Symbol") ? kSymbolToUnicode
+                        : SameName(f->face, L"Wingdings") ? kWingdingsToUnicode
+                                                          : NULL;
+  if (map) {
+    f->symbolFont = true;
+    f->charset = SYMBOL_CHARSET;
+    if (!f->src || !SameName(f->family, f->face.c_str())) f->symbolMap = map;
+  }
   BYTE family = lf.lfPitchAndFamily & 0xF0;
   if (family == FF_DONTCARE) family = f->fixedPitch ? FF_MODERN : FF_SWISS;
   // TMPF_FIXED_PITCH set means a variable pitch font.
