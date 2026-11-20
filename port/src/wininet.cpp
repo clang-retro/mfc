@@ -6,12 +6,16 @@
 // Each handle is an object of its own kind: the session (InternetOpen),
 // a connection to a server (InternetConnect), and what a connection
 // opens (an HTTP request, an FTP file or listing). Calls block, as they
-// do on Windows without INTERNET_FLAG_ASYNC. HTTPS is not there: an
-// https URL fails to connect.
+// do on Windows without INTERNET_FLAG_ASYNC. HTTPS goes through tls.h:
+// the server's certificate is checked as WinInet checks it, and
+// SECURITY_FLAG_IGNORE_UNKNOWN_CA and the others (on the request, through
+// INTERNET_OPTION_SECURITY_FLAGS, or as its INTERNET_FLAG_IGNORE_CERT_*
+// flags) let a problem with it go.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "winport.h"
+#include "tls.h"
 
 #include <wininet.h>
 #include <errno.h>
@@ -88,6 +92,7 @@ struct Request : Handle {
   DWORD position = 0;
   // HttpSendRequestEx: the body goes out through InternetWriteFile.
   bool writing = false;
+  DWORD security = 0;  // INTERNET_OPTION_SECURITY_FLAGS: the problems to let go
   Connection* conn() { return (Connection*)parent; }
 };
 
@@ -268,16 +273,10 @@ int ConnectTo(Handle* h, const std::string& host, INTERNET_PORT port, DWORD time
   return fd;
 }
 
-#ifdef MSG_NOSIGNAL
-const int kSendFlags = MSG_NOSIGNAL;
-#else
-const int kSendFlags = 0;
-#endif
-
 bool SendAll(int fd, const void* p, size_t n) {
   const char* c = (const char*)p;
   while (n > 0) {
-    ssize_t r = send(fd, c, n, kSendFlags);
+    ssize_t r = tls::Send(fd, c, n);
     if (r < 0 && errno == EINTR) continue;
     if (r <= 0) {
       SetLastError(ERROR_INTERNET_CONNECTION_ABORTED);
@@ -303,7 +302,7 @@ bool ReadLine(int fd, std::string& buffer, std::string& line) {
       return true;
     }
     char tmp[1024];
-    ssize_t r = recv(fd, tmp, sizeof tmp, 0);
+    ssize_t r = tls::Recv(fd, tmp, sizeof tmp);
     if (r < 0 && errno == EINTR) continue;
     if (r <= 0) {
       if (buffer.empty()) return false;
@@ -623,7 +622,7 @@ std::string RequestUrl(Request* r) {
 }
 
 void ResetResponse(Request* r) {
-  if (r->sock >= 0) close(r->sock);
+  if (r->sock >= 0) tls::Close(r->sock);
   r->sock = -1;
   r->sent = false;
   r->statusLine.clear();
@@ -640,15 +639,21 @@ void ResetResponse(Request* r) {
   r->writing = false;
 }
 
+// The certificate problems a request lets go.
+unsigned IgnoredProblems(Request* r) {
+  // (The request's own flags have the name and date ones only.)
+  DWORD f = r->security | (r->flags & (INTERNET_FLAG_IGNORE_CERT_CN_INVALID | INTERNET_FLAG_IGNORE_CERT_DATE_INVALID));
+  unsigned ignore = 0;
+  if (r->security & SECURITY_FLAG_IGNORE_UNKNOWN_CA) ignore |= tls::kUnknownCa;
+  if (f & SECURITY_FLAG_IGNORE_CERT_CN_INVALID) ignore |= tls::kNameMismatch;
+  if (f & SECURITY_FLAG_IGNORE_CERT_DATE_INVALID) ignore |= tls::kDateInvalid;
+  return ignore;
+}
+
 // Connects and sends the request line and headers (and the body, if it
 // is here).
 BOOL SendHead(Request* r, const std::string& extra, const void* body, DWORD bodyLen, long long totalLen) {
   Connection* c = r->conn();
-  if (c->flags & INTERNET_FLAG_SECURE) {
-    // No TLS in this layer.
-    SetLastError(ERROR_INTERNET_CANNOT_CONNECT);
-    return FALSE;
-  }
   ResetResponse(r);
   Session* s = SessionOf(r);
   r->sock = ConnectTo(r, U(c->server.c_str()), c->port, s ? s->connectTimeout : 0);
@@ -656,6 +661,15 @@ BOOL SendHead(Request* r, const std::string& extra, const void* body, DWORD body
   if (s && s->receiveTimeout) {
     timeval tv = {(time_t)(s->receiveTimeout / 1000), (int)(s->receiveTimeout % 1000) * 1000};
     setsockopt(r->sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+  }
+  if (r->flags & INTERNET_FLAG_SECURE) {
+    if (!tls::Start(r->sock, U(c->server.c_str()), IgnoredProblems(r))) {
+      DWORD e = GetLastError();
+      close(r->sock);
+      r->sock = -1;
+      SetLastError(e);
+      return FALSE;
+    }
   }
   std::string obj = U(r->object.c_str());
   if (obj.empty()) obj = "/";
@@ -753,7 +767,7 @@ BOOL ReadHead(Request* r) {
 bool Fill(Request* r) {
   char tmp[4096];
   for (;;) {
-    ssize_t n = recv(r->sock, tmp, sizeof tmp, 0);
+    ssize_t n = tls::Recv(r->sock, tmp, sizeof tmp);
     if (n < 0 && errno == EINTR) continue;
     if (n <= 0) return false;
     r->pending.append(tmp, (size_t)n);
@@ -2058,6 +2072,13 @@ BOOL QueryOption(HINTERNET hi, DWORD option, LPVOID buf, LPDWORD len) {
     case INTERNET_OPTION_PARENT_HANDLE: return ptr(h->parent);
     case INTERNET_OPTION_CALLBACK: return ptr((void*)h->callback);
     case INTERNET_OPTION_REQUEST_FLAGS: return dword(0);
+    case INTERNET_OPTION_SECURITY_FLAGS: {
+      if (h->type != INTERNET_HANDLE_TYPE_HTTP_REQUEST) break;
+      Request* r = (Request*)h;
+      DWORD v = r->security;
+      if (r->flags & INTERNET_FLAG_SECURE) v |= SECURITY_FLAG_SECURE | SECURITY_FLAG_STRENGTH_STRONG;
+      return dword(v);
+    }
     case INTERNET_OPTION_USER_AGENT: return str(s ? U(s->agent.c_str()) : std::string());
     case INTERNET_OPTION_USERNAME:
     case INTERNET_OPTION_PASSWORD: {
@@ -2104,6 +2125,9 @@ BOOL SetOption(HINTERNET hi, DWORD option, LPVOID buf, DWORD len) {
     case INTERNET_OPTION_READ_BUFFER_SIZE:
     case INTERNET_OPTION_WRITE_BUFFER_SIZE:
     case INTERNET_OPTION_KEEP_CONNECTION: return dword(NULL);
+    case INTERNET_OPTION_SECURITY_FLAGS:
+      if (!h || h->type != INTERNET_HANDLE_TYPE_HTTP_REQUEST) break;
+      return dword(&((Request*)h)->security);
     case INTERNET_OPTION_CONTEXT_VALUE:
       if (!h || !buf || len < sizeof(DWORD_PTR)) break;
       memcpy(&h->context, buf, sizeof(DWORD_PTR));
@@ -2169,7 +2193,7 @@ BOOL WINAPI InternetCloseHandle(HINTERNET hi) {
   switch (h->type) {
     case INTERNET_HANDLE_TYPE_HTTP_REQUEST: {
       Request* r = (Request*)h;
-      if (r->sock >= 0) close(r->sock);
+      if (r->sock >= 0) tls::Close(r->sock);
       r->sock = -1;
       break;
     }

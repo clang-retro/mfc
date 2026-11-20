@@ -108,7 +108,7 @@ registry (kept in `~/.config/winport/registry.reg`), resources, sockets
 (with `WSAAsyncSelect`), ODBC through the system's driver manager
 (unixODBC or iODBC, loaded when first used; `WINPORT_ODBC` names its
 library when it is elsewhere),
-WinInet's HTTP, FTP and gopher (no HTTPS yet), and COM within one process,
+WinInet's HTTP, HTTPS, FTP and gopher, and COM within one process,
 in-process servers in a shared library included, work, and so does the window manager: window
 classes and windows, messages and the message loop, timers, hooks,
 focus, painting, and drawing in software with device contexts, bitmaps,
@@ -155,6 +155,13 @@ The common controls are all there: besides the bars, list and tree
 views, tabs and the rest, the rebar, pager, SysLink, IP address,
 ComboBoxEx, animation (uncompressed and RLE8 AVI clips), month calendar
 and date and time picker.
+
+HTTPS uses OpenSSL (libssl 3 or 1.1, loaded when first used;
+`WINPORT_LIBSSL` names it when it is elsewhere), and on macOS the
+system's Secure Transport. The server's certificate is checked as
+WinInet checks it, and `INTERNET_OPTION_SECURITY_FLAGS`
+(`SECURITY_FLAG_IGNORE_UNKNOWN_CA` and the others) lets a problem with
+it go. `PlgBlt` draws through a parallelogram (and a mask) in software.
 
 There is no WinHelp viewer: `WinHelp` (and so MFC's Help commands)
 opens a document next to the program's `.hlp` file instead, of the same
@@ -302,6 +309,9 @@ try.
   since IE 7, and Wine's is a stub) a gopher server too: locators,
   menus, submenus and searches (CGopherFileFind), text, binary and
   gopher+ files, gopher+ attributes, and gopher URLs.
+  And HTTPS against `openssl s_server` with a certificate of its own:
+  the unknown authority and the wrong host refused, each let go with its
+  security flag, through the API and through CHttpFile.
 * `isapitest`: `afxisapi.h`, with an extension and a filter called
   through the functions an ISAPI DLL exports by a pretend server:
   CHtmlStream (growing, attached buffers), a parse map's commands
