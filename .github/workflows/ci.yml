@@ -153,6 +153,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends unixodbc libsqliteodbc
       - name: Build
         run: make -j"$(nproc)" TARGET=x86_64-linux-gnu STDLIB= AR=ar
+      - name: Fetch WTL (for wtltest)
+        run: sh tools/fetch-wtl.sh
       - name: Test
         env:
           MFC_TEST_ODBC: 1
@@ -181,6 +183,8 @@ jobs:
           fi
       - name: Build
         run: make -j"$(sysctl -n hw.ncpu)" TARGET=arm64-apple-macos11 STDLIB= AR=ar
+      - name: Fetch WTL (for wtltest)
+        run: sh tools/fetch-wtl.sh
       - name: Test
         run: make check TARGET=arm64-apple-macos11 STDLIB= AR=ar
       - uses: actions/upload-artifact@v4

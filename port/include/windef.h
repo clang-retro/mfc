@@ -71,6 +71,11 @@
 #define __winport_declspec_noinline __attribute__((noinline))
 #define __winport_declspec_nothrow
 #define __winport_declspec_thread __thread
+#define __winport_declspec_deprecated __attribute__((deprecated))
+#define __winport_declspec_restrict
+#define __winport_declspec_noalias
+#define __winport_declspec_property(...)
+#define __winport_declspec_uuid(x)
 #endif
 #define UNALIGNED
 #define RESTRICTED_POINTER
@@ -154,6 +159,25 @@ typedef DWORD_PTR* PDWORD_PTR;
 typedef SIZE_T* PSIZE_T;
 typedef ULONG_PTR KAFFINITY;
 
+// basetsd.h's conversions between pointers and integers.
+#define HandleToULong(h) ((ULONG)(ULONG_PTR)(h))
+#define HandleToUlong(h) HandleToULong(h)
+#define HandleToLong(h) ((LONG)(LONG_PTR)(h))
+#define ULongToHandle(ul) ((HANDLE)(ULONG_PTR)(ul))
+#define UlongToHandle(ul) ULongToHandle(ul)
+#define LongToHandle(h) ((HANDLE)(LONG_PTR)(h))
+#define PtrToUlong(p) ((ULONG)(ULONG_PTR)(p))
+#define PtrToULong(p) PtrToUlong(p)
+#define PtrToLong(p) ((LONG)(LONG_PTR)(p))
+#define PtrToUint(p) ((UINT)(UINT_PTR)(p))
+#define PtrToInt(p) ((INT)(INT_PTR)(p))
+#define PtrToUshort(p) ((unsigned short)(ULONG_PTR)(p))
+#define PtrToShort(p) ((short)(LONG_PTR)(p))
+#define IntToPtr(i) ((VOID*)(INT_PTR)((int)(i)))
+#define UIntToPtr(ui) ((VOID*)(UINT_PTR)((unsigned int)(ui)))
+#define LongToPtr(l) ((VOID*)(LONG_PTR)((LONG)(l)))
+#define ULongToPtr(ul) ((VOID*)(ULONG_PTR)((ULONG)(ul)))
+#define UlongToPtr(ul) ULongToPtr(ul)
 typedef UINT_PTR WPARAM;
 typedef LONG_PTR LPARAM;
 typedef LONG_PTR LRESULT;
@@ -235,7 +259,10 @@ typedef TCHAR* PTCHAR;
 typedef TBYTE* PTBYTE;
 #define TEXT(q) __TEXT(q)
 
-// Handles: distinct pointer types, as with STRICT.
+// Handles: distinct pointer types, as with STRICT, which is always on.
+#ifndef STRICT
+#define STRICT 1
+#endif
 #define DECLARE_HANDLE(name) \
   struct name##__ { int unused; }; \
   typedef struct name##__* name

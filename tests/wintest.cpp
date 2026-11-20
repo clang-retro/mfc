@@ -7,8 +7,9 @@
 // text, icons, accelerators and menus, dialogs and the standard
 // controls, MDI, image lists, the common controls, the list view, the
 // tree view and property sheets; printing and the print dialogs; window
-// shapes (SetWindowRgn) and dropped files (WM_DROPFILES); and a CWnd
-// with a message map on top.
+// shapes (SetWindowRgn) and dropped files (WM_DROPFILES); a CWnd with a
+// message map on top; and, here, monitors, layered windows, gradients and
+// the shell namespace with its folder browser.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -18,6 +19,10 @@
 #include <dlgs.h>
 #include <prsht.h>
 #include <shlobj.h>
+#ifdef _WINPORT
+#include <uxtheme.h>
+#include <unistd.h>
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <string>
@@ -3014,6 +3019,406 @@ static void TestWinHelp() {
 }
 #endif
 
+#ifdef _WINPORT
+// What WTL uses beyond the classic API: one monitor, layered windows,
+// PrintWindow, scroll bar and cursor state, flat scroll bars, gradients,
+// glyph indices, the description in a metafile, themes (off) and OpenGL
+// (absent).
+static COLORREF PixelAt(HDC dc, int x, int y) { return ::GetPixel(dc, x, y) & 0xFFFFFF; }
+
+// Draws a red square at (5,5) for WM_PRINTCLIENT; the class brush erases.
+static LRESULT CALLBACK PrintProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_PRINTCLIENT) {
+    RECT r = {5, 5, 15, 15};
+    HBRUSH red = ::CreateSolidBrush(RGB(255, 0, 0));
+    ::FillRect((HDC)wp, &r, red);
+    ::DeleteObject(red);
+    return 0;
+  }
+  return ::DefWindowProcW(h, msg, wp, lp);
+}
+
+static void TestDisplayAndDrawing() {
+  // One monitor: the screen, with its work area.
+  POINT origin = {0, 0}, away = {100000, 100000};
+  HMONITOR mon = ::MonitorFromPoint(origin, MONITOR_DEFAULTTONULL);
+  CHECK(mon != NULL);
+  CHECK(::MonitorFromPoint(away, MONITOR_DEFAULTTONULL) == NULL);
+  CHECK(::MonitorFromPoint(away, MONITOR_DEFAULTTONEAREST) == mon);
+  MONITORINFOEXW mi;
+  mi.cbSize = sizeof mi;
+  CHECK(::GetMonitorInfoW(mon, &mi));
+  CHECK(mi.rcMonitor.right == ::GetSystemMetrics(SM_CXSCREEN));
+  CHECK(mi.rcMonitor.bottom == ::GetSystemMetrics(SM_CYSCREEN));
+  CHECK(mi.dwFlags & MONITORINFOF_PRIMARY);
+  CHECK(wcscmp(mi.szDevice, L"\\\\.\\DISPLAY1") == 0);
+  MONITORINFO bad = {0};
+  CHECK(!::GetMonitorInfoA(mon, &bad));
+
+  WNDCLASSW wc = {0};
+  wc.lpfnWndProc = PrintProc;
+  wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+  wc.lpszClassName = L"WinTestPrint";
+  CHECK(::RegisterClassW(&wc));
+  HWND w = ::CreateWindowExW(WS_EX_LAYERED, L"WinTestPrint", L"layered",
+                             WS_POPUP | WS_VISIBLE | WS_VSCROLL | WS_BORDER, 10, 10, 120, 80, NULL, NULL, NULL, NULL);
+  CHECK(w != NULL);
+  CHECK(::MonitorFromWindow(w, MONITOR_DEFAULTTONULL) == mon);
+  CHECK(::SetLayeredWindowAttributes(w, RGB(1, 2, 3), 128, LWA_ALPHA | LWA_COLORKEY));
+  COLORREF key = 0;
+  BYTE alpha = 0;
+  DWORD flags = 0;
+  CHECK(::GetLayeredWindowAttributes(w, &key, &alpha, &flags));
+  CHECK(key == RGB(1, 2, 3) && alpha == 128 && flags == (LWA_ALPHA | LWA_COLORKEY));
+  HWND plain = ::CreateWindowW(L"STATIC", L"plain", WS_POPUP, 0, 0, 10, 10, NULL, NULL, NULL, NULL);
+  CHECK(!::SetLayeredWindowAttributes(plain, 0, 255, LWA_ALPHA));
+  ::DestroyWindow(plain);
+
+  // The window's scroll bar: its rectangle on the right, its arrows.
+  SCROLLINFO si = {sizeof si, SIF_RANGE | SIF_PAGE | SIF_POS, 0, 99, 10, 0};
+  ::SetScrollInfo(w, SB_VERT, &si, FALSE);
+  SCROLLBARINFO sbi = {sizeof sbi};
+  CHECK(::GetScrollBarInfo(w, OBJID_VSCROLL, &sbi));
+  RECT wr;
+  ::GetWindowRect(w, &wr);
+  CHECK(sbi.rcScrollBar.right == wr.right - 1);  // inside the border
+  CHECK(sbi.rcScrollBar.right - sbi.rcScrollBar.left == ::GetSystemMetrics(SM_CXVSCROLL));
+  CHECK(sbi.dxyLineButton == ::GetSystemMetrics(SM_CXVSCROLL));
+  CHECK(sbi.xyThumbTop == sbi.dxyLineButton);
+  CHECK(sbi.xyThumbBottom > sbi.xyThumbTop);
+  CHECK(!(sbi.rgstate[0] & STATE_SYSTEM_INVISIBLE));
+  CHECK(::GetScrollBarInfo(w, OBJID_HSCROLL, &sbi));
+  CHECK(sbi.rgstate[0] & STATE_SYSTEM_INVISIBLE);
+
+  // Flat scroll bars are the window's own.
+  CHECK(::InitializeFlatSB(w));
+  CHECK(::FlatSB_SetScrollPos(w, SB_VERT, 40, FALSE) == 0);
+  CHECK(::GetScrollPos(w, SB_VERT) == 40);
+  int prop = 0;
+  CHECK(::FlatSB_GetScrollProp(w, WSB_PROP_CXVSCROLL, &prop) && prop == ::GetSystemMetrics(SM_CXVSCROLL));
+  CHECK(::FlatSB_SetScrollProp(w, WSB_PROP_VSTYLE, FSB_FLAT_MODE, FALSE));
+  CHECK(::FlatSB_GetScrollProp(w, WSB_PROP_VSTYLE, &prop) && prop == FSB_FLAT_MODE);
+  CHECK(::UninitializeFlatSB(w) == S_OK);
+
+  // PrintWindow draws the client area through WM_PRINTCLIENT.
+  HDC screen = ::GetDC(NULL);
+  HDC mem = ::CreateCompatibleDC(screen);
+  HBITMAP bm = ::CreateCompatibleBitmap(screen, 200, 100);
+  HGDIOBJ old = ::SelectObject(mem, bm);
+  RECT all = {0, 0, 200, 100};
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(BLACK_BRUSH));
+  CHECK(::PrintWindow(w, mem, PW_CLIENTONLY));
+  CHECK(PixelAt(mem, 2, 2) == (::GetSysColor(COLOR_BTNFACE) & 0xFFFFFF));
+  CHECK(PixelAt(mem, 10, 10) == RGB(255, 0, 0));
+  // The whole window: the border, the client area inside it, and a child
+  // in its place.
+  HWND kid = ::CreateWindowW(L"WinTestPrint", L"", WS_CHILD | WS_VISIBLE, 40, 20, 30, 30, w, NULL, NULL, NULL);
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(BLACK_BRUSH));
+  CHECK(::PrintWindow(w, mem, 0));
+  CHECK(PixelAt(mem, 0, 0) == (::GetSysColor(COLOR_WINDOWFRAME) & 0xFFFFFF));
+  CHECK(PixelAt(mem, 11, 11) == RGB(255, 0, 0));
+  CHECK(PixelAt(mem, 1 + 40 + 2, 1 + 20 + 2) == (::GetSysColor(COLOR_BTNFACE) & 0xFFFFFF));
+  CHECK(PixelAt(mem, 1 + 40 + 10, 1 + 20 + 10) == RGB(255, 0, 0));
+  ::DestroyWindow(kid);
+  ::DestroyWindow(w);
+  ::UnregisterClassW(L"WinTestPrint", NULL);
+
+  CURSORINFO ci = {sizeof ci};
+  CHECK(::GetCursorInfo(&ci));
+  POINT pt;
+  ::GetCursorPos(&pt);
+  CHECK(ci.ptScreenPos.x == pt.x && ci.ptScreenPos.y == pt.y);
+
+  // A gradient across: red at the left, blue at the right.
+  TRIVERTEX v[2] = {{0, 0, 0xFF00, 0, 0, 0}, {100, 10, 0, 0, 0xFF00, 0}};
+  GRADIENT_RECT gr = {0, 1};
+  CHECK(::GradientFill(mem, v, 2, &gr, 1, GRADIENT_FILL_RECT_H));
+  CHECK(PixelAt(mem, 0, 5) == RGB(255, 0, 0));
+  CHECK(PixelAt(mem, 99, 5) == RGB(0, 0, 255));
+  COLORREF mid = PixelAt(mem, 50, 5);
+  CHECK(GetRValue(mid) > 100 && GetRValue(mid) < 155 && GetBValue(mid) > 100 && GetBValue(mid) < 155);
+  // Down, then a triangle: its corners' colors, nothing outside.
+  CHECK(::GradientFill(mem, v, 2, &gr, 1, GRADIENT_FILL_RECT_V));
+  CHECK(PixelAt(mem, 50, 0) == RGB(255, 0, 0));
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(BLACK_BRUSH));
+  TRIVERTEX t[3] = {{0, 0, 0xFF00, 0, 0, 0}, {60, 0, 0, 0xFF00, 0, 0}, {0, 60, 0, 0, 0xFF00, 0}};
+  GRADIENT_TRIANGLE tri = {0, 1, 2};
+  CHECK(::GradientFill(mem, t, 3, &tri, 1, GRADIENT_FILL_TRIANGLE));
+  CHECK(GetRValue(PixelAt(mem, 0, 0)) > 240);
+  CHECK(GetGValue(PixelAt(mem, 58, 0)) > 220);
+  CHECK(GetBValue(PixelAt(mem, 0, 58)) > 220);
+  CHECK(PixelAt(mem, 59, 59) == 0);
+  GRADIENT_RECT wrong = {0, 5};
+  CHECK(!::GradientFill(mem, v, 2, &wrong, 1, GRADIENT_FILL_RECT_H));
+
+  // Shadowed text draws both.
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  RECT tr = {0, 0, 200, 40};
+  CHECK(::DrawShadowText(mem, L"Shadow", 6, &tr, DT_LEFT | DT_TOP, RGB(255, 0, 0), RGB(0, 0, 255), 3, 3) > 0);
+  bool red = false, blue = false;
+  for (int y = 0; y < 30; y++)
+    for (int x = 0; x < 80; x++) {
+      COLORREF c = PixelAt(mem, x, y);
+      red = red || c == RGB(255, 0, 0);
+      blue = blue || c == RGB(0, 0, 255);
+    }
+  CHECK(red && blue);
+
+  // Glyph indices are the characters; widths match their *I forms.
+  WORD g[3] = {0};
+  CHECK(::GetGlyphIndicesW(mem, L"AB\xFFFF", 3, g, GGI_MARK_NONEXISTING_GLYPHS) == 3);
+  CHECK(g[0] == 'A' && g[1] == 'B');
+  SIZE s1, s2;
+  CHECK(::GetTextExtentPoint32W(mem, L"AB", 2, &s1));
+  CHECK(::GetTextExtentPointI(mem, g, 2, &s2));
+  CHECK(s1.cx == s2.cx && s1.cy == s2.cy);
+  INT wA = 0, wI = 0;
+  FLOAT wF = 0;
+  CHECK(::GetCharWidth32W(mem, 'A', 'A', &wA));
+  CHECK(::GetCharWidthI(mem, 0, 1, g, &wI) && wI == wA);
+  CHECK(::GetCharWidthFloatW(mem, 'A', 'A', &wF) && (int)wF == wA);
+  ABCFLOAT abcf;
+  CHECK(::GetCharABCWidthsFloatW(mem, 'A', 'A', &abcf));
+  CHECK((int)(abcf.abcfA + abcf.abcfB + abcf.abcfC) == wA);
+  DWORD need = ::GetFontUnicodeRanges(mem, NULL);
+  CHECK(need >= sizeof(GLYPHSET));
+  std::vector<BYTE> buf(need);
+  GLYPHSET* gs = (GLYPHSET*)buf.data();
+  CHECK(::GetFontUnicodeRanges(mem, gs) == need);
+  bool hasA = false;
+  for (DWORD i = 0; i < gs->cRanges; i++)
+    hasA = hasA || ('A' >= gs->ranges[i].wcLow && 'A' < gs->ranges[i].wcLow + gs->ranges[i].cGlyphs);
+  CHECK(hasA && gs->cGlyphsSupported >= 26);
+
+  ENUMLOGFONTEXDVW ex;
+  memset(&ex, 0, sizeof ex);
+  ex.elfEnumLogfontEx.elfLogFont.lfHeight = -20;
+  wcscpy(ex.elfEnumLogfontEx.elfLogFont.lfFaceName, L"Arial");
+  HFONT f = ::CreateFontIndirectExW(&ex);
+  CHECK(f != NULL);
+  LOGFONTW lf;
+  CHECK(::GetObjectW(f, sizeof lf, &lf) && lf.lfHeight == -20);
+  ::DeleteObject(f);
+
+  ::SelectObject(mem, old);
+  ::DeleteObject(bm);
+  ::DeleteDC(mem);
+  ::ReleaseDC(NULL, screen);
+
+  // The description saved with a metafile, both parts.
+  HDC emf = ::CreateEnhMetaFileW(NULL, NULL, NULL, L"App\0Picture\0");
+  ::Rectangle(emf, 0, 0, 10, 10);
+  HENHMETAFILE hemf = ::CloseEnhMetaFile(emf);
+  CHECK(::GetEnhMetaFileDescriptionW(hemf, 0, NULL) == 13);
+  WCHAR desc[20];
+  CHECK(::GetEnhMetaFileDescriptionW(hemf, 20, desc) == 13);
+  CHECK(wcscmp(desc, L"App") == 0 && wcscmp(desc + 4, L"Picture") == 0);
+  char descA[20];
+  CHECK(::GetEnhMetaFileDescriptionA(hemf, 20, descA) == 13 && strcmp(descA + 4, "Picture") == 0);
+  CHECK(::GetEnhMetaFilePaletteEntries(hemf, 0, NULL) == 0);
+  ::DeleteEnhMetaFile(hemf);
+
+  // No visual styles, and no OpenGL.
+  CHECK(!::IsThemeActive() && !::IsAppThemed());
+  CHECK(::OpenThemeData(NULL, L"BUTTON") == NULL);
+  CHECK(::GetThemeSysColor(NULL, COLOR_WINDOW) == ::GetSysColor(COLOR_WINDOW));
+  LOGFONTW tf;
+  CHECK(SUCCEEDED(::GetThemeSysFont(NULL, TMT_MENUFONT, &tf)));
+  PIXELFORMATDESCRIPTOR pfd = {sizeof pfd, 1, PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL};
+  HDC sdc = ::GetDC(NULL);
+  CHECK(::ChoosePixelFormat(sdc, &pfd) == 0 && ::GetLastError() == ERROR_NOT_SUPPORTED);
+  CHECK(::wglCreateContext(sdc) == NULL);
+  CHECK(::wglMakeCurrent(NULL, NULL));
+  ::ReleaseDC(NULL, sdc);
+}
+
+// DECIMAL: exact text, rounding half to even, comparison across scales.
+static void TestDecimal() {
+  DECIMAL a, b;
+  CHECK(SUCCEEDED(::VarDecFromStr(L"12.50", 0, 0, &a)));
+  CHECK(a.scale == 2 && a.Lo32 == 1250 && a.sign == 0);
+  CHECK(SUCCEEDED(::VarDecFromStr(L"12.5", 0, 0, &b)));
+  CHECK(::VarDecCmp(&a, &b) == VARCMP_EQ);
+  CHECK(SUCCEEDED(::VarDecFromStr(L"-0.001", 0, 0, &b)));
+  CHECK(b.sign == DECIMAL_NEG && b.scale == 3 && b.Lo32 == 1);
+  CHECK(::VarDecCmp(&b, &a) == VARCMP_LT && ::VarDecCmp(&a, &b) == VARCMP_GT);
+  BSTR s = NULL;
+  CHECK(SUCCEEDED(::VarBstrFromDec(&b, 0, 0, &s)) && wcscmp(s, L"-0.001") == 0);
+  ::SysFreeString(s);
+  CHECK(SUCCEEDED(::VarDecFromStr(L"79228162514264337593543950335", 0, 0, &a)));
+  CHECK(a.Hi32 == 0xFFFFFFFF && a.Mid32 == 0xFFFFFFFF && a.Lo32 == 0xFFFFFFFF);
+  CHECK(::VarDecFromStr(L"79228162514264337593543950336", 0, 0, &a) == DISP_E_OVERFLOW);
+  CHECK(::VarDecFromStr(L"12x", 0, 0, &a) == DISP_E_TYPEMISMATCH);
+  // Past 28 places, to even.
+  CHECK(SUCCEEDED(::VarDecFromStr(L"0.00000000000000000000000000025", 0, 0, &a)));
+  CHECK(a.scale == 28 && a.Lo32 == 2);
+  CHECK(SUCCEEDED(::VarDecFromStr(L"0.00000000000000000000000000035", 0, 0, &a)));
+  CHECK(a.Lo32 == 4);
+  CHECK(SUCCEEDED(::VarDecFromStr(L"1.5e3", 0, 0, &a)));
+  CHECK(SUCCEEDED(::VarBstrFromDec(&a, 0, 0, &s)) && wcscmp(s, L"1500") == 0);
+  ::SysFreeString(s);
+  CHECK(SUCCEEDED(::VarDecFromI4(-42, &a)));
+  double d = 0;
+  CHECK(SUCCEEDED(::VarR8FromDec(&a, &d)) && d == -42.0);
+  CHECK(SUCCEEDED(::VarDecFromR8(0.1, &a)));
+  CHECK(SUCCEEDED(::VarBstrFromDec(&a, 0, 0, &s)) && wcscmp(s, L"0.1") == 0);
+  ::SysFreeString(s);
+  CHECK(::VarDecFromR8(1e30, &a) == DISP_E_OVERFLOW);
+  DECIMAL z1, z2;
+  CHECK(SUCCEEDED(::VarDecFromStr(L"0", 0, 0, &z1)) && SUCCEEDED(::VarDecFromStr(L"-0.00", 0, 0, &z2)));
+  CHECK(::VarDecCmp(&z1, &z2) == VARCMP_EQ);
+}
+
+// The shell namespace over the file system, and the folder browser.
+static std::string g_browseDir;
+static int g_browseSelChanges = 0;
+static int CALLBACK BrowseCallback(HWND h, UINT msg, LPARAM lp, LPARAM data) {
+  if (msg == BFFM_INITIALIZED) {
+    CHECK(data == 1234);
+    std::string sub = g_browseDir + "/sub";
+    ::SendMessageA(h, BFFM_SETSELECTIONA, TRUE, (LPARAM)sub.c_str());
+    ::SendMessageW(h, BFFM_SETOKTEXT, 0, (LPARAM)L"Choose");
+    WCHAR ok[20];
+    ::GetDlgItemTextW(h, IDOK, ok, 20);
+    CHECK(wcscmp(ok, L"Choose") == 0);
+    ::PostMessageW(h, WM_COMMAND, IDOK, 0);
+  } else if (msg == BFFM_SELCHANGED) {
+    g_browseSelChanges++;
+    char path[MAX_PATH];
+    CHECK(::SHGetPathFromIDListA((LPCITEMIDLIST)lp, path));
+  }
+  return 0;
+}
+
+static void TestShellNamespace() {
+  char tmpl[] = "/tmp/wintest-shell-XXXXXX";
+  CHECK(mkdtemp(tmpl) != NULL);
+  std::string dir = tmpl;
+  CHECK(::CreateDirectoryA((dir + "/sub").c_str(), NULL));
+  CHECK(::CreateDirectoryA((dir + "/sub/deeper").c_str(), NULL));
+  FILE* fp = fopen((dir + "/file.txt").c_str(), "w");
+  fputs("hello", fp);
+  fclose(fp);
+  fp = fopen((dir + "/.hidden").c_str(), "w");
+  fclose(fp);
+
+  // ID lists: one item a component.
+  std::wstring wdir(dir.begin(), dir.end());
+  LPITEMIDLIST pidl = ::ILCreateFromPathW(wdir.c_str());
+  CHECK(pidl != NULL);
+  WCHAR path[MAX_PATH];
+  CHECK(::SHGetPathFromIDListW(pidl, path) && wdir == path);
+  LPITEMIDLIST copy = ::ILClone(pidl);
+  CHECK(::ILIsEqual(pidl, copy) && ::ILGetSize(copy) == ::ILGetSize(pidl));
+  CHECK(::ILRemoveLastID(copy));
+  CHECK(::ILIsParent(copy, pidl, TRUE));
+  CHECK(::SHGetPathFromIDListW(copy, path) && wcscmp(path, L"/tmp") == 0);
+  LPCITEMIDLIST last = ::ILFindLastID(pidl);
+  LPITEMIDLIST again = ::ILCombine(copy, last);
+  CHECK(::ILIsEqual(again, pidl));
+  CHECK(::ILFindChild(copy, pidl) == last);
+  ::ILFree(again);
+  ::ILFree(copy);
+
+  // The desktop is the root; folders bind below it.
+  IShellFolder* desktop = NULL;
+  CHECK(SUCCEEDED(::SHGetDesktopFolder(&desktop)));
+  IShellFolder* folder = NULL;
+  CHECK(SUCCEEDED(desktop->BindToObject(pidl, NULL, IID_IShellFolder, (void**)&folder)));
+  IEnumIDList* items = NULL;
+  CHECK(SUCCEEDED(folder->EnumObjects(NULL, SHCONTF_FOLDERS | SHCONTF_NONFOLDERS, &items)));
+  std::vector<std::string> names;
+  LPITEMIDLIST child;
+  ULONG got;
+  while (items->Next(1, &child, &got) == S_OK) {
+    STRRET name;
+    CHECK(SUCCEEDED(folder->GetDisplayNameOf(child, SHGDN_INFOLDER, &name)) && name.uType == STRRET_WSTR);
+    std::wstring w = name.pOleStr;
+    names.push_back(std::string(w.begin(), w.end()));
+    ::CoTaskMemFree(name.pOleStr);
+    ::ILFree(child);
+  }
+  items->Release();
+  CHECK(names.size() == 2 && names[0] == "file.txt" && names[1] == "sub");
+  CHECK(SUCCEEDED(folder->EnumObjects(NULL, SHCONTF_NONFOLDERS | SHCONTF_INCLUDEHIDDEN, &items)));
+  ULONG n = 0;
+  LPITEMIDLIST two[3] = {NULL, NULL, NULL};
+  CHECK(items->Next(3, two, &n) == S_FALSE && n == 2);
+  ::ILFree(two[0]);
+  ::ILFree(two[1]);
+  items->Release();
+
+  LPITEMIDLIST sub = NULL, file = NULL;
+  ULONG attrs = SFGAO_FOLDER | SFGAO_HASSUBFOLDER | SFGAO_FILESYSTEM | SFGAO_LINK;
+  CHECK(SUCCEEDED(folder->ParseDisplayName(NULL, NULL, (LPWSTR)L"sub", NULL, &sub, &attrs)));
+  CHECK(attrs == (SFGAO_FOLDER | SFGAO_HASSUBFOLDER | SFGAO_FILESYSTEM));
+  attrs = SFGAO_FOLDER | SFGAO_STREAM;
+  CHECK(SUCCEEDED(folder->ParseDisplayName(NULL, NULL, (LPWSTR)L"file.txt", NULL, &file, &attrs)));
+  CHECK(attrs == SFGAO_STREAM);
+  CHECK(folder->ParseDisplayName(NULL, NULL, (LPWSTR)L"missing", NULL, &child, NULL) ==
+        HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND));
+  // Folders before files.
+  CHECK((short)HRESULT_CODE(folder->CompareIDs(0, sub, file)) < 0);
+  CHECK((short)HRESULT_CODE(folder->CompareIDs(0, sub, sub)) == 0);
+  STRRET full;
+  CHECK(SUCCEEDED(folder->GetDisplayNameOf(file, SHGDN_FORPARSING, &full)));
+  CHECK(std::wstring(full.pOleStr) == wdir + L"/file.txt");
+  ::CoTaskMemFree(full.pOleStr);
+  IStream* stream = NULL;
+  CHECK(SUCCEEDED(folder->BindToStorage(file, NULL, IID_IStream, (void**)&stream)));
+  char text[8] = {0};
+  ULONG read = 0;
+  CHECK(SUCCEEDED(stream->Read(text, sizeof text, &read)) && read == 5 && strcmp(text, "hello") == 0);
+  stream->Release();
+  void* none = (void*)1;
+  CHECK(folder->BindToObject(file, NULL, IID_IShellLinkW, &none) == E_NOINTERFACE && none == NULL);
+  LPITEMIDLIST renamed = NULL;
+  CHECK(SUCCEEDED(folder->SetNameOf(NULL, file, L"renamed.txt", SHGDN_INFOLDER, &renamed)));
+  CHECK(::GetFileAttributesA((dir + "/renamed.txt").c_str()) != INVALID_FILE_ATTRIBUTES);
+  ::ILFree(renamed);
+  ::ILFree(file);
+  ::ILFree(sub);
+  folder->Release();
+  desktop->Release();
+
+  LPITEMIDLIST root = NULL;
+  CHECK(SUCCEEDED(::SHGetSpecialFolderLocation(NULL, CSIDL_DESKTOP, &root)) && ILIsEmpty(root));
+  CHECK(::SHGetPathFromIDListA(root, (char*)path) && strcmp((char*)path, "/") == 0);
+  ::ILFree(root);
+  IMalloc* malloc = NULL;
+  CHECK(SUCCEEDED(::SHGetMalloc(&malloc)));
+  void* block = malloc->Alloc(10);
+  CHECK(block != NULL && malloc->GetSize(block) >= 10);
+  malloc->Free(block);
+
+  // The folder browser, from a root, its callback choosing for it.
+  g_browseDir = dir;
+  char display[MAX_PATH] = "";
+  BROWSEINFOA bi;
+  memset(&bi, 0, sizeof bi);
+  bi.pidlRoot = pidl;
+  bi.pszDisplayName = display;
+  bi.lpszTitle = "Pick one";
+  bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_EDITBOX;
+  bi.lpfn = BrowseCallback;
+  bi.lParam = 1234;
+  LPITEMIDLIST chosen = ::SHBrowseForFolderA(&bi);
+  CHECK(chosen != NULL);
+  char chosenPath[MAX_PATH] = "";
+  CHECK(chosen && ::SHGetPathFromIDListA(chosen, chosenPath) && dir + "/sub" == chosenPath);
+  CHECK(strcmp(display, "sub") == 0);
+  CHECK(g_browseSelChanges >= 2);
+  ::ILFree(chosen);
+  ::ILFree(pidl);
+
+  remove((dir + "/renamed.txt").c_str());
+  remove((dir + "/.hidden").c_str());
+  rmdir((dir + "/sub/deeper").c_str());
+  rmdir((dir + "/sub").c_str());
+  rmdir(dir.c_str());
+}
+#endif
+
 int main() {
   if (!AfxWinInit(::GetModuleHandle(NULL), NULL, ::GetCommandLine(), SW_SHOW)) {
     printf("FAIL: AfxWinInit\n");
@@ -3050,6 +3455,9 @@ int main() {
   TestClickThroughGroupBox();
   TestWinHelp();
   TestPlgBlt();
+  TestDisplayAndDrawing();
+  TestDecimal();
+  TestShellNamespace();
 #endif
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;

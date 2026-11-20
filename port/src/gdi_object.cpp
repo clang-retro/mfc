@@ -713,6 +713,15 @@ HFONT WINAPI CreateFontIndirectA(const LOGFONTA* lf) {
   return CreateFontIndirectW(&w);
 }
 
+// The LOGFONT inside; the design axes (for multiple master fonts) and the
+// full and style names add nothing to matching here.
+HFONT WINAPI CreateFontIndirectExW(const ENUMLOGFONTEXDVW* e) {
+  return e ? CreateFontIndirectW(&e->elfEnumLogfontEx.elfLogFont) : NULL;
+}
+HFONT WINAPI CreateFontIndirectExA(const ENUMLOGFONTEXDVA* e) {
+  return e ? CreateFontIndirectA(&e->elfEnumLogfontEx.elfLogFont) : NULL;
+}
+
 HFONT WINAPI CreateFontW(int height, int width, int escapement, int orientation, int weight, DWORD italic,
                          DWORD underline, DWORD strikeOut, DWORD charSet, DWORD outPrecision, DWORD clipPrecision,
                          DWORD quality, DWORD pitchAndFamily, LPCWSTR face) {

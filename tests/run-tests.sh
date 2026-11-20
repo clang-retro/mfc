@@ -32,8 +32,10 @@ case "$TARGET" in
   *linux*|*darwin*|*apple*) NATIVE=1 ;;
   *) NATIVE=0 ;;
 esac
+# WTL's headers, for wtltest (tools/fetch-wtl.sh puts them here).
+WTL_INCLUDE=${WTL_INCLUDE:-build/wtl/include}
 if [ $NATIVE = 1 ]; then
-  TESTS=${NATIVE_TESTS:-"core memtest wintest disptest isapitest dlgtest sditest mditest cmntest splittest docktest dbtest odbctest rvtest socktest occtest dlltest inettest oletest iptest docobtest linktest bindtest richtest richsrvtest autotest srvtest atlwintest atltest conntest ctltest wltest dragtest daotest dvtest htmltest atlctltest atlutiltest cdlgtest iotest audiotest"}
+  TESTS=${NATIVE_TESTS:-"core memtest wintest disptest isapitest dlgtest sditest mditest cmntest splittest docktest dbtest odbctest rvtest socktest occtest dlltest inettest oletest iptest docobtest linktest bindtest richtest richsrvtest autotest srvtest atlwintest atltest conntest ctltest wltest dragtest daotest dvtest htmltest atlctltest atlutiltest cdlgtest iotest audiotest wtltest"}
   T=$OUT/tests
   mkdir -p "$T/a" "$T/u"
   python3 tests/gen-toolbar-bmp.py "$T/toolbar.bmp" 6 || exit 1
@@ -103,9 +105,19 @@ if [ $NATIVE = 1 ]; then
     fi
     mkdir -p "$outdir"
     srcs=tests/$name.cpp
+    # WTL, built as Visual C++ builds it (tools/fetch-wtl.sh fetches it).
+    extra= rcextra=
+    if [ $name = wtltest ]; then
+      if [ ! -f "$WTL_INCLUDE/atlapp.h" ]; then
+        echo "skip   $label-$v (no WTL headers; run tools/fetch-wtl.sh)"
+        return
+      fi
+      extra="-isystem $WTL_INCLUDE -fms-compatibility -fms-compatibility-version=19.29"
+      rcextra="-I $WTL_INCLUDE"
+    fi
     # Resources become C++ that registers them as the program starts.
     if [ -f tests/$name.rc ]; then
-      CXX="$CXX" RC="$RC_NATIVE" python3 port/tools/res2cpp.py -I include -I tests -I "$T" \
+      CXX="$CXX" RC="$RC_NATIVE" python3 port/tools/res2cpp.py -I include -I tests -I "$T" $rcextra \
         tests/$name.rc -o "$T/$name-res.cpp" 2>"$T/$name-rc.log" || {
         echo "FAIL   $label-$v (resources)"; cat "$T/$name-rc.log"; nfail=$((nfail + 1)); return; }
       srcs="$srcs $T/$name-res.cpp"
@@ -160,7 +172,7 @@ if [ $NATIVE = 1 ]; then
         echo "FAIL   $label-$v (DLL build)"; cat "$T/$label-dll-$v-build.log"; nfail=$((nfail + 1)); return; }
     fi
     # shellcheck disable=SC2086
-    "$CXX" $CXXFLAGS $flags $exeflags $srcs $LDFLAGS $libs $SYSLIBS $rpath -o "$exe" \
+    "$CXX" $CXXFLAGS $flags $extra $exeflags $srcs $LDFLAGS $libs $SYSLIBS $rpath -o "$exe" \
       2>"$T/$label-$v-build.log" || {
       echo "FAIL   $label-$v (build)"; cat "$T/$label-$v-build.log"; nfail=$((nfail + 1)); return; }
     # The tests that close their own message boxes want them as windows.
@@ -212,8 +224,6 @@ fi
 CXXFLAGS="$CXXFLAGS -fuse-ld=lld ${STDLIB--stdlib=libc++} -std=c++17"
 CXXFLAGS="$CXXFLAGS -Wall -Wno-unused-function -Wno-overloaded-virtual -Wno-missing-exception-spec -Iinclude -Itests"
 RCFLAGS="--target=i686-w64-mingw32 -I tests -I include -I $T ${SYSROOT:+-I $SYSROOT/include}"
-# WTL's headers, for wtltest (tools/fetch-wtl.sh puts them here).
-WTL_INCLUDE=${WTL_INCLUDE:-build/wtl/include}
 
 nfail=0
 npass=0

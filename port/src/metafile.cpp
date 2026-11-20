@@ -1062,4 +1062,65 @@ BOOL WINAPI PlayEnhMetaFile(HDC hdc, HENHMETAFILE h, const RECT* rc) {
   return ok;
 }
 
+// The description in the header: the application's name and the
+// picture's, each ending with a NUL. Without a buffer, its length.
+UINT WINAPI GetEnhMetaFileDescriptionW(HENHMETAFILE h, UINT n, LPWSTR out) {
+  EnhMetaFileObj* o = GdiAs<EnhMetaFileObj>(h, OBJ_ENHMETAFILE);
+  if (!o) return GDI_ERROR;
+  const std::vector<BYTE>& b = o->bits;
+  DWORD count = GetD(b.data() + 60), off = GetD(b.data() + 64);
+  if (count == 0 || off + (size_t)count * 2 > b.size()) return 0;
+  if (!out) return count;
+  UINT k = std::min<UINT>(n, count);
+  for (UINT i = 0; i < k; i++) out[i] = (WCHAR)GetW(b.data() + off + i * 2);
+  return k;
+}
+UINT WINAPI GetEnhMetaFileDescriptionA(HENHMETAFILE h, UINT n, LPSTR out) {
+  UINT count = GetEnhMetaFileDescriptionW(h, 0, NULL);
+  if (count == GDI_ERROR || count == 0) return count;
+  std::wstring w(count, L'\0');
+  GetEnhMetaFileDescriptionW(h, count, &w[0]);
+  // Each part converts with its NUL.
+  int need = WideCharToMultiByte(CP_ACP, 0, w.data(), (int)count, NULL, 0, NULL, NULL);
+  if (!out) return (UINT)need;
+  std::string a((size_t)need, '\0');
+  WideCharToMultiByte(CP_ACP, 0, w.data(), (int)count, &a[0], need, NULL, NULL);
+  UINT k = std::min<UINT>(n, (UINT)need);
+  memcpy(out, a.data(), k);
+  return k;
+}
+
+// The palette the EMR_EOF record carries. Without a buffer, how many.
+UINT WINAPI GetEnhMetaFilePaletteEntries(HENHMETAFILE h, UINT n, LPPALETTEENTRY out) {
+  EnhMetaFileObj* o = GdiAs<EnhMetaFileObj>(h, OBJ_ENHMETAFILE);
+  if (!o) return GDI_ERROR;
+  const std::vector<BYTE>& b = o->bits;
+  DWORD count = GetD(b.data() + 68);
+  if (count == 0) return 0;
+  if (!out) return count;
+  // The last record is EMR_EOF; its size is in its last DWORD.
+  if (b.size() < 20) return GDI_ERROR;
+  size_t eof = b.size() - GetD(b.data() + b.size() - 4);
+  if (eof + 16 > b.size() || GetD(b.data() + eof) != EMR_EOF) return GDI_ERROR;
+  DWORD have = GetD(b.data() + eof + 8), off = GetD(b.data() + eof + 12);
+  if (eof + off + (size_t)have * 4 > b.size()) return GDI_ERROR;
+  UINT k = std::min<UINT>(n, std::min<UINT>(count, have));
+  memcpy(out, b.data() + eof + off, (size_t)k * 4);
+  return k;
+}
+
+// The pixel format in the header, if it has one (an OpenGL picture).
+UINT WINAPI GetEnhMetaFilePixelFormat(HENHMETAFILE h, UINT n, PIXELFORMATDESCRIPTOR* out) {
+  EnhMetaFileObj* o = GdiAs<EnhMetaFileObj>(h, OBJ_ENHMETAFILE);
+  if (!o) return GDI_ERROR;
+  const std::vector<BYTE>& b = o->bits;
+  DWORD headerSize = GetD(b.data() + 4);
+  if (headerSize < 100) return 0;
+  DWORD size = GetD(b.data() + 88), off = GetD(b.data() + 92);
+  if (size == 0 || off + (size_t)size > b.size()) return 0;
+  if (!out) return size;
+  memcpy(out, b.data() + off, std::min<UINT>(n, size));
+  return size;
+}
+
 }  // extern "C"

@@ -21,6 +21,9 @@ HINSTANCE WINAPI FindExecutableA(LPCSTR, LPCSTR, LPSTR);
 HINSTANCE WINAPI FindExecutableW(LPCWSTR, LPCWSTR, LPWSTR);
 HICON WINAPI ExtractIconA(HINSTANCE, LPCSTR, UINT);
 HICON WINAPI ExtractIconW(HINSTANCE, LPCWSTR, UINT);
+HICON WINAPI ExtractAssociatedIconA(HINSTANCE, LPSTR, LPWORD);
+HICON WINAPI ExtractAssociatedIconW(HINSTANCE, LPWSTR, LPWORD);
+HICON WINAPI DuplicateIcon(HINSTANCE, HICON);
 LPWSTR* WINAPI CommandLineToArgvW(LPCWSTR, int*);
 #define SE_ERR_FNF 2
 #define SE_ERR_PNF 3
@@ -73,6 +76,7 @@ void WINAPI SHChangeNotify(LONG, UINT, LPCVOID, LPCVOID);
 #define ShellExecute __WINPORT_AW(ShellExecute)
 #define FindExecutable __WINPORT_AW(FindExecutable)
 #define ExtractIcon __WINPORT_AW(ExtractIcon)
+#define ExtractAssociatedIcon __WINPORT_AW(ExtractAssociatedIcon)
 #define SHFILEINFO __WINPORT_AW(SHFILEINFO)
 #define SHGetFileInfo __WINPORT_AW(SHGetFileInfo)
 

@@ -48,6 +48,8 @@ class Template {
     String(text);
     w_.push_back(0);
   }
+  // The height, for a dialog laid out as its controls are added.
+  void SetHeight(int cy) { w_[8] = (WORD)(short)cy; }
   LPCDLGTEMPLATEW Get() const { return (LPCDLGTEMPLATEW)w_.data(); }
 
  private:

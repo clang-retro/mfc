@@ -38,6 +38,8 @@ typedef wint_t _TINT;
 #define _tcstoul wcstoul
 #define _tcstod wcstod
 #define _stprintf swprintf
+#define _stprintf_s swprintf_s
+#define _vstprintf_s vswprintf_s
 #define _sntprintf swprintf
 #define _vsntprintf vswprintf
 #define _tprintf wprintf
@@ -76,6 +78,8 @@ typedef int _TINT;
 #define _tcstoul strtoul
 #define _tcstod strtod
 #define _stprintf sprintf
+#define _stprintf_s sprintf_s
+#define _vstprintf_s vsprintf_s
 #define _sntprintf snprintf
 #define _vsntprintf vsnprintf
 #define _tprintf printf
