@@ -312,13 +312,16 @@ static void TestPort() {
 // The environment as a block, and the user's name.
 static void TestEnvironment() {
   CHECK(::SetEnvironmentVariableA("IOTEST_VAR", "yes"));
+  bool found = false;
+#ifndef UNICODE
+  // The SDK names the A form only without UNICODE.
   LPCH block = ::GetEnvironmentStringsA();
   CHECK(block != NULL);
-  bool found = false;
   for (const char* p = block; p && *p; p += strlen(p) + 1)
     if (strcmp(p, "IOTEST_VAR=yes") == 0) found = true;
   CHECK(found);
   CHECK(::FreeEnvironmentStringsA(block));
+#endif
   LPWCH wide = ::GetEnvironmentStringsW();
   CHECK(wide != NULL);
   found = false;

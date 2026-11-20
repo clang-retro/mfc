@@ -259,7 +259,10 @@ static void TestMmio() {
   CHECK(mmioDescend(h, &ck, &riff, MMIO_FINDCHUNK) == MMIOERR_CHUNKNOTFOUND);
   CHECK(mmioClose(h, 0) == MMSYSERR_NOERROR);
   CHECK(mmioOpenA(path, NULL, MMIO_DELETE) != NULL);
-  CHECK(mmioOpenA(path, NULL, MMIO_EXIST) == NULL);
+  // Wine's MMIO_DELETE reports success but leaves the file.
+  if (!GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_version"))
+    CHECK(mmioOpenA(path, NULL, MMIO_EXIST) == NULL);
+  DeleteFileA(path);
 
   // A file in memory.
   char mem[64];

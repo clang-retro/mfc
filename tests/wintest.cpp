@@ -2590,6 +2590,19 @@ static void TestSymbolFont() {
   HFONT arial = ::CreateFontW(-32, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, 0, L"Arial");
   HDC dc = ::CreateCompatibleDC(NULL);
   HGDIOBJ old = ::SelectObject(dc, wd);
+#ifndef _WINPORT
+  // Windows draws the font only when it is installed (Wine has none).
+  WCHAR face[LF_FACESIZE] = {};
+  ::GetTextFaceW(dc, LF_FACESIZE, face);
+  if (lstrcmpiW(face, L"Wingdings") != 0) {
+    printf("no Wingdings font: symbol fonts not tested\n");
+    ::SelectObject(dc, old);
+    ::DeleteDC(dc);
+    ::DeleteObject(wd);
+    ::DeleteObject(arial);
+    return;
+  }
+#endif
   TEXTMETRICW tm = {};
   CHECK(::GetTextMetricsW(dc, &tm));
   CHECK(tm.tmCharSet == SYMBOL_CHARSET);
