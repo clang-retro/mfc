@@ -38,6 +38,8 @@ HANDLE NewHandle(Object* o);
 void Release(Object* o);
 // A new handle to an open file, for DuplicateHandle.
 HANDLE DuplicateFile(Object* o);
+// The descriptor of a file handle, or -1.
+int FileDescriptor(HANDLE h);
 // All waits sleep on one condition, which every change of a waitable
 // object's state broadcasts.
 pthread_mutex_t* WaitLock();

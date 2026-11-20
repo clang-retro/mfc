@@ -10,6 +10,7 @@
 
 #include <windows.h>
 #include <prsht.h>
+#include <objidl.h>
 
 extern "C" {
 
@@ -2811,6 +2812,332 @@ typedef HRESULT(CALLBACK* DLLGETVERSIONPROC)(DLLVERSIONINFO*);
 #define WC_TABCONTROL WC_TABCONTROLA
 #define WC_TREEVIEW WC_TREEVIEWA
 #endif
+
+// The message helpers for the list view, tab and tree view controls.
+#ifndef SNDMSG
+#define SNDMSG SendMessage
+#endif
+#define LPTV_INSERTSTRUCT LPTVINSERTSTRUCT
+#define LPTV_HITTESTINFO LPTVHITTESTINFO
+#define LPTV_SORTCB LPTVSORTCB
+#define ListView_GetBkColor(hwnd) \
+  (COLORREF)SNDMSG((hwnd), LVM_GETBKCOLOR, 0, 0L)
+#define ListView_SetBkColor(hwnd, clrBk) \
+  (BOOL)SNDMSG((hwnd), LVM_SETBKCOLOR, 0, (LPARAM)(COLORREF)(clrBk))
+#define ListView_GetImageList(hwnd, iImageList) \
+  (HIMAGELIST)SNDMSG((hwnd), LVM_GETIMAGELIST, (WPARAM)(INT)(iImageList), 0L)
+#define ListView_SetImageList(hwnd, himl, iImageList) \
+  (HIMAGELIST)SNDMSG((hwnd), LVM_SETIMAGELIST, (WPARAM)(iImageList), (LPARAM)(HIMAGELIST)(himl))
+#define ListView_GetItemCount(hwnd) \
+  (int)SNDMSG((hwnd), LVM_GETITEMCOUNT, 0, 0L)
+#define ListView_GetItem(hwnd, pitem) \
+  (BOOL)SNDMSG((hwnd), LVM_GETITEM, 0, (LPARAM)(LV_ITEM*)(pitem))
+#define ListView_SetItem(hwnd, pitem) \
+  (BOOL)SNDMSG((hwnd), LVM_SETITEM, 0, (LPARAM)(const LV_ITEM*)(pitem))
+#define ListView_InsertItem(hwnd, pitem) \
+  (int)SNDMSG((hwnd), LVM_INSERTITEM, 0, (LPARAM)(const LV_ITEM*)(pitem))
+#define ListView_DeleteItem(hwnd, i) \
+  (BOOL)SNDMSG((hwnd), LVM_DELETEITEM, (WPARAM)(int)(i), 0L)
+#define ListView_DeleteAllItems(hwnd) \
+  (BOOL)SNDMSG((hwnd), LVM_DELETEALLITEMS, 0, 0L)
+#define ListView_GetCallbackMask(hwnd) \
+  (UINT)SNDMSG((hwnd), LVM_GETCALLBACKMASK, 0, 0)
+#define ListView_SetCallbackMask(hwnd, mask) \
+  (BOOL)SNDMSG((hwnd), LVM_SETCALLBACKMASK, (WPARAM)(UINT)(mask), 0)
+#define ListView_GetNextItem(hwnd, i, flags) \
+  (int)SNDMSG((hwnd), LVM_GETNEXTITEM, (WPARAM)(int)(i), MAKELPARAM((flags), 0))
+#define ListView_FindItem(hwnd, iStart, plvfi) \
+  (int)SNDMSG((hwnd), LVM_FINDITEM, (WPARAM)(int)(iStart), (LPARAM)(const LV_FINDINFO*)(plvfi))
+#define ListView_GetItemRect(hwnd, i, prc, code) \
+  (BOOL)SNDMSG((hwnd), LVM_GETITEMRECT, (WPARAM)(int)(i), ((prc) ? (((RECT*)(prc))->left = (code), (LPARAM)(RECT*)(prc)) : (LPARAM)(RECT*)NULL))
+#define ListView_SetItemPosition(hwndLV, i, x, y) \
+  (BOOL)SNDMSG((hwndLV), LVM_SETITEMPOSITION, (WPARAM)(int)(i), MAKELPARAM((x), (y)))
+#define ListView_GetItemPosition(hwndLV, i, ppt) \
+  (BOOL)SNDMSG((hwndLV), LVM_GETITEMPOSITION, (WPARAM)(int)(i), (LPARAM)(POINT*)(ppt))
+#define ListView_GetStringWidth(hwndLV, psz) \
+  (int)SNDMSG((hwndLV), LVM_GETSTRINGWIDTH, 0, (LPARAM)(LPCTSTR)(psz))
+#define ListView_HitTest(hwndLV, pinfo) \
+  (int)SNDMSG((hwndLV), LVM_HITTEST, 0, (LPARAM)(LV_HITTESTINFO*)(pinfo))
+#define ListView_EnsureVisible(hwndLV, i, fPartialOK) \
+  (BOOL)SNDMSG((hwndLV), LVM_ENSUREVISIBLE, (WPARAM)(int)(i), MAKELPARAM((fPartialOK), 0))
+#define ListView_Scroll(hwndLV, dx, dy) \
+  (BOOL)SNDMSG((hwndLV), LVM_SCROLL, (WPARAM)(int)(dx), (LPARAM)(int)(dy))
+#define ListView_RedrawItems(hwndLV, iFirst, iLast) \
+  (BOOL)SNDMSG((hwndLV), LVM_REDRAWITEMS, (WPARAM)(int)(iFirst), (LPARAM)(int)(iLast))
+#define ListView_Arrange(hwndLV, code) \
+  (BOOL)SNDMSG((hwndLV), LVM_ARRANGE, (WPARAM)(UINT)(code), 0L)
+#define ListView_EditLabel(hwndLV, i) \
+  (HWND)SNDMSG((hwndLV), LVM_EDITLABEL, (WPARAM)(int)(i), 0L)
+#define ListView_GetEditControl(hwndLV) \
+  (HWND)SNDMSG((hwndLV), LVM_GETEDITCONTROL, 0, 0L)
+#define ListView_GetColumn(hwnd, iCol, pcol) \
+  (BOOL)SNDMSG((hwnd), LVM_GETCOLUMN, (WPARAM)(int)(iCol), (LPARAM)(LV_COLUMN*)(pcol))
+#define ListView_SetColumn(hwnd, iCol, pcol) \
+  (BOOL)SNDMSG((hwnd), LVM_SETCOLUMN, (WPARAM)(int)(iCol), (LPARAM)(const LV_COLUMN*)(pcol))
+#define ListView_InsertColumn(hwnd, iCol, pcol) \
+  (int)SNDMSG((hwnd), LVM_INSERTCOLUMN, (WPARAM)(int)(iCol), (LPARAM)(const LV_COLUMN*)(pcol))
+#define ListView_DeleteColumn(hwnd, iCol) \
+  (BOOL)SNDMSG((hwnd), LVM_DELETECOLUMN, (WPARAM)(int)(iCol), 0)
+#define ListView_GetColumnWidth(hwnd, iCol) \
+  (int)SNDMSG((hwnd), LVM_GETCOLUMNWIDTH, (WPARAM)(int)(iCol), 0)
+#define ListView_SetColumnWidth(hwnd, iCol, cx) \
+  (BOOL)SNDMSG((hwnd), LVM_SETCOLUMNWIDTH, (WPARAM)(int)(iCol), MAKELPARAM((cx), 0))
+#define ListView_GetHeader(hwnd) \
+  (HWND)SNDMSG((hwnd), LVM_GETHEADER, 0, 0L)
+#define ListView_CreateDragImage(hwnd, i, lpptUpLeft) \
+  (HIMAGELIST)SNDMSG((hwnd), LVM_CREATEDRAGIMAGE, (WPARAM)(int)(i), (LPARAM)(LPPOINT)(lpptUpLeft))
+#define ListView_GetViewRect(hwnd, prc) \
+  (BOOL)SNDMSG((hwnd), LVM_GETVIEWRECT, 0, (LPARAM)(RECT*)(prc))
+#define ListView_GetTextColor(hwnd) \
+  (COLORREF)SNDMSG((hwnd), LVM_GETTEXTCOLOR, 0, 0L)
+#define ListView_SetTextColor(hwnd, clrText) \
+  (BOOL)SNDMSG((hwnd), LVM_SETTEXTCOLOR, 0, (LPARAM)(COLORREF)(clrText))
+#define ListView_GetTextBkColor(hwnd) \
+  (COLORREF)SNDMSG((hwnd), LVM_GETTEXTBKCOLOR, 0, 0L)
+#define ListView_SetTextBkColor(hwnd, clrTextBk) \
+  (BOOL)SNDMSG((hwnd), LVM_SETTEXTBKCOLOR, 0, (LPARAM)(COLORREF)(clrTextBk))
+#define ListView_GetTopIndex(hwndLV) \
+  (int)SNDMSG((hwndLV), LVM_GETTOPINDEX, 0, 0)
+#define ListView_GetCountPerPage(hwndLV) \
+  (int)SNDMSG((hwndLV), LVM_GETCOUNTPERPAGE, 0, 0)
+#define ListView_GetOrigin(hwndLV, ppt) \
+  (BOOL)SNDMSG((hwndLV), LVM_GETORIGIN, (WPARAM)0, (LPARAM)(POINT*)(ppt))
+#define ListView_Update(hwndLV, i) \
+  (BOOL)SNDMSG((hwndLV), LVM_UPDATE, (WPARAM)(i), 0L)
+#define ListView_SetItemState(hwndLV, i, data, mask) \
+  { LV_ITEM _lvi_; _lvi_.stateMask = (mask); _lvi_.state = (data); SNDMSG((hwndLV), LVM_SETITEMSTATE, (WPARAM)(i), (LPARAM)(LV_ITEM*)&_lvi_); }
+#define ListView_SetCheckState(hwndLV, i, fCheck) \
+  ListView_SetItemState(hwndLV, i, INDEXTOSTATEIMAGEMASK((fCheck) ? 2 : 1), LVIS_STATEIMAGEMASK)
+#define ListView_GetItemState(hwndLV, i, mask) \
+  (UINT)SNDMSG((hwndLV), LVM_GETITEMSTATE, (WPARAM)(i), (LPARAM)(mask))
+#define ListView_GetCheckState(hwndLV, i) \
+  ((((UINT)(SNDMSG((hwndLV), LVM_GETITEMSTATE, (WPARAM)(i), LVIS_STATEIMAGEMASK))) >> 12) - 1)
+#define ListView_GetItemText(hwndLV, i, iSubItem_, pszText_, cchTextMax_) \
+  { LV_ITEM _lvi_; _lvi_.iSubItem = (iSubItem_); _lvi_.cchTextMax = (cchTextMax_); _lvi_.pszText = (pszText_); SNDMSG((hwndLV), LVM_GETITEMTEXT, (WPARAM)(i), (LPARAM)(LV_ITEM*)&_lvi_); }
+#define ListView_SetItemText(hwndLV, i, iSubItem_, pszText_) \
+  { LV_ITEM _lvi_; _lvi_.iSubItem = (iSubItem_); _lvi_.pszText = (pszText_); SNDMSG((hwndLV), LVM_SETITEMTEXT, (WPARAM)(i), (LPARAM)(LV_ITEM*)&_lvi_); }
+#define ListView_SetItemCount(hwndLV, cItems) \
+  SNDMSG((hwndLV), LVM_SETITEMCOUNT, (WPARAM)(cItems), 0)
+#define ListView_SetItemCountEx(hwndLV, cItems, dwFlags) \
+  SNDMSG((hwndLV), LVM_SETITEMCOUNT, (WPARAM)(cItems), (LPARAM)(dwFlags))
+#define ListView_SortItems(hwndLV, _pfnCompare, _lPrm) \
+  (BOOL)SNDMSG((hwndLV), LVM_SORTITEMS, (WPARAM)(LPARAM)(_lPrm), (LPARAM)(PFNLVCOMPARE)(_pfnCompare))
+#define ListView_SortItemsEx(hwndLV, _pfnCompare, _lPrm) \
+  (BOOL)SNDMSG((hwndLV), LVM_SORTITEMSEX, (WPARAM)(LPARAM)(_lPrm), (LPARAM)(PFNLVCOMPARE)(_pfnCompare))
+#define ListView_SetItemPosition32(hwndLV, i, x0, y0) \
+  { POINT ptNewPos; ptNewPos.x = (x0); ptNewPos.y = (y0); SNDMSG((hwndLV), LVM_SETITEMPOSITION32, (WPARAM)(int)(i), (LPARAM)&ptNewPos); }
+#define ListView_GetSelectedCount(hwndLV) \
+  (UINT)SNDMSG((hwndLV), LVM_GETSELECTEDCOUNT, 0, 0L)
+#define ListView_GetItemSpacing(hwndLV, fSmall) \
+  (DWORD)SNDMSG((hwndLV), LVM_GETITEMSPACING, (WPARAM)(fSmall), 0L)
+#define ListView_GetISearchString(hwndLV, lpsz) \
+  (BOOL)SNDMSG((hwndLV), LVM_GETISEARCHSTRING, 0, (LPARAM)(LPTSTR)(lpsz))
+#define ListView_SetIconSpacing(hwndLV, cx, cy) \
+  (DWORD)SNDMSG((hwndLV), LVM_SETICONSPACING, 0, MAKELONG(cx, cy))
+#define ListView_SetExtendedListViewStyle(hwndLV, dw) \
+  (DWORD)SNDMSG((hwndLV), LVM_SETEXTENDEDLISTVIEWSTYLE, 0, dw)
+#define ListView_SetExtendedListViewStyleEx(hwndLV, dwMask, dw) \
+  (DWORD)SNDMSG((hwndLV), LVM_SETEXTENDEDLISTVIEWSTYLE, dwMask, dw)
+#define ListView_GetExtendedListViewStyle(hwndLV) \
+  (DWORD)SNDMSG((hwndLV), LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0)
+#define ListView_GetSubItemRect(hwnd, iItem, iSubItem, code, prc) \
+  (BOOL)SNDMSG((hwnd), LVM_GETSUBITEMRECT, (WPARAM)(int)(iItem), ((prc) ? ((((LPRECT)(prc))->top = (iSubItem)), (((LPRECT)(prc))->left = (code)), (LPARAM)(prc)) : (LPARAM)(LPRECT)NULL))
+#define ListView_SubItemHitTest(hwnd, plvhti) \
+  (int)SNDMSG((hwnd), LVM_SUBITEMHITTEST, 0, (LPARAM)(LPLVHITTESTINFO)(plvhti))
+#define ListView_SetColumnOrderArray(hwnd, iCount, pi) \
+  (BOOL)SNDMSG((hwnd), LVM_SETCOLUMNORDERARRAY, (WPARAM)(iCount), (LPARAM)(LPINT)(pi))
+#define ListView_GetColumnOrderArray(hwnd, iCount, pi) \
+  (BOOL)SNDMSG((hwnd), LVM_GETCOLUMNORDERARRAY, (WPARAM)(iCount), (LPARAM)(LPINT)(pi))
+#define ListView_SetHotItem(hwnd, i) \
+  (int)SNDMSG((hwnd), LVM_SETHOTITEM, (WPARAM)(i), 0)
+#define ListView_GetHotItem(hwnd) \
+  (int)SNDMSG((hwnd), LVM_GETHOTITEM, 0, 0)
+#define ListView_SetHotCursor(hwnd, hcur) \
+  (HCURSOR)SNDMSG((hwnd), LVM_SETHOTCURSOR, 0, (LPARAM)(hcur))
+#define ListView_GetHotCursor(hwnd) \
+  (HCURSOR)SNDMSG((hwnd), LVM_GETHOTCURSOR, 0, 0)
+#define ListView_ApproximateViewRect(hwnd, iWidth, iHeight, iCount) \
+  (DWORD)SNDMSG((hwnd), LVM_APPROXIMATEVIEWRECT, iCount, MAKELPARAM(iWidth, iHeight))
+#define ListView_SetWorkAreas(hwnd, nWorkAreas, prc) \
+  (BOOL)SNDMSG((hwnd), LVM_SETWORKAREAS, (WPARAM)(int)(nWorkAreas), (LPARAM)(RECT*)(prc))
+#define ListView_GetWorkAreas(hwnd, nWorkAreas, prc) \
+  (BOOL)SNDMSG((hwnd), LVM_GETWORKAREAS, (WPARAM)(int)(nWorkAreas), (LPARAM)(RECT*)(prc))
+#define ListView_GetNumberOfWorkAreas(hwnd, pnWorkAreas) \
+  (BOOL)SNDMSG((hwnd), LVM_GETNUMBEROFWORKAREAS, 0, (LPARAM)(UINT*)(pnWorkAreas))
+#define ListView_GetSelectionMark(hwnd) \
+  (int)SNDMSG((hwnd), LVM_GETSELECTIONMARK, 0, 0)
+#define ListView_SetSelectionMark(hwnd, i) \
+  (int)SNDMSG((hwnd), LVM_SETSELECTIONMARK, 0, (LPARAM)(i))
+#define ListView_SetHoverTime(hwndLV, dwHoverTimeMs) \
+  (DWORD)SNDMSG((hwndLV), LVM_SETHOVERTIME, 0, (LPARAM)(dwHoverTimeMs))
+#define ListView_GetHoverTime(hwndLV) \
+  (DWORD)SNDMSG((hwndLV), LVM_GETHOVERTIME, 0, 0)
+#define ListView_SetToolTips(hwndLV, hwndNewHwnd) \
+  (HWND)SNDMSG((hwndLV), LVM_SETTOOLTIPS, (WPARAM)(hwndNewHwnd), 0)
+#define ListView_GetToolTips(hwndLV) \
+  (HWND)SNDMSG((hwndLV), LVM_GETTOOLTIPS, 0, 0)
+#define TabCtrl_GetImageList(hwnd) \
+  (HIMAGELIST)SNDMSG((hwnd), TCM_GETIMAGELIST, 0, 0L)
+#define TabCtrl_SetImageList(hwnd, himl) \
+  (HIMAGELIST)SNDMSG((hwnd), TCM_SETIMAGELIST, 0, (LPARAM)(HIMAGELIST)(himl))
+#define TabCtrl_GetItemCount(hwnd) \
+  (int)SNDMSG((hwnd), TCM_GETITEMCOUNT, 0, 0L)
+#define TabCtrl_GetItem(hwnd, iItem, pitem) \
+  (BOOL)SNDMSG((hwnd), TCM_GETITEM, (WPARAM)(int)(iItem), (LPARAM)(TC_ITEM*)(pitem))
+#define TabCtrl_SetItem(hwnd, iItem, pitem) \
+  (BOOL)SNDMSG((hwnd), TCM_SETITEM, (WPARAM)(int)(iItem), (LPARAM)(TC_ITEM*)(pitem))
+#define TabCtrl_InsertItem(hwnd, iItem, pitem) \
+  (int)SNDMSG((hwnd), TCM_INSERTITEM, (WPARAM)(int)(iItem), (LPARAM)(const TC_ITEM*)(pitem))
+#define TabCtrl_DeleteItem(hwnd, i) \
+  (BOOL)SNDMSG((hwnd), TCM_DELETEITEM, (WPARAM)(int)(i), 0L)
+#define TabCtrl_DeleteAllItems(hwnd) \
+  (BOOL)SNDMSG((hwnd), TCM_DELETEALLITEMS, 0, 0L)
+#define TabCtrl_GetItemRect(hwnd, i, prc) \
+  (BOOL)SNDMSG((hwnd), TCM_GETITEMRECT, (WPARAM)(int)(i), (LPARAM)(RECT*)(prc))
+#define TabCtrl_GetCurSel(hwnd) \
+  (int)SNDMSG((hwnd), TCM_GETCURSEL, 0, 0)
+#define TabCtrl_SetCurSel(hwnd, i) \
+  (int)SNDMSG((hwnd), TCM_SETCURSEL, (WPARAM)(i), 0)
+#define TabCtrl_HitTest(hwndTC, pinfo) \
+  (int)SNDMSG((hwndTC), TCM_HITTEST, 0, (LPARAM)(TC_HITTESTINFO*)(pinfo))
+#define TabCtrl_SetItemExtra(hwndTC, cb) \
+  (BOOL)SNDMSG((hwndTC), TCM_SETITEMEXTRA, (WPARAM)(cb), 0L)
+#define TabCtrl_AdjustRect(hwnd, bLarger, prc) \
+  (int)SNDMSG(hwnd, TCM_ADJUSTRECT, (WPARAM)(BOOL)(bLarger), (LPARAM)(RECT*)prc)
+#define TabCtrl_SetItemSize(hwnd, x, y) \
+  (DWORD)SNDMSG((hwnd), TCM_SETITEMSIZE, 0, MAKELPARAM(x, y))
+#define TabCtrl_RemoveImage(hwnd, i) \
+  (void)SNDMSG((hwnd), TCM_REMOVEIMAGE, i, 0L)
+#define TabCtrl_SetPadding(hwnd, cx, cy) \
+  (void)SNDMSG((hwnd), TCM_SETPADDING, 0, MAKELPARAM(cx, cy))
+#define TabCtrl_GetRowCount(hwnd) \
+  (int)SNDMSG((hwnd), TCM_GETROWCOUNT, 0, 0L)
+#define TabCtrl_GetToolTips(hwnd) \
+  (HWND)SNDMSG((hwnd), TCM_GETTOOLTIPS, 0, 0L)
+#define TabCtrl_SetToolTips(hwnd, hwndTT) \
+  (void)SNDMSG((hwnd), TCM_SETTOOLTIPS, (WPARAM)(hwndTT), 0L)
+#define TabCtrl_GetCurFocus(hwnd) \
+  (int)SNDMSG((hwnd), TCM_GETCURFOCUS, 0, 0)
+#define TabCtrl_SetCurFocus(hwnd, i) \
+  SNDMSG((hwnd), TCM_SETCURFOCUS, i, 0)
+#define TabCtrl_SetMinTabWidth(hwnd, x) \
+  (int)SNDMSG((hwnd), TCM_SETMINTABWIDTH, 0, x)
+#define TabCtrl_DeselectAll(hwnd, fExcludeFocus) \
+  (void)SNDMSG((hwnd), TCM_DESELECTALL, fExcludeFocus, 0)
+#define TabCtrl_HighlightItem(hwnd, i, fHighlight) \
+  (BOOL)SNDMSG((hwnd), TCM_HIGHLIGHTITEM, (WPARAM)(i), (LPARAM)MAKELONG(fHighlight, 0))
+#define TabCtrl_SetExtendedStyle(hwnd, dw) \
+  (DWORD)SNDMSG((hwnd), TCM_SETEXTENDEDSTYLE, 0, dw)
+#define TabCtrl_GetExtendedStyle(hwnd) \
+  (DWORD)SNDMSG((hwnd), TCM_GETEXTENDEDSTYLE, 0, 0)
+#define TreeView_InsertItem(hwnd, lpis) \
+  (HTREEITEM)SNDMSG((hwnd), TVM_INSERTITEM, 0, (LPARAM)(LPTV_INSERTSTRUCT)(lpis))
+#define TreeView_DeleteItem(hwnd, hitem) \
+  (BOOL)SNDMSG((hwnd), TVM_DELETEITEM, 0, (LPARAM)(HTREEITEM)(hitem))
+#define TreeView_DeleteAllItems(hwnd) \
+  (BOOL)SNDMSG((hwnd), TVM_DELETEITEM, 0, (LPARAM)TVI_ROOT)
+#define TreeView_Expand(hwnd, hitem, code) \
+  (BOOL)SNDMSG((hwnd), TVM_EXPAND, (WPARAM)(code), (LPARAM)(HTREEITEM)(hitem))
+#define TreeView_GetItemRect(hwnd, hitem, prc, code) \
+  (*(HTREEITEM*)(prc) = (hitem), (BOOL)SNDMSG((hwnd), TVM_GETITEMRECT, (WPARAM)(code), (LPARAM)(RECT*)(prc)))
+#define TreeView_GetCount(hwnd) \
+  (UINT)SNDMSG((hwnd), TVM_GETCOUNT, 0, 0)
+#define TreeView_GetIndent(hwnd) \
+  (UINT)SNDMSG((hwnd), TVM_GETINDENT, 0, 0)
+#define TreeView_SetIndent(hwnd, indent) \
+  (BOOL)SNDMSG((hwnd), TVM_SETINDENT, (WPARAM)(indent), 0)
+#define TreeView_GetImageList(hwnd, iImage) \
+  (HIMAGELIST)SNDMSG((hwnd), TVM_GETIMAGELIST, iImage, 0)
+#define TreeView_SetImageList(hwnd, himl, iImage) \
+  (HIMAGELIST)SNDMSG((hwnd), TVM_SETIMAGELIST, iImage, (LPARAM)(HIMAGELIST)(himl))
+#define TreeView_GetNextItem(hwnd, hitem, code) \
+  (HTREEITEM)SNDMSG((hwnd), TVM_GETNEXTITEM, (WPARAM)(code), (LPARAM)(HTREEITEM)(hitem))
+#define TreeView_GetChild(hwnd, hitem) \
+  TreeView_GetNextItem(hwnd, hitem, TVGN_CHILD)
+#define TreeView_GetNextSibling(hwnd, hitem) \
+  TreeView_GetNextItem(hwnd, hitem, TVGN_NEXT)
+#define TreeView_GetPrevSibling(hwnd, hitem) \
+  TreeView_GetNextItem(hwnd, hitem, TVGN_PREVIOUS)
+#define TreeView_GetParent(hwnd, hitem) \
+  TreeView_GetNextItem(hwnd, hitem, TVGN_PARENT)
+#define TreeView_GetFirstVisible(hwnd) \
+  TreeView_GetNextItem(hwnd, NULL, TVGN_FIRSTVISIBLE)
+#define TreeView_GetNextVisible(hwnd, hitem) \
+  TreeView_GetNextItem(hwnd, hitem, TVGN_NEXTVISIBLE)
+#define TreeView_GetPrevVisible(hwnd, hitem) \
+  TreeView_GetNextItem(hwnd, hitem, TVGN_PREVIOUSVISIBLE)
+#define TreeView_GetSelection(hwnd) \
+  TreeView_GetNextItem(hwnd, NULL, TVGN_CARET)
+#define TreeView_GetDropHilight(hwnd) \
+  TreeView_GetNextItem(hwnd, NULL, TVGN_DROPHILITE)
+#define TreeView_GetRoot(hwnd) \
+  TreeView_GetNextItem(hwnd, NULL, TVGN_ROOT)
+#define TreeView_GetLastVisible(hwnd) \
+  TreeView_GetNextItem(hwnd, NULL, TVGN_LASTVISIBLE)
+#define TreeView_Select(hwnd, hitem, code) \
+  (BOOL)SNDMSG((hwnd), TVM_SELECTITEM, (WPARAM)(code), (LPARAM)(HTREEITEM)(hitem))
+#define TreeView_SelectItem(hwnd, hitem) \
+  TreeView_Select(hwnd, hitem, TVGN_CARET)
+#define TreeView_SelectDropTarget(hwnd, hitem) \
+  TreeView_Select(hwnd, hitem, TVGN_DROPHILITE)
+#define TreeView_SelectSetFirstVisible(hwnd, hitem) \
+  TreeView_Select(hwnd, hitem, TVGN_FIRSTVISIBLE)
+#define TreeView_GetItem(hwnd, pitem) \
+  (BOOL)SNDMSG((hwnd), TVM_GETITEM, 0, (LPARAM)(TV_ITEM*)(pitem))
+#define TreeView_SetItem(hwnd, pitem) \
+  (BOOL)SNDMSG((hwnd), TVM_SETITEM, 0, (LPARAM)(const TV_ITEM*)(pitem))
+#define TreeView_EditLabel(hwnd, hitem) \
+  (HWND)SNDMSG((hwnd), TVM_EDITLABEL, 0, (LPARAM)(HTREEITEM)(hitem))
+#define TreeView_GetEditControl(hwnd) \
+  (HWND)SNDMSG((hwnd), TVM_GETEDITCONTROL, 0, 0)
+#define TreeView_GetVisibleCount(hwnd) \
+  (UINT)SNDMSG((hwnd), TVM_GETVISIBLECOUNT, 0, 0)
+#define TreeView_HitTest(hwnd, lpht) \
+  (HTREEITEM)SNDMSG((hwnd), TVM_HITTEST, 0, (LPARAM)(LPTV_HITTESTINFO)(lpht))
+#define TreeView_CreateDragImage(hwnd, hitem) \
+  (HIMAGELIST)SNDMSG((hwnd), TVM_CREATEDRAGIMAGE, 0, (LPARAM)(HTREEITEM)(hitem))
+#define TreeView_SortChildren(hwnd, hitem, recurse) \
+  (BOOL)SNDMSG((hwnd), TVM_SORTCHILDREN, (WPARAM)(recurse), (LPARAM)(HTREEITEM)(hitem))
+#define TreeView_EnsureVisible(hwnd, hitem) \
+  (BOOL)SNDMSG((hwnd), TVM_ENSUREVISIBLE, 0, (LPARAM)(HTREEITEM)(hitem))
+#define TreeView_SortChildrenCB(hwnd, psort, recurse) \
+  (BOOL)SNDMSG((hwnd), TVM_SORTCHILDRENCB, (WPARAM)(recurse), (LPARAM)(LPTV_SORTCB)(psort))
+#define TreeView_GetISearchString(hwndTV, lpsz) \
+  (BOOL)SNDMSG((hwndTV), TVM_GETISEARCHSTRING, 0, (LPARAM)(LPTSTR)(lpsz))
+#define TreeView_SetToolTips(hwnd, hwndTT) \
+  (HWND)SNDMSG((hwnd), TVM_SETTOOLTIPS, (WPARAM)(hwndTT), 0)
+#define TreeView_GetToolTips(hwnd) \
+  (HWND)SNDMSG((hwnd), TVM_GETTOOLTIPS, 0, 0)
+#define TreeView_SetInsertMark(hwnd, hItem, fAfter) \
+  (BOOL)SNDMSG((hwnd), TVM_SETINSERTMARK, (WPARAM)(fAfter), (LPARAM)(hItem))
+#define TreeView_SetItemHeight(hwnd, iHeight) \
+  (int)SNDMSG((hwnd), TVM_SETITEMHEIGHT, (WPARAM)(int)(iHeight), 0)
+#define TreeView_GetItemHeight(hwnd) \
+  (int)SNDMSG((hwnd), TVM_GETITEMHEIGHT, 0, 0)
+#define TreeView_SetBkColor(hwnd, clr) \
+  (COLORREF)SNDMSG((hwnd), TVM_SETBKCOLOR, 0, (LPARAM)(clr))
+#define TreeView_SetTextColor(hwnd, clr) \
+  (COLORREF)SNDMSG((hwnd), TVM_SETTEXTCOLOR, 0, (LPARAM)(clr))
+#define TreeView_GetBkColor(hwnd) \
+  (COLORREF)SNDMSG((hwnd), TVM_GETBKCOLOR, 0, 0)
+#define TreeView_GetTextColor(hwnd) \
+  (COLORREF)SNDMSG((hwnd), TVM_GETTEXTCOLOR, 0, 0)
+#define TreeView_SetScrollTime(hwnd, uTime) \
+  (UINT)SNDMSG((hwnd), TVM_SETSCROLLTIME, uTime, 0)
+#define TreeView_GetScrollTime(hwnd) \
+  (UINT)SNDMSG((hwnd), TVM_GETSCROLLTIME, 0, 0)
+#define TreeView_SetInsertMarkColor(hwnd, clr) \
+  (COLORREF)SNDMSG((hwnd), TVM_SETINSERTMARKCOLOR, 0, (LPARAM)(clr))
+#define TreeView_GetInsertMarkColor(hwnd) \
+  (COLORREF)SNDMSG((hwnd), TVM_GETINSERTMARKCOLOR, 0, 0)
+#define TreeView_GetItemState(hwndTV, hti, mask) \
+  (UINT)SNDMSG((hwndTV), TVM_GETITEMSTATE, (WPARAM)(hti), (LPARAM)(mask))
+#define TreeView_GetCheckState(hwndTV, hti) \
+  ((((UINT)(SNDMSG((hwndTV), TVM_GETITEMSTATE, (WPARAM)(hti), TVIS_STATEIMAGEMASK))) >> 12) - 1)
+#define TreeView_SetLineColor(hwnd, clr) \
+  (COLORREF)SNDMSG((hwnd), TVM_SETLINECOLOR, 0, (LPARAM)(clr))
+#define TreeView_GetLineColor(hwnd) \
+  (COLORREF)SNDMSG((hwnd), TVM_GETLINECOLOR, 0, 0)
 
 }  // extern "C"
 
