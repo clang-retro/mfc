@@ -3,7 +3,8 @@
 // refers to WinMain weakly, which does not pull the library's WinMain in,
 // and falls back to main; this main then starts the program the way
 // WinMain would. It is in its own file so that a program with its own
-// main never links it.
+// main never links it. On Linux and macOS it is the start of every MFC
+// program, and calls WinMain: the program's own, or else the library's.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -11,10 +12,28 @@
 
 #ifndef _AFX_BUILDING_DLL  // not in mfc.dll: each program has its own main, from libmfcs.a
 
-int main() {
 #ifdef _WINPORT
+// Linux and macOS: the program's own WinMain if it has one (a program that
+// is not built on CWinApp), else the library's, which runs AfxWinMain.
+int main() {
   _WinportAttachLinkedLibraries();  // the DllMains Windows calls before this
-#endif
+  LPSTR p = ::GetCommandLineA();
+  if (*p == '"') {
+    for (p++; *p != '\0' && *p != '"'; p++) {}
+    if (*p == '"') p++;
+  } else {
+    while (*p > ' ') p++;
+  }
+  while (*p != '\0' && *p <= ' ') p++;
+  STARTUPINFOA si;
+  memset(&si, 0, sizeof(si));
+  si.cb = sizeof(si);
+  ::GetStartupInfoA(&si);
+  int nCmdShow = (si.dwFlags & STARTF_USESHOWWINDOW) ? si.wShowWindow : SW_SHOWDEFAULT;
+  return WinMain(::GetModuleHandle(NULL), NULL, p, nCmdShow);
+}
+#else
+int main() {
   LPTSTR p = ::GetCommandLine();
   if (*p == _T('"')) {
     for (p++; *p != _T('\0') && *p != _T('"'); p++) {}
@@ -30,5 +49,6 @@ int main() {
   int nCmdShow = (si.dwFlags & STARTF_USESHOWWINDOW) ? si.wShowWindow : SW_SHOWDEFAULT;
   return AfxWinMain(::GetModuleHandle(NULL), NULL, p, nCmdShow);
 }
+#endif
 
 #endif  // _AFX_BUILDING_DLL
