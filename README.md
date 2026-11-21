@@ -134,7 +134,7 @@ python3 path/to/mfc/port/tools/res2cpp.py app.rc -o app-res.cpp
 MFC's include directory is searched after any given with `-I`.
 
 It is a work in progress. So far the non-window classes, automation, the
-registry (kept in `~/.config/winport/registry.reg`), resources, sockets
+registry (kept in `~/.config/libmfc/registry.reg`), resources, sockets
 (with `WSAAsyncSelect`), ODBC through the system's driver manager
 (unixODBC or iODBC, loaded when first used; `WINPORT_ODBC` names its
 library when it is elsewhere),
@@ -208,7 +208,35 @@ too: the service control manager keeps them under
 program, and its dispatcher takes `ControlService`'s controls over a
 local socket; `ReportEvent` writes to the system log. The registry's
 file is shared: each change is written at once, under a lock, and a
-program reads the file again when another has changed it.
+program reads the file again when another has changed it. The file is
+plain text, much as regedit exports it (`"name"="text"`,
+`"name"=dword:1`), so a person can edit it. The configuration directory
+(`$XDG_CONFIG_HOME/libmfc`, or `~/.config/libmfc`) holds it and the
+`.ini` files.
+
+The look can be changed there. The system colors come from
+`HKEY_CURRENT_USER\Control Panel\Colors` when a program starts, by
+Windows' names for them, and the caption shades from each title color to
+its gradient color when `GradientCaptions` is set:
+
+```
+[HKEY_CURRENT_USER\Control Panel\Colors]
+"ActiveTitle"="0 84 147"
+"GradientActiveTitle"="58 166 240"
+"ButtonFace"="212 208 200"
+[HKEY_CURRENT_USER\Control Panel\Desktop]
+"GradientCaptions"=dword:00000001
+```
+
+The other names are `Scrollbar`, `Background`, `InactiveTitle`,
+`GradientInactiveTitle`, `Menu`, `MenuBar`, `MenuText`, `MenuHilight`,
+`Window`, `WindowFrame`, `WindowText`, `TitleText`, `InactiveTitleText`,
+`ActiveBorder`, `InactiveBorder`, `AppWorkspace`, `Hilight`,
+`HilightText`, `ButtonShadow`, `ButtonHilight`, `ButtonDkShadow`,
+`ButtonLight`, `ButtonText`, `ButtonAlternateFace`, `GrayText`,
+`InfoText`, `InfoWindow` and `HotTrackingColor`. `SetSysColors` and
+`SPI_SETGRADIENTCAPTIONS` change them while the program runs (bit 0x10
+of `UserPreferencesMask`, as on Windows, also turns the gradient on).
 
 GDI+ is there as far as images go (`CImage` uses it): bitmaps in the
 usual pixel formats, locking their bits, and BMP, PNG, JPEG and GIF

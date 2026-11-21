@@ -3903,7 +3903,172 @@ static void TestOleBits() {
 }
 #endif
 
+#ifdef _WINPORT
+static int g_sysColorChanges = 0;
+static LRESULT CALLBACK ThemeProc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
+  if (m == WM_SYSCOLORCHANGE) g_sysColorChanges++;
+  return ::DefWindowProcW(h, m, wp, lp);
+}
+
+// The child wintest starts: the colors it found in the registry, put
+// back there for the parent.
+static int ReportTheme() {
+  HKEY k;
+  if (::RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\WinTest", 0, NULL, 0, KEY_ALL_ACCESS, NULL, &k, NULL) !=
+      ERROR_SUCCESS)
+    return 1;
+  BOOL gradient = FALSE;
+  ::SystemParametersInfoW(SPI_GETGRADIENTCAPTIONS, 0, &gradient, 0);
+  DWORD v[3] = {::GetSysColor(COLOR_ACTIVECAPTION), ::GetSysColor(COLOR_BTNFACE), (DWORD)gradient};
+  ::RegSetValueExW(k, L"Theme", 0, REG_BINARY, (const BYTE*)v, sizeof v);
+  ::RegCloseKey(k);
+  return 0;
+}
+
+// A value of HKCU\subkey, or false.
+static bool QueryValue(const wchar_t* sub, const wchar_t* name, DWORD* type, void* data, DWORD cb) {
+  HKEY k;
+  if (::RegOpenKeyExW(HKEY_CURRENT_USER, sub, 0, KEY_READ, &k) != ERROR_SUCCESS) return false;
+  bool ok = ::RegQueryValueExW(k, name, NULL, type, (BYTE*)data, &cb) == ERROR_SUCCESS;
+  ::RegCloseKey(k);
+  return ok;
+}
+
+static std::string ReadText(const char* path) {
+  std::string t;
+  FILE* f = fopen(path, "rb");
+  if (!f) return t;
+  char buf[4096];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof buf, f)) > 0) t.append(buf, n);
+  fclose(f);
+  return t;
+}
+
+// The system colors: from HKCU\Control Panel\Colors when a program
+// starts, in the registry file as a person writes them; SetSysColors for
+// the session; and captions shaded from one color to another.
+static void TestTheme() {
+  // The registry file keeps strings and numbers readable.
+  HKEY k;
+  CHECK(::RegCreateKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Colors", 0, NULL, 0, KEY_ALL_ACCESS, NULL, &k, NULL) ==
+        ERROR_SUCCESS);
+  const wchar_t* title = L"10 20 30";
+  CHECK(::RegSetValueExW(k, L"ActiveTitle", 0, REG_SZ, (const BYTE*)title, (DWORD)((wcslen(title) + 1) * sizeof(WCHAR))) ==
+        ERROR_SUCCESS);
+  ::RegCloseKey(k);
+  CHECK(::RegCreateKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Desktop", 0, NULL, 0, KEY_ALL_ACCESS, NULL, &k, NULL) ==
+        ERROR_SUCCESS);
+  DWORD one = 1;
+  CHECK(::RegSetValueExW(k, L"GradientCaptions", 0, REG_DWORD, (const BYTE*)&one, sizeof one) == ERROR_SUCCESS);
+  ::RegCloseKey(k);
+  const char* file = getenv("WINPORT_REGISTRY");
+  if (file) {
+    std::string text = ReadText(file);
+    CHECK(text.find("\"ActiveTitle\"=\"10 20 30\"") != std::string::npos);
+    CHECK(text.find("\"GradientCaptions\"=dword:00000001") != std::string::npos);
+    // A line written by hand is read as a string: the file is replaced, as
+    // an editor saves it, and the registry reads it again.
+    size_t at = text.find("[HKEY_CURRENT_USER\\Control Panel\\Colors]\n");
+    CHECK(at != std::string::npos);
+    if (at != std::string::npos) {
+      text.insert(at + strlen("[HKEY_CURRENT_USER\\Control Panel\\Colors]\n"), "\"ButtonFace\"=\"200 \\\"201\\\" 202\"\n");
+      std::string tmp = std::string(file) + ".edit";
+      FILE* f = fopen(tmp.c_str(), "wb");
+      CHECK(f != NULL);
+      if (f) {
+        fwrite(text.data(), 1, text.size(), f);
+        fclose(f);
+        CHECK(rename(tmp.c_str(), file) == 0);
+      }
+      WCHAR got[64] = {};
+      DWORD type = 0;
+      CHECK(QueryValue(L"Control Panel\\Colors", L"ButtonFace", &type, got, sizeof got - sizeof(WCHAR)));
+      CHECK(type == REG_SZ && wcscmp(got, L"200 \"201\" 202") == 0);
+      // Not a color, so the default would stay; put a real one.
+      const wchar_t* face = L"200 201 202";
+      CHECK(::RegOpenKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Colors", 0, KEY_ALL_ACCESS, &k) == ERROR_SUCCESS);
+      CHECK(::RegSetValueExW(k, L"ButtonFace", 0, REG_SZ, (const BYTE*)face, (DWORD)((wcslen(face) + 1) * sizeof(WCHAR))) ==
+            ERROR_SUCCESS);
+      ::RegCloseKey(k);
+    }
+  }
+
+  // A program started now sees them.
+  WCHAR exe[MAX_PATH], cmd[MAX_PATH + 16];
+  ::GetModuleFileNameW(NULL, exe, MAX_PATH);
+  wsprintfW(cmd, L"\"%s\" -theme", exe);
+  STARTUPINFOW si = {sizeof si};
+  PROCESS_INFORMATION pi = {};
+  CHECK(::CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi));
+  if (pi.hProcess) {
+    CHECK(::WaitForSingleObject(pi.hProcess, 20000) == WAIT_OBJECT_0);
+    DWORD code = 1;
+    ::GetExitCodeProcess(pi.hProcess, &code);
+    CHECK(code == 0);
+    ::CloseHandle(pi.hProcess);
+    ::CloseHandle(pi.hThread);
+    DWORD v[3] = {}, type = 0;
+    CHECK(QueryValue(L"Software\\WinTest", L"Theme", &type, v, sizeof v));
+    CHECK(v[0] == RGB(10, 20, 30));
+    CHECK(v[1] == RGB(200, 201, 202));
+    CHECK(v[2] == TRUE);
+  }
+  ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Control Panel\\Colors");
+  ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Control Panel\\Desktop");
+  ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Control Panel");
+  ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Software\\WinTest");
+
+  // SetSysColors: the color, its brush and every top-level window.
+  WNDCLASSW wc = {};
+  wc.lpfnWndProc = ThemeProc;
+  wc.hInstance = ::GetModuleHandleW(NULL);
+  wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+  wc.lpszClassName = L"ThemeTest";
+  CHECK(::RegisterClassW(&wc));
+  HWND h = ::CreateWindowExW(0, L"ThemeTest", L"", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 300, 100, NULL, NULL,
+                             wc.hInstance, NULL);
+  CHECK(h != NULL);
+  ::SetForegroundWindow(h);
+  INT which[2] = {COLOR_ACTIVECAPTION, COLOR_GRADIENTACTIVECAPTION};
+  COLORREF was[2] = {::GetSysColor(which[0]), ::GetSysColor(which[1])};
+  COLORREF now[2] = {RGB(255, 0, 0), RGB(0, 0, 255)};
+  CHECK(::SetSysColors(2, which, now));
+  CHECK(g_sysColorChanges == 1);
+  CHECK(::GetSysColor(COLOR_ACTIVECAPTION) == RGB(255, 0, 0));
+  LOGBRUSH lb = {};
+  CHECK(::GetObjectW(::GetSysColorBrush(COLOR_ACTIVECAPTION), sizeof lb, &lb) == sizeof lb);
+  CHECK(lb.lbColor == RGB(255, 0, 0));
+
+  // The caption shades from red at the left to blue at the right, or is
+  // all red without the gradient.
+  BOOL gradient = TRUE;
+  CHECK(::SystemParametersInfoW(SPI_GETGRADIENTCAPTIONS, 0, &gradient, 0));
+  BOOL before = gradient;
+  CHECK(::SystemParametersInfoW(SPI_SETGRADIENTCAPTIONS, 0, (PVOID)TRUE, 0));
+  ::UpdateWindow(h);
+  int b = ::GetSystemMetrics(SM_CXFRAME), y = b + 2;
+  HDC dc = ::GetWindowDC(h);
+  COLORREF left = ::GetPixel(dc, b, y), middle = ::GetPixel(dc, 150, y);
+  CHECK(GetRValue(left) > 240 && GetBValue(left) < 16);
+  CHECK(GetRValue(middle) > 64 && GetBValue(middle) > 64);
+  ::ReleaseDC(h, dc);
+  CHECK(::SystemParametersInfoW(SPI_SETGRADIENTCAPTIONS, 0, (PVOID)FALSE, 0));
+  ::UpdateWindow(h);
+  dc = ::GetWindowDC(h);
+  CHECK(::GetPixel(dc, 150, y) == RGB(255, 0, 0));
+  ::ReleaseDC(h, dc);
+  ::SystemParametersInfoW(SPI_SETGRADIENTCAPTIONS, 0, (PVOID)(INT_PTR)before, 0);
+  CHECK(::SetSysColors(2, which, was));
+  ::DestroyWindow(h);
+  ::UnregisterClassW(L"ThemeTest", wc.hInstance);
+}
+#endif
+
 int main() {
+#ifdef _WINPORT
+  if (strstr(::GetCommandLineA(), " -theme")) return ReportTheme();
+#endif
   if (!AfxWinInit(::GetModuleHandle(NULL), NULL, ::GetCommandLine(), SW_SHOW)) {
     printf("FAIL: AfxWinInit\n");
     return 1;
@@ -3936,6 +4101,7 @@ int main() {
   TestSymbolFont();
 #ifdef _WINPORT
   TestCaptionIcon();
+  TestTheme();
 #endif
   TestCWnd();
 #ifdef _WINPORT

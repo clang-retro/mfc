@@ -695,27 +695,26 @@ void WINAPI GetSystemInfo(LPSYSTEM_INFO si) {
 
 // ---------------------------------------------------------------------
 // Initialization files. A name without a directory is in the layer's
-// configuration directory, ~/.config/winport (or $XDG_CONFIG_HOME); the
-// profile functions without "Private" use win.ini there.
+// configuration directory (see ConfigDir); the profile functions without
+// "Private" use win.ini there.
+
+std::string winport::ConfigDir() {
+  const char* x = getenv("XDG_CONFIG_HOME");
+  std::string base;
+  if (x && *x) {
+    base = x;
+  } else {
+    const char* h = getenv("HOME");
+    base = std::string(h && *h ? h : "/tmp") + "/.config";
+  }
+  return base + "/libmfc";
+}
 
 namespace {
 
 std::recursive_mutex& IniLock() {
   static std::recursive_mutex m;
   return m;
-}
-
-std::string ConfigDir() {
-  const char* x = getenv("XDG_CONFIG_HOME");
-  std::string d;
-  if (x && *x) {
-    d = x;
-  } else {
-    const char* h = getenv("HOME");
-    d = std::string(h && *h ? h : "/tmp") + "/.config";
-  }
-  d += "/winport";
-  return d;
 }
 
 std::string IniPath(const char* file) {

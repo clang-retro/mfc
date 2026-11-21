@@ -1,5 +1,5 @@
 // winreg.h - the registry. The layer keeps it in a file per user
-// (~/.config/winport/registry on Linux, ~/Library/Preferences on macOS).
+// ($XDG_CONFIG_HOME/libmfc/registry.reg, or ~/.config/libmfc/registry.reg).
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only

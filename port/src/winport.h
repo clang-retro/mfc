@@ -72,6 +72,10 @@ DWORD CopyOut(const std::wstring& s, LPWSTR buf, DWORD cch);
 std::string PosixPath(const char* path);
 std::string PosixPath(const wchar_t* path);
 
+// The layer's configuration directory, where the registry and .ini files
+// are: $XDG_CONFIG_HOME/libmfc, or ~/.config/libmfc.
+std::string ConfigDir();
+
 // Time: FILETIME counts 100 ns intervals since 1601.
 const ULONGLONG kEpochDelta = 116444736000000000ULL;  // 1601 to 1970
 inline ULONGLONG ToU64(const FILETIME& ft) { return ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime; }

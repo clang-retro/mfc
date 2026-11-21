@@ -923,16 +923,8 @@ static std::string SystemDir() {
   if (d && *d) return d;
   struct stat st;
   if (stat("/usr/share/winport", &st) == 0 && S_ISDIR(st.st_mode)) return "/usr/share/winport";
-  std::string dir;
-  const char* xdg = getenv("XDG_CONFIG_HOME");
-  if (xdg && *xdg) {
-    dir = xdg;
-  } else {
-    const char* home = getenv("HOME");
-    dir = std::string(home && *home ? home : "/tmp") + "/.config";
-  }
-  mkdir(dir.c_str(), 0700);
-  dir += "/winport";
+  std::string dir = ConfigDir();
+  mkdir(dir.substr(0, dir.rfind('/')).c_str(), 0700);
   mkdir(dir.c_str(), 0700);
   return dir;
 }
