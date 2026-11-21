@@ -241,6 +241,24 @@ The other names are `Scrollbar`, `Background`, `InactiveTitle`,
 `SPI_SETGRADIENTCAPTIONS` change them while the program runs (bit 0x10
 of `UserPreferencesMask`, as on Windows, also turns the gradient on).
 
+Sizes and fonts come from `HKEY_CURRENT_USER\Control Panel\Desktop\WindowMetrics`:
+`BorderWidth`, `CaptionWidth`, `CaptionHeight`, `SmCaptionWidth`,
+`SmCaptionHeight`, `MenuWidth`, `MenuHeight`, `ScrollWidth` and
+`ScrollHeight` in pixels (or, as Windows keeps them, negative twips:
+`"-270"` is 18 pixels), and `CaptionFont`, `SmCaptionFont`, `MenuFont`,
+`StatusFont`, `MessageFont` and `IconFont` as `"face,points"` with
+`,bold` or `,italic` after it (or a LOGFONTW as Windows writes it):
+
+```
+[HKEY_CURRENT_USER\Control Panel\Desktop\WindowMetrics]
+"CaptionHeight"="24"
+"CaptionFont"="DejaVu Sans,9,bold"
+"MenuFont"="DejaVu Sans,9"
+```
+
+`SPI_SETNONCLIENTMETRICS` changes them while the program runs, and
+windows that are open take the new frame.
+
 GDI+ is there as far as images go (`CImage` uses it): bitmaps in the
 usual pixel formats, locking their bits, and BMP, PNG, JPEG and GIF
 files and streams, read with [stb_image](https://github.com/nothings/stb)

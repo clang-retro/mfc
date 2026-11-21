@@ -3919,8 +3919,18 @@ static int ReportTheme() {
     return 1;
   BOOL gradient = FALSE;
   ::SystemParametersInfoW(SPI_GETGRADIENTCAPTIONS, 0, &gradient, 0);
-  DWORD v[3] = {::GetSysColor(COLOR_ACTIVECAPTION), ::GetSysColor(COLOR_BTNFACE), (DWORD)gradient};
+  NONCLIENTMETRICSW ncm = {sizeof ncm};
+  ::SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof ncm, &ncm, 0);
+  DWORD v[7] = {::GetSysColor(COLOR_ACTIVECAPTION),
+                ::GetSysColor(COLOR_BTNFACE),
+                (DWORD)gradient,
+                (DWORD)::GetSystemMetrics(SM_CYCAPTION),
+                (DWORD)::GetSystemMetrics(SM_CXFRAME),
+                (DWORD)ncm.lfCaptionFont.lfHeight,
+                (DWORD)ncm.lfCaptionFont.lfWeight};
   ::RegSetValueExW(k, L"Theme", 0, REG_BINARY, (const BYTE*)v, sizeof v);
+  ::RegSetValueExW(k, L"Face", 0, REG_SZ, (const BYTE*)ncm.lfCaptionFont.lfFaceName,
+                   (DWORD)((wcslen(ncm.lfCaptionFont.lfFaceName) + 1) * sizeof(WCHAR)));
   ::RegCloseKey(k);
   return 0;
 }
@@ -3961,6 +3971,15 @@ static void TestTheme() {
         ERROR_SUCCESS);
   DWORD one = 1;
   CHECK(::RegSetValueExW(k, L"GradientCaptions", 0, REG_DWORD, (const BYTE*)&one, sizeof one) == ERROR_SUCCESS);
+  ::RegCloseKey(k);
+  // Sizes and fonts: the caption 24 pixels high (in twips, as Windows
+  // keeps it), the border 2, and a caption font by name.
+  CHECK(::RegCreateKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Desktop\\WindowMetrics", 0, NULL, 0, KEY_ALL_ACCESS, NULL, &k,
+                          NULL) == ERROR_SUCCESS);
+  const wchar_t* metrics[][2] = {{L"CaptionHeight", L"-360"}, {L"BorderWidth", L"2"}, {L"CaptionFont", L"Tahoma,9,bold"}};
+  for (auto& m : metrics)
+    CHECK(::RegSetValueExW(k, m[0], 0, REG_SZ, (const BYTE*)m[1], (DWORD)((wcslen(m[1]) + 1) * sizeof(WCHAR))) ==
+          ERROR_SUCCESS);
   ::RegCloseKey(k);
   const char* file = getenv("WINPORT_REGISTRY");
   if (file) {
@@ -4008,12 +4027,20 @@ static void TestTheme() {
     CHECK(code == 0);
     ::CloseHandle(pi.hProcess);
     ::CloseHandle(pi.hThread);
-    DWORD v[3] = {}, type = 0;
+    DWORD v[7] = {}, type = 0;
     CHECK(QueryValue(L"Software\\WinTest", L"Theme", &type, v, sizeof v));
     CHECK(v[0] == RGB(10, 20, 30));
     CHECK(v[1] == RGB(200, 201, 202));
     CHECK(v[2] == TRUE);
+    CHECK(v[3] == 25);
+    CHECK(v[4] == 5);
+    CHECK((LONG)v[5] == -12);
+    CHECK(v[6] == FW_BOLD);
+    WCHAR face[LF_FACESIZE] = {};
+    CHECK(QueryValue(L"Software\\WinTest", L"Face", &type, face, sizeof face - sizeof(WCHAR)));
+    CHECK(wcscmp(face, L"Tahoma") == 0);
   }
+  ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Control Panel\\Desktop\\WindowMetrics");
   ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Control Panel\\Colors");
   ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Control Panel\\Desktop");
   ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Control Panel");
@@ -4060,6 +4087,22 @@ static void TestTheme() {
   ::ReleaseDC(h, dc);
   ::SystemParametersInfoW(SPI_SETGRADIENTCAPTIONS, 0, (PVOID)(INT_PTR)before, 0);
   CHECK(::SetSysColors(2, which, was));
+
+  // SPI_SETNONCLIENTMETRICS: a taller caption takes from the client area
+  // of a window that is already open.
+  NONCLIENTMETRICSW ncm = {sizeof ncm}, saved;
+  CHECK(::SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof ncm, &ncm, 0));
+  saved = ncm;
+  RECT c0, c1;
+  ::GetClientRect(h, &c0);
+  int cap = ::GetSystemMetrics(SM_CYCAPTION);
+  ncm.iCaptionHeight += 10;
+  CHECK(::SystemParametersInfoW(SPI_SETNONCLIENTMETRICS, sizeof ncm, &ncm, 0));
+  CHECK(::GetSystemMetrics(SM_CYCAPTION) == cap + 10);
+  ::GetClientRect(h, &c1);
+  CHECK(c1.bottom == c0.bottom - 10);
+  CHECK(::SystemParametersInfoW(SPI_SETNONCLIENTMETRICS, sizeof saved, &saved, 0));
+  CHECK(::GetSystemMetrics(SM_CYCAPTION) == cap);
   ::DestroyWindow(h);
   ::UnregisterClassW(L"ThemeTest", wc.hInstance);
 }

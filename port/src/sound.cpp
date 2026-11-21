@@ -270,9 +270,12 @@ void RunTimer(std::shared_ptr<Timer> t) {
       }
       return;
     }
-    // A periodic timer that has fallen behind does not try to catch up.
+    // A periodic timer keeps to its period: a wake that came late (the
+    // system may gather timers together) is made up by the next ones
+    // coming sooner. After a long stall (the machine asleep) it starts
+    // again from now rather than firing for all the time missed.
     auto now = std::chrono::steady_clock::now();
-    if (now > due + std::chrono::milliseconds(t->delay)) due = now;
+    if (now > due + std::chrono::milliseconds(std::max<UINT>(t->delay * 10, 1000))) due = now;
   }
 }
 

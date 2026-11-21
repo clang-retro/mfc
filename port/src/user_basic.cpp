@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+#include <algorithm>
 #include <map>
 #include <mutex>
 #include <vector>
@@ -205,11 +206,26 @@ UINT WINAPI RegisterWindowMessageW(LPCWSTR name) { return name && *name ? Global
 UINT WINAPI RegisterClipboardFormatA(LPCSTR name) { return name && *name ? GlobalAddAtomA(name) : 0; }
 UINT WINAPI RegisterClipboardFormatW(LPCWSTR name) { return name && *name ? GlobalAddAtomW(name) : 0; }
 
-// The system colors: the classic Windows scheme, unless the user's
-// registry names others under HKEY_CURRENT_USER\Control Panel\Colors, as
-// Windows keeps them: "ActiveTitle"="0 0 128", say. Read when a color is
-// first asked for; SetSysColors changes them for the session.
-static const COLORREF kClassicColors[] = {
+// ---------------------------------------------------------------------
+// The look: the system colors, the caption gradient, and the sizes and
+// fonts of the window frame and menus. Each is the classic Windows one
+// unless the user's registry says otherwise, where Windows keeps it:
+//
+//   HKEY_CURRENT_USER\Control Panel\Colors       "ActiveTitle"="0 0 128"
+//   HKEY_CURRENT_USER\Control Panel\Desktop      "GradientCaptions"=dword:1
+//                                                (or UserPreferencesMask's bit 0x10)
+//   ...\Control Panel\Desktop\WindowMetrics      "CaptionHeight"="18"
+//                                                "CaptionFont"="Tahoma,8,bold"
+//
+// A size is in pixels, or negative in twips (-15 to the pixel), as Windows
+// writes them; a font is "face,points" with ",bold" or ",italic" after it,
+// or a LOGFONTW in REG_BINARY as Windows keeps it. The registry is read
+// when the look is first asked for; SetSysColors and SystemParametersInfo
+// change it for the session.
+
+namespace {
+
+const COLORREF kClassicColors[] = {
     RGB(192, 192, 192),  // COLOR_SCROLLBAR
     RGB(0, 128, 128),    // COLOR_BACKGROUND
     RGB(0, 0, 128),      // COLOR_ACTIVECAPTION
@@ -242,44 +258,199 @@ static const COLORREF kClassicColors[] = {
     RGB(0, 0, 128),      // COLOR_MENUHILIGHT
     RGB(192, 192, 192),  // COLOR_MENUBAR
 };
+const int kNumColors = (int)(sizeof(kClassicColors) / sizeof(kClassicColors[0]));
 
 // The registry's name for each color, by index.
-static const wchar_t* const kColorNames[] = {
-    L"Scrollbar",      L"Background",    L"ActiveTitle",       L"InactiveTitle",       L"Menu",
-    L"Window",         L"WindowFrame",   L"MenuText",          L"WindowText",          L"TitleText",
-    L"ActiveBorder",   L"InactiveBorder", L"AppWorkspace",     L"Hilight",             L"HilightText",
-    L"ButtonFace",     L"ButtonShadow",  L"GrayText",          L"ButtonText",          L"InactiveTitleText",
-    L"ButtonHilight",  L"ButtonDkShadow", L"ButtonLight",      L"InfoText",            L"InfoWindow",
+const wchar_t* const kColorNames[] = {
+    L"Scrollbar",      L"Background",     L"ActiveTitle",   L"InactiveTitle",  L"Menu",
+    L"Window",         L"WindowFrame",    L"MenuText",      L"WindowText",     L"TitleText",
+    L"ActiveBorder",   L"InactiveBorder", L"AppWorkspace",  L"Hilight",        L"HilightText",
+    L"ButtonFace",     L"ButtonShadow",   L"GrayText",      L"ButtonText",     L"InactiveTitleText",
+    L"ButtonHilight",  L"ButtonDkShadow", L"ButtonLight",   L"InfoText",       L"InfoWindow",
     L"ButtonAlternateFace", L"HotTrackingColor", L"GradientActiveTitle", L"GradientInactiveTitle",
     L"MenuHilight",    L"MenuBar"};
-const int kNumColors = (int)(sizeof(kClassicColors) / sizeof(kClassicColors[0]));
 static_assert(sizeof(kColorNames) / sizeof(kColorNames[0]) == sizeof(kClassicColors) / sizeof(kClassicColors[0]),
               "a name for each color");
 
-static COLORREF* SysColors() {
-  static COLORREF colors[kNumColors];
-  static std::once_flag once;
-  std::call_once(once, [] {
-    memcpy(colors, kClassicColors, sizeof colors);
-    HKEY k;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Colors", 0, KEY_READ, &k) != ERROR_SUCCESS) return;
+// The classic fonts: 8-point MS Sans Serif, bold in captions.
+LOGFONTW ClassicFont(bool bold) {
+  LOGFONTW lf = {};
+  lf.lfHeight = -11;
+  lf.lfWeight = bold ? FW_BOLD : FW_NORMAL;
+  lf.lfCharSet = DEFAULT_CHARSET;
+  lf.lfPitchAndFamily = VARIABLE_PITCH | FF_SWISS;
+  wcscpy(lf.lfFaceName, L"MS Sans Serif");
+  return lf;
+}
+
+struct Theme {
+  COLORREF colors[kNumColors];
+  BOOL gradient = FALSE;
+  // The frame's sizes, in pixels, as NONCLIENTMETRICS has them: the
+  // caption buttons' and the menu bar's height one less than the bar's.
+  int border = 1;  // to which the frame's 3-pixel edge adds
+  int captionWidth = 18, captionHeight = 18;
+  int smCaptionWidth = 14, smCaptionHeight = 14;
+  int menuWidth = 18, menuHeight = 18;
+  int scrollWidth = 16, scrollHeight = 16;
+  LOGFONTW captionFont = ClassicFont(true), smCaptionFont = ClassicFont(true), menuFont = ClassicFont(false),
+           statusFont = ClassicFont(false), messageFont = ClassicFont(false), iconFont = ClassicFont(false);
+  Theme() { memcpy(colors, kClassicColors, sizeof colors); }
+};
+
+std::wstring RegText(HKEY k, const wchar_t* name, DWORD* type, std::vector<BYTE>* raw) {
+  BYTE buf[512];
+  DWORD cb = sizeof buf - sizeof(WCHAR);
+  *type = REG_NONE;
+  if (RegQueryValueExW(k, name, NULL, type, buf, &cb) != ERROR_SUCCESS) return std::wstring();
+  if (raw) raw->assign(buf, buf + cb);
+  if (*type != REG_SZ) return std::wstring();
+  memset(buf + cb, 0, sizeof(WCHAR));
+  return std::wstring((const WCHAR*)buf);
+}
+
+// A size: pixels, or negative twips.
+void ReadSize(HKEY k, const wchar_t* name, int* out) {
+  DWORD type;
+  std::vector<BYTE> raw;
+  std::wstring t = RegText(k, name, &type, &raw);
+  long v;
+  if (type == REG_SZ && !t.empty()) v = wcstol(t.c_str(), NULL, 10);
+  else if (type == REG_DWORD && raw.size() == 4) v = (long)*(const int32_t*)raw.data();
+  else return;
+  if (v < 0) v = (-v + 7) / 15;
+  if (v >= 0 && v <= 200) *out = (int)v;
+}
+
+// A font: "face,points[,bold][,italic]", or a Windows LOGFONTW (its
+// characters 16 bits wide).
+void ReadFont(HKEY k, const wchar_t* name, LOGFONTW* out) {
+  DWORD type;
+  std::vector<BYTE> raw;
+  std::wstring t = RegText(k, name, &type, &raw);
+  if (type == REG_BINARY && raw.size() >= 28 + 2) {
+    LOGFONTW lf = {};
+    memcpy(&lf, raw.data(), 28);  // the numbers, which the layouts share
+    for (size_t i = 0; i < LF_FACESIZE - 1 && 28 + 2 * i + 1 < raw.size(); i++) {
+      WCHAR c = raw[28 + 2 * i] | (raw[28 + 2 * i + 1] << 8);
+      if (!c) break;
+      lf.lfFaceName[i] = c;
+    }
+    if (lf.lfFaceName[0]) *out = lf;
+    return;
+  }
+  if (type != REG_SZ || t.empty()) return;
+  LOGFONTW lf = *out;
+  std::vector<std::wstring> parts;
+  size_t start = 0;
+  for (;;) {
+    size_t comma = t.find(L',', start);
+    std::wstring p = t.substr(start, comma == std::wstring::npos ? std::wstring::npos : comma - start);
+    while (!p.empty() && p[0] == L' ') p.erase(0, 1);
+    while (!p.empty() && p.back() == L' ') p.pop_back();
+    parts.push_back(p);
+    if (comma == std::wstring::npos) break;
+    start = comma + 1;
+  }
+  if (parts[0].empty() || parts[0].size() >= LF_FACESIZE) return;
+  wcscpy(lf.lfFaceName, parts[0].c_str());
+  lf.lfWeight = FW_NORMAL;
+  lf.lfItalic = FALSE;
+  for (size_t i = 1; i < parts.size(); i++) {
+    if (_wcsicmp(parts[i].c_str(), L"bold") == 0) lf.lfWeight = FW_BOLD;
+    else if (_wcsicmp(parts[i].c_str(), L"italic") == 0) lf.lfItalic = TRUE;
+    else if (int pt = (int)wcstol(parts[i].c_str(), NULL, 10)) lf.lfHeight = -(pt * 96 + 36) / 72;
+  }
+  *out = lf;
+}
+
+void ReadTheme(Theme* t) {
+  HKEY k;
+  if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Colors", 0, KEY_READ, &k) == ERROR_SUCCESS) {
     for (int i = 0; i < kNumColors; i++) {
-      WCHAR text[64];
-      DWORD type, cb = sizeof text - sizeof(WCHAR);
-      if (RegQueryValueExW(k, kColorNames[i], NULL, &type, (BYTE*)text, &cb) != ERROR_SUCCESS || type != REG_SZ)
-        continue;
-      text[cb / sizeof(WCHAR)] = 0;
+      DWORD type;
+      std::wstring text = RegText(k, kColorNames[i], &type, NULL);
       unsigned r, g, b;
-      if (swscanf(text, L"%u %u %u", &r, &g, &b) == 3 && r < 256 && g < 256 && b < 256) colors[i] = RGB(r, g, b);
+      if (type == REG_SZ && swscanf(text.c_str(), L"%u %u %u", &r, &g, &b) == 3 && r < 256 && g < 256 && b < 256)
+        t->colors[i] = RGB(r, g, b);
     }
     RegCloseKey(k);
-  });
-  return colors;
+  }
+  if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Desktop", 0, KEY_READ, &k) == ERROR_SUCCESS) {
+    DWORD type;
+    std::vector<BYTE> raw;
+    RegText(k, L"UserPreferencesMask", &type, &raw);
+    if (type == REG_BINARY && !raw.empty()) t->gradient = (raw[0] & 0x10) != 0;
+    std::wstring text = RegText(k, L"GradientCaptions", &type, &raw);
+    if (type == REG_SZ) t->gradient = wcstol(text.c_str(), NULL, 10) != 0;
+    else if (type == REG_DWORD && raw.size() == 4) t->gradient = *(const DWORD*)raw.data() != 0;
+    RegCloseKey(k);
+  }
+  if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Desktop\\WindowMetrics", 0, KEY_READ, &k) == ERROR_SUCCESS) {
+    ReadSize(k, L"BorderWidth", &t->border);
+    ReadSize(k, L"CaptionWidth", &t->captionWidth);
+    ReadSize(k, L"CaptionHeight", &t->captionHeight);
+    ReadSize(k, L"SmCaptionWidth", &t->smCaptionWidth);
+    ReadSize(k, L"SmCaptionHeight", &t->smCaptionHeight);
+    ReadSize(k, L"MenuWidth", &t->menuWidth);
+    ReadSize(k, L"MenuHeight", &t->menuHeight);
+    ReadSize(k, L"ScrollWidth", &t->scrollWidth);
+    ReadSize(k, L"ScrollHeight", &t->scrollHeight);
+    ReadFont(k, L"CaptionFont", &t->captionFont);
+    ReadFont(k, L"SmCaptionFont", &t->smCaptionFont);
+    ReadFont(k, L"MenuFont", &t->menuFont);
+    ReadFont(k, L"StatusFont", &t->statusFont);
+    ReadFont(k, L"MessageFont", &t->messageFont);
+    ReadFont(k, L"IconFont", &t->iconFont);
+    RegCloseKey(k);
+  }
+  // Sizes that leave no room are kept out.
+  t->captionHeight = std::max(t->captionHeight, 8);
+  t->smCaptionHeight = std::max(t->smCaptionHeight, 8);
+  t->menuHeight = std::max(t->menuHeight, 8);
+  t->scrollWidth = std::max(t->scrollWidth, 8);
+  t->scrollHeight = std::max(t->scrollHeight, 8);
+  t->border = std::min(t->border, 50);
 }
+
+std::mutex& ThemeLock() {
+  static std::mutex* m = new std::mutex;
+  return *m;
+}
+Theme& CurrentTheme() {
+  static Theme* t = NULL;
+  static std::once_flag once;
+  std::call_once(once, [] {
+    Theme* n = new Theme;
+    ReadTheme(n);
+    t = n;
+  });
+  return *t;
+}
+
+// Every top-level window hears of a change of the look, then draws again
+// (the frame recalculated when sizes changed).
+void ThemeChanged(UINT msg, WPARAM wp, bool frames) {
+  std::vector<HWND> tops;
+  {
+    UserGuard g(UserLock());
+    for (Window* w : TopLevels()) tops.push_back(w->hwnd);
+  }
+  if (msg) for (HWND h : tops) SendMessageW(h, msg, wp, 0);
+  for (HWND h : tops) {
+    if (frames)
+      SetWindowPos(h, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+  }
+}
+
+}  // namespace
 
 DWORD WINAPI GetSysColor(int index) {
   if (index < 0 || index >= kNumColors) return 0;
-  return SysColors()[index];
+  Theme& t = CurrentTheme();
+  std::lock_guard<std::mutex> g(ThemeLock());
+  return t.colors[index];
 }
 
 // The system color brushes follow the colors, so a change shows once the
@@ -289,41 +460,45 @@ BOOL WINAPI SetSysColors(int n, const INT* indexes, const COLORREF* colors) {
     SetLastError(ERROR_INVALID_PARAMETER);
     return FALSE;
   }
-  COLORREF* sys = SysColors();
-  for (int i = 0; i < n; i++)
-    if (indexes[i] >= 0 && indexes[i] < kNumColors) sys[indexes[i]] = colors[i] & 0xFFFFFF;
-  std::vector<HWND> tops;
+  Theme& t = CurrentTheme();
   {
-    UserGuard g(UserLock());
-    for (Window* w : TopLevels()) tops.push_back(w->hwnd);
+    std::lock_guard<std::mutex> g(ThemeLock());
+    for (int i = 0; i < n; i++)
+      if (indexes[i] >= 0 && indexes[i] < kNumColors) t.colors[indexes[i]] = colors[i] & 0xFFFFFF;
   }
-  for (HWND h : tops) SendMessageW(h, WM_SYSCOLORCHANGE, 0, 0);
-  for (HWND h : tops) RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+  ThemeChanged(WM_SYSCOLORCHANGE, 0, false);
   return TRUE;
 }
 
-// The classic metrics, on the screen the backend reports.
+// The metrics, from the look's sizes, on the screen the backend reports.
 int WINAPI GetSystemMetrics(int index) {
+  Theme& t = CurrentTheme();
+  int frame = t.border + 3;
   switch (index) {
     case SM_CXSCREEN: case SM_CXFULLSCREEN: case SM_CXVIRTUALSCREEN: case SM_CXMAXIMIZED:
       return GetBackend()->ScreenSize().cx;
     case SM_CYSCREEN: case SM_CYVIRTUALSCREEN: case SM_CYMAXIMIZED: return GetBackend()->ScreenSize().cy;
-    case SM_CYFULLSCREEN: return GetBackend()->ScreenSize().cy - 19 - 30;
-    case SM_CXVSCROLL: case SM_CYHSCROLL: case SM_CXHSCROLL: case SM_CYVSCROLL: return 16;
-    case SM_CYCAPTION: return 19;
+    case SM_CYFULLSCREEN: return GetBackend()->ScreenSize().cy - (t.captionHeight + 1) - 30;
+    case SM_CXVSCROLL: case SM_CYVSCROLL: return t.scrollWidth;
+    case SM_CYHSCROLL: case SM_CXHSCROLL: return t.scrollHeight;
+    case SM_CYVTHUMB: return t.scrollWidth;
+    case SM_CXHTHUMB: return t.scrollHeight;
+    case SM_CYCAPTION: return t.captionHeight + 1;
     case SM_CXBORDER: case SM_CYBORDER: return 1;
     case SM_CXDLGFRAME: case SM_CYDLGFRAME: return 3;
-    case SM_CXFRAME: case SM_CYFRAME: return 4;
-    case SM_CYVTHUMB: case SM_CXHTHUMB: return 16;
+    case SM_CXFRAME: case SM_CYFRAME: return frame;
     case SM_CXICON: case SM_CYICON: case SM_CXCURSOR: case SM_CYCURSOR: return 32;
     case SM_CXSMICON: case SM_CYSMICON: return 16;
-    case SM_CYMENU: case SM_CYMENUSIZE: case SM_CXMENUSIZE: return 19;
-    case SM_CXMIN: return 112;
-    case SM_CYMIN: return 27;
-    case SM_CXSIZE: case SM_CYSIZE: case SM_CXSMSIZE: case SM_CYSMSIZE: return 18;
-    case SM_CYSMCAPTION: return 15;
-    case SM_CXMINTRACK: return 112;
-    case SM_CYMINTRACK: return 27;
+    case SM_CYMENU: return t.menuHeight + 1;
+    case SM_CXMENUSIZE: return t.menuWidth;
+    case SM_CYMENUSIZE: return t.menuHeight;
+    case SM_CXMIN: case SM_CXMINTRACK: return 112;
+    case SM_CYMIN: case SM_CYMINTRACK: return t.captionHeight + 1 + 2 * frame;
+    case SM_CXSIZE: return t.captionWidth;
+    case SM_CYSIZE: return t.captionHeight;
+    case SM_CXSMSIZE: return t.smCaptionWidth;
+    case SM_CYSMSIZE: return t.smCaptionHeight;
+    case SM_CYSMCAPTION: return t.smCaptionHeight + 1;
     case SM_CXDOUBLECLK: case SM_CYDOUBLECLK: return 4;
     case SM_CXICONSPACING: case SM_CYICONSPACING: return 75;
     case SM_CXDRAG: case SM_CYDRAG: return 4;
@@ -337,15 +512,11 @@ int WINAPI GetSystemMetrics(int index) {
   }
 }
 
-// The classic fonts: 8-point MS Sans Serif, bold in captions.
-static LOGFONTW ClassicFont(bool bold) {
-  LOGFONTW lf = {};
-  lf.lfHeight = -11;
-  lf.lfWeight = bold ? FW_BOLD : FW_NORMAL;
-  lf.lfCharSet = DEFAULT_CHARSET;
-  lf.lfPitchAndFamily = VARIABLE_PITCH | FF_SWISS;
-  wcscpy(lf.lfFaceName, L"MS Sans Serif");
-  return lf;
+static void FontToW(const LOGFONTA& a, LOGFONTW* w) {
+  memcpy(w, &a, offsetof(LOGFONTA, lfFaceName));
+  memset(w->lfFaceName, 0, sizeof w->lfFaceName);
+  std::wstring f = Widen(a.lfFaceName);
+  wcsncpy(w->lfFaceName, f.c_str(), LF_FACESIZE - 1);
 }
 
 static void FontToA(const LOGFONTW& w, LOGFONTA* a) {
@@ -354,62 +525,63 @@ static void FontToA(const LOGFONTW& w, LOGFONTA* a) {
   strncpy(a->lfFaceName, Narrow(w.lfFaceName).c_str(), LF_FACESIZE - 1);
 }
 
-// Whether captions shade from the title color to its gradient color: as
-// the user's registry says (bit 0x10 of UserPreferencesMask under
-// HKEY_CURRENT_USER\Control Panel\Desktop, as on Windows, or its own
-// "GradientCaptions"="1"), else not, the classic look.
-static BOOL& GradientCaptions() {
-  static BOOL on = FALSE;
-  static std::once_flag once;
-  std::call_once(once, [] {
-    HKEY k;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Desktop", 0, KEY_READ, &k) != ERROR_SUCCESS) return;
-    BYTE mask[8];
-    DWORD type, cb = sizeof mask;
-    if (RegQueryValueExW(k, L"UserPreferencesMask", NULL, &type, mask, &cb) == ERROR_SUCCESS && type == REG_BINARY &&
-        cb >= 1)
-      on = (mask[0] & 0x10) != 0;
-    WCHAR text[16];
-    cb = sizeof text - sizeof(WCHAR);
-    if (RegQueryValueExW(k, L"GradientCaptions", NULL, &type, (BYTE*)text, &cb) == ERROR_SUCCESS) {
-      if (type == REG_SZ) {
-        text[cb / sizeof(WCHAR)] = 0;
-        on = wcstol(text, NULL, 10) != 0;
-      } else if (type == REG_DWORD && cb == 4) {
-        DWORD d;
-        memcpy(&d, text, 4);
-        on = d != 0;
-      }
-    }
-    RegCloseKey(k);
-  });
-  return on;
-}
-
 BOOL WINAPI SystemParametersInfoW(UINT action, UINT uiParam, PVOID pv, UINT) {
   switch (action) {
     case SPI_GETNONCLIENTMETRICS: {
       NONCLIENTMETRICSW* m = (NONCLIENTMETRICSW*)pv;
       if (!m) return FALSE;
       UINT size = m->cbSize ? m->cbSize : sizeof *m;
+      Theme& t = CurrentTheme();
+      std::lock_guard<std::mutex> g(ThemeLock());
       memset(m, 0, sizeof *m);
       m->cbSize = size;
-      m->iBorderWidth = 1;
-      m->iScrollWidth = m->iScrollHeight = GetSystemMetrics(SM_CXVSCROLL);
-      m->iCaptionWidth = m->iCaptionHeight = GetSystemMetrics(SM_CYCAPTION) - 1;
-      m->lfCaptionFont = ClassicFont(true);
-      m->iSmCaptionWidth = m->iSmCaptionHeight = GetSystemMetrics(SM_CYSMCAPTION) - 1;
-      m->lfSmCaptionFont = ClassicFont(true);
-      m->iMenuWidth = m->iMenuHeight = GetSystemMetrics(SM_CYMENU) - 1;
-      m->lfMenuFont = ClassicFont(false);
-      m->lfStatusFont = ClassicFont(false);
-      m->lfMessageFont = ClassicFont(false);
+      m->iBorderWidth = t.border;
+      m->iScrollWidth = t.scrollWidth;
+      m->iScrollHeight = t.scrollHeight;
+      m->iCaptionWidth = t.captionWidth;
+      m->iCaptionHeight = t.captionHeight;
+      m->lfCaptionFont = t.captionFont;
+      m->iSmCaptionWidth = t.smCaptionWidth;
+      m->iSmCaptionHeight = t.smCaptionHeight;
+      m->lfSmCaptionFont = t.smCaptionFont;
+      m->iMenuWidth = t.menuWidth;
+      m->iMenuHeight = t.menuHeight;
+      m->lfMenuFont = t.menuFont;
+      m->lfStatusFont = t.statusFont;
+      m->lfMessageFont = t.messageFont;
       return TRUE;
     }
-    case SPI_GETICONTITLELOGFONT:
-      if (pv == NULL) return FALSE;
-      *(LOGFONTW*)pv = ClassicFont(false);
+    case SPI_SETNONCLIENTMETRICS: {
+      const NONCLIENTMETRICSW* m = (const NONCLIENTMETRICSW*)pv;
+      if (!m) return FALSE;
+      Theme& t = CurrentTheme();
+      {
+        std::lock_guard<std::mutex> g(ThemeLock());
+        t.border = m->iBorderWidth;
+        t.scrollWidth = std::max(8, m->iScrollWidth);
+        t.scrollHeight = std::max(8, m->iScrollHeight);
+        t.captionWidth = m->iCaptionWidth;
+        t.captionHeight = std::max(8, m->iCaptionHeight);
+        t.captionFont = m->lfCaptionFont;
+        t.smCaptionWidth = m->iSmCaptionWidth;
+        t.smCaptionHeight = std::max(8, m->iSmCaptionHeight);
+        t.smCaptionFont = m->lfSmCaptionFont;
+        t.menuWidth = m->iMenuWidth;
+        t.menuHeight = std::max(8, m->iMenuHeight);
+        t.menuFont = m->lfMenuFont;
+        t.statusFont = m->lfStatusFont;
+        t.messageFont = m->lfMessageFont;
+      }
+      ThemeChanged(WM_SETTINGCHANGE, SPI_SETNONCLIENTMETRICS, true);
       return TRUE;
+    }
+    case SPI_GETICONTITLELOGFONT: {
+      if (pv == NULL) return FALSE;
+      Theme& t = CurrentTheme();
+      std::lock_guard<std::mutex> g(ThemeLock());
+      *(LOGFONTW*)pv = t.iconFont;
+      return TRUE;
+    }
     case SPI_GETWORKAREA:
       if (pv == NULL) return FALSE;
       SetRect((LPRECT)pv, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
@@ -420,18 +592,12 @@ BOOL WINAPI SystemParametersInfoW(UINT action, UINT uiParam, PVOID pv, UINT) {
       return TRUE;
     case SPI_GETGRADIENTCAPTIONS:
       if (pv == NULL) return FALSE;
-      *(BOOL*)pv = GradientCaptions();
+      *(BOOL*)pv = CurrentTheme().gradient;
       return TRUE;
-    case SPI_SETGRADIENTCAPTIONS: {
-      GradientCaptions() = pv != NULL;
-      std::vector<HWND> tops;
-      {
-        UserGuard g(UserLock());
-        for (Window* w : TopLevels()) tops.push_back(w->hwnd);
-      }
-      for (HWND h : tops) RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+    case SPI_SETGRADIENTCAPTIONS:
+      CurrentTheme().gradient = pv != NULL;
+      ThemeChanged(WM_SETTINGCHANGE, SPI_SETGRADIENTCAPTIONS, false);
       return TRUE;
-    }
     case SPI_GETDRAGFULLWINDOWS:
     case SPI_GETFLATMENU:
     case SPI_GETMENUUNDERLINES:
@@ -466,6 +632,26 @@ BOOL WINAPI SystemParametersInfoA(UINT action, UINT uiParam, PVOID pv, UINT winI
     FontToA(w.lfStatusFont, &a->lfStatusFont);
     FontToA(w.lfMessageFont, &a->lfMessageFont);
     return TRUE;
+  }
+  if (action == SPI_SETNONCLIENTMETRICS) {
+    const NONCLIENTMETRICSA* a = (const NONCLIENTMETRICSA*)pv;
+    if (!a) return FALSE;
+    NONCLIENTMETRICSW w = {sizeof w};
+    w.iBorderWidth = a->iBorderWidth;
+    w.iScrollWidth = a->iScrollWidth;
+    w.iScrollHeight = a->iScrollHeight;
+    w.iCaptionWidth = a->iCaptionWidth;
+    w.iCaptionHeight = a->iCaptionHeight;
+    FontToW(a->lfCaptionFont, &w.lfCaptionFont);
+    w.iSmCaptionWidth = a->iSmCaptionWidth;
+    w.iSmCaptionHeight = a->iSmCaptionHeight;
+    FontToW(a->lfSmCaptionFont, &w.lfSmCaptionFont);
+    w.iMenuWidth = a->iMenuWidth;
+    w.iMenuHeight = a->iMenuHeight;
+    FontToW(a->lfMenuFont, &w.lfMenuFont);
+    FontToW(a->lfStatusFont, &w.lfStatusFont);
+    FontToW(a->lfMessageFont, &w.lfMessageFont);
+    return SystemParametersInfoW(action, sizeof w, &w, winIni);
   }
   if (action == SPI_GETICONTITLELOGFONT) {
     LOGFONTW w;
