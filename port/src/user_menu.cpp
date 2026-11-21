@@ -387,7 +387,14 @@ const BYTE* ParseItemsEx(const BYTE* base, const BYTE* p, HMENU menu, int depth)
 
 HFONT MenuFont(bool bold) {
   static HFONT normal, heavy;
+  static unsigned made;
+  if (normal && made != ThemeGeneration()) {
+    DeleteObject(normal);
+    DeleteObject(heavy);
+    normal = heavy = NULL;
+  }
   if (!normal) {
+    made = ThemeGeneration();
     NONCLIENTMETRICSW ncm = {sizeof ncm};
     SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof ncm, &ncm, 0);
     normal = CreateFontIndirectW(&ncm.lfMenuFont);

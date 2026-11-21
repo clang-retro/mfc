@@ -182,6 +182,13 @@ void QueueInput(Window* w, UINT msg, WPARAM wParam, LPARAM lParam);
 // Drops a destroyed window's timers and waiting messages.
 void ForgetWindowMessages(Window* w);
 void WakeQueue(Queue* q);  // call with the lock held
+void WakeAllQueues();      // takes the lock
+// The look: a number that changes whenever it does (for fonts made from
+// it), and the registry file's changes applied, if it has changed since;
+// called without the lock as a thread looks for messages.
+unsigned ThemeGeneration();
+bool ThemeFilePending();
+void CheckThemeFile();
 
 // Calls a window procedure with the message in the form the procedure
 // wants, converting text between ANSI and Unicode.

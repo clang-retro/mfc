@@ -53,6 +53,11 @@ void WakeQueue(Queue* q) {
   if (g_backendWaiter == q->tid) GetBackend()->Wake();
 }
 
+void WakeAllQueues() {
+  UserGuard g(UserLock());
+  for (auto& e : Queues()) WakeQueue(e.second);
+}
+
 POINT& CursorPos() {
   static POINT p = {0, 0};
   return p;
@@ -640,6 +645,7 @@ ULONGLONG Now() { return GetTickCount64(); }
 // The next message for GetMessage or PeekMessage, in Windows' order:
 // sent, posted, input, quit, paint, timers.
 bool PeekCore(MSG* out, HWND filter, UINT min, UINT max, UINT flags) {
+  CheckThemeFile();
   Queue* q = CurrentQueue();
   ProcessSent(q);
   DeliverCallbacks(q);
@@ -715,7 +721,7 @@ DWORD QueueState(Queue* q) {
 // timeout ms pass.
 void WaitForWork(Queue* q, DWORD timeout) {
   UserGuard g(UserLock());
-  if (HasWork(q)) return;
+  if (HasWork(q) || ThemeFilePending()) return;
   ULONGLONG now = Now();
   ULONGLONG wait = timeout == INFINITE ? ~0ULL : timeout;
   for (const Timer& t : q->timers) {

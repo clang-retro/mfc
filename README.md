@@ -257,7 +257,15 @@ Sizes and fonts come from `HKEY_CURRENT_USER\Control Panel\Desktop\WindowMetrics
 ```
 
 `SPI_SETNONCLIENTMETRICS` changes them while the program runs, and
-windows that are open take the new frame.
+windows that are open take the new frame; with `SPIF_UPDATEINIFILE` it
+saves them there too, as `SPI_SETGRADIENTCAPTIONS` does the gradient.
+
+Each program watches the registry file (with inotify on Linux, kqueue on
+macOS), so saving it in an editor, or another program changing these
+keys, restyles the programs already running: what changed is applied
+as it would be on Windows, colors with `WM_SYSCOLORCHANGE` and sizes and
+fonts with `WM_SETTINGCHANGE` and a new frame. A color a program set
+itself with `SetSysColors` stays until the file changes that color.
 
 GDI+ is there as far as images go (`CImage` uses it): bitmaps in the
 usual pixel formats, locking their bits, and BMP, PNG, JPEG and GIF

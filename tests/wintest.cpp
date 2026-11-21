@@ -4103,6 +4103,66 @@ static void TestTheme() {
   CHECK(c1.bottom == c0.bottom - 10);
   CHECK(::SystemParametersInfoW(SPI_SETNONCLIENTMETRICS, sizeof saved, &saved, 0));
   CHECK(::GetSystemMetrics(SM_CYCAPTION) == cap);
+
+  // SPIF_UPDATEINIFILE keeps the sizes and fonts in the registry, as
+  // Windows writes them.
+  ncm.iCaptionHeight = 20;
+  CHECK(::SystemParametersInfoW(SPI_SETNONCLIENTMETRICS, sizeof ncm, &ncm, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE));
+  WCHAR text[64] = {};
+  DWORD type = 0;
+  CHECK(QueryValue(L"Control Panel\\Desktop\\WindowMetrics", L"CaptionHeight", &type, text, sizeof text - sizeof(WCHAR)));
+  CHECK(type == REG_SZ && wcscmp(text, L"-300") == 0);
+  memset(text, 0, sizeof text);
+  CHECK(QueryValue(L"Control Panel\\Desktop\\WindowMetrics", L"CaptionFont", &type, text, sizeof text - sizeof(WCHAR)));
+  CHECK(wcsncmp(text, ncm.lfCaptionFont.lfFaceName, wcslen(ncm.lfCaptionFont.lfFaceName)) == 0);
+  CHECK(::SystemParametersInfoW(SPI_SETNONCLIENTMETRICS, sizeof saved, &saved, 0));
+  ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Control Panel\\Desktop\\WindowMetrics");
+  ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Control Panel\\Desktop");
+  ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Control Panel");
+  PumpFor(300);
+  CHECK(::GetSystemMetrics(SM_CYCAPTION) == cap);
+
+  // The registry file changed while the window is open, as an editor
+  // saves it: the window takes the new caption color and height once it
+  // looks for messages, and a color the program set itself stays.
+  const char* path = getenv("WINPORT_REGISTRY");
+  if (path) {
+    INT hi = COLOR_HIGHLIGHT;
+    COLORREF highlight = ::GetSysColor(COLOR_HIGHLIGHT), mine = RGB(1, 2, 3);
+    CHECK(::SetSysColors(1, &hi, &mine));
+    int changes = g_sysColorChanges;
+    ::GetClientRect(h, &c0);
+    std::string edit = ReadText(path);
+    edit +=
+        "[HKEY_CURRENT_USER\\Control Panel\\Colors]\n\"ActiveTitle\"=\"40 50 60\"\n"
+        "[HKEY_CURRENT_USER\\Control Panel\\Desktop\\WindowMetrics]\n\"CaptionHeight\"=\"30\"\n";
+    std::string tmp = std::string(path) + ".edit";
+    FILE* f = fopen(tmp.c_str(), "wb");
+    CHECK(f != NULL);
+    if (f) {
+      fwrite(edit.data(), 1, edit.size(), f);
+      fclose(f);
+      CHECK(rename(tmp.c_str(), path) == 0);
+    }
+    DWORD start = ::GetTickCount();
+    while (::GetSystemMetrics(SM_CYCAPTION) != 31 && ::GetTickCount() - start < 5000) PumpFor(20);
+    CHECK(::GetSysColor(COLOR_ACTIVECAPTION) == RGB(40, 50, 60));
+    CHECK(g_sysColorChanges == changes + 1);
+    CHECK(::GetSystemMetrics(SM_CYCAPTION) == 31);
+    ::GetClientRect(h, &c1);
+    CHECK(c1.bottom == c0.bottom - (31 - cap));
+    CHECK(::GetSysColor(COLOR_HIGHLIGHT) == mine);
+    // Taken out again, the classic ones come back.
+    ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Control Panel\\Colors");
+    ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Control Panel\\Desktop\\WindowMetrics");
+    ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Control Panel\\Desktop");
+    ::RegDeleteKeyW(HKEY_CURRENT_USER, L"Control Panel");
+    start = ::GetTickCount();
+    while (::GetSystemMetrics(SM_CYCAPTION) != cap && ::GetTickCount() - start < 5000) PumpFor(20);
+    CHECK(::GetSystemMetrics(SM_CYCAPTION) == cap);
+    CHECK(::GetSysColor(COLOR_ACTIVECAPTION) == was[0]);
+    CHECK(::SetSysColors(1, &hi, &highlight));
+  }
   ::DestroyWindow(h);
   ::UnregisterClassW(L"ThemeTest", wc.hInstance);
 }
