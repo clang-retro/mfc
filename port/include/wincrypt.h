@@ -1,8 +1,8 @@
-// wincrypt.h - CryptoAPI's providers, hashes and symmetric keys: MD2,
-// MD4, MD5, SHA-1, SHA-2 and HMAC hashes, RC4 and AES keys generated,
-// derived from hashes or imported in plain text, and random numbers.
-// There are no RSA keys: CryptGetUserKey finds none, and CryptGenKey and
-// the signature functions report NTE_BAD_ALGID for them.
+// wincrypt.h - CryptoAPI's providers, hashes and keys: MD2, MD4, MD5,
+// SHA-1, SHA-2 and HMAC hashes; RC4 and AES keys generated, derived from
+// hashes, or imported in plain text or wrapped in a SIMPLEBLOB; RSA key
+// pairs kept in key containers, with PKCS #1 v1.5 and OAEP encryption
+// and PKCS #1 v1.5 signatures; and random numbers.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -127,6 +127,14 @@ typedef ULONG_PTR HCRYPTHASH;
 #define CRYPT_ARCHIVABLE 0x00004000
 // CryptImportKey: a key of any length, for HMAC.
 #define CRYPT_IPSEC_HMAC_KEY 0x00000100
+// CryptEncrypt, CryptDecrypt, CryptExportKey and CryptImportKey with an
+// RSA key: OAEP padding instead of PKCS #1 v1.5.
+#define CRYPT_OAEP 0x00000040
+// CryptSignHash and CryptVerifySignature: the hash value alone, with no
+// algorithm identifier.
+#define CRYPT_NOHASHOID 0x00000001
+#define CRYPT_TYPE2_FORMAT 0x00000002
+#define CRYPT_X931_FORMAT 0x00000004
 #define AT_KEYEXCHANGE 1
 #define AT_SIGNATURE 2
 

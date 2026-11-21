@@ -1365,6 +1365,187 @@ static void TestCrypt() {
   CHECK(copy.GetHandle() != 0 && copy.GetHandle() != sha.GetHandle());
 }
 
+// A 512-bit key pair made outside CryptoAPI, as a PRIVATEKEYBLOB; its
+// PKCS #1 v1.5 signature of SHA-1("abc"), and "hello" encrypted with its
+// public half, both least significant byte first.
+static const BYTE kRsaPair[] = {
+    0x07, 0x02, 0x00, 0x00, 0x00, 0xa4, 0x00, 0x00, 0x52, 0x53, 0x41, 0x32,
+    0x00, 0x02, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x4d, 0x50, 0x1b, 0x2c,
+    0x8b, 0x67, 0x7b, 0x32, 0x2a, 0xd7, 0x30, 0xb0, 0xc7, 0x38, 0xdf, 0x49,
+    0xa2, 0xbb, 0xef, 0xaa, 0xb7, 0x84, 0xcb, 0xaa, 0xb4, 0x3f, 0x38, 0x1f,
+    0xa2, 0x3b, 0xe7, 0xf1, 0x4f, 0x8d, 0x28, 0x50, 0xde, 0x1a, 0x5b, 0x1e,
+    0xbe, 0x5c, 0x31, 0x01, 0x07, 0x46, 0xa0, 0x38, 0x4a, 0xff, 0x57, 0x13,
+    0xa3, 0x39, 0x2e, 0x66, 0xe7, 0xd5, 0x22, 0x28, 0x04, 0x16, 0xdb, 0xb2,
+    0x07, 0xff, 0x94, 0x4a, 0xc3, 0x19, 0xdf, 0xaa, 0xfe, 0x34, 0xd4, 0x35,
+    0x89, 0x5b, 0x95, 0x26, 0xe0, 0xe0, 0xa3, 0x80, 0xc0, 0xb5, 0x1d, 0x0e,
+    0xae, 0x7d, 0x98, 0x2b, 0xbb, 0xc1, 0x5a, 0xd8, 0x0b, 0x0d, 0xf7, 0x31,
+    0x1d, 0x25, 0x2a, 0x11, 0x95, 0x0d, 0x0b, 0x92, 0x96, 0x3a, 0x29, 0xca,
+    0x98, 0x72, 0x53, 0x01, 0x42, 0x67, 0xd5, 0x1b, 0xc7, 0x26, 0x00, 0x66,
+    0x63, 0x41, 0xa1, 0xd3, 0x21, 0xad, 0x57, 0x50, 0xd1, 0x95, 0x4a, 0xc6,
+    0xe3, 0x86, 0x27, 0xb2, 0x39, 0xdb, 0x66, 0x8e, 0x03, 0x6e, 0xe1, 0xc9,
+    0x84, 0x07, 0xab, 0xc6, 0xb1, 0xbc, 0xca, 0x1b, 0x14, 0x6a, 0x43, 0x67,
+    0x9d, 0x5b, 0x4c, 0xc1, 0xdd, 0xae, 0x65, 0x04, 0x00, 0xa2, 0x9c, 0x76,
+    0x01, 0xc3, 0x55, 0xe6, 0xf4, 0x1a, 0x66, 0xd6, 0x32, 0xa8, 0x06, 0x7c,
+    0xe0, 0x8d, 0x80, 0x98, 0x0f, 0xfd, 0x9e, 0xbb, 0x85, 0x62, 0x26, 0x6b,
+    0x59, 0x89, 0x47, 0x3f, 0x6a, 0xac, 0x2a, 0x65, 0xab, 0x44, 0x8a, 0xa1,
+    0x76, 0x8e, 0xca, 0x69, 0x37, 0x97, 0x37, 0x35, 0x53, 0x5a, 0x4f, 0xbb,
+    0x09, 0x94, 0xba, 0x87, 0x31, 0xd4, 0x16, 0x7e, 0xad, 0xc7, 0x3e, 0x85,
+    0x45, 0xe0, 0x53, 0xf0, 0xca, 0x5a, 0xc4, 0x66, 0x08, 0xec, 0x56, 0x98,
+    0x62, 0x1c, 0x33, 0x01, 0x3c, 0xb7, 0x6d, 0x0d, 0xea, 0xac, 0xa0, 0x60,
+    0x84, 0xdb, 0x23, 0x16, 0xbe, 0x0d, 0xc4, 0xc3, 0x0f, 0x62, 0xa7, 0x18,
+    0x86, 0x8f, 0x58, 0x5d, 0x90, 0x75, 0xdc, 0x27, 0x81, 0xbf, 0x5b, 0x42,
+    0x4e, 0x9f, 0x21, 0x93, 0x1c, 0x87, 0x52, 0x71,
+};
+static const BYTE kRsaSigAbc[] = {
+    0x5f, 0xa3, 0xb3, 0x09, 0x5d, 0xe7, 0xf4, 0x5d, 0x3f, 0x04, 0x65, 0xe6,
+    0xed, 0x0e, 0x8a, 0xa8, 0xaa, 0xc0, 0x1e, 0x64, 0x83, 0x6f, 0xe9, 0x09,
+    0x0b, 0xba, 0x13, 0xe4, 0xae, 0x0b, 0x53, 0x5c, 0xc4, 0x41, 0x21, 0xf5,
+    0x7b, 0xb3, 0x2c, 0x2e, 0x69, 0x1c, 0x07, 0xb7, 0x2d, 0x93, 0xd4, 0x5c,
+    0xe8, 0xb0, 0x3d, 0xb0, 0xa7, 0x07, 0xa4, 0xb8, 0x93, 0x62, 0x0b, 0x3e,
+    0x52, 0xd0, 0x69, 0x18,
+};
+static const BYTE kRsaHello[] = {
+    0x91, 0x4d, 0x45, 0xf6, 0xa1, 0x65, 0xee, 0x14, 0xef, 0xa4, 0xcf, 0x89,
+    0x52, 0xb0, 0x7f, 0x18, 0x71, 0x7b, 0x3f, 0x88, 0xbd, 0xad, 0x0a, 0x2d,
+    0x7d, 0x5a, 0xb1, 0x0e, 0xf7, 0xa5, 0x5e, 0x69, 0x36, 0x5e, 0x53, 0x4b,
+    0xae, 0xcc, 0x1e, 0x9f, 0x67, 0xb5, 0x16, 0x43, 0xb0, 0x04, 0x70, 0xb6,
+    0xda, 0xa8, 0x9d, 0x99, 0x81, 0x9c, 0x9d, 0xe9, 0x1a, 0x7e, 0xea, 0x42,
+    0xdc, 0x52, 0xc9, 0x11,
+};
+
+
+static void TestRsa() {
+  CCryptProv prov;
+  HRESULT hr = prov.InitVerifyContext(PROV_RSA_FULL, MS_ENHANCED_PROV);
+  CHECK(SUCCEEDED(hr));
+  if (FAILED(hr)) return;
+  CCryptImportKey pair;
+  hr = pair.Initialize(prov, (BYTE*)kRsaPair, sizeof(kRsaPair), CCryptKey::EmptyKey, CRYPT_EXPORTABLE);
+  CHECK(SUCCEEDED(hr));
+  if (FAILED(hr)) return;
+  DWORD dw = 0, n = sizeof(dw);
+  CHECK(SUCCEEDED(pair.GetParam(KP_KEYLEN, (BYTE*)&dw, &n)) && dw == 512);
+  ALG_ID alg = 0;
+  n = sizeof(alg);
+  CHECK(SUCCEEDED(pair.GetParam(KP_ALGID, (BYTE*)&alg, &n)) && alg == CALG_RSA_KEYX);
+
+  // It exports as it came in.
+  BYTE abBlob[400];
+  n = sizeof(abBlob);
+  CHECK(SUCCEEDED(pair.ExportPrivateKeyBlob(CCryptKey::EmptyKey, 0, abBlob, &n)) && n == sizeof(kRsaPair) &&
+        memcmp(abBlob, kRsaPair, n) == 0);
+
+  // The signature PKCS #1 gives, with it as the exchange key.
+  CCryptSHA1Hash sha;
+  CHECK(SUCCEEDED(sha.Initialize(prov)) && SUCCEEDED(sha.AddData((const BYTE*)"abc", 3)));
+  BYTE abSig[64];
+  DWORD dwSig = 0;
+  CHECK(SUCCEEDED(sha.Sign(NULL, &dwSig, 0, AT_KEYEXCHANGE)) && dwSig == 64);
+  CHECK(SUCCEEDED(sha.Sign(abSig, &dwSig, 0, AT_KEYEXCHANGE)) && dwSig == 64 &&
+        memcmp(abSig, kRsaSigAbc, 64) == 0);
+
+  // Its public half checks that, and refuses it for other data.
+  BYTE abPub[200];
+  DWORD dwPub = sizeof(abPub);
+  CHECK(SUCCEEDED(pair.ExportPublicKeyBlob(CCryptKey::EmptyKey, 0, abPub, &dwPub)) && dwPub == 84);
+  CHECK(abPub[0] == PUBLICKEYBLOB && memcmp(abPub + 8, "RSA1", 4) == 0 &&
+        memcmp(abPub + 12, kRsaPair + 12, 72) == 0);
+  CCryptImportKey pub;
+  CHECK(SUCCEEDED(pub.Initialize(prov, abPub, dwPub, CCryptKey::EmptyKey, 0)));
+  CCryptSHA1Hash shaOk, shaBad;
+  CHECK(SUCCEEDED(shaOk.Initialize(prov)) && SUCCEEDED(shaOk.AddData((const BYTE*)"abc", 3)));
+  CHECK(SUCCEEDED(shaOk.VerifySignature(abSig, dwSig, pub)));
+  CHECK(SUCCEEDED(shaBad.Initialize(prov)) && SUCCEEDED(shaBad.AddData((const BYTE*)"abd", 3)));
+  CHECK(shaBad.VerifySignature(abSig, dwSig, pub) == NTE_BAD_SIGNATURE);
+
+  // What was encrypted elsewhere decrypts; and a round trip through the
+  // public half, with PKCS #1 v1.5 and with OAEP.
+  BYTE abBuf[64];
+  memcpy(abBuf, kRsaHello, 64);
+  DWORD dwLen = 64;
+  CHECK(SUCCEEDED(pair.Decrypt(TRUE, abBuf, &dwLen)) && dwLen == 5 && memcmp(abBuf, "hello", 5) == 0);
+  memcpy(abBuf, "round trip", 10);
+  dwLen = 10;
+  CHECK(SUCCEEDED(pub.Encrypt(TRUE, abBuf, &dwLen, sizeof(abBuf))) && dwLen == 64);
+  CHECK(memcmp(abBuf, "round trip", 10) != 0);
+  CHECK(SUCCEEDED(pair.Decrypt(TRUE, abBuf, &dwLen)) && dwLen == 10 && memcmp(abBuf, "round trip", 10) == 0);
+  memcpy(abBuf, "oaep", 4);
+  dwLen = 4;
+  CHECK(::CryptEncrypt(pub.m_hKey, 0, TRUE, CRYPT_OAEP, abBuf, &dwLen, sizeof(abBuf)) && dwLen == 64);
+  CHECK(::CryptDecrypt(pair.m_hKey, 0, TRUE, CRYPT_OAEP, abBuf, &dwLen) && dwLen == 4 &&
+        memcmp(abBuf, "oaep", 4) == 0);
+  dwLen = 60;  // more than one block holds
+  CHECK(!::CryptEncrypt(pub.m_hKey, 0, TRUE, 0, abBuf, &dwLen, sizeof(abBuf)));
+
+  // A session key wrapped for the pair, and unwrapped: the same key.
+  CCryptRandomKey session;
+  CHECK(SUCCEEDED(session.Initialize(prov, CALG_RC4, CRYPT_EXPORTABLE | (128 << 16))));
+  BYTE abWrap[128];
+  DWORD dwWrap = sizeof(abWrap);
+  CHECK(SUCCEEDED(session.ExportSimpleBlob(pub, 0, abWrap, &dwWrap)) && dwWrap == 76 &&
+        abWrap[0] == SIMPLEBLOB);
+  CCryptImportKey unwrapped;
+  CHECK(SUCCEEDED(unwrapped.Initialize(prov, abWrap, dwWrap, pair, 0)));
+  BYTE abA[8] = "1234567", abB[8] = "1234567";
+  DWORD dwA = 7, dwB = 7;
+  CHECK(SUCCEEDED(session.Encrypt(TRUE, abA, &dwA, 8)) && SUCCEEDED(unwrapped.Encrypt(TRUE, abB, &dwB, 8)));
+  CHECK(memcmp(abA, abB, 7) == 0 && memcmp(abA, "1234567", 7) != 0);
+
+  // A new signature pair of the length asked for.
+  CCryptKeyPair sigPair;
+  hr = sigPair.Initialize(prov, AT_SIGNATURE, CRYPT_EXPORTABLE | (1024 << 16));
+  CHECK(SUCCEEDED(hr));
+  if (SUCCEEDED(hr)) {
+    n = sizeof(dw);
+    CHECK(SUCCEEDED(sigPair.GetParam(KP_KEYLEN, (BYTE*)&dw, &n)) && dw == 1024);
+    n = sizeof(alg);
+    CHECK(SUCCEEDED(sigPair.GetParam(KP_ALGID, (BYTE*)&alg, &n)) && alg == CALG_RSA_SIGN);
+    CCryptMD5Hash md5;
+    CHECK(SUCCEEDED(md5.Initialize(prov, _T("signed text"))));
+    BYTE abSig2[128];
+    DWORD dwSig2 = sizeof(abSig2);
+    CHECK(SUCCEEDED(md5.Sign(abSig2, &dwSig2)) && dwSig2 == 128);
+    dwPub = sizeof(abPub);
+    CHECK(SUCCEEDED(sigPair.ExportPublicKeyBlob(CCryptKey::EmptyKey, 0, abPub, &dwPub)) && dwPub == 148);
+    CCryptImportKey pub2;
+    CHECK(SUCCEEDED(pub2.Initialize(prov, abPub, dwPub, CCryptKey::EmptyKey, 0)));
+    CCryptMD5Hash md5Again;
+    CHECK(SUCCEEDED(md5Again.Initialize(prov, _T("signed text"))));
+    CHECK(SUCCEEDED(md5Again.VerifySignature(abSig2, dwSig2, pub2)));
+  }
+
+  // A named container: not there, made, its pair kept and found again
+  // (and not exportable as it was not made so), then deleted.
+  LPCTSTR pszName = _T("clang-retro atlutiltest");
+  HCRYPTPROV hProv = 0;
+  ::CryptAcquireContext(&hProv, pszName, MS_ENHANCED_PROV, PROV_RSA_FULL, CRYPT_DELETEKEYSET);
+  CHECK(!::CryptAcquireContext(&hProv, pszName, MS_ENHANCED_PROV, PROV_RSA_FULL, 0) &&
+        ::GetLastError() == (DWORD)NTE_BAD_KEYSET);
+  CHECK(::CryptAcquireContext(&hProv, pszName, MS_ENHANCED_PROV, PROV_RSA_FULL, CRYPT_NEWKEYSET));
+  HCRYPTKEY hKey = 0;
+  CHECK(!::CryptGetUserKey(hProv, AT_KEYEXCHANGE, &hKey) && ::GetLastError() == (DWORD)NTE_NO_KEY);
+  CHECK(::CryptGenKey(hProv, AT_KEYEXCHANGE, 512 << 16, &hKey));
+  BYTE abPub1[100], abPub2[100];
+  DWORD dwPub1 = sizeof(abPub1), dwPub2 = sizeof(abPub2);
+  CHECK(::CryptExportKey(hKey, 0, PUBLICKEYBLOB, 0, abPub1, &dwPub1) && dwPub1 == 84);
+  n = sizeof(abBlob);
+  CHECK(!::CryptExportKey(hKey, 0, PRIVATEKEYBLOB, 0, abBlob, &n) && ::GetLastError() == (DWORD)NTE_BAD_KEY_STATE);
+  ::CryptDestroyKey(hKey);
+  ::CryptReleaseContext(hProv, 0);
+  CHECK(!::CryptAcquireContext(&hProv, pszName, MS_ENHANCED_PROV, PROV_RSA_FULL, CRYPT_NEWKEYSET) &&
+        ::GetLastError() == (DWORD)NTE_EXISTS);
+  CHECK(::CryptAcquireContext(&hProv, pszName, MS_ENHANCED_PROV, PROV_RSA_FULL, 0));
+  hKey = 0;
+  CHECK(::CryptGetUserKey(hProv, AT_KEYEXCHANGE, &hKey));
+  CHECK(::CryptExportKey(hKey, 0, PUBLICKEYBLOB, 0, abPub2, &dwPub2) && dwPub2 == dwPub1 &&
+        memcmp(abPub1, abPub2, dwPub1) == 0);
+  ::CryptDestroyKey(hKey);
+  ::CryptReleaseContext(hProv, 0);
+  CHECK(::CryptAcquireContext(&hProv, pszName, MS_ENHANCED_PROV, PROV_RSA_FULL, CRYPT_DELETEKEYSET));
+  CHECK(!::CryptAcquireContext(&hProv, pszName, MS_ENHANCED_PROV, PROV_RSA_FULL, 0) &&
+        ::GetLastError() == (DWORD)NTE_BAD_KEYSET);
+}
+
 static void TestSocketAddr() {
   WSADATA wsa;
   CHECK(::WSAStartup(MAKEWORD(2, 2), &wsa) == 0);
@@ -1584,6 +1765,7 @@ int main() {
   Log("COleDateTime, sync: %d failure(s) so far", g_nFailures);
   TestEncodings();
   TestCrypt();
+  TestRsa();
   Log("encodings, crypt: %d failure(s) so far", g_nFailures);
   TestSocketAddr();
   TestRegExp();
