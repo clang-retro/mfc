@@ -743,6 +743,9 @@ INT_PTR CALLBACK BoxProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
       NONCLIENTMETRICSW ncm = {sizeof ncm};
       static HFONT msgFont;
+      static unsigned made;
+      if (msgFont && made != ThemeGeneration()) msgFont = NULL;  // dialogs still open keep theirs
+      made = ThemeGeneration();
       if (!msgFont && SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof ncm, &ncm, 0))
         msgFont = CreateFontIndirectW(&ncm.lfMessageFont);
       if (msgFont) font = msgFont;

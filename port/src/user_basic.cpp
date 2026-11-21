@@ -10,10 +10,23 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <map>
 #include <mutex>
+#include <string>
+#include <thread>
 #include <vector>
+#if defined(__linux__)
+#include <sys/inotify.h>
+#elif defined(__APPLE__)
+#include <sys/event.h>
+#endif
 
 using namespace winport;
 
@@ -221,7 +234,13 @@ UINT WINAPI RegisterClipboardFormatW(LPCWSTR name) { return name && *name ? Glob
 // writes them; a font is "face,points" with ",bold" or ",italic" after it,
 // or a LOGFONTW in REG_BINARY as Windows keeps it. The registry is read
 // when the look is first asked for; SetSysColors and SystemParametersInfo
-// change it for the session.
+// change it for the session (SPIF_UPDATEINIFILE saving the sizes, fonts
+// and gradient). The registry file is watched, so a change made there,
+// by hand or by another program, reaches the windows open as it would
+// on Windows: what changed is applied, with WM_SYSCOLORCHANGE or
+// WM_SETTINGCHANGE.
+
+}  // extern "C"
 
 namespace {
 
@@ -417,20 +436,179 @@ std::mutex& ThemeLock() {
   static std::mutex* m = new std::mutex;
   return *m;
 }
+std::atomic<unsigned> g_themeGeneration{0};
+std::atomic<bool> g_themePending{false};
+Theme* g_fileTheme = NULL;  // the look as the file last had it
+
+// The registry file changed: once it has been quiet a moment (an editor
+// may write it in steps), every thread looking for messages is woken to
+// apply it.
+void FileChanged() {
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  g_themePending = true;
+  WakeAllQueues();
+}
+
+// Watches the directory the registry file is in, since an editor saving
+// it may put a new file in its place.
+void WatchFile() {
+  std::string file = RegistryPath();
+  size_t slash = file.rfind('/');
+  std::string dir = slash == std::string::npos ? "." : slash == 0 ? "/" : file.substr(0, slash);
+  std::string base = slash == std::string::npos ? file : file.substr(slash + 1);
+  mkdir(dir.c_str(), 0700);
+#if defined(__linux__)
+  int fd = inotify_init1(IN_CLOEXEC);
+  if (fd < 0) return;
+  if (inotify_add_watch(fd, dir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE | IN_DELETE) < 0) {
+    close(fd);
+    return;
+  }
+  std::thread([fd, base] {
+    alignas(inotify_event) char buf[4096];
+    for (;;) {
+      ssize_t n = read(fd, buf, sizeof buf);
+      if (n < 0 && errno == EINTR) continue;
+      if (n <= 0) return;
+      bool ours = false;
+      for (char* p = buf; p < buf + n;) {
+        inotify_event* e = (inotify_event*)p;
+        if (e->len && base == e->name) ours = true;
+        p += sizeof *e + e->len;
+      }
+      if (ours) FileChanged();
+    }
+  }).detach();
+#elif defined(__APPLE__)
+  int kq = kqueue();
+  int dfd = open(dir.c_str(), O_EVTONLY | O_CLOEXEC);
+  if (kq < 0 || dfd < 0) {
+    if (kq >= 0) close(kq);
+    if (dfd >= 0) close(dfd);
+    return;
+  }
+  std::thread([kq, dfd, file] {
+    for (;;) {
+      // The directory, for a file put in its place, and the file as it
+      // is now, for one written where it is.
+      struct kevent ev[2];
+      int n = 0;
+      EV_SET(&ev[n++], dfd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE, 0, NULL);
+      int ffd = open(file.c_str(), O_EVTONLY | O_CLOEXEC);
+      if (ffd >= 0)
+        EV_SET(&ev[n++], ffd, EVFILT_VNODE, EV_ADD | EV_CLEAR,
+               NOTE_WRITE | NOTE_EXTEND | NOTE_DELETE | NOTE_RENAME | NOTE_ATTRIB, 0, NULL);
+      struct kevent got;
+      int r = kevent(kq, ev, n, &got, 1, NULL);
+      if (ffd >= 0) close(ffd);
+      if (r < 0 && errno != EINTR) return;
+      if (r > 0) FileChanged();
+    }
+  }).detach();
+#endif
+}
+
 Theme& CurrentTheme() {
   static Theme* t = NULL;
   static std::once_flag once;
   std::call_once(once, [] {
     Theme* n = new Theme;
     ReadTheme(n);
+    g_fileTheme = new Theme(*n);
     t = n;
+    WatchFile();
   });
   return *t;
+}
+
+bool SameFont(const LOGFONTW& a, const LOGFONTW& b) {
+  return memcmp(&a, &b, offsetof(LOGFONTW, lfFaceName)) == 0 && wcscmp(a.lfFaceName, b.lfFaceName) == 0;
+}
+
+enum { kColorsChanged = 1, kMetricsChanged = 2, kGradientChanged = 4 };
+
+// What the file changed from was to now, put in cur where cur does not
+// have it already (a change the program made itself stays until the
+// file changes that value); which kinds of thing cur changed.
+int Merge(const Theme& was, const Theme& now, Theme* cur) {
+  int changed = 0;
+  for (int i = 0; i < kNumColors; i++)
+    if (was.colors[i] != now.colors[i] && cur->colors[i] != now.colors[i]) {
+      cur->colors[i] = now.colors[i];
+      changed |= kColorsChanged;
+    }
+  if (was.gradient != now.gradient && cur->gradient != now.gradient) {
+    cur->gradient = now.gradient;
+    changed |= kGradientChanged;
+  }
+  int Theme::*sizes[] = {&Theme::border,          &Theme::captionWidth, &Theme::captionHeight,
+                         &Theme::smCaptionWidth,  &Theme::smCaptionHeight, &Theme::menuWidth,
+                         &Theme::menuHeight,      &Theme::scrollWidth,  &Theme::scrollHeight};
+  for (int Theme::*f : sizes)
+    if (was.*f != now.*f && cur->*f != now.*f) {
+      cur->*f = now.*f;
+      changed |= kMetricsChanged;
+    }
+  LOGFONTW Theme::*fonts[] = {&Theme::captionFont, &Theme::smCaptionFont, &Theme::menuFont,
+                              &Theme::statusFont,  &Theme::messageFont,   &Theme::iconFont};
+  for (LOGFONTW Theme::*f : fonts)
+    if (!SameFont(was.*f, now.*f) && !SameFont(cur->*f, now.*f)) {
+      cur->*f = now.*f;
+      changed |= kMetricsChanged;
+    }
+  return changed;
+}
+
+// SPIF_UPDATEINIFILE: the sizes and fonts written back, as Windows keeps
+// them (sizes in negative twips).
+void SetText(HKEY k, const wchar_t* name, const std::wstring& v) {
+  RegSetValueExW(k, name, 0, REG_SZ, (const BYTE*)v.c_str(), (DWORD)((v.size() + 1) * sizeof(WCHAR)));
+}
+std::wstring Number(int v) { return Widen(std::to_string(v).c_str()); }
+void WriteMetrics(const Theme& t) {
+  HKEY k;
+  if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Desktop\\WindowMetrics", 0, NULL, 0, KEY_ALL_ACCESS, NULL, &k,
+                      NULL) != ERROR_SUCCESS)
+    return;
+  const struct {
+    const wchar_t* name;
+    int value;
+  } sizes[] = {{L"BorderWidth", t.border},         {L"CaptionWidth", t.captionWidth},
+               {L"CaptionHeight", t.captionHeight}, {L"SmCaptionWidth", t.smCaptionWidth},
+               {L"SmCaptionHeight", t.smCaptionHeight}, {L"MenuWidth", t.menuWidth},
+               {L"MenuHeight", t.menuHeight},       {L"ScrollWidth", t.scrollWidth},
+               {L"ScrollHeight", t.scrollHeight}};
+  for (auto& s : sizes) SetText(k, s.name, Number(-15 * s.value));
+  const struct {
+    const wchar_t* name;
+    const LOGFONTW* font;
+  } fonts[] = {{L"CaptionFont", &t.captionFont}, {L"SmCaptionFont", &t.smCaptionFont},
+               {L"MenuFont", &t.menuFont},       {L"StatusFont", &t.statusFont},
+               {L"MessageFont", &t.messageFont}, {L"IconFont", &t.iconFont}};
+  for (auto& f : fonts) {
+    int h = f.font->lfHeight < 0 ? -f.font->lfHeight : f.font->lfHeight;
+    std::wstring v = f.font->lfFaceName;
+    v += L"," + Number((h * 72 + 48) / 96);
+    if (f.font->lfWeight >= FW_BOLD) v += L",bold";
+    if (f.font->lfItalic) v += L",italic";
+    SetText(k, f.name, v);
+  }
+  RegCloseKey(k);
+}
+void WriteGradient(BOOL on) {
+  HKEY k;
+  if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Desktop", 0, NULL, 0, KEY_ALL_ACCESS, NULL, &k, NULL) !=
+      ERROR_SUCCESS)
+    return;
+  DWORD v = on ? 1 : 0;
+  RegSetValueExW(k, L"GradientCaptions", 0, REG_DWORD, (const BYTE*)&v, sizeof v);
+  RegCloseKey(k);
 }
 
 // Every top-level window hears of a change of the look, then draws again
 // (the frame recalculated when sizes changed).
 void ThemeChanged(UINT msg, WPARAM wp, bool frames) {
+  g_themeGeneration++;
   std::vector<HWND> tops;
   {
     UserGuard g(UserLock());
@@ -445,6 +623,29 @@ void ThemeChanged(UINT msg, WPARAM wp, bool frames) {
 }
 
 }  // namespace
+
+unsigned winport::ThemeGeneration() { return g_themeGeneration; }
+bool winport::ThemeFilePending() { return g_themePending; }
+
+// The registry file has changed: what it changed in the look is applied,
+// as SetSysColors and SPI_SETNONCLIENTMETRICS would.
+void winport::CheckThemeFile() {
+  if (!g_themePending || !g_themePending.exchange(false)) return;
+  Theme now;
+  ReadTheme(&now);
+  Theme& cur = CurrentTheme();
+  int changed;
+  {
+    std::lock_guard<std::mutex> g(ThemeLock());
+    changed = Merge(*g_fileTheme, now, &cur);
+    *g_fileTheme = now;
+  }
+  if (changed & kColorsChanged) ThemeChanged(WM_SYSCOLORCHANGE, 0, false);
+  if (changed & kMetricsChanged) ThemeChanged(WM_SETTINGCHANGE, SPI_SETNONCLIENTMETRICS, true);
+  else if (changed & kGradientChanged) ThemeChanged(WM_SETTINGCHANGE, SPI_SETGRADIENTCAPTIONS, false);
+}
+
+extern "C" {
 
 DWORD WINAPI GetSysColor(int index) {
   if (index < 0 || index >= kNumColors) return 0;
@@ -525,7 +726,7 @@ static void FontToA(const LOGFONTW& w, LOGFONTA* a) {
   strncpy(a->lfFaceName, Narrow(w.lfFaceName).c_str(), LF_FACESIZE - 1);
 }
 
-BOOL WINAPI SystemParametersInfoW(UINT action, UINT uiParam, PVOID pv, UINT) {
+BOOL WINAPI SystemParametersInfoW(UINT action, UINT uiParam, PVOID pv, UINT winIni) {
   switch (action) {
     case SPI_GETNONCLIENTMETRICS: {
       NONCLIENTMETRICSW* m = (NONCLIENTMETRICSW*)pv;
@@ -572,6 +773,14 @@ BOOL WINAPI SystemParametersInfoW(UINT action, UINT uiParam, PVOID pv, UINT) {
         t.statusFont = m->lfStatusFont;
         t.messageFont = m->lfMessageFont;
       }
+      if (winIni & SPIF_UPDATEINIFILE) {
+        Theme copy;
+        {
+          std::lock_guard<std::mutex> g(ThemeLock());
+          copy = t;
+        }
+        WriteMetrics(copy);
+      }
       ThemeChanged(WM_SETTINGCHANGE, SPI_SETNONCLIENTMETRICS, true);
       return TRUE;
     }
@@ -596,6 +805,7 @@ BOOL WINAPI SystemParametersInfoW(UINT action, UINT uiParam, PVOID pv, UINT) {
       return TRUE;
     case SPI_SETGRADIENTCAPTIONS:
       CurrentTheme().gradient = pv != NULL;
+      if (winIni & SPIF_UPDATEINIFILE) WriteGradient(pv != NULL);
       ThemeChanged(WM_SETTINGCHANGE, SPI_SETGRADIENTCAPTIONS, false);
       return TRUE;
     case SPI_GETDRAGFULLWINDOWS:

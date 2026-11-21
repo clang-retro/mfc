@@ -82,6 +82,8 @@ std::string PosixPath(const wchar_t* path);
 // The layer's configuration directory, where the registry and .ini files
 // are: $XDG_CONFIG_HOME/libmfc, or ~/.config/libmfc.
 std::string ConfigDir();
+// The registry file: $WINPORT_REGISTRY, or registry.reg there.
+std::string RegistryPath();
 
 // Time: FILETIME counts 100 ns intervals since 1601.
 const ULONGLONG kEpochDelta = 116444736000000000ULL;  // 1601 to 1970

@@ -562,6 +562,8 @@ std::wstring W(LPCWSTR s) { return s ? std::wstring(s) : std::wstring(); }
 
 }  // namespace
 
+std::string winport::RegistryPath() { return RegistryFile(); }
+
 extern "C" {
 
 LONG WINAPI RegOpenKeyExW(HKEY h, LPCWSTR sub, DWORD, REGSAM, PHKEY out) { return Open(h, W(sub), out); }
