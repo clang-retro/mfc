@@ -7,6 +7,12 @@
 // when the backend starts, so programs run without it when there is no
 // display.
 //
+// A translucent window (layered, or with a window region) gets a 32-bit
+// visual with premultiplied alpha when a compositing manager runs, and
+// otherwise a bounding shape of its visible pixels; either way its input
+// shape lets the mouse through where it is fully transparent. Shapes take
+// libXext's SHAPE extension, loaded when there is one.
+//
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "user.h"
@@ -39,7 +45,8 @@ namespace {
   F(XSetTransientForHint) F(XSetWMNormalHints) F(XSetWMHints) F(XStoreName) F(XDefineCursor)                  \
   F(XCreateFontCursor) F(XRaiseWindow) F(XSetInputFocus) F(XWarpPointer) F(XGetWindowAttributes)               \
   F(XTranslateCoordinates) F(XSync) F(XFreeCursor) F(XSetSelectionOwner) F(XGetSelectionOwner)          \
-  F(XConvertSelection) F(XGetWindowProperty) F(XFree) F(XDeleteProperty) F(XSendEvent) F(XCheckTypedWindowEvent) F(XCheckTypedEvent)
+  F(XConvertSelection) F(XGetWindowProperty) F(XFree) F(XDeleteProperty) F(XSendEvent) F(XCheckTypedWindowEvent) F(XCheckTypedEvent) \
+  F(XMatchVisualInfo) F(XCreateColormap)
 
 struct XLib {
 #define F(name) decltype(&::name) name = nullptr;
@@ -89,6 +96,25 @@ struct XfixesLib {
     XFixesQueryExtension = (decltype(XFixesQueryExtension))dlsym(lib, "XFixesQueryExtension");
     XFixesSelectSelectionInput = (decltype(XFixesSelectSelectionInput))dlsym(lib, "XFixesSelectSelectionInput");
     return XFixesQueryExtension && XFixesSelectSelectionInput;
+  }
+};
+
+// libXext's SHAPE extension, for windows that are not rectangles. Its
+// header may be missing, so the functions are declared here as the
+// library defines them.
+struct XextLib {
+  enum { kBounding = 0, kInput = 2, kSet = 0, kUnsorted = 0 };
+  Bool (*XShapeQueryExtension)(Display* dpy, int* eventBase, int* errorBase) = nullptr;
+  void (*XShapeCombineRectangles)(Display* dpy, ::Window w, int kind, int x, int y, XRectangle* rects, int n,
+                                  int op, int ordering) = nullptr;
+  void (*XShapeCombineMask)(Display* dpy, ::Window w, int kind, int x, int y, Pixmap mask, int op) = nullptr;
+  bool Load() {
+    void* lib = dlopen("libXext.so.6", RTLD_NOW | RTLD_LOCAL);
+    if (!lib) return false;
+    XShapeQueryExtension = (decltype(XShapeQueryExtension))dlsym(lib, "XShapeQueryExtension");
+    XShapeCombineRectangles = (decltype(XShapeCombineRectangles))dlsym(lib, "XShapeCombineRectangles");
+    XShapeCombineMask = (decltype(XShapeCombineMask))dlsym(lib, "XShapeCombineMask");
+    return XShapeQueryExtension && XShapeCombineRectangles && XShapeCombineMask;
   }
 };
 
@@ -152,6 +178,10 @@ struct Native {
   bool mapped = false;
   bool managed = true;  // by the window manager, rather than override-redirect
   int width = 0, height = 0;
+  bool argb = false;  // a 32-bit visual with alpha
+  // The shapes last given the server, and whether any were.
+  bool shaped = false;
+  std::vector<RECT> input, bounding;
 };
 
 struct X11Backend : Backend {
@@ -162,6 +192,14 @@ struct X11Backend : Backend {
   Visual* visual = NULL;
   int depth = 24;
   GC gc = NULL;
+  // Translucent windows: the 32-bit visual, its colormap and a GC for it,
+  // the compositing manager's selection, and the SHAPE extension.
+  Visual* argbVisual = NULL;
+  Colormap argbColormap = 0;
+  GC argbGc = NULL;
+  Atom compositor = 0;
+  XextLib xext;
+  bool haveShape = false;
   int wakePipe[2] = {-1, -1};
   Atom netIcon = 0;
   Atom wmDelete = 0, wmProtocols = 0, motifHints = 0, netName = 0, utf8 = 0, netType = 0, typeNormal = 0,
@@ -208,6 +246,16 @@ struct X11Backend : Backend {
       return false;
     }
     gc = x.XCreateGC(dpy, root, 0, NULL);
+    XVisualInfo vi;
+    if (x.XMatchVisualInfo(dpy, screen, 32, TrueColor, &vi)) {
+      argbVisual = vi.visual;
+      argbColormap = x.XCreateColormap(dpy, root, argbVisual, AllocNone);
+    }
+    char cm[32];
+    snprintf(cm, sizeof cm, "_NET_WM_CM_S%d", screen);
+    compositor = x.XInternAtom(dpy, cm, False);
+    int shapeEvent, shapeError;
+    haveShape = xext.Load() && xext.XShapeQueryExtension(dpy, &shapeEvent, &shapeError);
     if (pipe(wakePipe) == 0) {
       fcntl(wakePipe[0], F_SETFL, O_NONBLOCK);
       fcntl(wakePipe[1], F_SETFL, O_NONBLOCK);
@@ -361,9 +409,19 @@ struct X11Backend : Backend {
     a.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
                    PointerMotionMask | StructureNotifyMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask;
     a.cursor = cursor;
-    n->xid = x.XCreateWindow(dpy, root, w->rect.left, w->rect.top, n->width, n->height, 0, CopyFromParent,
-                             InputOutput, CopyFromParent, CWBackPixel | CWOverrideRedirect | CWEventMask | CWCursor,
-                             &a);
+    unsigned long mask = CWBackPixel | CWOverrideRedirect | CWEventMask | CWCursor;
+    n->argb = WantArgb(w);
+    if (n->argb) {
+      a.colormap = argbColormap;
+      a.border_pixel = 0;
+      mask |= CWColormap | CWBorderPixel;
+      n->xid = x.XCreateWindow(dpy, root, w->rect.left, w->rect.top, n->width, n->height, 0, 32, InputOutput,
+                               argbVisual, mask, &a);
+      if (!argbGc) argbGc = x.XCreateGC(dpy, n->xid, 0, NULL);
+    } else {
+      n->xid = x.XCreateWindow(dpy, root, w->rect.left, w->rect.top, n->width, n->height, 0, CopyFromParent,
+                               InputOutput, CopyFromParent, mask, &a);
+    }
     if (n->managed) {
       // No frame from the window manager: the window draws its own.
       long motif[5] = {2 /* decorations */, 0, 0, 0, 0};
@@ -388,7 +446,69 @@ struct X11Backend : Backend {
     SetIcon(n);
     byXid[n->xid] = n;
     w->native = n;
+    SetShapes(n);
     return n;
+  }
+
+  // Whether a window shows with alpha: translucent, with a compositing
+  // manager to blend it.
+  bool WantArgb(Window* w) {
+    return argbVisual && argbColormap && Translucent(w) && x.XGetSelectionOwner(dpy, compositor) != None;
+  }
+
+  // The window's shapes: where it takes the mouse, and without alpha,
+  // where it shows; the defaults (all of it) for an opaque window.
+  void SetShapes(Native* n) {
+    if (!haveShape) return;
+    Window* w = n->w;
+    bool translucent = Translucent(w);
+    if (!translucent && !n->shaped) return;
+    std::vector<RECT> input, bounding;
+    if (translucent) {
+      input = MouseArea(w);
+      if (!n->argb) bounding = ShownArea(w);
+    }
+    auto same = [](const std::vector<RECT>& a, const std::vector<RECT>& b) {
+      if (a.size() != b.size()) return false;
+      for (size_t i = 0; i < a.size(); i++)
+        if (!EqualRect(&a[i], &b[i])) return false;
+      return true;
+    };
+    auto apply = [&](int kind, const std::vector<RECT>& area, bool whole) {
+      if (whole) {
+        xext.XShapeCombineMask(dpy, n->xid, kind, 0, 0, None, XextLib::kSet);
+        return;
+      }
+      std::vector<XRectangle> xr;
+      for (const RECT& r : area)
+        xr.push_back(XRectangle{(short)r.left, (short)r.top, (unsigned short)(r.right - r.left),
+                                (unsigned short)(r.bottom - r.top)});
+      xext.XShapeCombineRectangles(dpy, n->xid, kind, 0, 0, xr.data(), (int)xr.size(), XextLib::kSet,
+                                   XextLib::kUnsorted);
+    };
+    if (!n->shaped || !translucent || !same(input, n->input)) apply(XextLib::kInput, input, !translucent);
+    bool boundingWhole = !translucent || n->argb;
+    if (!n->shaped || boundingWhole != n->bounding.empty() || !same(bounding, n->bounding))
+      apply(XextLib::kBounding, bounding, boundingWhole);
+    n->input = input;
+    n->bounding = bounding;
+    n->shaped = translucent;
+  }
+
+  void TranslucencyChanged(Window* w) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    Native* n = NativeOf(w);
+    if (!n || !dpy) return;
+    if (WantArgb(w) != n->argb) {
+      // Another visual takes another X window.
+      bool mapped = n->mapped;
+      Destroy(w);
+      Create(w);
+      if (mapped) Show(w, true);
+      return;
+    }
+    SetShapes(n);
+    x.XFlush(dpy);
   }
 
   void Show(Window* w, bool show) override {
@@ -447,6 +567,31 @@ struct X11Backend : Backend {
     if (!s || s->width <= 0 || s->height <= 0) return;
     RECT all = {0, 0, s->width, s->height};
     if (!IntersectRect(&r, &r, &all)) return;
+    if (Translucent(n->w)) SetShapes(n);
+    if (n->argb) {
+      // Premultiplied ARGB, as the compositing manager blends it.
+      int w = r.right - r.left, h = r.bottom - r.top;
+      std::vector<DWORD> px((size_t)w * h);
+      Composite(n->w, r, px.data(), w);
+      XImage img = {};
+      img.width = w;
+      img.height = h;
+      img.format = ZPixmap;
+      img.data = (char*)px.data();
+      img.byte_order = LSBFirst;
+      img.bitmap_unit = 32;
+      img.bitmap_bit_order = LSBFirst;
+      img.bitmap_pad = 32;
+      img.depth = 32;
+      img.bytes_per_line = w * 4;
+      img.bits_per_pixel = 32;
+      img.red_mask = 0xFF0000;
+      img.green_mask = 0x00FF00;
+      img.blue_mask = 0x0000FF;
+      if (!x.XInitImage(&img)) return;
+      x.XPutImage(dpy, n->xid, argbGc, &img, 0, 0, r.left, r.top, w, h);
+      return;
+    }
     XImage img = {};
     img.width = s->width;
     img.height = s->height;

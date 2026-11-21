@@ -166,8 +166,10 @@ bool ReallyVisible(Window* w) {
 }
 
 bool InShape(Window* w, POINT screen) {
-  if (!w->shaped) return true;
   RECT r = ScreenRect(w);
+  // A top-level window's look decides, for a layered one.
+  if (!w->parent) return TakesMouse(w, screen.x - r.left, screen.y - r.top);
+  if (!w->shaped) return true;
   return w->shape.Contains(screen.x - r.left, screen.y - r.top);
 }
 
@@ -1437,7 +1439,15 @@ static LONG_PTR WindowLong(Window* w, int index, bool set, LONG_PTR value, bool 
       if (set) {
         STYLESTRUCT ss = {w->exStyle, (DWORD)value};
         SendTo(w, WM_STYLECHANGING, GWL_EXSTYLE, (LPARAM)&ss);
+        DWORD was = w->exStyle;
         w->exStyle = ss.styleNew;
+        // Clearing WS_EX_LAYERED forgets the window's layering.
+        if ((was & WS_EX_LAYERED) && !(w->exStyle & WS_EX_LAYERED)) {
+          w->layer = 0;
+          w->layerPixels.clear();
+          w->layerWidth = w->layerHeight = 0;
+        }
+        if (!w->parent && ((was ^ w->exStyle) & (WS_EX_LAYERED | WS_EX_TRANSPARENT))) TranslucencyChanged(w);
         SendTo(w, WM_STYLECHANGED, GWL_EXSTYLE, (LPARAM)&ss);
       }
       return old;

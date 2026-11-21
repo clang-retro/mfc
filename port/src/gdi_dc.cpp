@@ -213,12 +213,24 @@ DrawScope::DrawScope(DCObj* dc, bool forWriting) : dc_(dc), writing_(forWriting)
         for (size_t i = tops.size(); i-- > 0;) {
           Window* t = tops[i];
           if (!t->Visible() || !t->surface) continue;
+          // A translucent window over what is below it.
+          bool blend = Translucent(t);
+          std::vector<DWORD> row(blend ? t->surface->width : 0);
           for (int y = 0; y < t->surface->height; y++) {
             int sy = t->rect.top + y;
             if (sy < 0 || sy >= sz.cy) continue;
+            if (blend) Composite(t, MakeRect(0, y, t->surface->width, y + 1), row.data(), t->surface->width);
             for (int x = 0; x < t->surface->width; x++) {
               int sx = t->rect.left + x;
-              if (sx >= 0 && sx < sz.cx) screen_[(size_t)sy * sz.cx + sx] = t->surface->Row(y)[x];
+              if (sx < 0 || sx >= sz.cx) continue;
+              DWORD& d = screen_[(size_t)sy * sz.cx + sx];
+              if (!blend) {
+                d = t->surface->Row(y)[x];
+                continue;
+              }
+              DWORD c = row[x], a = c >> 24, k = 255 - a;
+              auto ch = [&](int shift) { return (((c >> shift) & 0xFF) + (((d >> shift) & 0xFF) * k + 127) / 255) & 0xFF; };
+              d = ch(16) << 16 | ch(8) << 8 | ch(0);
             }
           }
         }

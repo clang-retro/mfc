@@ -2,7 +2,9 @@
 //
 // Each top-level window becomes an xdg_toplevel, which the window draws
 // its own frame in, and its surface is copied to a shared-memory buffer
-// as it changes. Menus, list drop-downs and tooltips become xdg_popups of
+// as it changes (with alpha, premultiplied, for a translucent window:
+// layered, or with a window region, whose input region then lets the
+// mouse through where it is fully transparent). Menus, list drop-downs and tooltips become xdg_popups of
 // the window they belong to. Wayland does not tell a program where its
 // windows are on the screen, so a window keeps the position the program
 // gave it, and a popup goes where it lies relative to its window.
@@ -43,6 +45,7 @@
 #define wl_data_device_interface (*winport_wl_data_device_interface)
 #define wl_data_source_interface (*winport_wl_data_source_interface)
 #define wl_data_offer_interface (*winport_wl_data_offer_interface)
+#define wl_region_interface (*winport_wl_region_interface)
 #pragma push_macro("interface")
 #undef interface  // winport.h makes it mean struct, as on Windows
 #include <wayland-client.h>
@@ -91,6 +94,7 @@ const struct wl_interface* winport_wl_data_device_manager_interface;
 const struct wl_interface* winport_wl_data_device_interface;
 const struct wl_interface* winport_wl_data_source_interface;
 const struct wl_interface* winport_wl_data_offer_interface;
+const struct wl_interface* winport_wl_region_interface;
 }
 
 namespace winport {
@@ -138,7 +142,7 @@ struct WlLib {
     P(wl_surface_interface) P(wl_shm_interface) P(wl_shm_pool_interface) P(wl_buffer_interface)
     P(wl_callback_interface) P(wl_seat_interface) P(wl_pointer_interface) P(wl_keyboard_interface)
     P(wl_output_interface) P(wl_data_device_manager_interface) P(wl_data_device_interface)
-    P(wl_data_source_interface) P(wl_data_offer_interface)
+    P(wl_data_source_interface) P(wl_data_offer_interface) P(wl_region_interface)
 #undef P
 #define F(name)                                \
   name = (decltype(&::name))dlsym(xkb, #name); \
@@ -372,6 +376,7 @@ struct Buffer {
   void* data = NULL;
   size_t size = 0;
   int width = 0, height = 0;
+  bool alpha = false;  // ARGB8888 rather than XRGB8888
   bool busy = false;
 };
 
@@ -392,6 +397,9 @@ struct Native {
   void* decoration = NULL;  // zxdg_toplevel_decoration_v1
   wl_callback* frame = NULL;
   RECT damage = {0, 0, 0, 0};  // still to be shown
+  // The input region last given, for a translucent window.
+  bool inputSet = false;
+  std::vector<RECT> input;
 };
 
 struct WaylandBackend;
@@ -869,7 +877,7 @@ struct WaylandBackend : Backend {
     b->busy = false;
   }
 
-  bool NewBuffer(Buffer& b, int width, int height) {
+  bool NewBuffer(Buffer& b, int width, int height, bool alpha = false) {
     FreeBuffer(b);
     size_t size = (size_t)width * height * 4;
     int fd = memfd_create("winport-surface", MFD_CLOEXEC);
@@ -884,7 +892,8 @@ struct WaylandBackend : Backend {
       return false;
     }
     wl_shm_pool* pool = wl_shm_create_pool(shm, fd, (int32_t)size);
-    b.buffer = wl_shm_pool_create_buffer(pool, 0, width, height, width * 4, WL_SHM_FORMAT_XRGB8888);
+    b.buffer = wl_shm_pool_create_buffer(pool, 0, width, height, width * 4,
+                                         alpha ? WL_SHM_FORMAT_ARGB8888 : WL_SHM_FORMAT_XRGB8888);
     wl_shm_pool_destroy(pool);
     close(fd);
     static const wl_buffer_listener bl = {BufferRelease};
@@ -893,6 +902,7 @@ struct WaylandBackend : Backend {
     b.size = size;
     b.width = width;
     b.height = height;
+    b.alpha = alpha;
     return true;
   }
 
@@ -919,10 +929,15 @@ struct WaylandBackend : Backend {
         break;
       }
     if (!b) return;  // shown when a buffer comes back
-    if (b->width != s->width || b->height != s->height) {
-      if (!NewBuffer(*b, s->width, s->height)) return;
+    bool translucent = Translucent(n->w);
+    if (b->width != s->width || b->height != s->height || b->alpha != translucent) {
+      if (!NewBuffer(*b, s->width, s->height, translucent)) return;
     }
-    memcpy(b->data, s->pixels.data(), b->size);
+    if (translucent)
+      Composite(n->w, RECT{0, 0, s->width, s->height}, (DWORD*)b->data, s->width);
+    else
+      memcpy(b->data, s->pixels.data(), b->size);
+    SetInputRegion(n, translucent);
     wl_surface_attach(n->surface, b->buffer, 0, 0);
     RECT d = n->damage;
     wl_surface_damage_buffer(n->surface, d.left, d.top, d.right - d.left, d.bottom - d.top);
@@ -932,6 +947,31 @@ struct WaylandBackend : Backend {
     static const wl_callback_listener fl = {FrameDone};
     wl_callback_add_listener(n->frame, &fl, n);
     wl_surface_commit(n->surface);
+  }
+
+  // Where a translucent window takes the mouse; all of an opaque one.
+  void SetInputRegion(Native* n, bool translucent) {
+    if (!translucent) {
+      if (n->inputSet) wl_surface_set_input_region(n->surface, NULL);
+      n->inputSet = false;
+      return;
+    }
+    std::vector<RECT> area = MouseArea(n->w);
+    if (n->inputSet && area.size() == n->input.size() &&
+        std::equal(area.begin(), area.end(), n->input.begin(), [](const RECT& a, const RECT& b) { return EqualRect(&a, &b); }))
+      return;
+    wl_region* rgn = wl_compositor_create_region(compositor);
+    for (const RECT& r : area) wl_region_add(rgn, r.left, r.top, r.right - r.left, r.bottom - r.top);
+    wl_surface_set_input_region(n->surface, rgn);
+    wl_region_destroy(rgn);
+    n->input = area;
+    n->inputSet = true;
+  }
+
+  void TranslucencyChanged(Window* w) override {
+    // The whole window is shown again next, in a buffer of the right kind.
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (Native* n = NativeOf(w)) n->input.clear();
   }
 
   void Present(Window* w, const RECT& r) override {
@@ -944,7 +984,7 @@ struct WaylandBackend : Backend {
     if (!IntersectRect(&d, &r, &all)) return;
     // A buffer the size of an older surface is shown whole.
     for (Buffer& b : n->buffers)
-      if (b.buffer && (b.width != s->width || b.height != s->height)) d = all;
+      if (b.buffer && (b.width != s->width || b.height != s->height || b.alpha != Translucent(w))) d = all;
     UnionRect(&n->damage, &n->damage, &d);
     // The other buffer is behind by what the last frame showed; copying
     // the whole surface keeps it simple.

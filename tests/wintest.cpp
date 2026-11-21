@@ -3094,6 +3094,134 @@ static LRESULT CALLBACK PrintProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
   return ::DefWindowProcW(h, msg, wp, lp);
 }
 
+#ifdef _WINPORT
+// Layered windows as the screen shows them, and where they take the
+// mouse: fully transparent pixels let it through to the window beneath.
+static LRESULT CALLBACK LayerProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_ERASEBKGND) {
+    // Red on the left, green on the right.
+    RECT r;
+    ::GetClientRect(h, &r);
+    RECT left = r, right = r;
+    left.right = right.left = r.right / 2;
+    HBRUSH red = ::CreateSolidBrush(RGB(255, 0, 0)), green = ::CreateSolidBrush(RGB(0, 255, 0));
+    ::FillRect((HDC)wp, &left, red);
+    ::FillRect((HDC)wp, &right, green);
+    ::DeleteObject(red);
+    ::DeleteObject(green);
+    return 1;
+  }
+  return ::DefWindowProcW(h, msg, wp, lp);
+}
+
+static bool Near(COLORREF a, COLORREF b) {
+  return abs(GetRValue(a) - GetRValue(b)) <= 1 && abs(GetGValue(a) - GetGValue(b)) <= 1 &&
+         abs(GetBValue(a) - GetBValue(b)) <= 1;
+}
+
+static void TestLayeredWindows() {
+  WNDCLASSW wc = {0};
+  wc.lpfnWndProc = LayerProc;
+  wc.lpszClassName = L"WinTestLayer";
+  CHECK(::RegisterClassW(&wc));
+  HBRUSH blue = ::CreateSolidBrush(RGB(0, 0, 255));
+  wc.lpfnWndProc = ::DefWindowProcW;
+  wc.hbrBackground = blue;
+  wc.lpszClassName = L"WinTestBlue";
+  CHECK(::RegisterClassW(&wc));
+  HWND under = ::CreateWindowExW(0, L"WinTestBlue", L"under", WS_POPUP | WS_VISIBLE, 500, 300, 100, 100, NULL, NULL,
+                                 NULL, NULL);
+  HWND top = ::CreateWindowExW(WS_EX_LAYERED, L"WinTestLayer", L"top", WS_POPUP | WS_VISIBLE, 520, 320, 40, 40,
+                               NULL, NULL, NULL, NULL);
+  CHECK(under && top);
+  ::UpdateWindow(under);
+  ::UpdateWindow(top);
+  HDC screen = ::GetDC(NULL);
+  POINT redPt = {525, 325}, greenPt = {555, 325}, corner = {520, 320};
+  const COLORREF kBlue = RGB(0, 0, 255);
+
+  // Nothing shows until the window has attributes or a picture.
+  CHECK(PixelAt(screen, redPt.x, redPt.y) == kBlue);
+  CHECK(::WindowFromPoint(redPt) == under);
+
+  // Half alpha over the blue.
+  CHECK(::SetLayeredWindowAttributes(top, 0, 128, LWA_ALPHA));
+  CHECK(Near(PixelAt(screen, redPt.x, redPt.y), RGB(128, 0, 127)));
+  CHECK(Near(PixelAt(screen, greenPt.x, greenPt.y), RGB(0, 128, 127)));
+  CHECK(::WindowFromPoint(redPt) == top);
+
+  // A color key: the red half is a hole, for the eye and the mouse.
+  CHECK(::SetLayeredWindowAttributes(top, RGB(255, 0, 0), 255, LWA_COLORKEY));
+  CHECK(PixelAt(screen, redPt.x, redPt.y) == kBlue);
+  CHECK(PixelAt(screen, greenPt.x, greenPt.y) == RGB(0, 255, 0));
+  CHECK(::WindowFromPoint(redPt) == under && ::WindowFromPoint(greenPt) == top);
+  // With WS_EX_TRANSPARENT the mouse goes through it everywhere.
+  LONG ex = ::GetWindowLongW(top, GWL_EXSTYLE);
+  ::SetWindowLongW(top, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT);
+  CHECK(::WindowFromPoint(greenPt) == under);
+  ::SetWindowLongW(top, GWL_EXSTYLE, ex);
+  CHECK(::WindowFromPoint(greenPt) == top);
+
+  // A 32-bit picture with alpha: white on the left, black at half alpha
+  // on the right (premultiplied), a hole in the top left corner.
+  BITMAPINFO bi = {};
+  bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+  bi.bmiHeader.biWidth = 40;
+  bi.bmiHeader.biHeight = -40;
+  bi.bmiHeader.biPlanes = 1;
+  bi.bmiHeader.biBitCount = 32;
+  DWORD* bits = NULL;
+  HBITMAP dib = ::CreateDIBSection(NULL, &bi, DIB_RGB_COLORS, (void**)&bits, NULL, 0);
+  CHECK(dib != NULL);
+  for (int y = 0; y < 40; y++)
+    for (int x = 0; x < 40; x++) bits[y * 40 + x] = x < 20 ? 0xFFFFFFFFu : 0x80000000u;
+  bits[0] = 0;
+  HDC mem = ::CreateCompatibleDC(NULL);
+  HGDIOBJ old = ::SelectObject(mem, dib);
+  BLENDFUNCTION bf = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+  POINT zero = {0, 0}, pos = {520, 320};
+  SIZE size = {40, 40};
+  // Not after SetLayeredWindowAttributes, until the style is set again.
+  CHECK(!::UpdateLayeredWindow(top, NULL, &pos, &size, mem, &zero, 0, &bf, ULW_ALPHA));
+  ::SetWindowLongW(top, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
+  ::SetWindowLongW(top, GWL_EXSTYLE, ex);
+  CHECK(PixelAt(screen, greenPt.x, greenPt.y) == kBlue);  // nothing shown again
+  CHECK(::UpdateLayeredWindow(top, NULL, &pos, &size, mem, &zero, 0, &bf, ULW_ALPHA));
+  CHECK(!::GetLayeredWindowAttributes(top, NULL, NULL, NULL));
+  CHECK(PixelAt(screen, redPt.x, redPt.y) == RGB(255, 255, 255));
+  CHECK(Near(PixelAt(screen, greenPt.x, greenPt.y), RGB(0, 0, 127)));
+  CHECK(PixelAt(screen, corner.x, corner.y) == kBlue);
+  CHECK(::WindowFromPoint(corner) == under && ::WindowFromPoint(redPt) == top);
+  // The same picture at no constant alpha: gone, and the mouse goes by.
+  bf.SourceConstantAlpha = 0;
+  CHECK(::UpdateLayeredWindow(top, NULL, NULL, NULL, NULL, NULL, 0, &bf, ULW_ALPHA));
+  CHECK(PixelAt(screen, redPt.x, redPt.y) == kBlue && ::WindowFromPoint(redPt) == under);
+  // Moved by it, and the picture taken in full again.
+  bf.SourceConstantAlpha = 255;
+  pos.x = 530;
+  CHECK(::UpdateLayeredWindow(top, NULL, &pos, &size, mem, &zero, 0, &bf, ULW_ALPHA));
+  RECT wr;
+  ::GetWindowRect(top, &wr);
+  CHECK(wr.left == 530 && wr.top == 320 && wr.right == 570);
+  CHECK(PixelAt(screen, 535, 325) == RGB(255, 255, 255) && PixelAt(screen, 525, 325) == kBlue);
+  ::SelectObject(mem, old);
+  ::DeleteDC(mem);
+  ::DeleteObject(dib);
+
+  // A window region shows on the screen as well: outside it, what is
+  // beneath.
+  ::DestroyWindow(top);
+  CHECK(::SetWindowRgn(under, ::CreateRectRgn(0, 0, 50, 100), TRUE));
+  ::UpdateWindow(under);
+  CHECK(PixelAt(screen, 510, 310) == kBlue && PixelAt(screen, 590, 310) != kBlue);
+  POINT outside = {590, 310};
+  CHECK(::WindowFromPoint(outside) != under);
+  ::ReleaseDC(NULL, screen);
+  ::DestroyWindow(under);
+  ::DeleteObject(blue);
+}
+#endif
+
 static void TestDisplayAndDrawing() {
   // One monitor: the screen, with its work area.
   POINT origin = {0, 0}, away = {100000, 100000};
@@ -4212,6 +4340,9 @@ int main() {
   TestWinHelp();
   TestPlgBlt();
   TestDisplayAndDrawing();
+#ifdef _WINPORT
+  TestLayeredWindows();
+#endif
   TestDecimal();
   TestShellNamespace();
   TestOleBits();

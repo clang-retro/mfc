@@ -297,9 +297,25 @@ symbolic links need none. `SHBrowseForFolder` shows a tree of the
 folders below its root and answers the `BFFM_` messages. There are no
 visual styles: the controls draw the classic look, as Windows does with
 styles turned off, so `OpenThemeData` opens nothing and `IsThemeActive`
-is false. There is one monitor, the screen. A layered window keeps its
-attributes but draws opaque. There is no OpenGL: no pixel format can be
-chosen and `wglCreateContext` fails.
+is false. There is one monitor, the screen. There is no OpenGL: no
+pixel format can be chosen and `wglCreateContext` fails.
+
+Layered windows show with their transparency: `SetLayeredWindowAttributes`
+with a color key and a constant alpha, and `UpdateLayeredWindow` (and
+`UpdateLayeredWindowIndirect`) with a picture's own premultiplied alpha
+from a 32-bit DIB section, the constant alpha over it, or a color key.
+As on Windows, the mouse goes through a layered window where it is fully
+transparent, and everywhere with `WS_EX_TRANSPARENT`; a layered window
+shows nothing until it has attributes or a picture; and once
+`SetLayeredWindowAttributes` is called, `UpdateLayeredWindow` fails until
+`WS_EX_LAYERED` is cleared and set again. A window region from
+`SetWindowRgn` cuts a top-level window's shape on the screen the same
+way. On X11 a translucent window gets a 32-bit visual when a compositing
+manager runs; without one, its color key and region become a shape
+(SHAPE extension) and its alpha is not shown. Its input shape follows
+the transparent pixels either way. On Wayland it is an ARGB buffer with
+an input region, and on macOS a window that is not opaque. The desktop's
+DC (`GetDC(NULL)`) reads the screen with translucent windows blended.
 
 A regular DLL builds as a shared library (`-shared`, exporting
 `DllMain` and the `.def` file's names; the program links with

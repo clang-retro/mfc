@@ -565,6 +565,7 @@ int WINAPI SetWindowRgn(HWND h, HRGN rgn, BOOL redraw) {
     }
   }
   if (rgn) DeleteObject(rgn);
+  if (!w->parent) TranslucencyChanged(w);
   if (redraw && ReallyVisible(w)) {
     // What the window covered before shows its parent again.
     if (w->parent) {

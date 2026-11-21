@@ -24,7 +24,14 @@ struct Native {
   Window* w = NULL;
   cocoa::Win* win = NULL;
   bool popup = false;
+  std::vector<DWORD> composed;  // a translucent window's look, while it is drawn
 };
+
+void SetTranslucent(Native* n) {
+  Window* w = n->w;
+  cocoa::SetTranslucent(n->win, Translucent(w),
+                        (w->exStyle & (WS_EX_LAYERED | WS_EX_TRANSPARENT)) == (WS_EX_LAYERED | WS_EX_TRANSPARENT));
+}
 
 std::set<Native*> g_natives;
 
@@ -118,6 +125,7 @@ struct CocoaBackend : Backend {
       n->win = cocoa::Create(n, r.left, r.top, r.right - r.left, r.bottom - r.top, n->popup);
       w->native = n;
       SetTitle(n);
+      if (Translucent(w)) SetTranslucent(n);
     }
     if (show) SetAppIcon(n);
     cocoa::Show(n->win, !show ? cocoa::kHide : (n->popup || (w->style & WS_DISABLED)) ? cocoa::kShow : cocoa::kShowKey);
@@ -157,6 +165,10 @@ struct CocoaBackend : Backend {
 
   void IconChanged(Window* w) override {
     if (Native* n = (Native*)w->native) SetAppIcon(n);
+  }
+
+  void TranslucencyChanged(Window* w) override {
+    if (Native* n = (Native*)w->native) SetTranslucent(n);
   }
 
   void Present(Window* w, const RECT& r) override {
@@ -321,7 +333,7 @@ void OnQuit() {
   PostQuitMessage(0);
 }
 
-bool BeginDraw(void* owner, const uint32_t** pixels, int* width, int* height) {
+bool BeginDraw(void* owner, const uint32_t** pixels, int* width, int* height, bool* alpha) {
   UserLock().lock();
   Native* n = Valid(owner);
   Surface* s = n && GetWindow(n->w->hwnd) ? n->w->surface : NULL;
@@ -329,7 +341,14 @@ bool BeginDraw(void* owner, const uint32_t** pixels, int* width, int* height) {
     UserLock().unlock();
     return false;
   }
-  *pixels = (const uint32_t*)s->pixels.data();
+  *alpha = Translucent(n->w);
+  if (*alpha) {
+    n->composed.resize((size_t)s->width * s->height);
+    Composite(n->w, RECT{0, 0, s->width, s->height}, n->composed.data(), s->width);
+    *pixels = (const uint32_t*)n->composed.data();
+  } else {
+    *pixels = (const uint32_t*)s->pixels.data();
+  }
   *width = s->width;
   *height = s->height;
   return true;
