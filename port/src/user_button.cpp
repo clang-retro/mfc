@@ -9,8 +9,10 @@
 #include "gdi.h"
 #include "user.h"
 
+#include <commctrl.h>
 #include <string.h>
 
+#include <algorithm>
 #include <string>
 
 using namespace winport;
@@ -120,6 +122,16 @@ struct ButtonState {
   HFONT font = NULL;
   HANDLE image = NULL;
   UINT imageType = IMAGE_BITMAP;
+  // The Vista-era parts: a split button's drop-down part, a command
+  // link's note, the shield, an image list and the text's margins.
+  bool dropDown = false, shield = false, hot = false;
+  UINT splitStyle = 0;
+  SIZE splitSize = {0, 0};  // 0 wide: the default
+  HIMAGELIST splitImages = NULL;
+  WCHAR glyph = 0;  // a Marlett character, or 0 for the arrow
+  std::wstring note;
+  BUTTON_IMAGELIST images = {NULL, {0, 0, 0, 0}, 0};
+  RECT margin = {1, 1, 1, 1};
 };
 
 UINT TypeOf(HWND h) { return GetWindowLongW(h, GWL_STYLE) & BS_TYPEMASK; }
@@ -127,6 +139,121 @@ UINT TypeOf(HWND h) { return GetWindowLongW(h, GWL_STYLE) & BS_TYPEMASK; }
 bool IsCheck(UINT t) { return t == BS_CHECKBOX || t == BS_AUTOCHECKBOX || t == BS_3STATE || t == BS_AUTO3STATE; }
 bool IsRadio(UINT t) { return t == BS_RADIOBUTTON || t == BS_AUTORADIOBUTTON; }
 bool IsPush(UINT t) { return t == BS_PUSHBUTTON || t == BS_DEFPUSHBUTTON || t == BS_PUSHBOX || t == BS_USERBUTTON; }
+bool IsSplit(UINT t) { return t == BS_SPLITBUTTON || t == BS_DEFSPLITBUTTON; }
+bool IsLink(UINT t) { return t == BS_COMMANDLINK || t == BS_DEFCOMMANDLINK; }
+bool IsDefault(UINT t) { return t == BS_DEFPUSHBUTTON || t == BS_DEFSPLITBUTTON || t == BS_DEFCOMMANDLINK; }
+
+// The split part's width: as set, or the arrow's room.
+int SplitWidth(ButtonState* s) { return s->splitSize.cx > 0 ? s->splitSize.cx : 16; }
+
+// Where a split button's drop-down part is, at its right (or left).
+RECT SplitPart(HWND h, ButtonState* s) {
+  RECT rc;
+  GetClientRect(h, &rc);
+  int w = SplitWidth(s);
+  if (s->splitStyle & BCSS_ALIGNLEFT)
+    rc.right = rc.left + w;
+  else
+    rc.left = rc.right - w;
+  return rc;
+}
+
+// A small triangle pointing down, in the text color.
+void DrawArrow(HDC dc, RECT r, bool enabled) {
+  int cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+  HBRUSH br = GetSysColorBrush(enabled ? COLOR_BTNTEXT : COLOR_GRAYTEXT);
+  for (int i = 0; i < 4; i++) {
+    RECT line = {cx - 3 + i, cy - 1 + i, cx + 4 - i, cy + i};
+    FillRect(dc, &line, br);
+  }
+}
+
+// The command link's arrow: a green circle with a white arrow in it.
+void DrawLinkArrow(HDC dc, int x, int y, bool enabled) {
+  HBRUSH br = CreateSolidBrush(enabled ? RGB(0, 140, 60) : GetSysColor(COLOR_GRAYTEXT));
+  HGDIOBJ oldBrush = SelectObject(dc, br), oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
+  Ellipse(dc, x, y, x + 17, y + 17);
+  SelectObject(dc, oldPen);
+  SelectObject(dc, oldBrush);
+  DeleteObject(br);
+  HBRUSH white = (HBRUSH)GetStockObject(WHITE_BRUSH);
+  RECT shaft = {x + 4, y + 7, x + 10, y + 10};
+  FillRect(dc, &shaft, white);
+  for (int i = 0; i < 4; i++) {
+    RECT head = {x + 10 + i, y + 4 + i, x + 11 + i, y + 13 - i};
+    FillRect(dc, &head, white);
+  }
+}
+
+// The shield that marks a step needing an administrator.
+void DrawShield(HDC dc, int x, int y) {
+  POINT pts[] = {{x + 1, y + 1}, {x + 8, y}, {x + 15, y + 1}, {x + 15, y + 7}, {x + 8, y + 15}, {x + 1, y + 7}};
+  HBRUSH br = CreateSolidBrush(RGB(40, 90, 200));
+  HPEN pen = CreatePen(PS_SOLID, 1, RGB(20, 50, 130));
+  HGDIOBJ ob = SelectObject(dc, br), op = SelectObject(dc, pen);
+  Polygon(dc, pts, 6);
+  SelectObject(dc, op);
+  SelectObject(dc, ob);
+  DeleteObject(pen);
+  DeleteObject(br);
+  RECT gold = {x + 8, y + 2, x + 14, y + 7};
+  HBRUSH g = CreateSolidBrush(RGB(250, 200, 40));
+  FillRect(dc, &gold, g);
+  RECT gold2 = {x + 3, y + 7, x + 8, y + 11};
+  FillRect(dc, &gold2, g);
+  DeleteObject(g);
+}
+
+// The image list's picture for the button's state, and its size.
+int ImageIndex(HWND h, ButtonState* s) {
+  int n = s->images.himl ? ImageList_GetImageCount(s->images.himl) : 0;
+  if (n <= 1) return 0;
+  // The order of the pictures: normal, hot, pressed, disabled, default.
+  int state = !IsWindowEnabled(h) ? 4 : s->pushed ? 3 : s->hot ? 2 : s->focus ? 5 : 1;
+  return std::min(n, state) - 1;
+}
+SIZE ImagesSize(ButtonState* s) {
+  SIZE z = {0, 0};
+  int cx, cy;
+  if (s->images.himl && ImageList_GetIconSize(s->images.himl, &cx, &cy)) z = SIZE{cx, cy};
+  return z;
+}
+
+// The image list's picture, put where its alignment says; r loses the
+// room it takes.
+void DrawImages(HWND h, HDC dc, ButtonState* s, RECT* r) {
+  if (!s->images.himl || ImageList_GetImageCount(s->images.himl) <= 0) return;
+  SIZE is = ImagesSize(s);
+  const RECT& m = s->images.margin;
+  int x, y;
+  switch (s->images.uAlign) {
+    case BUTTON_IMAGELIST_ALIGN_RIGHT:
+      x = r->right - m.right - is.cx;
+      y = (r->top + r->bottom - is.cy) / 2;
+      r->right = x - m.left;
+      break;
+    case BUTTON_IMAGELIST_ALIGN_TOP:
+      x = (r->left + r->right - is.cx) / 2;
+      y = r->top + m.top;
+      r->top = y + is.cy + m.bottom;
+      break;
+    case BUTTON_IMAGELIST_ALIGN_BOTTOM:
+      x = (r->left + r->right - is.cx) / 2;
+      y = r->bottom - m.bottom - is.cy;
+      r->bottom = y - m.top;
+      break;
+    case BUTTON_IMAGELIST_ALIGN_CENTER:
+      x = (r->left + r->right - is.cx) / 2;
+      y = (r->top + r->bottom - is.cy) / 2;
+      break;
+    default:
+      x = r->left + m.left;
+      y = (r->top + r->bottom - is.cy) / 2;
+      r->left = x + is.cx + m.right;
+      break;
+  }
+  ImageList_Draw(s->images.himl, ImageIndex(h, s), dc, x, y, ILD_TRANSPARENT);
+}
 
 UINT TextFormat(DWORD style, bool push) {
   UINT fmt = (style & BS_MULTILINE) ? DT_WORDBREAK : DT_SINGLELINE;
@@ -170,6 +297,137 @@ RECT DrawContent(HWND h, HDC dc, ButtonState* s, RECT r, DWORD style, bool push)
   box.bottom = box.top + ht;
   DrawLabel(dc, text, r, fmt, enabled);
   return box;
+}
+
+// A font like the button's, bigger: a command link's first line.
+HFONT LinkFont(HDC dc, ButtonState* s) {
+  LOGFONTW lf = {};
+  HGDIOBJ f = s->font ? (HGDIOBJ)s->font : GetStockObject(DEFAULT_GUI_FONT);
+  GetObjectW(f, sizeof lf, &lf);
+  lf.lfHeight = lf.lfHeight ? lf.lfHeight * 4 / 3 : -15;
+  (void)dc;
+  return CreateFontIndirectW(&lf);
+}
+
+// The command link's layout: the text and the note in width w, with the
+// heights they take.
+void LinkLayout(HWND h, HDC dc, ButtonState* s, int w, int* textHeight, int* noteHeight) {
+  std::wstring text = TextOf(h);
+  HFONT big = LinkFont(dc, s);
+  HGDIOBJ old = SelectObject(dc, big);
+  RECT r = {0, 0, std::max(w, 1), 0};
+  DrawTextW(dc, text.empty() ? L" " : text.c_str(), -1, &r, DT_WORDBREAK | DT_CALCRECT);
+  *textHeight = r.bottom;
+  SelectObject(dc, s->font ? (HGDIOBJ)s->font : GetStockObject(DEFAULT_GUI_FONT));
+  *noteHeight = 0;
+  if (!s->note.empty()) {
+    RECT n = {0, 0, std::max(w, 1), 0};
+    DrawTextW(dc, s->note.c_str(), -1, &n, DT_WORDBREAK | DT_CALCRECT);
+    *noteHeight = n.bottom;
+  }
+  SelectObject(dc, old);
+  DeleteObject(big);
+}
+
+const int kLinkIndent = 10 + 17 + 8;  // left margin, arrow, gap
+
+void PaintLink(HWND h, HDC dc, ButtonState* s, RECT rc, DWORD style, bool enabled) {
+  HBRUSH br = CtlColor(h, dc, WM_CTLCOLORBTN);
+  FillRect(dc, &rc, br ? br : GetSysColorBrush(COLOR_BTNFACE));
+  if (s->pushed) {
+    DrawEdge(dc, &rc, BDR_SUNKENOUTER, BF_RECT);
+  } else if (s->hot || IsDefault(style & BS_TYPEMASK) || s->focus) {
+    FrameRect(dc, &rc, GetSysColorBrush(s->hot ? COLOR_HOTLIGHT : COLOR_BTNSHADOW));
+  }
+  int off = s->pushed ? 1 : 0;
+  int x = rc.left + 10 + off, y = rc.top + 10 + off;
+  if (s->images.himl && ImageList_GetImageCount(s->images.himl) > 0)
+    ImageList_Draw(s->images.himl, ImageIndex(h, s), dc, x, y, ILD_TRANSPARENT);
+  else if (s->shield)
+    DrawShield(dc, x, y);
+  else
+    DrawLinkArrow(dc, x, y, enabled);
+  RECT text = {rc.left + kLinkIndent + off, rc.top + 8 + off, rc.right - 8 + off, rc.bottom - 4 + off};
+  int th, nh;
+  LinkLayout(h, dc, s, text.right - text.left, &th, &nh);
+  int mode = SetBkMode(dc, TRANSPARENT);
+  HFONT big = LinkFont(dc, s);
+  HGDIOBJ old = SelectObject(dc, big);
+  SetTextColor(dc, enabled ? RGB(0, 51, 153) : GetSysColor(COLOR_GRAYTEXT));
+  std::wstring label = TextOf(h);
+  DrawTextW(dc, label.c_str(), -1, &text, DT_WORDBREAK);
+  SelectObject(dc, s->font ? (HGDIOBJ)s->font : GetStockObject(DEFAULT_GUI_FONT));
+  if (!s->note.empty()) {
+    RECT n = text;
+    n.top += th + 2;
+    SetTextColor(dc, enabled ? GetSysColor(COLOR_BTNTEXT) : GetSysColor(COLOR_GRAYTEXT));
+    DrawTextW(dc, s->note.c_str(), -1, &n, DT_WORDBREAK);
+  }
+  SelectObject(dc, old);
+  DeleteObject(big);
+  SetBkMode(dc, mode);
+  if (s->focus) {
+    RECT f = rc;
+    InflateRect(&f, -2, -2);
+    DrawFocusRect(dc, &f);
+  }
+}
+
+// BCM_GETIDEALSIZE: the size that shows all of the button. A command link
+// keeps the width it is given (or has) and answers its height.
+void IdealSize(HWND h, ButtonState* s, SIZE* out) {
+  HDC dc = GetDC(h);
+  HGDIOBJ old = SelectObject(dc, s->font ? (HGDIOBJ)s->font : GetStockObject(SYSTEM_FONT));
+  UINT type = TypeOf(h);
+  if (IsLink(type)) {
+    RECT rc;
+    GetClientRect(h, &rc);
+    int w = out->cx > 0 ? out->cx : rc.right;
+    int th, nh;
+    LinkLayout(h, dc, s, w - kLinkIndent - 8, &th, &nh);
+    out->cx = w;
+    out->cy = std::max(8 + th + (nh ? nh + 2 : 0) + 10, 41);
+  } else {
+    std::wstring text = TextOf(h);
+    RECT r = {0, 0, 0, 0};
+    DrawTextW(dc, text.empty() ? L" " : text.c_str(), -1, &r, DT_SINGLELINE | DT_CALCRECT);
+    SIZE is = ImagesSize(s);
+    int w = r.right + 8 + s->margin.left + s->margin.right, ht = r.bottom + 8 + s->margin.top + s->margin.bottom;
+    if (s->images.himl) {
+      if (s->images.uAlign == BUTTON_IMAGELIST_ALIGN_TOP || s->images.uAlign == BUTTON_IMAGELIST_ALIGN_BOTTOM)
+        ht += is.cy + s->images.margin.top + s->images.margin.bottom;
+      else
+        w += is.cx + s->images.margin.left + s->images.margin.right;
+      ht = std::max<int>(ht, is.cy + 8);
+    }
+    if (s->shield) w += 18;
+    if (IsSplit(type)) w += SplitWidth(s);
+    if (IsCheck(type) || IsRadio(type)) w += 17;
+    out->cx = w;
+    out->cy = ht;
+  }
+  SelectObject(dc, old);
+  ReleaseDC(h, dc);
+}
+
+void Redraw(HWND h);
+
+// A split button's drop-down: its part shows pushed while the parent
+// handles BCN_DROPDOWN.
+void DropDown(HWND h, ButtonState* s) {
+  NMBCDROPDOWN nm;
+  memset(&nm, 0, sizeof nm);
+  nm.hdr.hwndFrom = h;
+  nm.hdr.idFrom = (UINT_PTR)GetDlgCtrlID(h);
+  nm.hdr.code = BCN_DROPDOWN;
+  GetClientRect(h, &nm.rcButton);
+  s->dropDown = true;
+  Redraw(h);
+  SendMessageW(GetParent(h), WM_NOTIFY, nm.hdr.idFrom, (LPARAM)&nm);
+  if (IsWindow(h) && StateOf<ButtonState>(h) == s) {
+    s->dropDown = false;
+    Redraw(h);
+  }
 }
 
 void PaintButton(HWND h, HDC dc) {
@@ -216,7 +474,65 @@ void PaintButton(HWND h, HDC dc) {
     return;
   }
 
+  if (IsLink(type)) {
+    PaintLink(h, dc, s, rc, style, enabled);
+    SelectObject(dc, oldFont);
+    return;
+  }
+
   bool pushLike = (style & BS_PUSHLIKE) && (IsCheck(type) || IsRadio(type));
+  if (IsSplit(type)) {
+    HBRUSH br = CtlColor(h, dc, WM_CTLCOLORBTN);
+    FillRect(dc, &rc, br ? br : GetSysColorBrush(COLOR_BTNFACE));
+    RECT r = rc;
+    if (IsDefault(type)) {
+      FrameRect(dc, &r, GetSysColorBrush(COLOR_WINDOWFRAME));
+      InflateRect(&r, -1, -1);
+    }
+    bool split = !(s->splitStyle & BCSS_NOSPLIT);
+    RECT part = SplitPart(h, s);
+    if (IsDefault(type)) InflateRect(&part, 0, -1);
+    if (s->splitStyle & BCSS_ALIGNLEFT) part.left = r.left; else part.right = r.right;
+    RECT main = r;
+    if (s->splitStyle & BCSS_ALIGNLEFT) main.left = part.right; else main.right = part.left;
+    UINT state = DFCS_BUTTONPUSH | (s->pushed ? DFCS_PUSHED : 0) | ((style & BS_FLAT) ? DFCS_FLAT : 0);
+    if (split) {
+      DrawFrameControl(dc, &main, DFC_BUTTON, state);
+      DrawFrameControl(dc, &part, DFC_BUTTON,
+                       DFCS_BUTTONPUSH | (s->dropDown ? DFCS_PUSHED : 0) | ((style & BS_FLAT) ? DFCS_FLAT : 0));
+    } else {
+      DrawFrameControl(dc, &r, DFC_BUTTON, state | (s->dropDown ? DFCS_PUSHED : 0));
+    }
+    RECT glyph = part;
+    if (s->dropDown) OffsetRect(&glyph, 1, 1);
+    if ((s->splitStyle & BCSS_IMAGE) && s->splitImages) {
+      int cx = 0, cy = 0;
+      ImageList_GetIconSize(s->splitImages, &cx, &cy);
+      ImageList_Draw(s->splitImages, 0, dc, (glyph.left + glyph.right - cx) / 2, (glyph.top + glyph.bottom - cy) / 2,
+                     ILD_TRANSPARENT);
+    } else {
+      DrawArrow(dc, glyph, enabled);
+    }
+    RECT content = main;
+    InflateRect(&content, -3, -3);
+    content.left += s->margin.left - 1;
+    content.right -= s->margin.right - 1;
+    if (s->pushed) OffsetRect(&content, 1, 1);
+    DrawImages(h, dc, s, &content);
+    if (s->shield) {
+      DrawShield(dc, content.left, (content.top + content.bottom - 16) / 2);
+      content.left += 18;
+    }
+    SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
+    DrawContent(h, dc, s, content, style, true);
+    if (s->focus) {
+      RECT f = main;
+      InflateRect(&f, -3, -3);
+      DrawFocusRect(dc, &f);
+    }
+    SelectObject(dc, oldFont);
+    return;
+  }
   if (IsPush(type) || pushLike) {
     HBRUSH br = CtlColor(h, dc, WM_CTLCOLORBTN);
     FillRect(dc, &rc, br ? br : GetSysColorBrush(COLOR_BTNFACE));
@@ -233,7 +549,16 @@ void PaintButton(HWND h, HDC dc) {
     DrawFrameControl(dc, &r, DFC_BUTTON, state);
     RECT content = r;
     InflateRect(&content, -3, -3);
+    content.left += s->margin.left - 1;
+    content.top += s->margin.top - 1;
+    content.right -= s->margin.right - 1;
+    content.bottom -= s->margin.bottom - 1;
     if (down) OffsetRect(&content, 1, 1);
+    DrawImages(h, dc, s, &content);
+    if (s->shield) {
+      DrawShield(dc, content.left, (content.top + content.bottom - 16) / 2);
+      content.left += 18;
+    }
     SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
     DrawContent(h, dc, s, content, style, true);
     if (s->focus) {
@@ -351,8 +676,8 @@ LRESULT CALLBACK ButtonProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_GETDLGCODE: {
       UINT t = TypeOf(h);
       if (t == BS_GROUPBOX) return DLGC_STATIC;
-      if (t == BS_DEFPUSHBUTTON) return DLGC_BUTTON | DLGC_DEFPUSHBUTTON;
-      if (t == BS_PUSHBUTTON || t == BS_PUSHBOX || t == BS_USERBUTTON || t == BS_OWNERDRAW)
+      if (IsDefault(t)) return DLGC_BUTTON | DLGC_DEFPUSHBUTTON;
+      if (t == BS_PUSHBUTTON || t == BS_PUSHBOX || t == BS_USERBUTTON || t == BS_OWNERDRAW || IsSplit(t) || IsLink(t))
         return DLGC_BUTTON | DLGC_UNDEFPUSHBUTTON;
       if (IsRadio(t)) return DLGC_BUTTON | DLGC_RADIOBUTTON;
       return DLGC_BUTTON;
@@ -387,7 +712,7 @@ LRESULT CALLBACK ButtonProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_LBUTTONDBLCLK:
       if (GetWindowLongW(h, GWL_STYLE) & BS_NOTIFY) {
         UINT t = TypeOf(h);
-        if (IsRadio(t) || t == BS_OWNERDRAW || IsPush(t)) {
+        if (IsRadio(t) || t == BS_OWNERDRAW || IsPush(t) || IsSplit(t) || IsLink(t)) {
           Notify(h, BN_DOUBLECLICKED);
           return 0;
         }
@@ -395,13 +720,35 @@ LRESULT CALLBACK ButtonProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       // fall through: a second click
     case WM_LBUTTONDOWN:
       if (TypeOf(h) == BS_GROUPBOX) return 0;
+      if (IsSplit(TypeOf(h))) {
+        // The drop-down part, or all of a button that has no split.
+        RECT part = SplitPart(h, s);
+        POINT p = {(SHORT)LOWORD(lp), (SHORT)HIWORD(lp)};
+        if ((s->splitStyle & BCSS_NOSPLIT) || PtInRect(&part, p)) {
+          if (GetFocus() != h) SetFocus(h);
+          DropDown(h, s);
+          return 0;
+        }
+      }
       if (GetFocus() != h) SetFocus(h);
       SetCapture(h);
       s->tracking = true;
       s->pushed = true;
       Redraw(h);
       return 0;
+    case WM_MOUSELEAVE:
+      if (s->hot) {
+        s->hot = false;
+        if (IsLink(TypeOf(h))) Redraw(h);
+      }
+      return 0;
     case WM_MOUSEMOVE:
+      if (!s->hot) {
+        s->hot = true;
+        TRACKMOUSEEVENT tme = {sizeof tme, TME_LEAVE, h, 0};
+        TrackMouseEvent(&tme);
+        if (IsLink(TypeOf(h))) Redraw(h);
+      }
       if (s->tracking) {
         RECT rc;
         GetClientRect(h, &rc);
@@ -430,7 +777,17 @@ LRESULT CALLBACK ButtonProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         Redraw(h);
       }
       return 0;
+    case WM_SYSKEYDOWN:
+      if (wp == VK_DOWN && IsSplit(TypeOf(h))) {
+        DropDown(h, s);
+        return 0;
+      }
+      break;
     case WM_KEYDOWN:
+      if (wp == VK_F4 && IsSplit(TypeOf(h))) {
+        DropDown(h, s);
+        return 0;
+      }
       if (wp == VK_SPACE && !(HIWORD(lp) & KF_REPEAT)) {
         s->spacePressed = true;
         s->pushed = true;
@@ -480,7 +837,8 @@ LRESULT CALLBACK ButtonProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
     }
     case BM_GETSTATE:
-      return s->check | (s->pushed ? BST_PUSHED : 0) | (s->focus ? BST_FOCUS : 0);
+      return s->check | (s->pushed ? BST_PUSHED : 0) | (s->focus ? BST_FOCUS : 0) | (s->hot ? BST_HOT : 0) |
+             (s->dropDown ? BST_DROPDOWNPUSHED : 0);
     case BM_SETSTATE:
       if ((wp != 0) != s->pushed) {
         s->pushed = wp != 0;
@@ -489,7 +847,12 @@ LRESULT CALLBACK ButtonProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
     case BM_SETSTYLE: {
       LONG style = GetWindowLongW(h, GWL_STYLE);
-      SetWindowLongW(h, GWL_STYLE, (style & ~BS_TYPEMASK) | (wp & BS_TYPEMASK));
+      UINT type = (UINT)(wp & BS_TYPEMASK), now = style & BS_TYPEMASK;
+      // The dialog manager moves the default between push buttons; a
+      // split button or command link stays one.
+      if ((IsSplit(now) || IsLink(now)) && (type == BS_PUSHBUTTON || type == BS_DEFPUSHBUTTON))
+        type = (IsSplit(now) ? BS_SPLITBUTTON : BS_COMMANDLINK) | (type == BS_DEFPUSHBUTTON ? 1 : 0);
+      SetWindowLongW(h, GWL_STYLE, (style & ~BS_TYPEMASK) | type);
       if (lp) Redraw(h);
       return 0;
     }
@@ -502,6 +865,86 @@ LRESULT CALLBACK ButtonProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         Click(h);
       }
       return 0;
+    case BCM_GETIDEALSIZE: {
+      SIZE* sz = (SIZE*)lp;
+      if (!sz) return FALSE;
+      IdealSize(h, s, sz);
+      return TRUE;
+    }
+    case BCM_SETIMAGELIST: {
+      const BUTTON_IMAGELIST* il = (const BUTTON_IMAGELIST*)lp;
+      if (!il) return FALSE;
+      s->images = *il;
+      Redraw(h);
+      return TRUE;
+    }
+    case BCM_GETIMAGELIST:
+      if (!lp) return FALSE;
+      *(BUTTON_IMAGELIST*)lp = s->images;
+      return TRUE;
+    case BCM_SETTEXTMARGIN:
+      if (!lp) return FALSE;
+      s->margin = *(const RECT*)lp;
+      Redraw(h);
+      return TRUE;
+    case BCM_GETTEXTMARGIN:
+      if (!lp) return FALSE;
+      *(RECT*)lp = s->margin;
+      return TRUE;
+    case BCM_SETDROPDOWNSTATE:
+      if (!IsSplit(TypeOf(h))) return FALSE;
+      s->dropDown = wp != 0;
+      Redraw(h);
+      return TRUE;
+    case BCM_SETSPLITINFO: {
+      const BUTTON_SPLITINFO* si = (const BUTTON_SPLITINFO*)lp;
+      if (!si) return FALSE;
+      if (si->mask & BCSIF_GLYPH) s->glyph = (WCHAR)(UINT_PTR)si->himlGlyph;
+      if (si->mask & BCSIF_IMAGE) s->splitImages = si->himlGlyph;
+      if (si->mask & BCSIF_STYLE) s->splitStyle = si->uSplitStyle;
+      if (si->mask & BCSIF_SIZE) s->splitSize = si->size;
+      Redraw(h);
+      return TRUE;
+    }
+    case BCM_GETSPLITINFO: {
+      BUTTON_SPLITINFO* si = (BUTTON_SPLITINFO*)lp;
+      if (!si) return FALSE;
+      if (si->mask & BCSIF_GLYPH) si->himlGlyph = (HIMAGELIST)(UINT_PTR)(s->glyph ? s->glyph : 6);
+      if (si->mask & BCSIF_IMAGE) si->himlGlyph = s->splitImages;
+      if (si->mask & BCSIF_STYLE) si->uSplitStyle = s->splitStyle;
+      if (si->mask & BCSIF_SIZE) si->size = SIZE{SplitWidth(s), s->splitSize.cy};
+      return TRUE;
+    }
+    case BCM_SETNOTE:
+      if (!IsLink(TypeOf(h))) {
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return FALSE;
+      }
+      s->note = lp ? (const WCHAR*)lp : L"";
+      Redraw(h);
+      return TRUE;
+    case BCM_GETNOTE: {
+      DWORD* cch = (DWORD*)wp;
+      if (!IsLink(TypeOf(h))) {
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return FALSE;
+      }
+      if (!cch) return FALSE;
+      if (!lp || *cch < s->note.size() + 1) {
+        *cch = (DWORD)s->note.size() + 1;
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        return FALSE;
+      }
+      memcpy((WCHAR*)lp, s->note.c_str(), (s->note.size() + 1) * sizeof(WCHAR));
+      *cch = (DWORD)s->note.size();
+      return TRUE;
+    }
+    case BCM_GETNOTELENGTH:
+      return IsLink(TypeOf(h)) ? (LRESULT)s->note.size() : 0;
+    case BCM_SETSHIELD:
+      s->shield = lp != 0;
+      Redraw(h);
+      return TRUE;
     case BM_GETIMAGE:
       return wp == s->imageType ? (LRESULT)s->image : 0;
     case BM_SETIMAGE: {

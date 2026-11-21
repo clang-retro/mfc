@@ -11,25 +11,19 @@
 #endif
 #include "afximpl.h"
 #include <afxdlgs.h>
-#ifndef _WINPORT
 #include <shlobj.h>
-#endif
 
 IMPLEMENT_DYNAMIC(CFolderPickerDialog, CFileDialog)
 
 CFileDialog::~CFileDialog() {
-#ifndef _WINPORT
   if (m_pIFileDialog != NULL) m_pIFileDialog->Release();
   if (m_bCoInit) ::CoUninitialize();
-#endif
 }
 
 void CFileDialog::OnButtonClicked(DWORD) {}
 void CFileDialog::OnCheckButtonToggled(DWORD, BOOL) {}
 void CFileDialog::OnControlActivating(DWORD) {}
 void CFileDialog::OnItemSelected(DWORD, DWORD) {}
-
-#ifndef _WINPORT
 
 // The identifiers, spelled out so nothing depends on which of them the
 // SDK's uuid library has.
@@ -60,10 +54,14 @@ static IShellItem* _AfxShellItemFromPath(LPCTSTR lpszPath) {
   static PFN pfn = NULL;
   static BOOL bLooked = FALSE;
   if (!bLooked) {
+#ifdef _WINPORT
+    pfn = ::SHCreateItemFromParsingName;  // the layer's own
+#else
     HMODULE hShell = ::GetModuleHandle(_T("shell32.dll"));
     if (hShell == NULL) hShell = ::LoadLibrary(_T("shell32.dll"));
     if (hShell != NULL)
       pfn = (PFN)(void*)::GetProcAddress(hShell, "SHCreateItemFromParsingName");
+#endif
     bLooked = TRUE;
   }
   if (pfn == NULL || lpszPath == NULL || *lpszPath == 0) return NULL;
@@ -580,45 +578,6 @@ static INT_PTR _AfxBrowseForFolder(CFileDialog* pDlg, CWnd* pParentWnd) {
   return IDOK;
 }
 
-#else  // _WINPORT: no shell dialogs; the classic one does the work.
-
-IFileDialog* CFileDialog::_AfxEnsureShellDialog() { return NULL; }
-BOOL CFileDialog::_AfxUseShellDialog() { return FALSE; }
-INT_PTR CFileDialog::_AfxDoModalShell() { return IDCANCEL; }
-void CFileDialog::ApplyOFNToShellDialog() {}
-void CFileDialog::UpdateOFNFromShellDialog() {}
-IFileOpenDialog* CFileDialog::GetIFileOpenDialog() { return NULL; }
-IFileSaveDialog* CFileDialog::GetIFileSaveDialog() { return NULL; }
-IFileDialogCustomize* CFileDialog::GetIFileDialogCustomize() { return NULL; }
-HRESULT CFileDialog::AddCheckButton(DWORD, const CString&, BOOL) { return E_NOTIMPL; }
-HRESULT CFileDialog::AddComboBox(DWORD) { return E_NOTIMPL; }
-HRESULT CFileDialog::AddControlItem(DWORD, DWORD, const CString&) { return E_NOTIMPL; }
-HRESULT CFileDialog::AddEditBox(DWORD, const CString&) { return E_NOTIMPL; }
-HRESULT CFileDialog::AddMenu(DWORD, const CString&) { return E_NOTIMPL; }
-HRESULT CFileDialog::AddPushButton(DWORD, const CString&) { return E_NOTIMPL; }
-HRESULT CFileDialog::AddRadioButtonList(DWORD) { return E_NOTIMPL; }
-HRESULT CFileDialog::AddSeparator(DWORD) { return E_NOTIMPL; }
-HRESULT CFileDialog::AddText(DWORD, const CString&) { return E_NOTIMPL; }
-HRESULT CFileDialog::EnableOpenDropDown(DWORD) { return E_NOTIMPL; }
-HRESULT CFileDialog::EndVisualGroup() { return E_NOTIMPL; }
-HRESULT CFileDialog::GetCheckButtonState(DWORD, BOOL&) { return E_NOTIMPL; }
-HRESULT CFileDialog::GetControlItemState(DWORD, DWORD, CDCONTROLSTATEF&) { return E_NOTIMPL; }
-HRESULT CFileDialog::GetControlState(DWORD, CDCONTROLSTATEF&) { return E_NOTIMPL; }
-HRESULT CFileDialog::GetEditBoxText(DWORD, CString&) { return E_NOTIMPL; }
-HRESULT CFileDialog::GetSelectedControlItem(DWORD, DWORD&) { return E_NOTIMPL; }
-HRESULT CFileDialog::MakeProminent(DWORD) { return E_NOTIMPL; }
-HRESULT CFileDialog::RemoveControlItem(DWORD, DWORD) { return E_NOTIMPL; }
-HRESULT CFileDialog::SetCheckButtonState(DWORD, BOOL) { return E_NOTIMPL; }
-HRESULT CFileDialog::SetControlItemState(DWORD, DWORD, CDCONTROLSTATEF) { return E_NOTIMPL; }
-HRESULT CFileDialog::SetControlItemText(DWORD, DWORD, const CString&) { return E_NOTIMPL; }
-HRESULT CFileDialog::SetControlLabel(DWORD, const CString&) { return E_NOTIMPL; }
-HRESULT CFileDialog::SetControlState(DWORD, CDCONTROLSTATEF) { return E_NOTIMPL; }
-HRESULT CFileDialog::SetEditBoxText(DWORD, const CString&) { return E_NOTIMPL; }
-HRESULT CFileDialog::SetSelectedControlItem(DWORD, DWORD) { return E_NOTIMPL; }
-HRESULT CFileDialog::StartVisualGroup(DWORD, const CString&) { return E_NOTIMPL; }
-
-#endif  // _WINPORT
-
 // ---------------------------------------------------------------------
 // CFolderPickerDialog
 
@@ -633,9 +592,5 @@ CFolderPickerDialog::~CFolderPickerDialog() {}
 
 INT_PTR CFolderPickerDialog::DoModal() {
   if (_AfxUseShellDialog()) return _AfxDoModalShell();
-#ifndef _WINPORT
   return _AfxBrowseForFolder(this, m_pParentWnd);
-#else
-  return IDCANCEL;
-#endif
 }
