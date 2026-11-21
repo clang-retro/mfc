@@ -40,6 +40,13 @@ struct Object {
   // When the object will next signal by itself (a waitable timer), as a
   // FILETIME on the system clock; 0 for never. Called with WaitLock held.
   virtual ULONGLONG Due() { return 0; }
+  // An object shared with other processes holds its state still between
+  // Lock and Unlock (with WaitLock held); Lock is false for the others.
+  virtual bool Lock() { return false; }
+  virtual const char* LockKey() { return NULL; }  // the order to lock several in
+  virtual void Unlock() {}
+  // A mutex the last wait took from an owner that had ended.
+  virtual bool TakeAbandoned() { return false; }
 };
 Object* FromHandle(HANDLE h, ObjectType type = (ObjectType)0);
 HANDLE NewHandle(Object* o);

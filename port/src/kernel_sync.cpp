@@ -8,16 +8,21 @@
 #include "file.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <sched.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <signal.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <algorithm>
 #include <deque>
 #include <functional>
 #include <map>
 #include <new>
 #include <set>
+#include <type_traits>
 #include <vector>
 #ifdef __APPLE__
 #include <mach/mach_time.h>
@@ -45,8 +50,9 @@ Object* FromHandle(HANDLE h, ObjectType type) {
   return o;
 }
 HANDLE NewHandle(Object* o) { return (HANDLE)o; }
-// Named objects (events, mutexes, semaphores, timers): the names are
-// this process's.
+// Named objects (events, mutexes, semaphores, timers): a process finds
+// its own by name here. Named events, mutexes and semaphores are shared
+// with the user's other processes too (see SharedState below).
 static pthread_mutex_t g_namesLock = PTHREAD_MUTEX_INITIALIZER;
 static std::map<std::wstring, Object*>& Names() {
   static auto* m = new std::map<std::wstring, Object*>;
@@ -78,34 +84,227 @@ void Release(Object* o) {
 
 namespace {
 
+// ---------------------------------------------------------------------
+// Named objects between processes. A named event, mutex or semaphore
+// keeps its state in a page of POSIX shared memory, named for the user
+// and a hash of the object's name, which every process with a handle to
+// it maps. A spin lock in the page guards the state for the moment it
+// takes to look at or change it. The page lists the processes that hold
+// handles; when none of those is alive any more the object is gone, as
+// on Windows when its last handle closes, and the next to create it
+// starts afresh. A mutex whose owner's process has ended is abandoned.
+// Waits in other processes see a change by looking again every few
+// milliseconds, since nothing can wake them.
+
+const uint32_t kSharedMagic = 0x6c6d6f62;  // "lmob"
+const int kMaxHolders = 64;
+const ULONGLONG kSharedPoll = 4 * 10000;  // 4 ms, in FILETIME units
+
+struct SharedState {
+  std::atomic<uint32_t> lock;
+  uint32_t magic;
+  uint32_t type;
+  // An event
+  int32_t manual, signaled;
+  // A mutex: its owning thread, as a process and the thread's number in it
+  int32_t ownerPid;
+  uint32_t ownerTid;
+  int32_t count;
+  int32_t abandoned;
+  // A semaphore (its count is count)
+  int32_t max;
+  // The processes with handles, and how many each
+  int32_t pids[kMaxHolders];
+  int32_t pidRefs[kMaxHolders];
+  char name[512];
+};
+static_assert(sizeof(std::atomic<uint32_t>) == 4, "a plain word in shared memory");
+
+bool Alive(int32_t pid) { return pid > 0 && (kill(pid, 0) == 0 || errno == EPERM); }
+
+void LockShared(SharedState* s) {
+  for (int spins = 0; s->lock.exchange(1, std::memory_order_acquire); spins++)
+    if (spins > 64) sched_yield();
+}
+void UnlockShared(SharedState* s) { s->lock.store(0, std::memory_order_release); }
+
+// The shared memory's name: short, as macOS allows 31 characters.
+std::string SharedName(const std::string& name) {
+  uint64_t h = 1469598103934665603ULL;
+  for (unsigned char c : name) h = (h ^ c) * 1099511628211ULL;
+  char buf[48];
+  snprintf(buf, sizeof buf, "/lm%u-%016llx", (unsigned)getuid(), (unsigned long long)h);
+  return buf;
+}
+
+// Maps the object's page and adds this process to its holders; fresh is
+// true when there was no live object of the name, and the caller then
+// sets it up. NULL when there is no shared memory, or another kind of
+// object has the name (wrongType).
+SharedState* MapShared(const std::wstring& wname, uint32_t type, bool create, bool* fresh, bool* wrongType) {
+  std::string name = Narrow(wname.c_str());
+  if (name.size() >= sizeof(((SharedState*)0)->name)) return NULL;
+  std::string sn = SharedName(name);
+  int fd = shm_open(sn.c_str(), O_RDWR | (create ? O_CREAT : 0), 0600);
+  if (fd < 0) return NULL;
+  struct stat st;
+  if (fstat(fd, &st) != 0 || ((size_t)st.st_size < sizeof(SharedState) && ftruncate(fd, sizeof(SharedState)) != 0)) {
+    close(fd);
+    return NULL;
+  }
+  void* p = mmap(NULL, sizeof(SharedState), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  close(fd);
+  if (p == MAP_FAILED) return NULL;
+  SharedState* s = (SharedState*)p;
+  LockShared(s);
+  bool live = false;
+  if (s->magic == kSharedMagic && strcmp(s->name, name.c_str()) == 0)
+    for (int i = 0; i < kMaxHolders; i++)
+      if (s->pidRefs[i] > 0) {
+        if (Alive(s->pids[i])) live = true;
+        else s->pids[i] = 0, s->pidRefs[i] = 0;
+      }
+  *fresh = !live;
+  *wrongType = live && s->type != type;
+  if ((!live && !create) || *wrongType) {
+    UnlockShared(s);
+    munmap(p, sizeof(SharedState));
+    return NULL;
+  }
+  if (!live) {
+    memset((char*)s + sizeof(s->lock), 0, sizeof(SharedState) - sizeof(s->lock));
+    s->magic = kSharedMagic;
+    s->type = type;
+    strcpy(s->name, name.c_str());
+  }
+  int32_t me = (int32_t)getpid();
+  int slot = -1;
+  for (int i = 0; i < kMaxHolders; i++)
+    if (s->pidRefs[i] > 0 && s->pids[i] == me) slot = i;
+  for (int i = 0; i < kMaxHolders && slot < 0; i++)
+    if (s->pidRefs[i] == 0) slot = i;
+  if (slot >= 0) {
+    s->pids[slot] = me;
+    s->pidRefs[slot]++;
+  }
+  // Fresh state stays locked for the caller to fill in.
+  if (live) UnlockShared(s);
+  return s;
+}
+
+void UnmapShared(SharedState* s) {
+  LockShared(s);
+  int32_t me = (int32_t)getpid();
+  for (int i = 0; i < kMaxHolders; i++)
+    if (s->pids[i] == me && s->pidRefs[i] > 0 && --s->pidRefs[i] == 0) s->pids[i] = 0;
+  UnlockShared(s);
+  munmap((void*)s, sizeof(SharedState));
+}
+
+// A wait on a shared object looks again this often.
+ULONGLONG SharedDue() {
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  return (ULONGLONG)ts.tv_sec * 10000000 + ts.tv_nsec / 100 + kEpochDelta + kSharedPoll;
+}
+
+// The objects' state is their own, or with a name, the shared page's,
+// which Lock holds still across a wait's look and its taking.
 struct Event : Object {
   bool manual, signaled;
+  SharedState* shared = NULL;
   Event(bool m, bool s) : Object(kEvent), manual(m), signaled(s) {}
-  bool Waitable() override { return true; }
-  bool IsSignaled(DWORD) override { return signaled; }
-  void Acquire(DWORD) override {
-    if (!manual) signaled = false;
+  ~Event() override {
+    if (shared) UnmapShared(shared);
   }
+  bool Waitable() override { return true; }
+  bool IsSignaled(DWORD) override { return shared ? shared->signaled != 0 : signaled; }
+  void Acquire(DWORD) override {
+    if (shared ? !shared->manual : !manual) (shared ? (void)(shared->signaled = 0) : (void)(signaled = false));
+  }
+  bool Lock() override {
+    if (shared) LockShared(shared);
+    return shared != NULL;
+  }
+  const char* LockKey() override { return shared ? shared->name : NULL; }
+  void Unlock() override {
+    if (shared) UnlockShared(shared);
+  }
+  ULONGLONG Due() override { return shared ? SharedDue() : 0; }
 };
 
 struct Mutex : Object {
   DWORD owner = 0;
   int count = 0;
+  SharedState* shared = NULL;
+  bool abandoned = false;  // taken from an owner that ended: the waiter is told
   Mutex() : Object(kMutex) {}
-  bool Waitable() override { return true; }
-  bool IsSignaled(DWORD tid) override { return count == 0 || owner == tid; }
-  void Acquire(DWORD tid) override {
-    owner = tid;
-    count++;
+  ~Mutex() override {
+    if (shared) UnmapShared(shared);
   }
+  bool Waitable() override { return true; }
+  bool IsSignaled(DWORD tid) override {
+    if (!shared) return count == 0 || owner == tid;
+    if (shared->count == 0) return true;
+    if (shared->ownerPid == (int32_t)getpid()) return shared->ownerTid == tid;
+    if (!Alive(shared->ownerPid)) {
+      // Its owner's process has ended.
+      shared->count = 0;
+      shared->abandoned = 1;
+      return true;
+    }
+    return false;
+  }
+  void Acquire(DWORD tid) override {
+    if (!shared) {
+      owner = tid;
+      count++;
+      return;
+    }
+    shared->ownerPid = (int32_t)getpid();
+    shared->ownerTid = tid;
+    shared->count++;
+    abandoned = shared->abandoned != 0;
+    shared->abandoned = 0;
+  }
+  bool TakeAbandoned() override {
+    bool a = abandoned;
+    abandoned = false;
+    return a;
+  }
+  bool Lock() override {
+    if (shared) LockShared(shared);
+    return shared != NULL;
+  }
+  const char* LockKey() override { return shared ? shared->name : NULL; }
+  void Unlock() override {
+    if (shared) UnlockShared(shared);
+  }
+  ULONGLONG Due() override { return shared ? SharedDue() : 0; }
 };
 
 struct Semaphore : Object {
   LONG count, max;
+  SharedState* shared = NULL;
   Semaphore(LONG c, LONG m) : Object(kSemaphore), count(c), max(m) {}
+  ~Semaphore() override {
+    if (shared) UnmapShared(shared);
+  }
   bool Waitable() override { return true; }
-  bool IsSignaled(DWORD) override { return count > 0; }
-  void Acquire(DWORD) override { count--; }
+  bool IsSignaled(DWORD) override { return shared ? shared->count > 0 : count > 0; }
+  void Acquire(DWORD) override {
+    if (shared) shared->count--;
+    else count--;
+  }
+  bool Lock() override {
+    if (shared) LockShared(shared);
+    return shared != NULL;
+  }
+  const char* LockKey() override { return shared ? shared->name : NULL; }
+  void Unlock() override {
+    if (shared) UnlockShared(shared);
+  }
+  ULONGLONG Due() override { return shared ? SharedDue() : 0; }
 };
 
 struct Thread : Object {
@@ -223,6 +422,50 @@ thread_local DWORD t_lastError = 0;
 
 }  // namespace
 
+// Gives a new named object its shared state: another process's, or its
+// own, now shared. existed says whether another process had it. False
+// when the name is another kind of object's.
+uint32_t SharedType(Object* o) {
+  return dynamic_cast<Event*>(o) ? 1 : dynamic_cast<Mutex*>(o) ? 2 : dynamic_cast<Semaphore*>(o) ? 3 : 0;
+}
+bool Share(Object* o, const std::wstring& name, bool create, bool* existed) {
+  *existed = false;
+  uint32_t type = SharedType(o);
+  if (!type) return true;
+  bool fresh = false, wrong = false;
+  SharedState* sh = MapShared(name, type, create, &fresh, &wrong);
+  if (wrong) return false;
+  if (!sh) return true;  // no shared memory: this process's alone
+  *existed = !fresh;
+  if (Event* e = dynamic_cast<Event*>(o)) {
+    if (fresh) sh->manual = e->manual, sh->signaled = e->signaled;
+    e->shared = sh;
+  } else if (Mutex* m = dynamic_cast<Mutex*>(o)) {
+    if (fresh && m->count) sh->count = m->count, sh->ownerPid = (int32_t)getpid(), sh->ownerTid = m->owner;
+    m->shared = sh;
+  } else if (Semaphore* s = dynamic_cast<Semaphore*>(o)) {
+    if (fresh) sh->count = s->count, sh->max = s->max;
+    s->shared = sh;
+  }
+  if (fresh) UnlockShared(sh);
+  return true;
+}
+// A handle's object for a name another process has: NULL when none has.
+template <class T>
+T* OpenShared(const std::wstring& name) {
+  T* o = NULL;
+  if (std::is_same<T, Event>::value) o = (T*)(Object*)new Event(false, false);
+  else if (std::is_same<T, Mutex>::value) o = (T*)(Object*)new Mutex();
+  else if (std::is_same<T, Semaphore>::value) o = (T*)(Object*)new Semaphore(0, 1);
+  if (!o) return NULL;
+  bool existed = false;
+  if (!Share(o, name, false, &existed) || !existed) {
+    delete o;
+    return NULL;
+  }
+  return o;
+}
+
 // A new named object, or another handle to the one of that name.
 template <class T, class Make>
 HANDLE CreateNamed(LPCWSTR name, LPSECURITY_ATTRIBUTES sa, Make make) {
@@ -249,12 +492,19 @@ HANDLE CreateNamed(LPCWSTR name, LPSECURITY_ATTRIBUTES sa, Make make) {
   }
   T* o = make();
   SetObjectSecurity(o, sa);
+  bool existed = false;
   if (!n.empty()) {
+    if (!Share(o, n, true, &existed)) {
+      pthread_mutex_unlock(&g_namesLock);
+      delete o;
+      SetLastError(ERROR_INVALID_HANDLE);
+      return NULL;
+    }
     o->named = true;
     Names()[n] = o;
     pthread_mutex_unlock(&g_namesLock);
   }
-  SetLastError(0);
+  SetLastError(existed ? ERROR_ALREADY_EXISTS : 0);
   return NewHandle(o);
 }
 template <class T>
@@ -264,10 +514,21 @@ HANDLE OpenNamed(LPCWSTR name) {
     return NULL;
   }
   pthread_mutex_lock(&g_namesLock);
-  auto it = Names().find(ObjectName(name));
+  std::wstring n = ObjectName(name);
+  auto it = Names().find(n);
   Object* o = it != Names().end() ? it->second : NULL;
   int r = o ? o->refs.load() : 0;
   while (r > 0 && !o->refs.compare_exchange_weak(r, r + 1)) {
+  }
+  if (r == 0) {
+    // Another process's.
+    T* t = OpenShared<T>(n);
+    if (t) {
+      t->named = true;
+      Names()[n] = t;
+      o = t;
+      r = 1;
+    }
   }
   pthread_mutex_unlock(&g_namesLock);
   if (r == 0) {
@@ -336,8 +597,8 @@ BOOL WINAPI DuplicateHandle(HANDLE hSourceProcess, HANDLE hSource, HANDLE hTarge
   return TRUE;
 }
 
-// Events, mutexes and semaphores. Named objects are shared within the
-// process only.
+// Events, mutexes and semaphores. Named ones are shared with the user's
+// other processes (see SharedState).
 HANDLE WINAPI CreateEventW(LPSECURITY_ATTRIBUTES sa, BOOL bManualReset, BOOL bInitialState, LPCWSTR name) {
   return CreateNamed<Event>(name, sa, [&] { return new Event(bManualReset != 0, bInitialState != 0); });
 }
@@ -357,18 +618,28 @@ static BOOL SetEventState(HANDLE h, int how) {
     return FALSE;
   }
   pthread_mutex_lock(WaitLock());
+  auto set = [e](bool on) {
+    if (e->Lock()) {
+      e->shared->signaled = on;
+      e->Unlock();
+    } else {
+      e->signaled = on;
+    }
+  };
   if (how == 0) {
-    e->signaled = false;
+    set(false);
   } else {
-    e->signaled = true;
+    set(true);
     SignalChange();
     if (how == 2) {
       // PulseEvent: wake the waiters there are now, then reset. The
-      // waiters re-check under the lock, so give them a moment to run.
+      // waiters re-check under the lock, so give them a moment to run;
+      // other processes' look again only every few milliseconds.
       pthread_mutex_unlock(WaitLock());
-      sched_yield();
+      if (e->shared) usleep((useconds_t)(kSharedPoll / 10 * 2));
+      else sched_yield();
       pthread_mutex_lock(WaitLock());
-      e->signaled = false;
+      set(false);
     }
   }
   pthread_mutex_unlock(WaitLock());
@@ -402,7 +673,18 @@ BOOL WINAPI ReleaseMutex(HANDLE h) {
   }
   BOOL ok = FALSE;
   pthread_mutex_lock(WaitLock());
-  if (m->count > 0 && m->owner == CurrentThreadId()) {
+  if (m->Lock()) {
+    SharedState* sh = m->shared;
+    if (sh->count > 0 && sh->ownerPid == (int32_t)getpid() && sh->ownerTid == CurrentThreadId()) {
+      if (--sh->count == 0) {
+        sh->ownerPid = 0;
+        sh->ownerTid = 0;
+        SignalChange();
+      }
+      ok = TRUE;
+    }
+    m->Unlock();
+  } else if (m->count > 0 && m->owner == CurrentThreadId()) {
     if (--m->count == 0) {
       m->owner = 0;
       SignalChange();
@@ -438,12 +720,16 @@ BOOL WINAPI ReleaseSemaphore(HANDLE h, LONG lReleaseCount, LPLONG lpPreviousCoun
   }
   BOOL ok = FALSE;
   pthread_mutex_lock(WaitLock());
-  if (lReleaseCount > 0 && s->count + lReleaseCount <= s->max) {
-    if (lpPreviousCount) *lpPreviousCount = s->count;
-    s->count += lReleaseCount;
+  bool shared = s->Lock();
+  LONG& count = shared ? *(LONG*)&s->shared->count : s->count;
+  LONG max = shared ? s->shared->max : s->max;
+  if (lReleaseCount > 0 && count + lReleaseCount <= max) {
+    if (lpPreviousCount) *lpPreviousCount = count;
+    count += lReleaseCount;
     SignalChange();
     ok = TRUE;
   }
+  if (shared) s->Unlock();
   pthread_mutex_unlock(WaitLock());
   if (!ok) SetLastError(298);  // ERROR_TOO_MANY_POSTS
   return ok;
@@ -523,20 +809,37 @@ static DWORD Wait(DWORD nCount, Object** objs, BOOL bWaitAll, DWORD dwMillisecon
       }
     }
     if (nCount && bWaitAll) {
+      // Objects shared with other processes are held still together, in
+      // the order of their names, which is the same in every process.
+      std::vector<Object*> held;
+      for (DWORD i = 0; i < nCount; i++)
+        if (objs[i]->LockKey() && std::find(held.begin(), held.end(), objs[i]) == held.end()) held.push_back(objs[i]);
+      std::sort(held.begin(), held.end(), [](Object* a, Object* b) { return strcmp(a->LockKey(), b->LockKey()) < 0; });
+      for (Object* o : held) o->Lock();
       bool all = true;
       for (DWORD i = 0; i < nCount; i++) all = objs[i]->IsSignaled(tid) && all;
+      bool abandoned = false;
+      if (all)
+        for (DWORD i = 0; i < nCount; i++) {
+          objs[i]->Acquire(tid);
+          abandoned = objs[i]->TakeAbandoned() || abandoned;
+        }
+      for (Object* o : held) o->Unlock();
       if (all) {
-        for (DWORD i = 0; i < nCount; i++) objs[i]->Acquire(tid);
-        result = WAIT_OBJECT_0;
+        result = abandoned ? WAIT_ABANDONED_0 : WAIT_OBJECT_0;
         break;
       }
     } else if (nCount) {
       DWORD i = 0;
-      for (; i < nCount; i++)
-        if (objs[i]->IsSignaled(tid)) break;
+      for (; i < nCount; i++) {
+        bool shared = objs[i]->Lock();
+        bool now = objs[i]->IsSignaled(tid);
+        if (now) objs[i]->Acquire(tid);
+        if (shared) objs[i]->Unlock();
+        if (now) break;
+      }
       if (i < nCount) {
-        objs[i]->Acquire(tid);
-        result = WAIT_OBJECT_0 + i;
+        result = (objs[i]->TakeAbandoned() ? WAIT_ABANDONED_0 : WAIT_OBJECT_0) + i;
         break;
       }
     }

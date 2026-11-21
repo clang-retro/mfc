@@ -3,8 +3,9 @@
 // STARTF_USESTDHANDLES, a broken pipe; and, on Linux and macOS, a serial
 // port (a pseudo-terminal named as COM9): its DCB, BuildCommDCB, its
 // time-outs, reads and writes, and WaitCommEvent overlapped, ended by
-// data and by SetCommMask; and the environment block, GetUserName and
-// the standard folders.
+// data and by SetCommMask; the environment block, GetUserName and the
+// standard folders; and named mutexes, events and semaphores shared with
+// child processes.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -368,14 +369,139 @@ static void TestEnvironment() {
 #endif
 }
 
+// Named kernel objects between processes: what a child started with
+// one of these finds, as its exit code (0 for what the parent expects).
+static int NamedChild(const char* what) {
+  if (strcmp(what, "-exists") == 0) {
+    // The parent owns the mutex: it exists, and is not this process's to take.
+    HANDLE m = ::CreateMutexA(NULL, TRUE, "Local\\IoTestMutex");
+    if (!m || ::GetLastError() != ERROR_ALREADY_EXISTS) return 1;
+    if (::WaitForSingleObject(m, 0) != WAIT_TIMEOUT) return 2;
+    if (::ReleaseMutex(m)) return 3;  // not the owner
+    // The parent releases it once this event is set.
+    HANDLE go = ::OpenEventA(EVENT_ALL_ACCESS, FALSE, "Local\\IoTestGo");
+    if (!go) return 4;
+    ::SetEvent(go);
+    if (::WaitForSingleObject(m, 10000) != WAIT_OBJECT_0) return 5;
+    if (!::ReleaseMutex(m)) return 6;
+    ::CloseHandle(go);
+    ::CloseHandle(m);
+    return 0;
+  }
+  if (strcmp(what, "-abandon") == 0) {
+    // Owns the mutex and ends without letting it go.
+    HANDLE m = ::CreateMutexA(NULL, TRUE, "Local\\IoTestAbandoned");
+    HANDLE ready = ::OpenEventA(EVENT_ALL_ACCESS, FALSE, "Local\\IoTestReady");
+    if (!m || !ready) return 1;
+    ::SetEvent(ready);
+    ::Sleep(200);
+    return 0;
+  }
+  if (strcmp(what, "-semaphore") == 0) {
+    HANDLE s = ::OpenSemaphoreA(SEMAPHORE_ALL_ACCESS, FALSE, "Local\\IoTestSemaphore");
+    if (!s) return 1;
+    if (::WaitForSingleObject(s, 0) != WAIT_OBJECT_0) return 2;  // takes one of two
+    LONG prev = -1;
+    if (!::ReleaseSemaphore(s, 2, &prev) || prev != 0) return 3;  // back, and one more
+    ::CloseHandle(s);
+    return 0;
+  }
+  return 99;
+}
+
+static DWORD RunNamedChild(const char* what, HANDLE* process = NULL) {
+  char exe[MAX_PATH], cmd[MAX_PATH + 32];
+  ::GetModuleFileNameA(NULL, exe, MAX_PATH);
+  wsprintfA(cmd, "\"%s\" %s", exe, what);
+  STARTUPINFOA si = {};
+  si.cb = sizeof si;
+  PROCESS_INFORMATION pi = {};
+  if (!::CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) return 1000;
+  ::CloseHandle(pi.hThread);
+  if (process) {
+    *process = pi.hProcess;
+    return 0;
+  }
+  DWORD code = 1001;
+  if (::WaitForSingleObject(pi.hProcess, 20000) == WAIT_OBJECT_0) ::GetExitCodeProcess(pi.hProcess, &code);
+  ::CloseHandle(pi.hProcess);
+  return code;
+}
+
+static void TestNamedObjects() {
+  // A mutex another process owns, then waits for.
+  HANDLE m = ::CreateMutexA(NULL, TRUE, "Local\\IoTestMutex");
+  CHECK(m != NULL && ::GetLastError() == 0);
+  HANDLE go = ::CreateEventA(NULL, FALSE, FALSE, "Local\\IoTestGo");
+  CHECK(go != NULL);
+  HANDLE child = NULL;
+  CHECK(RunNamedChild("-exists", &child) == 0);
+  // The child's event, set in its process, wakes this wait.
+  CHECK(::WaitForSingleObject(go, 10000) == WAIT_OBJECT_0);
+  CHECK(::ReleaseMutex(m));
+  DWORD code = 1001;
+  if (child) {
+    CHECK(::WaitForSingleObject(child, 20000) == WAIT_OBJECT_0);
+    ::GetExitCodeProcess(child, &code);
+    ::CloseHandle(child);
+  }
+  CHECK(code == 0);
+  // Free again once the child let go, and now this thread's.
+  CHECK(::WaitForSingleObject(m, 5000) == WAIT_OBJECT_0);
+  CHECK(::ReleaseMutex(m));
+  ::CloseHandle(go);
+  ::CloseHandle(m);
+  // With every handle closed, the name is free: a new mutex, not the old.
+  m = ::CreateMutexA(NULL, FALSE, "Local\\IoTestMutex");
+  CHECK(m != NULL && ::GetLastError() == 0);
+  ::CloseHandle(m);
+
+  // A mutex whose owner ended without letting it go is abandoned to the
+  // next waiter, which then owns it.
+  HANDLE ready = ::CreateEventA(NULL, TRUE, FALSE, "Local\\IoTestReady");
+  CHECK(RunNamedChild("-abandon", &child) == 0);
+  CHECK(::WaitForSingleObject(ready, 10000) == WAIT_OBJECT_0);
+  m = ::OpenMutexA(MUTEX_ALL_ACCESS, FALSE, "Local\\IoTestAbandoned");
+  CHECK(m != NULL);
+  if (child) {
+    CHECK(::WaitForSingleObject(child, 20000) == WAIT_OBJECT_0);
+    ::CloseHandle(child);
+  }
+  if (m) {
+    CHECK(::WaitForSingleObject(m, 5000) == WAIT_ABANDONED_0);
+    CHECK(::ReleaseMutex(m));
+    CHECK(::WaitForSingleObject(m, 0) == WAIT_OBJECT_0);
+    CHECK(::ReleaseMutex(m));
+    ::CloseHandle(m);
+  }
+  ::CloseHandle(ready);
+
+  // A semaphore's count is one between the processes.
+  HANDLE s = ::CreateSemaphoreA(NULL, 2, 5, "Local\\IoTestSemaphore");
+  CHECK(s != NULL);
+  CHECK(::WaitForSingleObject(s, 0) == WAIT_OBJECT_0);  // one left
+  CHECK(RunNamedChild("-semaphore") == 0);
+  LONG prev = -1;
+  CHECK(::ReleaseSemaphore(s, 1, &prev) && prev == 2);
+  ::CloseHandle(s);
+
+  // A name is one kind of object.
+  HANDLE e = ::CreateEventA(NULL, FALSE, FALSE, "Local\\IoTestKind");
+  CHECK(::CreateMutexA(NULL, FALSE, "Local\\IoTestKind") == NULL && ::GetLastError() == ERROR_INVALID_HANDLE);
+  ::CloseHandle(e);
+}
+
 int main(int argc, char** argv) {
   if (argc > 1 && strcmp(argv[1], "-child") == 0) return Child();
+  if (argc > 1 && argv[1][0] == '-') return NamedChild(argv[1]);
   TestPipes();
   printf("pipes: %d failure(s) so far\n", g_failures);
   TestChild();
   printf("child: %d failure(s) so far\n", g_failures);
   TestBuildDcb();
   TestEnvironment();
+  TestNamedObjects();
+  printf("named objects: %d failure(s) so far\n", g_failures);
 #ifdef _WINPORT
   TestPort();
   printf("port: %d failure(s) so far\n", g_failures);
