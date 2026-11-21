@@ -1139,6 +1139,65 @@ static void TestImage() {
   CHECK(SUCCEEDED(ind2.Load(szBmp)) && ind2.GetBPP() == 8);
   CHECK(ind2.GetPixel(3, 3) == RGB(0, 0, 0xFF));
 
+  // GIF: an indexed image keeps its colors, and so does a large one of
+  // all 256, noisy enough that the LZW table fills and starts over.
+  TCHAR szGif[MAX_PATH];
+  wsprintf(szGif, TEXT("%satlimg.gif"), szDir);
+  CHECK(SUCCEEDED(ind.Save(szGif)));
+  CImage gif;
+  CHECK(SUCCEEDED(gif.Load(szGif)) && gif.GetWidth() == 4 && gif.GetHeight() == 4);
+  CHECK(gif.GetPixel(0, 0) == RGB(0xFF, 0, 0) && gif.GetPixel(3, 3) == RGB(0, 0, 0xFF));
+  gif.Destroy();
+  CImage noise;
+  CHECK(noise.Create(97, 61, 8));
+  RGBQUAD pal[256];
+  for (int i = 0; i < 256; i++) {
+    pal[i].rgbRed = (BYTE)i;
+    pal[i].rgbGreen = (BYTE)(255 - i);
+    pal[i].rgbBlue = (BYTE)(i * 7);
+    pal[i].rgbReserved = 0;
+  }
+  noise.SetColorTable(0, 256, pal);
+  UINT seed = 12345;
+  for (int y = 0; y < 61; y++)
+    for (int x = 0; x < 97; x++) {
+      seed = seed * 1103515245u + 12345u;
+      noise.SetPixelIndexed(x, y, (int)((seed >> 16) & 0xFF));
+    }
+  CHECK(SUCCEEDED(noise.Save(szGif, Gdiplus::ImageFormatGIF)));
+  CHECK(SUCCEEDED(gif.Load(szGif)) && gif.GetWidth() == 97 && gif.GetHeight() == 61);
+  int nDiff = 0;
+  for (int y = 0; y < 61; y++)
+    for (int x = 0; x < 97; x++)
+      if (gif.GetPixel(x, y) != noise.GetPixel(x, y)) nDiff++;
+  CHECK(nDiff == 0);
+  gif.Destroy();
+#ifdef _WINPORT
+  // Here a true-color image of 256 colors or fewer keeps them exactly,
+  // one of more comes through a color cube, and a pixel of no alpha is
+  // transparent. (GDI+ itself takes every true-color image through its
+  // halftone palette.)
+  CHECK(SUCCEEDED(rgb.Save(szGif, Gdiplus::ImageFormatGIF)));
+  CHECK(SUCCEEDED(gif.Load(szGif)) && gif.GetWidth() == 5 && gif.GetHeight() == 4);
+  CHECK(gif.GetPixel(1, 2) == RGB(10, 200, 30) && gif.GetPixel(0, 0) == RGB(0, 0, 0));
+  gif.Destroy();
+  CImage ramp;
+  CHECK(ramp.Create(32, 32, 32, CImage::createAlphaChannel));
+  for (int y = 0; y < 32; y++)
+    for (int x = 0; x < 32; x++)
+      *(DWORD*)ramp.GetPixelAddress(x, y) = 0xFF000000u | (DWORD)(x * 8) << 16 | (DWORD)(y * 8) << 8 | 0x40;
+  *(DWORD*)ramp.GetPixelAddress(0, 0) = 0;
+  CHECK(SUCCEEDED(ramp.Save(szGif, Gdiplus::ImageFormatGIF)));
+  CHECK(SUCCEEDED(gif.Load(szGif)) && gif.GetBPP() == 32);
+  CHECK((*(DWORD*)gif.GetPixelAddress(0, 0) >> 24) == 0);
+  COLORREF cr = gif.GetPixel(20, 10), want = ramp.GetPixel(20, 10);
+  CHECK(abs(GetRValue(cr) - GetRValue(want)) <= 26 && abs(GetGValue(cr) - GetGValue(want)) <= 22 &&
+        abs(GetBValue(cr) - GetBValue(want)) <= 26);
+  CHECK((*(DWORD*)gif.GetPixelAddress(20, 10) >> 24) == 0xFF);
+  gif.Destroy();
+#endif
+  ::DeleteFile(szGif);
+
   // Attach and Detach, and a bitmap that is not a DIB section.
   HBITMAP h = img.Detach();
   CHECK(img.IsNull() && h != NULL);

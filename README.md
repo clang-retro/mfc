@@ -270,8 +270,12 @@ itself with `SetSysColors` stays until the file changes that color.
 GDI+ is there as far as images go (`CImage` uses it): bitmaps in the
 usual pixel formats, locking their bits, and BMP, PNG, JPEG and GIF
 files and streams, read with [stb_image](https://github.com/nothings/stb)
-and written with stb_image_write (public domain or MIT, in
-`port/src/third_party/`), GIF only read. CryptoAPI has the base and
+and PNG and JPEG written with stb_image_write (public domain or MIT, in
+`port/src/third_party/`), BMP and GIF by hand. A GIF is written as one
+frame: an indexed bitmap with its own palette, and a true-color one with
+its own colors when it has 256 or fewer, else through a color cube
+(GDI+ takes every true-color image through its halftone palette);
+pixels under half alpha become the transparent color. CryptoAPI has the base and
 enhanced providers' hashes (MD4, MD5, SHA-1, SHA-256, SHA-384, SHA-512
 and HMAC), RC4 and AES keys (derived, imported or random),
 `CryptGenRandom`, and RSA: key pairs generated or imported (1024 bits
