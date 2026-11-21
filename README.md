@@ -273,8 +273,16 @@ files and streams, read with [stb_image](https://github.com/nothings/stb)
 and written with stb_image_write (public domain or MIT, in
 `port/src/third_party/`), GIF only read. CryptoAPI has the base and
 enhanced providers' hashes (MD4, MD5, SHA-1, SHA-256, SHA-384, SHA-512
-and HMAC), RC4 and AES keys (derived, imported or random) and
-`CryptGenRandom`, but no RSA: there are no key pairs. `shlwapi`'s path
+and HMAC), RC4 and AES keys (derived, imported or random),
+`CryptGenRandom`, and RSA: key pairs generated or imported (1024 bits
+unless asked, 384 to 16384), PKCS #1 v1.5 and OAEP encryption, PKCS #1
+v1.5 signatures, and `PUBLICKEYBLOB`, `PRIVATEKEYBLOB` and `SIMPLEBLOB`
+blobs, in CryptoAPI's byte order. Key containers are directories under
+`crypto/user/` in the configuration directory (`crypto/machine/` for
+`CRYPT_MACHINE_KEYSET`), one file for each pair, readable by the owner
+only and not encrypted; opening one that is not there fails with
+`NTE_BAD_KEYSET` until `CRYPT_NEWKEYSET` makes it. A private key blob
+exports only in plain, not wrapped in a session key. `shlwapi`'s path
 and string functions, access control lists and SDDL work as well.
 
 The shell namespace is the file system: the desktop is the root `/`,

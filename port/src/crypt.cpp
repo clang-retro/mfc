@@ -1,14 +1,25 @@
 // crypt.cpp - CryptoAPI: provider contexts, hashes (MD4, MD5, SHA-1,
 // SHA-256, SHA-384, SHA-512, the SSL3 MD5 and SHA-1 pair, and HMAC over
-// any of them), RC4 and AES keys, and random numbers from the system.
+// any of them), RC4 and AES keys, RSA key pairs kept in key containers,
+// RSA encryption, signatures and key exchange blobs, and random numbers
+// from the system.
+//
+// A key container is a directory under the configuration directory,
+// crypto/user/<name> (crypto/machine/<name> for CRYPT_MACHINE_KEYSET),
+// holding a file for each key pair it has: its flags then its
+// PRIVATEKEYBLOB, readable by the owner only.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "winport.h"
 
 #include <wincrypt.h>
+#include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -17,7 +28,12 @@
 #include <string>
 #include <vector>
 
+#include "rsa.h"
+
 namespace {
+
+using winport::rsa::Big;
+typedef winport::rsa::Key RsaKey;
 
 // ---------------------------------------------------------------------
 // Digests
@@ -472,6 +488,10 @@ struct Provider {
   DWORD type = PROV_RSA_FULL;
   std::string name, container;
   bool enhanced = false;  // longer default keys than the base provider's
+  std::string dir;        // the key container's; empty for CRYPT_VERIFYCONTEXT
+  // The key pairs, by AT_KEYEXCHANGE and AT_SIGNATURE, and their flags.
+  std::shared_ptr<const RsaKey> pairs[3];
+  DWORD pairFlags[3] = {0, 0, 0};
 };
 
 struct Key {
@@ -490,6 +510,8 @@ struct Key {
   bool fresh = true;
   // Decryption keeps the last block back until it knows it is the last.
   std::vector<BYTE> pending;
+  // An RSA key: a pair, or a public key alone.
+  std::shared_ptr<const RsaKey> rsa;
 };
 
 struct Hash {
@@ -648,6 +670,281 @@ std::string Narrow(LPCWSTR s) {
   return out;
 }
 
+// ---------------------------------------------------------------------
+// RSA
+
+const DWORD kRsa1 = 0x31415352, kRsa2 = 0x32415352;  // "RSA1", "RSA2"
+
+bool IsRsa(ALG_ID alg) { return alg == CALG_RSA_KEYX || alg == CALG_RSA_SIGN; }
+bool Random(uint8_t* p, size_t n) { return RandomBytes(p, n); }
+DWORD Bytes(const RsaKey& k) { return (k.bits + 7) / 8; }
+DWORD Half(const RsaKey& k) { return (k.bits + 15) / 16; }
+ALG_ID PairAlg(DWORD spec) { return spec == AT_SIGNATURE ? CALG_RSA_SIGN : CALG_RSA_KEYX; }
+
+void Append(std::vector<BYTE>* out, const Big& v, DWORD n) {
+  std::vector<BYTE> b = v.ToLe(n);
+  out->insert(out->end(), b.begin(), b.end());
+}
+
+std::vector<BYTE> KeyBlob(const RsaKey& k, ALG_ID alg, bool priv) {
+  BLOBHEADER hdr = {(BYTE)(priv ? PRIVATEKEYBLOB : PUBLICKEYBLOB), CUR_BLOB_VERSION, 0, alg};
+  RSAPUBKEY pub = {priv ? kRsa2 : kRsa1, k.bits, k.e};
+  std::vector<BYTE> out(sizeof hdr + sizeof pub);
+  memcpy(out.data(), &hdr, sizeof hdr);
+  memcpy(out.data() + sizeof hdr, &pub, sizeof pub);
+  Append(&out, k.n, Bytes(k));
+  if (priv) {
+    for (const Big* v : {&k.p, &k.q, &k.dp, &k.dq, &k.qinv}) Append(&out, *v, Half(k));
+    Append(&out, k.d, Bytes(k));
+  }
+  return out;
+}
+
+// The key in a PUBLICKEYBLOB or a PRIVATEKEYBLOB.
+bool ParseKeyBlob(const BYTE* data, DWORD len, bool priv, RsaKey* k) {
+  if (len < sizeof(BLOBHEADER) + sizeof(RSAPUBKEY)) return false;
+  RSAPUBKEY pub;
+  memcpy(&pub, data + sizeof(BLOBHEADER), sizeof pub);
+  if (pub.magic != (priv ? kRsa2 : kRsa1) || pub.bitlen < 64 || pub.bitlen > 16384) return false;
+  if (pub.pubexp < 3 || !(pub.pubexp & 1)) return false;
+  k->bits = pub.bitlen;
+  k->e = pub.pubexp;
+  DWORD b = Bytes(*k), h = Half(*k);
+  if (len < sizeof(BLOBHEADER) + sizeof pub + b + (priv ? 5 * h + b : 0)) return false;
+  const BYTE* q = data + sizeof(BLOBHEADER) + sizeof pub;
+  k->n = Big::FromLe(q, b);
+  q += b;
+  if (!k->n.Odd() || k->n.Bits() + 8 <= k->bits) return false;
+  if (priv) {
+    for (Big* v : {&k->p, &k->q, &k->dp, &k->dq, &k->qinv}) {
+      *v = Big::FromLe(q, h);
+      q += h;
+    }
+    k->d = Big::FromLe(q, b);
+    if (!k->p.Odd() || !k->q.Odd() || winport::rsa::Cmp(winport::rsa::Mul(k->p, k->q), k->n) != 0) return false;
+    k->hasPrivate = true;
+  }
+  return true;
+}
+
+std::vector<BYTE> Sha1Of(const BYTE* p, size_t n) {
+  std::unique_ptr<Digest> d(NewDigest(CALG_SHA1));
+  d->Update(p, n);
+  std::vector<BYTE> out(d->Size());
+  d->Final(out.data());
+  return out;
+}
+
+// XORs MGF1 with SHA-1 of the seed into out.
+void Mgf1(const BYTE* seed, size_t seedLen, BYTE* out, size_t n) {
+  std::vector<BYTE> buf(seed, seed + seedLen);
+  buf.resize(seedLen + 4);
+  for (uint32_t counter = 0, off = 0; off < n; counter++) {
+    PutBe32(buf.data() + seedLen, counter);
+    std::vector<BYTE> h = Sha1Of(buf.data(), buf.size());
+    for (size_t i = 0; i < h.size() && off < n; i++) out[off++] ^= h[i];
+  }
+}
+
+// The message padded to k bytes for encryption: PKCS #1 v1.5 (block type
+// 2), or OAEP with SHA-1 and an empty label.
+bool PadForEncrypt(const BYTE* m, DWORD mlen, DWORD k, bool oaep, std::vector<BYTE>* em) {
+  em->assign(k, 0);
+  if (oaep) {
+    if (k < 42 || mlen > k - 42) return false;
+    BYTE* seed = em->data() + 1;
+    BYTE* db = seed + 20;
+    size_t dbLen = k - 21;
+    std::vector<BYTE> lhash = Sha1Of(NULL, 0);
+    memcpy(db, lhash.data(), 20);
+    db[dbLen - mlen - 1] = 1;
+    memcpy(db + dbLen - mlen, m, mlen);
+    if (!RandomBytes(seed, 20)) return false;
+    Mgf1(seed, 20, db, dbLen);
+    Mgf1(db, dbLen, seed, 20);
+    return true;
+  }
+  if (k < 11 || mlen > k - 11) return false;
+  (*em)[1] = 2;
+  for (DWORD i = 2; i < k - mlen - 1; i++) {
+    do {
+      if (!RandomBytes(&(*em)[i], 1)) return false;
+    } while (!(*em)[i]);
+  }
+  memcpy(em->data() + k - mlen, m, mlen);
+  return true;
+}
+
+bool UnpadEncrypted(std::vector<BYTE> em, bool oaep, std::vector<BYTE>* m) {
+  size_t k = em.size();
+  if (k < 11 || em[0]) return false;
+  if (oaep) {
+    if (k < 42) return false;
+    BYTE* seed = em.data() + 1;
+    BYTE* db = seed + 20;
+    size_t dbLen = k - 21;
+    Mgf1(db, dbLen, seed, 20);
+    Mgf1(seed, 20, db, dbLen);
+    std::vector<BYTE> lhash = Sha1Of(NULL, 0);
+    if (memcmp(db, lhash.data(), 20)) return false;
+    size_t i = 20;
+    while (i < dbLen && !db[i]) i++;
+    if (i == dbLen || db[i] != 1) return false;
+    m->assign(db + i + 1, db + dbLen);
+    return true;
+  }
+  if (em[1] != 2) return false;
+  size_t i = 2;
+  while (i < k && em[i]) i++;
+  if (i == k || i < 10) return false;
+  m->assign(em.begin() + i + 1, em.end());
+  return true;
+}
+
+// The value a signature encodes: the DER DigestInfo of the hash's
+// algorithm and its value, or the value alone for CRYPT_NOHASHOID and
+// for the SSL3 pair.
+bool SignedValue(Hash* h, DWORD flags, std::vector<BYTE>* t) {
+  static const BYTE kMd4[] = {0x30, 0x20, 0x30, 0x0c, 0x06, 0x08, 0x2a, 0x86, 0x48,
+                              0x86, 0xf7, 0x0d, 0x02, 0x04, 0x05, 0x00, 0x04, 0x10};
+  static const BYTE kMd5[] = {0x30, 0x20, 0x30, 0x0c, 0x06, 0x08, 0x2a, 0x86, 0x48,
+                              0x86, 0xf7, 0x0d, 0x02, 0x05, 0x05, 0x00, 0x04, 0x10};
+  static const BYTE kSha1[] = {0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e,
+                               0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14};
+  static const BYTE kSha256[] = {0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01,
+                                 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20};
+  static const BYTE kSha384[] = {0x30, 0x41, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01,
+                                 0x65, 0x03, 0x04, 0x02, 0x02, 0x05, 0x00, 0x04, 0x30};
+  static const BYTE kSha512[] = {0x30, 0x51, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01,
+                                 0x65, 0x03, 0x04, 0x02, 0x03, 0x05, 0x00, 0x04, 0x40};
+  if (!h->d) return false;
+  const std::vector<BYTE>& value = HashValue(h);
+  t->clear();
+  if (!(flags & CRYPT_NOHASHOID) && h->alg != CALG_SSL3_SHAMD5) {
+    const BYTE* prefix;
+    size_t n;
+    switch (h->alg) {
+      case CALG_MD4: prefix = kMd4, n = sizeof kMd4; break;
+      case CALG_MD5: prefix = kMd5, n = sizeof kMd5; break;
+      case CALG_SHA1: prefix = kSha1, n = sizeof kSha1; break;
+      case CALG_SHA_256: prefix = kSha256, n = sizeof kSha256; break;
+      case CALG_SHA_384: prefix = kSha384, n = sizeof kSha384; break;
+      case CALG_SHA_512: prefix = kSha512, n = sizeof kSha512; break;
+      default: return false;
+    }
+    t->assign(prefix, prefix + n);
+  }
+  t->insert(t->end(), value.begin(), value.end());
+  return true;
+}
+
+// PKCS #1 v1.5 block type 1, for a signature.
+std::vector<BYTE> PadForSignature(const std::vector<BYTE>& t, DWORD k) {
+  std::vector<BYTE> em(k, 0xff);
+  em[0] = 0;
+  em[1] = 1;
+  em[k - t.size() - 1] = 0;
+  memcpy(em.data() + k - t.size(), t.data(), t.size());
+  return em;
+}
+
+// The RSA transform on k bytes, most significant first.
+bool Transform(const RsaKey& key, bool priv, const std::vector<BYTE>& in, std::vector<BYTE>* out) {
+  Big x = Big::FromBe(in.data(), in.size());
+  if (winport::rsa::Cmp(x, key.n) >= 0) return false;
+  Big y = priv ? winport::rsa::Private(key, x) : winport::rsa::Public(key, x);
+  *out = y.ToBe(Bytes(key));
+  return true;
+}
+
+Key* NewPairKey(Provider* p, ALG_ID alg, DWORD flags, std::shared_ptr<const RsaKey> rsa) {
+  Key* k = new Key;
+  k->prov = p;
+  k->alg = alg;
+  k->flags = flags;
+  k->rsa = rsa;
+  if (!(flags & CRYPT_EXPORTABLE)) k->permissions &= ~(DWORD)CRYPT_EXPORT;
+  p->refs++;
+  return k;
+}
+
+// Key containers.
+
+std::string ContainerDir(const std::string& name, bool machine) {
+  std::string out = winport::ConfigDir() + (machine ? "/crypto/machine/" : "/crypto/user/");
+  if (name.empty()) out += "%00";
+  for (unsigned char c : name) {
+    if (isalnum(c) || c == '-' || c == '_' || c == ' ') {
+      out += (char)c;
+    } else {
+      char b[4];
+      snprintf(b, sizeof b, "%%%02X", c);
+      out += b;
+    }
+  }
+  return out;
+}
+
+bool IsDir(const std::string& path) {
+  struct stat st;
+  return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+bool MakeDirs(const std::string& path) {
+  for (size_t i = 1; i <= path.size(); i++)
+    if (i == path.size() || path[i] == '/') {
+      std::string part = path.substr(0, i);
+      if (mkdir(part.c_str(), 0700) != 0 && errno != EEXIST) return false;
+    }
+  return IsDir(path);
+}
+
+std::string PairFile(const std::string& dir, DWORD spec) {
+  return dir + (spec == AT_SIGNATURE ? "/signature" : "/exchange");
+}
+
+void LoadPairs(Provider* p) {
+  for (DWORD spec : {(DWORD)AT_KEYEXCHANGE, (DWORD)AT_SIGNATURE}) {
+    FILE* f = fopen(PairFile(p->dir, spec).c_str(), "rb");
+    if (!f) continue;
+    std::vector<BYTE> buf;
+    BYTE chunk[4096];
+    size_t n;
+    while ((n = fread(chunk, 1, sizeof chunk, f)) > 0) buf.insert(buf.end(), chunk, chunk + n);
+    fclose(f);
+    auto key = std::make_shared<RsaKey>();
+    if (buf.size() > 4 && ParseKeyBlob(buf.data() + 4, (DWORD)buf.size() - 4, true, key.get())) {
+      memcpy(&p->pairFlags[spec], buf.data(), 4);
+      p->pairs[spec] = key;
+    }
+    std::fill(buf.begin(), buf.end(), 0);
+  }
+}
+
+// Makes the pair the provider's key of its kind, and writes it to the
+// container.
+bool StorePair(Provider* p, DWORD spec, std::shared_ptr<const RsaKey> key, DWORD flags) {
+  p->pairs[spec] = key;
+  p->pairFlags[spec] = flags;
+  if (p->dir.empty()) return true;
+  std::vector<BYTE> file(4);
+  memcpy(file.data(), &flags, 4);
+  std::vector<BYTE> blob = KeyBlob(*key, PairAlg(spec), true);
+  file.insert(file.end(), blob.begin(), blob.end());
+  std::string path = PairFile(p->dir, spec), tmp = path + ".new";
+  int fd = open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+  bool ok = fd >= 0;
+  if (ok) {
+    ok = write(fd, file.data(), file.size()) == (ssize_t)file.size();
+    ok = close(fd) == 0 && ok;
+  }
+  ok = ok && rename(tmp.c_str(), path.c_str()) == 0;
+  if (!ok) unlink(tmp.c_str());
+  std::fill(file.begin(), file.end(), 0);
+  std::fill(blob.begin(), blob.end(), 0);
+  return ok;
+}
+
 }  // namespace
 
 extern "C" {
@@ -662,20 +959,43 @@ BOOL WINAPI CryptAcquireContextA(HCRYPTPROV* phProv, LPCSTR container, LPCSTR pr
   if (name == MS_DEF_PROV_A) enhanced = false;
   else if (name == MS_ENHANCED_PROV_A || name == MS_STRONG_PROV_A || name == MS_ENH_RSA_AES_PROV_A) enhanced = true;
   else return Fail(NTE_KEYSET_NOT_DEF);
-  // Key containers hold no keys here, so every one is there to open,
-  // make or delete.
-  if (flags & CRYPT_DELETEKEYSET) return TRUE;
-  Provider* p = new Provider;
+  bool verify = (flags & CRYPT_VERIFYCONTEXT) != 0, machine = (flags & CRYPT_MACHINE_KEYSET) != 0;
+  // The default container is the user's.
+  std::string cname;
+  if (container) {
+    cname = container;
+  } else if (!verify) {
+    char user[256];
+    DWORD n = sizeof user;
+    if (GetUserNameA(user, &n)) cname = user;
+  }
+  std::lock_guard<std::mutex> g(Lock());
+  if (flags & CRYPT_DELETEKEYSET) {
+    std::string dir = ContainerDir(cname, machine);
+    if (!IsDir(dir)) return Fail(NTE_BAD_KEYSET);
+    unlink(PairFile(dir, AT_KEYEXCHANGE).c_str());
+    unlink(PairFile(dir, AT_SIGNATURE).c_str());
+    if (rmdir(dir.c_str()) != 0) return Fail(NTE_FAIL);
+    return TRUE;
+  }
+  std::unique_ptr<Provider> p(new Provider);
   p->type = type;
   p->name = name;
   p->enhanced = enhanced;
-  if (container) p->container = container;
-  else if (!(flags & CRYPT_VERIFYCONTEXT)) {
-    char user[256];
-    DWORD n = sizeof user;
-    if (GetUserNameA(user, &n)) p->container = user;
+  p->container = cname;
+  if (!verify) {
+    p->dir = ContainerDir(cname, machine);
+    bool exists = IsDir(p->dir);
+    if (flags & CRYPT_NEWKEYSET) {
+      if (exists) return Fail(NTE_EXISTS);
+      if (!MakeDirs(p->dir)) return Fail(NTE_FAIL);
+    } else if (!exists) {
+      return Fail(NTE_BAD_KEYSET);
+    } else {
+      LoadPairs(p.get());
+    }
   }
-  *phProv = (HCRYPTPROV)p;
+  *phProv = (HCRYPTPROV)p.release();
   return TRUE;
 }
 
@@ -728,7 +1048,8 @@ BOOL WINAPI CryptGetProvParam(HCRYPTPROV hProv, DWORD param, BYTE* data, DWORD* 
           {CALG_RC4, 128, 4, "RC4"},      {CALG_AES_128, 128, 8, "AES 128"}, {CALG_AES_192, 192, 8, "AES 192"},
           {CALG_AES_256, 256, 8, "AES 256"}, {CALG_MD4, 128, 4, "MD4"},  {CALG_MD5, 128, 4, "MD5"},
           {CALG_SHA1, 160, 6, "SHA-1"},   {CALG_SHA_256, 256, 8, "SHA-256"}, {CALG_SHA_384, 384, 8, "SHA-384"},
-          {CALG_SHA_512, 512, 8, "SHA-512"}, {CALG_SSL3_SHAMD5, 288, 12, "SSL3 SHAMD5"}, {CALG_HMAC, 0, 5, "HMAC"}};
+          {CALG_SHA_512, 512, 8, "SHA-512"}, {CALG_SSL3_SHAMD5, 288, 12, "SSL3 SHAMD5"}, {CALG_HMAC, 0, 5, "HMAC"},
+          {CALG_RSA_SIGN, 1024, 9, "RSA_SIGN"}, {CALG_RSA_KEYX, 1024, 9, "RSA_KEYX"}};
       static thread_local size_t next = 0;
       if (flags & CRYPT_FIRST) next = 0;
       if (next >= sizeof kAlgs / sizeof kAlgs[0]) return FailW(ERROR_NO_MORE_ITEMS);
@@ -918,6 +1239,21 @@ BOOL WINAPI CryptGenKey(HCRYPTPROV hProv, ALG_ID alg, DWORD flags, HCRYPTKEY* ph
   Provider* p = ProvOf(hProv);
   if (!p) return Fail(NTE_BAD_UID);
   if (!phKey) return FailW(ERROR_INVALID_PARAMETER);
+  if (alg == AT_KEYEXCHANGE || alg == AT_SIGNATURE || IsRsa(alg)) {
+    DWORD spec = alg == AT_SIGNATURE || alg == CALG_RSA_SIGN ? AT_SIGNATURE : AT_KEYEXCHANGE;
+    if (spec == AT_KEYEXCHANGE && p->type == PROV_RSA_SIG) return Fail(NTE_BAD_ALGID);
+    // 1024 bits unless the flags say; whole bytes from 384 to 16384.
+    DWORD bits = flags >> 16;
+    if (!bits) bits = 1024;
+    if (bits < 384 || bits > 16384 || bits % 8) return Fail(NTE_BAD_FLAGS);
+    auto key = std::make_shared<RsaKey>();
+    if (!winport::rsa::Generate(bits, 65537, Random, key.get())) return Fail(NTE_FAIL);
+    std::lock_guard<std::mutex> g(Lock());
+    DWORD keep = flags & 0xFFFF;
+    if (!StorePair(p, spec, key, keep)) return Fail(NTE_FAIL);
+    *phKey = (HCRYPTKEY)NewPairKey(p, PairAlg(spec), keep, key);
+    return TRUE;
+  }
   if (!IsCipher(alg)) return Fail(NTE_BAD_ALGID);
   DWORD bits;
   if (!KeyBits(p, alg, flags, &bits)) return Fail(NTE_BAD_FLAGS);
@@ -959,8 +1295,12 @@ BOOL WINAPI CryptGetKeyParam(HCRYPTKEY hKey, DWORD param, BYTE* data, DWORD* len
   switch (param) {
     case KP_ALGID: return Out(&k->alg, sizeof k->alg, data, len);
     case KP_KEYLEN:
-    case KP_EFFECTIVE_KEYLEN: v = (DWORD)k->material.size() * 8; return Out(&v, sizeof v, data, len);
-    case KP_BLOCKLEN: v = IsBlock(k->alg) ? 128 : 0; return Out(&v, sizeof v, data, len);
+    case KP_EFFECTIVE_KEYLEN:
+      v = k->rsa ? k->rsa->bits : (DWORD)k->material.size() * 8;
+      return Out(&v, sizeof v, data, len);
+    case KP_BLOCKLEN:
+      v = k->rsa ? k->rsa->bits : IsBlock(k->alg) ? 128 : 0;
+      return Out(&v, sizeof v, data, len);
     case KP_IV:
       if (!IsBlock(k->alg)) return Fail(NTE_BAD_TYPE);
       return Out(k->iv, 16, data, len);
@@ -1014,14 +1354,37 @@ BOOL WINAPI CryptSetKeyParam(HCRYPTKEY hKey, DWORD param, const BYTE* data, DWOR
   }
 }
 
-BOOL WINAPI CryptEncrypt(HCRYPTKEY hKey, HCRYPTHASH hHash, BOOL final, DWORD, BYTE* data, DWORD* len, DWORD bufLen) {
+BOOL WINAPI CryptEncrypt(HCRYPTKEY hKey, HCRYPTHASH hHash, BOOL final, DWORD flags, BYTE* data, DWORD* len,
+                         DWORD bufLen) {
   std::lock_guard<std::mutex> g(Lock());
   Key* k = KeyOf(hKey);
   if (!k) return Fail(NTE_BAD_KEY);
-  if (!IsCipher(k->alg)) return Fail(NTE_BAD_ALGID);
   if (!len) return FailW(ERROR_INVALID_PARAMETER);
   Hash* h = hHash ? HashOf(hHash) : NULL;
   if (hHash && !h) return Fail(NTE_BAD_HASH);
+  if (k->rsa) {
+    // One block, padded, out least significant byte first.
+    if (k->alg != CALG_RSA_KEYX) return Fail(NTE_BAD_KEY);
+    if (!final) return Fail(NTE_BAD_DATA);
+    DWORD kb = Bytes(*k->rsa);
+    if (!data) {
+      *len = kb;
+      return TRUE;
+    }
+    std::vector<BYTE> em, out;
+    if (!PadForEncrypt(data, *len, kb, (flags & CRYPT_OAEP) != 0, &em)) return Fail(NTE_BAD_LEN);
+    if (bufLen < kb) {
+      *len = kb;
+      return FailW(ERROR_MORE_DATA);
+    }
+    if (h && h->d) h->d->Update(data, *len);
+    if (!Transform(*k->rsa, false, em, &out)) return Fail(NTE_FAIL);
+    std::reverse(out.begin(), out.end());
+    memcpy(data, out.data(), kb);
+    *len = kb;
+    return TRUE;
+  }
+  if (!IsCipher(k->alg)) return Fail(NTE_BAD_ALGID);
   DWORD n = *len;
   DWORD need = n;
   if (IsBlock(k->alg)) {
@@ -1058,14 +1421,28 @@ BOOL WINAPI CryptEncrypt(HCRYPTKEY hKey, HCRYPTHASH hHash, BOOL final, DWORD, BY
   return TRUE;
 }
 
-BOOL WINAPI CryptDecrypt(HCRYPTKEY hKey, HCRYPTHASH hHash, BOOL final, DWORD, BYTE* data, DWORD* len) {
+BOOL WINAPI CryptDecrypt(HCRYPTKEY hKey, HCRYPTHASH hHash, BOOL final, DWORD flags, BYTE* data, DWORD* len) {
   std::lock_guard<std::mutex> g(Lock());
   Key* k = KeyOf(hKey);
   if (!k) return Fail(NTE_BAD_KEY);
-  if (!IsCipher(k->alg)) return Fail(NTE_BAD_ALGID);
   if (!len || (*len && !data)) return FailW(ERROR_INVALID_PARAMETER);
   Hash* h = hHash ? HashOf(hHash) : NULL;
   if (hHash && !h) return Fail(NTE_BAD_HASH);
+  if (k->rsa) {
+    if (k->alg != CALG_RSA_KEYX || !k->rsa->hasPrivate) return Fail(NTE_BAD_KEY);
+    if (!final) return Fail(NTE_BAD_DATA);
+    DWORD kb = Bytes(*k->rsa);
+    if (*len != kb) return Fail(NTE_BAD_LEN);
+    std::vector<BYTE> in(data, data + kb), em, m;
+    std::reverse(in.begin(), in.end());
+    if (!Transform(*k->rsa, true, in, &em) || !UnpadEncrypted(em, (flags & CRYPT_OAEP) != 0, &m))
+      return Fail(NTE_BAD_DATA);
+    memcpy(data, m.data(), m.size());
+    *len = (DWORD)m.size();
+    if (h && h->d) h->d->Update(data, *len);
+    return TRUE;
+  }
+  if (!IsCipher(k->alg)) return Fail(NTE_BAD_ALGID);
   DWORD n = *len;
   if (k->fresh) Restart(k);
   if (k->alg == CALG_RC4) {
@@ -1101,11 +1478,52 @@ BOOL WINAPI CryptDecrypt(HCRYPTKEY hKey, HCRYPTHASH hHash, BOOL final, DWORD, BY
   return TRUE;
 }
 
-BOOL WINAPI CryptExportKey(HCRYPTKEY hKey, HCRYPTKEY hExpKey, DWORD type, DWORD, BYTE* data, DWORD* len) {
+BOOL WINAPI CryptExportKey(HCRYPTKEY hKey, HCRYPTKEY hExpKey, DWORD type, DWORD flags, BYTE* data, DWORD* len) {
   Key* k = KeyOf(hKey);
   if (!k) return Fail(NTE_BAD_KEY);
   if (!len) return FailW(ERROR_INVALID_PARAMETER);
-  if (type != PLAINTEXTKEYBLOB || hExpKey) return Fail(NTE_BAD_TYPE);
+  if (type == PUBLICKEYBLOB) {
+    if (!k->rsa) return Fail(NTE_BAD_KEY);
+    if (hExpKey) return Fail(NTE_BAD_PUBLIC_KEY);
+    std::vector<BYTE> blob = KeyBlob(*k->rsa, k->alg, false);
+    return Out(blob.data(), (DWORD)blob.size(), data, len);
+  }
+  if (type == PRIVATEKEYBLOB) {
+    // In plain only: not encrypted with a session key.
+    if (!k->rsa || !k->rsa->hasPrivate || hExpKey) return Fail(NTE_BAD_KEY);
+    if (!(k->permissions & CRYPT_EXPORT)) return Fail(NTE_BAD_KEY_STATE);
+    std::vector<BYTE> blob = KeyBlob(*k->rsa, k->alg, true);
+    BOOL ok = Out(blob.data(), (DWORD)blob.size(), data, len);
+    std::fill(blob.begin(), blob.end(), 0);
+    return ok;
+  }
+  if (type == SIMPLEBLOB) {
+    // A session key encrypted with the public half of an exchange key.
+    Key* x = KeyOf(hExpKey);
+    if (!x || !x->rsa || x->alg != CALG_RSA_KEYX) return Fail(NTE_BAD_PUBLIC_KEY);
+    if (!IsCipher(k->alg)) return Fail(NTE_BAD_KEY);
+    if (!(k->permissions & CRYPT_EXPORT)) return Fail(NTE_BAD_KEY_STATE);
+    DWORD kb = Bytes(*x->rsa);
+    DWORD size = sizeof(BLOBHEADER) + sizeof(ALG_ID) + kb;
+    if (!data) return Out(NULL, size, data, len);
+    if (*len < size) {
+      *len = size;
+      return FailW(ERROR_MORE_DATA);
+    }
+    std::vector<BYTE> em, out;
+    if (!PadForEncrypt(k->material.data(), (DWORD)k->material.size(), kb, (flags & CRYPT_OAEP) != 0, &em))
+      return Fail(NTE_BAD_LEN);
+    if (!Transform(*x->rsa, false, em, &out)) return Fail(NTE_FAIL);
+    std::reverse(out.begin(), out.end());
+    BLOBHEADER hdr = {(BYTE)SIMPLEBLOB, CUR_BLOB_VERSION, 0, k->alg};
+    ALG_ID enc = CALG_RSA_KEYX;
+    std::vector<BYTE> blob(sizeof hdr + sizeof enc);
+    memcpy(blob.data(), &hdr, sizeof hdr);
+    memcpy(blob.data() + sizeof hdr, &enc, sizeof enc);
+    blob.insert(blob.end(), out.begin(), out.end());
+    return Out(blob.data(), (DWORD)blob.size(), data, len);
+  }
+  if (type != PLAINTEXTKEYBLOB || hExpKey || k->rsa) return Fail(NTE_BAD_TYPE);
   if (!(k->permissions & CRYPT_EXPORT)) return Fail(NTE_BAD_KEY_STATE);
   std::vector<BYTE> blob(sizeof(BLOBHEADER) + sizeof(DWORD) + k->material.size());
   BLOBHEADER hdr = {(BYTE)PLAINTEXTKEYBLOB, CUR_BLOB_VERSION, 0, k->alg};
@@ -1124,6 +1542,40 @@ BOOL WINAPI CryptImportKey(HCRYPTPROV hProv, const BYTE* data, DWORD len, HCRYPT
   if (len < sizeof(BLOBHEADER) + sizeof(DWORD)) return Fail(NTE_BAD_DATA);
   BLOBHEADER hdr;
   memcpy(&hdr, data, sizeof hdr);
+  if (hdr.bType == PUBLICKEYBLOB || hdr.bType == PRIVATEKEYBLOB) {
+    bool priv = hdr.bType == PRIVATEKEYBLOB;
+    if (!IsRsa(hdr.aiKeyAlg)) return Fail(NTE_BAD_ALGID);
+    if (hPubKey) return Fail(NTE_BAD_FLAGS);
+    auto key = std::make_shared<RsaKey>();
+    if (!ParseKeyBlob(data, len, priv, key.get())) return Fail(NTE_BAD_DATA);
+    std::lock_guard<std::mutex> g(Lock());
+    // A pair becomes the container's key of its kind; a public key is
+    // the handle's alone.
+    if (priv && !StorePair(p, hdr.aiKeyAlg == CALG_RSA_SIGN ? AT_SIGNATURE : AT_KEYEXCHANGE, key, flags & 0xFFFF))
+      return Fail(NTE_FAIL);
+    *phKey = (HCRYPTKEY)NewPairKey(p, hdr.aiKeyAlg, flags, key);
+    return TRUE;
+  }
+  if (hdr.bType == SIMPLEBLOB) {
+    Key* x = KeyOf(hPubKey);
+    if (!x || !x->rsa || !x->rsa->hasPrivate || x->alg != CALG_RSA_KEYX) return Fail(NTE_BAD_KEY);
+    if (!IsCipher(hdr.aiKeyAlg)) return Fail(NTE_BAD_ALGID);
+    DWORD kb = Bytes(*x->rsa);
+    ALG_ID enc;
+    memcpy(&enc, data + sizeof hdr, sizeof enc);
+    if (enc != CALG_RSA_KEYX) return Fail(NTE_BAD_ALGID);
+    if (len < sizeof hdr + sizeof enc + kb) return Fail(NTE_BAD_DATA);
+    std::vector<BYTE> in(data + sizeof hdr + sizeof enc, data + sizeof hdr + sizeof enc + kb), em, m;
+    std::reverse(in.begin(), in.end());
+    if (!Transform(*x->rsa, true, in, &em) || !UnpadEncrypted(em, (flags & CRYPT_OAEP) != 0, &m))
+      return Fail(NTE_BAD_DATA);
+    DWORD bits;
+    if (!KeyBits(p, hdr.aiKeyAlg, (DWORD)m.size() * 8 << 16, &bits)) return Fail(NTE_BAD_DATA);
+    std::lock_guard<std::mutex> g(Lock());
+    *phKey = (HCRYPTKEY)NewKey(p, hdr.aiKeyAlg, flags, m.data(), (DWORD)m.size());
+    std::fill(m.begin(), m.end(), 0);
+    return TRUE;
+  }
   if (hdr.bType != PLAINTEXTKEYBLOB || hPubKey) return Fail(NTE_BAD_TYPE);
   DWORD n;
   memcpy(&n, data + sizeof hdr, sizeof n);
@@ -1140,19 +1592,69 @@ BOOL WINAPI CryptImportKey(HCRYPTPROV hProv, const BYTE* data, DWORD len, HCRYPT
   return TRUE;
 }
 
-BOOL WINAPI CryptGetUserKey(HCRYPTPROV hProv, DWORD, HCRYPTKEY* phKey) {
-  if (!ProvOf(hProv)) return Fail(NTE_BAD_UID);
-  if (phKey) *phKey = 0;
-  return Fail(NTE_NO_KEY);
+BOOL WINAPI CryptGetUserKey(HCRYPTPROV hProv, DWORD spec, HCRYPTKEY* phKey) {
+  std::lock_guard<std::mutex> g(Lock());
+  Provider* p = ProvOf(hProv);
+  if (!p) return Fail(NTE_BAD_UID);
+  if (!phKey) return FailW(ERROR_INVALID_PARAMETER);
+  *phKey = 0;
+  if (spec != AT_KEYEXCHANGE && spec != AT_SIGNATURE) return Fail(NTE_BAD_KEY);
+  if (!p->pairs[spec]) return Fail(NTE_NO_KEY);
+  *phKey = (HCRYPTKEY)NewPairKey(p, PairAlg(spec), p->pairFlags[spec], p->pairs[spec]);
+  return TRUE;
 }
 
-BOOL WINAPI CryptSignHashA(HCRYPTHASH, DWORD, LPCSTR, DWORD, BYTE*, DWORD*) { return Fail(NTE_NO_KEY); }
-BOOL WINAPI CryptSignHashW(HCRYPTHASH, DWORD, LPCWSTR, DWORD, BYTE*, DWORD*) { return Fail(NTE_NO_KEY); }
-BOOL WINAPI CryptVerifySignatureA(HCRYPTHASH, const BYTE*, DWORD, HCRYPTKEY, LPCSTR, DWORD) {
-  return Fail(NTE_BAD_KEY);
+BOOL WINAPI CryptSignHashA(HCRYPTHASH hHash, DWORD spec, LPCSTR, DWORD flags, BYTE* sig, DWORD* len) {
+  std::lock_guard<std::mutex> g(Lock());
+  Hash* h = HashOf(hHash);
+  if (!h) return Fail(NTE_BAD_HASH);
+  if (!len) return FailW(ERROR_INVALID_PARAMETER);
+  if (spec != AT_KEYEXCHANGE && spec != AT_SIGNATURE) return Fail(NTE_BAD_ALGID);
+  std::shared_ptr<const RsaKey> key = h->prov->pairs[spec];
+  if (!key) return Fail(NTE_NO_KEY);
+  DWORD kb = Bytes(*key);
+  if (!sig) {
+    *len = kb;
+    return TRUE;
+  }
+  if (*len < kb) {
+    *len = kb;
+    return FailW(ERROR_MORE_DATA);
+  }
+  std::vector<BYTE> t, out;
+  if (!SignedValue(h, flags, &t)) return Fail(NTE_BAD_ALGID);
+  if (t.size() + 11 > kb) return Fail(NTE_BAD_LEN);
+  if (!Transform(*key, true, PadForSignature(t, kb), &out)) return Fail(NTE_FAIL);
+  std::reverse(out.begin(), out.end());
+  memcpy(sig, out.data(), kb);
+  *len = kb;
+  return TRUE;
 }
-BOOL WINAPI CryptVerifySignatureW(HCRYPTHASH, const BYTE*, DWORD, HCRYPTKEY, LPCWSTR, DWORD) {
-  return Fail(NTE_BAD_KEY);
+
+BOOL WINAPI CryptSignHashW(HCRYPTHASH hHash, DWORD spec, LPCWSTR, DWORD flags, BYTE* sig, DWORD* len) {
+  return CryptSignHashA(hHash, spec, NULL, flags, sig, len);
+}
+
+BOOL WINAPI CryptVerifySignatureA(HCRYPTHASH hHash, const BYTE* sig, DWORD sigLen, HCRYPTKEY hKey, LPCSTR,
+                                  DWORD flags) {
+  std::lock_guard<std::mutex> g(Lock());
+  Hash* h = HashOf(hHash);
+  if (!h) return Fail(NTE_BAD_HASH);
+  Key* k = KeyOf(hKey);
+  if (!k || !k->rsa) return Fail(NTE_BAD_KEY);
+  DWORD kb = Bytes(*k->rsa);
+  if (!sig || sigLen != kb) return Fail(NTE_BAD_SIGNATURE);
+  std::vector<BYTE> t, in(sig, sig + kb), em;
+  if (!SignedValue(h, flags, &t)) return Fail(NTE_BAD_ALGID);
+  if (t.size() + 11 > kb) return Fail(NTE_BAD_SIGNATURE);
+  std::reverse(in.begin(), in.end());
+  if (!Transform(*k->rsa, false, in, &em) || em != PadForSignature(t, kb)) return Fail(NTE_BAD_SIGNATURE);
+  return TRUE;
+}
+
+BOOL WINAPI CryptVerifySignatureW(HCRYPTHASH hHash, const BYTE* sig, DWORD sigLen, HCRYPTKEY hKey, LPCWSTR,
+                                  DWORD flags) {
+  return CryptVerifySignatureA(hHash, sig, sigLen, hKey, NULL, flags);
 }
 
 }  // extern "C"
