@@ -1,7 +1,7 @@
 // gdiplus.cpp - GDI+'s bitmaps and image codecs, for CImage: bitmaps in
 // any of the GDI pixel formats, their pixels locked and converted, and
-// BMP, PNG, JPEG and GIF read (stb_image) and BMP, PNG and JPEG written
-// (stb_image_write, BMP by hand).
+// BMP, PNG, JPEG and GIF read (stb_image) and written (PNG and JPEG with
+// stb_image_write, BMP and GIF by hand).
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -310,7 +310,7 @@ const Codec kCodecs[] = {
     {CODEC_CLSID(0), &ImageFormatBMP, L"Built-in BMP Codec", L"BMP", L"*.BMP;*.DIB;*.RLE", L"image/bmp", true},
     {CODEC_CLSID(1), &ImageFormatJPEG, L"Built-in JPEG Codec", L"JPEG", L"*.JPG;*.JPEG;*.JPE;*.JFIF",
      L"image/jpeg", true},
-    {CODEC_CLSID(2), &ImageFormatGIF, L"Built-in GIF Codec", L"GIF", L"*.GIF", L"image/gif", false},
+    {CODEC_CLSID(2), &ImageFormatGIF, L"Built-in GIF Codec", L"GIF", L"*.GIF", L"image/gif", true},
     {CODEC_CLSID(6), &ImageFormatPNG, L"Built-in PNG Codec", L"PNG", L"*.PNG", L"image/png", true},
 };
 
@@ -407,6 +407,182 @@ std::vector<BYTE> EncodeBmp(Bitmap* b) {
   return out;
 }
 
+// ---- GIF
+
+// GIF's LZW: variable-length codes from minCode + 1 bits up to 12, least
+// significant bit first, in sub-blocks of up to 255 bytes.
+void LzwEncode(const std::vector<BYTE>& idx, int minCode, std::vector<BYTE>* out) {
+  std::vector<BYTE> packed;
+  uint32_t acc = 0;
+  int nbits = 0;
+  auto emit = [&](UINT code, int size) {
+    acc |= (uint32_t)code << nbits;
+    nbits += size;
+    while (nbits >= 8) {
+      packed.push_back((BYTE)acc);
+      acc >>= 8;
+      nbits -= 8;
+    }
+  };
+  const UINT clear = 1u << minCode, eoi = clear + 1;
+  UINT next = eoi + 1;
+  int size = minCode + 1;
+  // The table: (prefix code, byte) to code, by open addressing.
+  const size_t kSlots = 8192;
+  std::vector<uint32_t> keys(kSlots, 0xFFFFFFFFu);
+  std::vector<uint16_t> codes(kSlots);
+  auto slot = [&](uint32_t key) {
+    size_t h = (key * 2654435761u) & (kSlots - 1);
+    while (keys[h] != 0xFFFFFFFFu && keys[h] != key) h = (h + 1) & (kSlots - 1);
+    return h;
+  };
+  emit(clear, size);
+  if (!idx.empty()) {
+    UINT prefix = idx[0];
+    for (size_t i = 1; i < idx.size(); i++) {
+      uint32_t key = (uint32_t)prefix << 8 | idx[i];
+      size_t h = slot(key);
+      if (keys[h] == key) {
+        prefix = codes[h];
+        continue;
+      }
+      emit(prefix, size);
+      // A decoder adds its entry a code later, so the width grows once
+      // the next code would not fit; a full table starts over.
+      if (next < 4095) {
+        keys[h] = key;
+        codes[h] = (uint16_t)next++;
+        if (next > (1u << size) && size < 12) size++;
+      } else {
+        emit(clear, size);
+        std::fill(keys.begin(), keys.end(), 0xFFFFFFFFu);
+        next = eoi + 1;
+        size = minCode + 1;
+      }
+      prefix = idx[i];
+    }
+    emit(prefix, size);
+  }
+  emit(eoi, size);
+  if (nbits) packed.push_back((BYTE)acc);
+  out->push_back((BYTE)minCode);
+  for (size_t off = 0; off < packed.size(); off += 255) {
+    size_t n = std::min<size_t>(255, packed.size() - off);
+    out->push_back((BYTE)n);
+    out->insert(out->end(), packed.begin() + off, packed.begin() + off + n);
+  }
+  out->push_back(0);
+}
+
+// One frame, its colors in a global table: an indexed bitmap's palette
+// as it is; else the image's own colors when there are 256 or fewer,
+// and a 6-7-6 color cube when there are more. Pixels with less than half
+// alpha, or an indexed bitmap's colors of alpha 0, are transparent.
+std::vector<BYTE> EncodeGif(Bitmap* b) {
+  std::vector<ARGB> table;
+  std::vector<BYTE> idx((size_t)b->width * b->height);
+  int transparent = -1;
+  if (IsIndexedPixelFormat(b->format)) {
+    table = b->palette;
+    if (table.empty()) table.push_back(0xFF000000u);
+    for (size_t i = 0; i < table.size(); i++)
+      if ((table[i] >> 24) == 0) {
+        transparent = (int)i;
+        break;
+      }
+    UINT bpp = GetPixelFormatSize(b->format);
+    for (UINT y = 0; y < b->height; y++) {
+      const BYTE* row = b->Row(y);
+      for (UINT x = 0; x < b->width; x++) {
+        UINT bit = x * bpp;
+        UINT v = (row[bit / 8] >> (8 - bpp - bit % 8)) & ((1u << bpp) - 1);
+        idx[(size_t)y * b->width + x] = (BYTE)(v < table.size() ? v : 0);
+      }
+    }
+  } else {
+    std::vector<ARGB> px(idx.size());
+    bool clear = false;
+    for (UINT y = 0; y < b->height; y++)
+      for (UINT x = 0; x < b->width; x++) {
+        ARGB c = ReadPixel(b, b->Row(y), x);
+        if ((c >> 24) < 0x80) {
+          clear = true;
+          c = 0;
+        } else {
+          c &= 0xFFFFFF;
+          c |= 0xFF000000u;
+        }
+        px[(size_t)y * b->width + x] = c;
+      }
+    std::vector<ARGB> colors;
+    for (ARGB c : px)
+      if (c) colors.push_back(c);
+    std::sort(colors.begin(), colors.end());
+    colors.erase(std::unique(colors.begin(), colors.end()), colors.end());
+    size_t room = clear ? 255 : 256;
+    if (clear) {
+      transparent = 0;
+      table.push_back(0);
+    }
+    if (colors.size() <= room) {
+      table.insert(table.end(), colors.begin(), colors.end());
+      for (size_t i = 0; i < px.size(); i++)
+        idx[i] = px[i] ? (BYTE)(std::lower_bound(colors.begin(), colors.end(), px[i]) - colors.begin() +
+                                (clear ? 1 : 0))
+                       : 0;
+    } else {
+      size_t base = table.size();
+      for (UINT r = 0; r < 6; r++)
+        for (UINT g = 0; g < 7; g++)
+          for (UINT bl = 0; bl < 6; bl++)
+            table.push_back(0xFF000000u | (r * 51) << 16 | (g * 255 / 6) << 8 | bl * 51);
+      for (size_t i = 0; i < px.size(); i++) {
+        ARGB c = px[i];
+        if (!c) {
+          idx[i] = 0;
+          continue;
+        }
+        UINT r = (((c >> 16) & 0xFF) * 5 + 127) / 255, g = (((c >> 8) & 0xFF) * 6 + 127) / 255,
+             bl = ((c & 0xFF) * 5 + 127) / 255;
+        idx[i] = (BYTE)(base + (r * 7 + g) * 6 + bl);
+      }
+    }
+  }
+  int tableBits = 1;
+  while ((1u << tableBits) < table.size()) tableBits++;
+  std::vector<BYTE> out;
+  auto put16 = [&](UINT v) {
+    out.push_back((BYTE)v);
+    out.push_back((BYTE)(v >> 8));
+  };
+  const char* sig = "GIF89a";
+  out.insert(out.end(), sig, sig + 6);
+  put16(b->width);
+  put16(b->height);
+  out.push_back((BYTE)(0x80 | (tableBits - 1) << 4 | (tableBits - 1)));
+  out.push_back(0);  // background
+  out.push_back(0);  // aspect
+  for (UINT i = 0; i < (1u << tableBits); i++) {
+    ARGB c = i < table.size() ? table[i] : 0;
+    out.push_back((BYTE)(c >> 16));
+    out.push_back((BYTE)(c >> 8));
+    out.push_back((BYTE)c);
+  }
+  if (transparent >= 0) {
+    const BYTE gce[] = {0x21, 0xF9, 4, 1, 0, 0, (BYTE)transparent, 0};
+    out.insert(out.end(), gce, gce + sizeof gce);
+  }
+  out.push_back(0x2C);
+  put16(0);
+  put16(0);
+  put16(b->width);
+  put16(b->height);
+  out.push_back(0);
+  LzwEncode(idx, std::max(2, tableBits), &out);
+  out.push_back(0x3B);
+  return out;
+}
+
 void Append(void* context, void* data, int size) {
   std::vector<BYTE>* v = (std::vector<BYTE>*)context;
   v->insert(v->end(), (BYTE*)data, (BYTE*)data + size);
@@ -419,6 +595,10 @@ Status Encode(Bitmap* b, const CLSID* clsid, const EncoderParameters* params, st
   if (!codec) return InvalidParameter;
   if (*codec->format == ImageFormatBMP) {
     *out = EncodeBmp(b);
+    return Ok;
+  }
+  if (*codec->format == ImageFormatGIF) {
+    *out = EncodeGif(b);
     return Ok;
   }
   bool alpha = IsAlphaPixelFormat(b->format);
