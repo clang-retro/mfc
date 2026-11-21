@@ -321,6 +321,16 @@ void SetTitle(Win* w, const uint16_t* text, size_t length) {
   [pool release];
 }
 
+void SetTranslucent(Win* w, bool translucent, bool clickThrough) {
+  NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+  [w->window setOpaque:translucent ? NO : YES];
+  [w->window setBackgroundColor:translucent ? [NSColor clearColor] : [NSColor windowBackgroundColor]];
+  [w->window setHasShadow:translucent ? NO : YES];
+  [w->window setIgnoresMouseEvents:clickThrough ? YES : NO];
+  [w->view setNeedsDisplay:YES];
+  [pool release];
+}
+
 void Invalidate(Win* w, int x, int y, int width, int height) {
   CGFloat h = [w->view bounds].size.height;
   [w->view setNeedsDisplayInRect:NSMakeRect(x, h - y - height, width, height)];
@@ -516,19 +526,23 @@ void Wake() {
 - (void)drawRect:(NSRect)dirty {
   const uint32_t* pixels;
   int width, height;
-  if (!owner || !BeginDraw(owner, &pixels, &width, &height)) return;
+  bool alpha = false;
+  if (!owner || !BeginDraw(owner, &pixels, &width, &height, &alpha)) return;
   CGContextRef ctx = (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort];
   if (ctx) {
     CGColorSpaceRef rgb = CGColorSpaceCreateDeviceRGB();
     CGDataProviderRef data = CGDataProviderCreateWithData(NULL, pixels, (size_t)width * height * 4, NULL);
-    // 0x00RRGGBB in the machine's byte order.
-    CGImageRef img = CGImageCreate(width, height, 8, 32, width * 4, rgb,
-                                   (CGBitmapInfo)kCGImageAlphaNoneSkipFirst | (CGBitmapInfo)kCGBitmapByteOrder32Host, data, NULL,
-                                   false, kCGRenderingIntentDefault);
+    // 0x00RRGGBB in the machine's byte order, or premultiplied ARGB.
+    CGBitmapInfo info = (CGBitmapInfo)(alpha ? kCGImageAlphaPremultipliedFirst : kCGImageAlphaNoneSkipFirst) |
+                        (CGBitmapInfo)kCGBitmapByteOrder32Host;
+    CGImageRef img = CGImageCreate(width, height, 8, 32, width * 4, rgb, info, data, NULL, false,
+                                   kCGRenderingIntentDefault);
     CGFloat h = [self bounds].size.height;
     CGContextSaveGState(ctx);
     CGContextClipToRect(ctx, CGRectMake(dirty.origin.x, dirty.origin.y, dirty.size.width, dirty.size.height));
     CGContextSetInterpolationQuality(ctx, kCGInterpolationNone);
+    // With alpha the picture replaces what was there, rather than going over it.
+    if (alpha) CGContextSetBlendMode(ctx, kCGBlendModeCopy);
     CGContextDrawImage(ctx, CGRectMake(0, h - height, width, height), img);
     CGContextRestoreGState(ctx);
     CGImageRelease(img);

@@ -33,6 +33,9 @@ void Show(Win* w, int how);
 void SetFrame(Win* w, int x, int y, int width, int height);
 void SetTitle(Win* w, const uint16_t* text, size_t length);
 void Invalidate(Win* w, int x, int y, int width, int height);  // in the window
+// A window drawn with alpha, which lets the mouse through where it is
+// fully transparent; clickThrough lets it through everywhere.
+void SetTranslucent(Win* w, bool translucent, bool clickThrough);
 // The pointer's shape: a system cursor by its IDC_ number, or else the
 // picture (ARGB, not premultiplied, top row first); hidden hides it.
 void SetCursor(bool hidden, int systemId, const uint32_t* argb, int width, int height, int hotX, int hotY);
@@ -71,8 +74,9 @@ bool OnDragFiles(int x, int y);
 bool OnDropFiles(int x, int y, const std::vector<std::string>& paths);
 void OnQuit();
 // Drawing: the window's pixels (0x00RRGGBB in the machine's byte order,
-// top row first), held still until EndDraw. False when there are none.
-bool BeginDraw(void* owner, const uint32_t** pixels, int* width, int* height);
+// top row first; premultiplied 0xAARRGGBB when alpha), held still until
+// EndDraw. False when there are none.
+bool BeginDraw(void* owner, const uint32_t** pixels, int* width, int* height, bool* alpha);
 void EndDraw();
 
 }  // namespace cocoa

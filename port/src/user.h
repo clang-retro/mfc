@@ -90,6 +90,17 @@ struct Window {
   // window neither draws nor takes the mouse.
   Region shape;
   bool shaped = false;
+  // A layered window's look: by SetLayeredWindowAttributes (layer 1), a
+  // color key and a constant alpha over its surface; by
+  // UpdateLayeredWindow (layer 2), its own picture, premultiplied ARGB,
+  // with UpdateLayeredWindow's key, constant alpha and flags. Until one
+  // of them is called (layer 0) it shows nothing.
+  int layer = 0;
+  COLORREF layerKey = 0;
+  BYTE layerAlpha = 255;
+  DWORD layerFlags = 0;
+  int layerWidth = 0, layerHeight = 0;
+  std::vector<DWORD> layerPixels;
 
   bool Visible() const { return (style & WS_VISIBLE) != 0; }
   bool Child() const { return (style & WS_CHILD) != 0 && parent != NULL; }
@@ -270,6 +281,24 @@ std::vector<CursorPicture> DesktopIcons(Window* w);
 // changed, and redraws the caption.
 void WindowIconChanged(Window* w);
 
+// Top-level windows that are not plain rectangles of opaque pixels:
+// layered ones, and those with a window region (user_layered.cpp).
+// Translucent says whether one is. Composite gives its look for r of the
+// surface as premultiplied ARGB, 0xAARRGGBB, at out[y * stride + x] from
+// r's top left. TakesMouse says whether a point of the surface takes the
+// mouse: not where it is fully transparent, nor anywhere for a layered
+// window with WS_EX_TRANSPARENT. ShownArea and MouseArea are the same as
+// rectangles in surface coordinates, for a backend's shapes and input
+// regions.
+bool Translucent(Window* top);
+void Composite(Window* top, const RECT& r, DWORD* out, int stride);
+bool TakesMouse(Window* top, int x, int y);
+std::vector<RECT> ShownArea(Window* top);
+std::vector<RECT> MouseArea(Window* top);
+// Tells the backend that a top-level window's translucency has changed,
+// and shows it again whole.
+void TranslucencyChanged(Window* top);
+
 // The backend: how top-level windows are shown.
 struct Backend {
   virtual ~Backend() {}
@@ -281,6 +310,10 @@ struct Backend {
   virtual void TitleChanged(Window* /*w*/) {}
   virtual void IconChanged(Window* /*w*/) {}  // see DesktopIcons
   virtual void Present(Window* /*w*/, const RECT& /*r*/) {}
+  // The window has become translucent or opaque, or changed how; a
+  // Present of the whole window follows. Present shows a translucent
+  // window with Composite.
+  virtual void TranslucencyChanged(Window* /*w*/) {}
   // Moving or sizing a top-level window with the mouse, for displays
   // where only the compositor can; hit is HTCAPTION or a frame edge.
   virtual bool BeginMoveSize(Window* /*w*/, LRESULT /*hit*/) { return false; }

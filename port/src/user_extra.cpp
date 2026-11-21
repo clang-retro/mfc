@@ -1,9 +1,9 @@
 // user_extra.cpp - the display as one monitor (MonitorFromWindow and the
-// rest), layered windows, PrintWindow, and the cursor's state.
+// rest), PrintWindow, and the cursor's state. (Layered windows are in
+// user_layered.cpp.)
 //
 // There is one monitor, the screen the backend reports, with the work
-// area SystemParametersInfo gives. A layered window keeps the attributes
-// it is given, but draws opaque: the backends have no per-window alpha.
+// area SystemParametersInfo gives.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -53,23 +53,6 @@ bool FillInfo(HMONITOR m, LPMONITORINFO mi, bool wide) {
   return true;
 }
 
-// A layered window's attributes, as window properties.
-const WCHAR kLayeredKey[] = L"winport.layered.key";
-const WCHAR kLayeredAlpha[] = L"winport.layered.alpha";
-const WCHAR kLayeredFlags[] = L"winport.layered.flags";
-
-bool Layered(HWND h) {
-  if (!IsWindow(h)) {
-    SetLastError(ERROR_INVALID_WINDOW_HANDLE);
-    return false;
-  }
-  if (!(GetWindowLongW(h, GWL_EXSTYLE) & WS_EX_LAYERED)) {
-    SetLastError(ERROR_INVALID_PARAMETER);
-    return false;
-  }
-  return true;
-}
-
 }  // namespace
 
 extern "C" {
@@ -108,53 +91,6 @@ BOOL WINAPI EnumDisplayMonitors(HDC dc, LPCRECT clip, MONITORENUMPROC proc, LPAR
   }
   if (clip && !IntersectRect(&r, &r, clip)) return TRUE;
   proc(kMonitor, dc, &r, data);
-  return TRUE;
-}
-
-BOOL WINAPI SetLayeredWindowAttributes(HWND h, COLORREF key, BYTE alpha, DWORD flags) {
-  if (!Layered(h)) return FALSE;
-  SetPropW(h, kLayeredKey, (HANDLE)(UINT_PTR)key);
-  SetPropW(h, kLayeredAlpha, (HANDLE)(UINT_PTR)alpha);
-  SetPropW(h, kLayeredFlags, (HANDLE)(UINT_PTR)(flags | 0x80000000u));
-  return TRUE;
-}
-
-BOOL WINAPI GetLayeredWindowAttributes(HWND h, COLORREF* key, BYTE* alpha, DWORD* flags) {
-  if (!Layered(h)) return FALSE;
-  UINT_PTR f = (UINT_PTR)GetPropW(h, kLayeredFlags);
-  // Only after SetLayeredWindowAttributes (not UpdateLayeredWindow).
-  if (!(f & 0x80000000u)) {
-    SetLastError(ERROR_INVALID_PARAMETER);
-    return FALSE;
-  }
-  if (key) *key = (COLORREF)(UINT_PTR)GetPropW(h, kLayeredKey);
-  if (alpha) *alpha = (BYTE)(UINT_PTR)GetPropW(h, kLayeredAlpha);
-  if (flags) *flags = (DWORD)(f & 0x7fffffffu);
-  return TRUE;
-}
-
-// The window takes the place and size given and shows the source DC's
-// image (opaque; see the top).
-BOOL WINAPI UpdateLayeredWindow(HWND h, HDC dst, POINT* pos, SIZE* size, HDC src, POINT* srcPos, COLORREF key,
-                                BLENDFUNCTION* blend, DWORD flags) {
-  (void)dst;
-  if (!Layered(h)) return FALSE;
-  RECT r;
-  GetWindowRect(h, &r);
-  UINT swp = SWP_NOZORDER | SWP_NOACTIVATE;
-  if (!pos) swp |= SWP_NOMOVE;
-  if (!size || (flags & ULW_EX_NORESIZE)) swp |= SWP_NOSIZE;
-  int cx = size ? size->cx : r.right - r.left, cy = size ? size->cy : r.bottom - r.top;
-  if (!(swp & SWP_NOMOVE) || !(swp & SWP_NOSIZE))
-    SetWindowPos(h, NULL, pos ? pos->x : 0, pos ? pos->y : 0, cx, cy, swp);
-  SetPropW(h, kLayeredKey, (HANDLE)(UINT_PTR)key);
-  SetPropW(h, kLayeredAlpha, (HANDLE)(UINT_PTR)(blend ? blend->SourceConstantAlpha : 255));
-  SetPropW(h, kLayeredFlags, (HANDLE)(UINT_PTR)(flags & (ULW_COLORKEY | ULW_ALPHA)));
-  if (src) {
-    HDC wdc = GetWindowDC(h);
-    BitBlt(wdc, 0, 0, cx, cy, src, srcPos ? srcPos->x : 0, srcPos ? srcPos->y : 0, SRCCOPY);
-    ReleaseDC(h, wdc);
-  }
   return TRUE;
 }
 
