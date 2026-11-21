@@ -426,8 +426,22 @@ void DrawFrameTo(Window* w, HDC dc) {
     FrameRect(dc, &r, GetSysColorBrush(COLOR_WINDOWFRAME));
   }
   if (HasCaption(w->style)) {
-    Fill(dc, f.caption.left, f.caption.top, f.caption.right, f.caption.bottom,
-         active ? COLOR_ACTIVECAPTION : COLOR_INACTIVECAPTION);
+    BOOL gradient = FALSE;
+    SystemParametersInfoW(SPI_GETGRADIENTCAPTIONS, 0, &gradient, 0);
+    if (gradient) {
+      // From the title color at the left to its gradient color at the right.
+      COLORREF from = GetSysColor(active ? COLOR_ACTIVECAPTION : COLOR_INACTIVECAPTION);
+      COLORREF to = GetSysColor(active ? COLOR_GRADIENTACTIVECAPTION : COLOR_GRADIENTINACTIVECAPTION);
+      TRIVERTEX v[2] = {{f.caption.left, f.caption.top, (COLOR16)(GetRValue(from) << 8), (COLOR16)(GetGValue(from) << 8),
+                         (COLOR16)(GetBValue(from) << 8), 0},
+                        {f.caption.right, f.caption.bottom, (COLOR16)(GetRValue(to) << 8),
+                         (COLOR16)(GetGValue(to) << 8), (COLOR16)(GetBValue(to) << 8), 0}};
+      GRADIENT_RECT gr = {0, 1};
+      GradientFill(dc, v, 2, &gr, 1, GRADIENT_FILL_RECT_H);
+    } else {
+      Fill(dc, f.caption.left, f.caption.top, f.caption.right, f.caption.bottom,
+           active ? COLOR_ACTIVECAPTION : COLOR_INACTIVECAPTION);
+    }
     Fill(dc, f.caption.left, f.caption.bottom, f.caption.right, f.caption.bottom + 1, COLOR_BTNFACE);
     RECT text = f.caption;
     text.left += RectEmpty(f.sysmenu) ? 4 : f.sysmenu.right - f.caption.left + 4;

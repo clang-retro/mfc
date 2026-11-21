@@ -4,9 +4,12 @@
 // replaced it, so that processes see each other's changes.
 //
 // The file is $WINPORT_REGISTRY, else registry.reg in the configuration
-// directory ($XDG_CONFIG_HOME/winport or ~/.config/winport). Each key is a
-// line "[HIVE\path]" followed by its values, "name"=type:hex bytes, with
-// strings in UTF-8. The programs of one user share it, as on Windows.
+// directory (see ConfigDir). Each key is a line "[HIVE\path]" followed by
+// its values, one a line, much as regedit writes them: "name"="text" for
+// a string (UTF-8), "name"=dword:hex for a number, and "name"=type:hex
+// bytes for the rest. A person can edit it, to change the system colors
+// under [HKEY_CURRENT_USER\Control Panel\Colors], say. The programs of
+// one user share it, as on Windows.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -89,15 +92,7 @@ struct Handle {
 std::string RegistryFile() {
   const char* f = getenv("WINPORT_REGISTRY");
   if (f != NULL && *f) return f;
-  std::string dir;
-  const char* xdg = getenv("XDG_CONFIG_HOME");
-  if (xdg != NULL && *xdg) {
-    dir = xdg;
-  } else {
-    const char* home = getenv("HOME");
-    dir = std::string(home ? home : "/tmp") + "/.config";
-  }
-  return dir + "/winport/registry.reg";
+  return ConfigDir() + "/registry.reg";
 }
 
 void MakeParents(const std::string& path) {
@@ -150,6 +145,22 @@ int HexValue(char c) {
   return -1;
 }
 
+std::vector<BYTE> StoreW(DWORD type, const BYTE* data, DWORD cb);
+std::wstring LoadW(const std::vector<BYTE>& d);
+
+// A quoted string from a line, from the opening quote at i; quotes and
+// backslashes inside are escaped. i ends past the closing quote.
+std::string Quoted(const std::string& line, size_t& i) {
+  std::string out;
+  i++;
+  while (i < line.size() && line[i] != '"') {
+    if (line[i] == '\\' && i + 1 < line.size()) i++;
+    out += line[i++];
+  }
+  if (i < line.size()) i++;
+  return out;
+}
+
 void Load() {
   if (g_loaded) return;
   g_loaded = true;
@@ -176,21 +187,37 @@ void Load() {
           break;
         }
     } else if (cur != NULL && line.size() > 2 && line[0] == '"') {
-      // "name"=type:hex; quotes and backslashes in names are escaped.
-      std::string name;
-      size_t i = 1;
-      while (i < line.size() && line[i] != '"') {
-        if (line[i] == '\\' && i + 1 < line.size()) i++;
-        name += line[i++];
-      }
-      if (i + 2 >= line.size() || line[i + 1] != '=') {
+      // "name"="text" (a REG_SZ string, in UTF-8), "name"=dword:hex, or
+      // "name"=type:hex bytes; quotes and backslashes in the name and the
+      // text are escaped.
+      size_t i = 0;
+      std::string name = Quoted(line, i);
+      if (i + 1 >= line.size() || line[i] != '=') {
         line.clear();
         continue;
       }
+      i++;
       char* end;
       Value v;
       v.name = Widen(name.c_str());
-      v.type = (DWORD)strtoul(line.c_str() + i + 2, &end, 16);
+      if (line[i] == '"') {
+        std::wstring text = Widen(Quoted(line, i).c_str());
+        text += L'\0';
+        v.type = REG_SZ;
+        v.data = StoreW(REG_SZ, (const BYTE*)text.data(), (DWORD)(text.size() * sizeof(wchar_t)));
+        cur->values.push_back(v);
+        line.clear();
+        continue;
+      }
+      if (line.compare(i, 6, "dword:") == 0) {
+        DWORD d = (DWORD)strtoul(line.c_str() + i + 6, NULL, 16);
+        v.type = REG_DWORD;
+        v.data.assign((const BYTE*)&d, (const BYTE*)&d + 4);
+        cur->values.push_back(v);
+        line.clear();
+        continue;
+      }
+      v.type = (DWORD)strtoul(line.c_str() + i, &end, 16);
       if (*end == ':') {
         for (const char* p = end + 1; p[0] && p[1]; p += 2) {
           int hi = HexValue(p[0]), lo = HexValue(p[1]);
@@ -264,14 +291,32 @@ void SaveKey(FILE* f, Key* k, const std::wstring& path) {
   if (!k->values.empty() || k->children.empty()) {
     fprintf(f, "[%s]\n", Narrow(path.c_str()).c_str());
     for (const Value& v : k->values) {
-      std::string n = Narrow(v.name.c_str());
-      fputc('"', f);
-      for (char c : n) {
-        if (c == '"' || c == '\\') fputc('\\', f);
-        fputc(c, f);
+      auto quote = [f](const std::string& t) {
+        fputc('"', f);
+        for (char c : t) {
+          if (c == '"' || c == '\\') fputc('\\', f);
+          fputc(c, f);
+        }
+        fputc('"', f);
+      };
+      quote(Narrow(v.name.c_str()));
+      fputc('=', f);
+      // Strings and numbers as a person would write them, where they can
+      // be: one line of text, ending in its one terminator.
+      std::wstring text = v.type == REG_SZ ? LoadW(v.data) : std::wstring();
+      bool plain = !text.empty() && text.back() == L'\0' && text.find_first_of(L"\r\n") == std::wstring::npos &&
+                   text.find(L'\0') == text.size() - 1;
+      if (plain) {
+        text.pop_back();
+        quote(Narrow(text.c_str()));
+      } else if (v.type == REG_DWORD && v.data.size() == 4) {
+        DWORD d;
+        memcpy(&d, v.data.data(), 4);
+        fprintf(f, "dword:%08lx", (unsigned long)d);
+      } else {
+        fprintf(f, "%lx:", (unsigned long)v.type);
+        for (BYTE b : v.data) fprintf(f, "%02x", b);
       }
-      fprintf(f, "\"=%lx:", (unsigned long)v.type);
-      for (BYTE b : v.data) fprintf(f, "%02x", b);
       fputc('\n', f);
     }
   }
@@ -285,7 +330,7 @@ void Save() {
   std::string tmp = file + ".tmp" + std::to_string(getpid());
   FILE* f = fopen(tmp.c_str(), "w");
   if (f == NULL) return;
-  fprintf(f, "; winport registry\n");
+  fprintf(f, "; libmfc registry\n");
   for (int i = 0; i < kNumHives; i++) {
     if (g_hives[i].values.empty() && g_hives[i].children.empty()) continue;
     SaveKey(f, &g_hives[i], kHives[i]);

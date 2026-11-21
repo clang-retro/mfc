@@ -8,6 +8,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <wchar.h>
 #include <map>
 #include <mutex>
 #include <vector>
@@ -203,43 +205,101 @@ UINT WINAPI RegisterWindowMessageW(LPCWSTR name) { return name && *name ? Global
 UINT WINAPI RegisterClipboardFormatA(LPCSTR name) { return name && *name ? GlobalAddAtomA(name) : 0; }
 UINT WINAPI RegisterClipboardFormatW(LPCWSTR name) { return name && *name ? GlobalAddAtomW(name) : 0; }
 
-// The classic Windows scheme.
+// The system colors: the classic Windows scheme, unless the user's
+// registry names others under HKEY_CURRENT_USER\Control Panel\Colors, as
+// Windows keeps them: "ActiveTitle"="0 0 128", say. Read when a color is
+// first asked for; SetSysColors changes them for the session.
+static const COLORREF kClassicColors[] = {
+    RGB(192, 192, 192),  // COLOR_SCROLLBAR
+    RGB(0, 128, 128),    // COLOR_BACKGROUND
+    RGB(0, 0, 128),      // COLOR_ACTIVECAPTION
+    RGB(128, 128, 128),  // COLOR_INACTIVECAPTION
+    RGB(192, 192, 192),  // COLOR_MENU
+    RGB(255, 255, 255),  // COLOR_WINDOW
+    RGB(0, 0, 0),        // COLOR_WINDOWFRAME
+    RGB(0, 0, 0),        // COLOR_MENUTEXT
+    RGB(0, 0, 0),        // COLOR_WINDOWTEXT
+    RGB(255, 255, 255),  // COLOR_CAPTIONTEXT
+    RGB(192, 192, 192),  // COLOR_ACTIVEBORDER
+    RGB(192, 192, 192),  // COLOR_INACTIVEBORDER
+    RGB(128, 128, 128),  // COLOR_APPWORKSPACE
+    RGB(0, 0, 128),      // COLOR_HIGHLIGHT
+    RGB(255, 255, 255),  // COLOR_HIGHLIGHTTEXT
+    RGB(192, 192, 192),  // COLOR_BTNFACE
+    RGB(128, 128, 128),  // COLOR_BTNSHADOW
+    RGB(128, 128, 128),  // COLOR_GRAYTEXT
+    RGB(0, 0, 0),        // COLOR_BTNTEXT
+    RGB(192, 192, 192),  // COLOR_INACTIVECAPTIONTEXT
+    RGB(255, 255, 255),  // COLOR_BTNHIGHLIGHT
+    RGB(64, 64, 64),     // COLOR_3DDKSHADOW
+    RGB(223, 223, 223),  // COLOR_3DLIGHT
+    RGB(0, 0, 0),        // COLOR_INFOTEXT
+    RGB(255, 255, 225),  // COLOR_INFOBK
+    RGB(180, 180, 180),  // 25, unused
+    RGB(0, 0, 255),      // COLOR_HOTLIGHT
+    RGB(16, 132, 208),   // COLOR_GRADIENTACTIVECAPTION
+    RGB(181, 181, 181),  // COLOR_GRADIENTINACTIVECAPTION
+    RGB(0, 0, 128),      // COLOR_MENUHILIGHT
+    RGB(192, 192, 192),  // COLOR_MENUBAR
+};
+
+// The registry's name for each color, by index.
+static const wchar_t* const kColorNames[] = {
+    L"Scrollbar",      L"Background",    L"ActiveTitle",       L"InactiveTitle",       L"Menu",
+    L"Window",         L"WindowFrame",   L"MenuText",          L"WindowText",          L"TitleText",
+    L"ActiveBorder",   L"InactiveBorder", L"AppWorkspace",     L"Hilight",             L"HilightText",
+    L"ButtonFace",     L"ButtonShadow",  L"GrayText",          L"ButtonText",          L"InactiveTitleText",
+    L"ButtonHilight",  L"ButtonDkShadow", L"ButtonLight",      L"InfoText",            L"InfoWindow",
+    L"ButtonAlternateFace", L"HotTrackingColor", L"GradientActiveTitle", L"GradientInactiveTitle",
+    L"MenuHilight",    L"MenuBar"};
+const int kNumColors = (int)(sizeof(kClassicColors) / sizeof(kClassicColors[0]));
+static_assert(sizeof(kColorNames) / sizeof(kColorNames[0]) == sizeof(kClassicColors) / sizeof(kClassicColors[0]),
+              "a name for each color");
+
+static COLORREF* SysColors() {
+  static COLORREF colors[kNumColors];
+  static std::once_flag once;
+  std::call_once(once, [] {
+    memcpy(colors, kClassicColors, sizeof colors);
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Colors", 0, KEY_READ, &k) != ERROR_SUCCESS) return;
+    for (int i = 0; i < kNumColors; i++) {
+      WCHAR text[64];
+      DWORD type, cb = sizeof text - sizeof(WCHAR);
+      if (RegQueryValueExW(k, kColorNames[i], NULL, &type, (BYTE*)text, &cb) != ERROR_SUCCESS || type != REG_SZ)
+        continue;
+      text[cb / sizeof(WCHAR)] = 0;
+      unsigned r, g, b;
+      if (swscanf(text, L"%u %u %u", &r, &g, &b) == 3 && r < 256 && g < 256 && b < 256) colors[i] = RGB(r, g, b);
+    }
+    RegCloseKey(k);
+  });
+  return colors;
+}
+
 DWORD WINAPI GetSysColor(int index) {
-  static const COLORREF colors[] = {
-      RGB(192, 192, 192),  // COLOR_SCROLLBAR
-      RGB(0, 128, 128),    // COLOR_BACKGROUND
-      RGB(0, 0, 128),      // COLOR_ACTIVECAPTION
-      RGB(128, 128, 128),  // COLOR_INACTIVECAPTION
-      RGB(192, 192, 192),  // COLOR_MENU
-      RGB(255, 255, 255),  // COLOR_WINDOW
-      RGB(0, 0, 0),        // COLOR_WINDOWFRAME
-      RGB(0, 0, 0),        // COLOR_MENUTEXT
-      RGB(0, 0, 0),        // COLOR_WINDOWTEXT
-      RGB(255, 255, 255),  // COLOR_CAPTIONTEXT
-      RGB(192, 192, 192),  // COLOR_ACTIVEBORDER
-      RGB(192, 192, 192),  // COLOR_INACTIVEBORDER
-      RGB(128, 128, 128),  // COLOR_APPWORKSPACE
-      RGB(0, 0, 128),      // COLOR_HIGHLIGHT
-      RGB(255, 255, 255),  // COLOR_HIGHLIGHTTEXT
-      RGB(192, 192, 192),  // COLOR_BTNFACE
-      RGB(128, 128, 128),  // COLOR_BTNSHADOW
-      RGB(128, 128, 128),  // COLOR_GRAYTEXT
-      RGB(0, 0, 0),        // COLOR_BTNTEXT
-      RGB(192, 192, 192),  // COLOR_INACTIVECAPTIONTEXT
-      RGB(255, 255, 255),  // COLOR_BTNHIGHLIGHT
-      RGB(64, 64, 64),     // COLOR_3DDKSHADOW
-      RGB(223, 223, 223),  // COLOR_3DLIGHT
-      RGB(0, 0, 0),        // COLOR_INFOTEXT
-      RGB(255, 255, 225),  // COLOR_INFOBK
-      RGB(180, 180, 180),  // 25, unused
-      RGB(0, 0, 255),      // COLOR_HOTLIGHT
-      RGB(16, 132, 208),   // COLOR_GRADIENTACTIVECAPTION
-      RGB(181, 181, 181),  // COLOR_GRADIENTINACTIVECAPTION
-      RGB(0, 0, 128),      // COLOR_MENUHILIGHT
-      RGB(192, 192, 192),  // COLOR_MENUBAR
-  };
-  if (index < 0 || index >= (int)(sizeof(colors) / sizeof(colors[0]))) return 0;
-  return colors[index];
+  if (index < 0 || index >= kNumColors) return 0;
+  return SysColors()[index];
+}
+
+// The system color brushes follow the colors, so a change shows once the
+// windows draw again; each top-level window hears of it first.
+BOOL WINAPI SetSysColors(int n, const INT* indexes, const COLORREF* colors) {
+  if (n < 0 || (n && (!indexes || !colors))) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  COLORREF* sys = SysColors();
+  for (int i = 0; i < n; i++)
+    if (indexes[i] >= 0 && indexes[i] < kNumColors) sys[indexes[i]] = colors[i] & 0xFFFFFF;
+  std::vector<HWND> tops;
+  {
+    UserGuard g(UserLock());
+    for (Window* w : TopLevels()) tops.push_back(w->hwnd);
+  }
+  for (HWND h : tops) SendMessageW(h, WM_SYSCOLORCHANGE, 0, 0);
+  for (HWND h : tops) RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+  return TRUE;
 }
 
 // The classic metrics, on the screen the backend reports.
@@ -294,6 +354,38 @@ static void FontToA(const LOGFONTW& w, LOGFONTA* a) {
   strncpy(a->lfFaceName, Narrow(w.lfFaceName).c_str(), LF_FACESIZE - 1);
 }
 
+// Whether captions shade from the title color to its gradient color: as
+// the user's registry says (bit 0x10 of UserPreferencesMask under
+// HKEY_CURRENT_USER\Control Panel\Desktop, as on Windows, or its own
+// "GradientCaptions"="1"), else not, the classic look.
+static BOOL& GradientCaptions() {
+  static BOOL on = FALSE;
+  static std::once_flag once;
+  std::call_once(once, [] {
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Desktop", 0, KEY_READ, &k) != ERROR_SUCCESS) return;
+    BYTE mask[8];
+    DWORD type, cb = sizeof mask;
+    if (RegQueryValueExW(k, L"UserPreferencesMask", NULL, &type, mask, &cb) == ERROR_SUCCESS && type == REG_BINARY &&
+        cb >= 1)
+      on = (mask[0] & 0x10) != 0;
+    WCHAR text[16];
+    cb = sizeof text - sizeof(WCHAR);
+    if (RegQueryValueExW(k, L"GradientCaptions", NULL, &type, (BYTE*)text, &cb) == ERROR_SUCCESS) {
+      if (type == REG_SZ) {
+        text[cb / sizeof(WCHAR)] = 0;
+        on = wcstol(text, NULL, 10) != 0;
+      } else if (type == REG_DWORD && cb == 4) {
+        DWORD d;
+        memcpy(&d, text, 4);
+        on = d != 0;
+      }
+    }
+    RegCloseKey(k);
+  });
+  return on;
+}
+
 BOOL WINAPI SystemParametersInfoW(UINT action, UINT uiParam, PVOID pv, UINT) {
   switch (action) {
     case SPI_GETNONCLIENTMETRICS: {
@@ -326,6 +418,20 @@ BOOL WINAPI SystemParametersInfoW(UINT action, UINT uiParam, PVOID pv, UINT) {
       if (pv == NULL) return FALSE;
       *(UINT*)pv = 3;
       return TRUE;
+    case SPI_GETGRADIENTCAPTIONS:
+      if (pv == NULL) return FALSE;
+      *(BOOL*)pv = GradientCaptions();
+      return TRUE;
+    case SPI_SETGRADIENTCAPTIONS: {
+      GradientCaptions() = pv != NULL;
+      std::vector<HWND> tops;
+      {
+        UserGuard g(UserLock());
+        for (Window* w : TopLevels()) tops.push_back(w->hwnd);
+      }
+      for (HWND h : tops) RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+      return TRUE;
+    }
     case SPI_GETDRAGFULLWINDOWS:
     case SPI_GETFLATMENU:
     case SPI_GETMENUUNDERLINES:
