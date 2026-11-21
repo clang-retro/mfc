@@ -141,6 +141,8 @@ HRESULT CopyMedium(STGMEDIUM* dst, const STGMEDIUM* src, CLIPFORMAT cf);
 // The classes the layer serves itself (the standard font and picture),
 // for CoGetClassObject when no program or DLL serves them.
 HRESULT GetBuiltinClassObject(REFCLSID clsid, REFIID riid, void** out);
+// The shell's classes: the Vista-style file dialogs (shell_filedlg.cpp).
+HRESULT GetShellClassObject(REFCLSID clsid, REFIID riid, void** out);
 
 // A new object's cache: the pictures OLERENDER_DRAW or _FORMAT ask for,
 // and filled from data (NULL: the object's own).

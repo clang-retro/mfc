@@ -5,6 +5,7 @@
 #include "afximpl.h"
 #include <afxcmn.h>
 #include <objidl.h>
+#include <shlobj.h>
 
 IMPLEMENT_DYNCREATE(CImageList, CObject)
 IMPLEMENT_DYNAMIC(CToolBarCtrl, CWnd)
@@ -904,10 +905,14 @@ BOOL CNetAddressCtrl::CreateEx(DWORD dwExStyle, DWORD dwStyle, const RECT& rect,
   // shell32 registers the class on Vista and later; find it at run time so
   // the program still loads on older Windows.
   typedef BOOL(WINAPI * PFNINIT)(void);
+#ifdef _WINPORT
+  PFNINIT pfnInit = ::InitNetworkAddressControl;  // the layer's own
+#else
   HMODULE hShell = ::GetModuleHandle(_T("shell32.dll"));
   if (hShell == NULL) hShell = ::LoadLibrary(_T("shell32.dll"));
   PFNINIT pfnInit =
       hShell != NULL ? (PFNINIT)(void*)::GetProcAddress(hShell, "InitNetworkAddressControl") : NULL;
+#endif
   if (pfnInit == NULL || !pfnInit()) return FALSE;
   return CWnd::CreateEx(dwExStyle, _T("msctls_netaddress"), NULL, dwStyle, rect, pParentWnd, nID);
 }

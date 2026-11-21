@@ -180,6 +180,9 @@ typedef struct _browseinfoW {
 
 HRESULT WINAPI SHGetMalloc(IMalloc** ppMalloc);
 HRESULT WINAPI SHGetDesktopFolder(struct IShellFolder** ppshf);
+// The network address control's class (msctls_netaddress), always there.
+BOOL WINAPI InitNetworkAddressControl(void);
+
 PIDLIST_ABSOLUTE WINAPI SHBrowseForFolderA(LPBROWSEINFOA lpbi);
 PIDLIST_ABSOLUTE WINAPI SHBrowseForFolderW(LPBROWSEINFOW lpbi);
 BOOL WINAPI SHGetPathFromIDListA(PCIDLIST_ABSOLUTE pidl, LPSTR pszPath);
@@ -307,5 +310,7 @@ WINPORT_UUIDOF(IEnumIDList)
 WINPORT_UUIDOF(IShellFolder)
 WINPORT_UUIDOF(IShellLinkA)
 WINPORT_UUIDOF(IShellLinkW)
+
+#include <shobjidl.h>
 
 #endif

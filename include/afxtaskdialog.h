@@ -21,7 +21,7 @@
 
 // The task dialog's declarations, for programs built for systems before
 // Windows Vista (whose commctrl.h leaves them out).
-#if !defined(NTDDI_VERSION) || NTDDI_VERSION < 0x06000000 || defined(NOTASKDIALOG)
+#if defined(_WINPORT) || !defined(NTDDI_VERSION) || NTDDI_VERSION < 0x06000000 || defined(NOTASKDIALOG)
 #pragma pack(push, 1)
 typedef HRESULT(CALLBACK* PFTASKDIALOGCALLBACK)(HWND hwnd, UINT msg, WPARAM wParam,
                                                 LPARAM lParam, LONG_PTR lpRefData);

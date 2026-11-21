@@ -12,14 +12,12 @@
 // The Vista file dialog's interfaces. The SDK declares them only for
 // NTDDI_VERSION >= Vista; CFileDialog needs just their names and the
 // customization state type, which it declares itself when they are out.
-#ifndef _WINPORT
 #include <shobjidl.h>
-#endif
 struct IFileDialog;
 struct IFileOpenDialog;
 struct IFileSaveDialog;
 struct IFileDialogCustomize;
-#if defined(_WINPORT) || !defined(__IFileDialogCustomize_INTERFACE_DEFINED__)
+#if !defined(_WINPORT) && !defined(__IFileDialogCustomize_INTERFACE_DEFINED__)
 typedef enum CDCONTROLSTATEF {
   CDCS_INACTIVE = 0x0,
   CDCS_ENABLED = 0x1,

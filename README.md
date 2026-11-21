@@ -415,7 +415,7 @@ when there is no display. For a Linux or macOS target it builds `core`,
 `docobtest`, `linktest`, `bindtest`, `richtest`, `richsrvtest`,
 `autotest`, `srvtest`, `atlwintest`, `atltest`, `conntest`, `ctltest`,
 `wltest`, `dragtest`, `daotest`, `dvtest`, `htmltest`, `atlctltest`,
-`atlutiltest`, `cdlgtest`, `iotest`, `audiotest` and `wtltest` against
+`atlutiltest`, `cdlgtest`, `vistatest`, `iotest`, `audiotest` and `wtltest` against
 the portable layer, and `exttest`, `core`, `sditest`,
 `dlgtest` and `dlltest` again with the shared libraries
 (`SHARED_TESTS`), and runs them directly; `NATIVE_TESTS` names others to
@@ -602,7 +602,8 @@ try.
   (a resource menu, then the program's own) with the chosen command
   reaching the parent, the split style, size and glyph; a command link's
   note, the ideal size, text margin and image list; CNetAddressCtrl
-  where shell32 has it; and the Vista-style CFileDialog driven by a
+  where shell32 (or the portable layer) has it; and the Vista-style
+  CFileDialog driven by a
   timer: opening a file with a check box and edit box added (the first
   OK turned down), two files at once, saving with the default
   extension, cancelling, and CFolderPickerDialog. On XP the test checks
@@ -1295,8 +1296,9 @@ ATLVERIFY, ATLENSURE and ATLTRY, the trace categories (CTraceCategory,
 * CFileDialog asks for the Vista dialog when it runs: where Windows has
   none (XP), or a hook or template is set, it shows the classic one, and
   the customization members return E_NOTIMPL. CFolderPickerDialog falls
-  back to SHBrowseForFolder there. The portable layer always shows the
-  classic dialog.
+  back to SHBrowseForFolder there. The portable layer has the Vista
+  dialog too: its own file dialog with the program's added controls in a
+  panel below the standard ones.
 
 ## Plans
 

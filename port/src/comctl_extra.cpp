@@ -1023,6 +1023,277 @@ LRESULT CALLBACK AnimateProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
   return DefWindowProcW(h, msg, wp, lp);
 }
 
+// ---------------------------------------------------------------------
+// The network address control (shell32's msctls_netaddress on Vista): an
+// edit control whose text NCM_GETADDRESS reads as an IPv4 or IPv6
+// address, a network, a host name, or any of them with a port, of the
+// kinds NCM_SETALLOWTYPE allows.
+
+#define NETADDR_GETADDRESS (WM_USER + 1)
+#define NETADDR_SETALLOWTYPE (WM_USER + 2)
+#define NETADDR_GETALLOWTYPE (WM_USER + 3)
+#define NETADDR_DISPLAYERRORTIP (WM_USER + 4)
+enum {
+  kIpv4Address = 0x1,
+  kIpv4Service = 0x2,
+  kIpv4Network = 0x4,
+  kIpv6Address = 0x8,
+  kIpv6AddressNoScope = 0x10,
+  kIpv6Service = 0x20,
+  kIpv6ServiceNoScope = 0x40,
+  kIpv6Network = 0x80,
+  kNamedAddress = 0x100,
+  kNamedService = 0x200,
+};
+const wchar_t kAllowProp[] = L"winport.netaddress.allow";
+
+// NC_ADDRESS, and the NET_ADDRESS_INFO it points at, as Windows lays
+// them out: the format, then a host name and port as text, or a socket
+// address.
+struct NcAddress {
+  BYTE* info;
+  USHORT port;
+  BYTE prefix;
+};
+const size_t kNameChars = 256, kPortChars = 6;
+
+bool ParseIpv4(const std::wstring& t, BYTE out[4]) {
+  int part = 0;
+  size_t i = 0;
+  while (part < 4) {
+    if (i >= t.size() || !iswdigit(t[i])) return false;
+    unsigned v = 0;
+    size_t start = i;
+    while (i < t.size() && iswdigit(t[i])) {
+      v = v * 10 + (t[i] - L'0');
+      if (v > 255 || i - start > 2) return false;
+      i++;
+    }
+    out[part++] = (BYTE)v;
+    if (part < 4) {
+      if (i >= t.size() || t[i] != L'.') return false;
+      i++;
+    }
+  }
+  return i == t.size();
+}
+
+bool ParseIpv6(const std::wstring& t, BYTE out[16]) {
+  // Groups of hex digits, one "::" for a run of zeros, and an IPv4
+  // address in the last 32 bits.
+  std::vector<int> head, tail;
+  std::vector<int>* cur = &head;
+  bool gap = false;
+  size_t i = 0;
+  if (t.compare(0, 2, L"::") == 0) {
+    gap = true;
+    cur = &tail;
+    i = 2;
+  }
+  while (i < t.size()) {
+    size_t j = i;
+    while (j < t.size() && iswxdigit(t[j]) && j - i < 5) j++;
+    if (j < t.size() && t[j] == L'.') {
+      BYTE v4[4];
+      if (!ParseIpv4(t.substr(i), v4)) return false;
+      cur->push_back(v4[0] << 8 | v4[1]);
+      cur->push_back(v4[2] << 8 | v4[3]);
+      i = t.size();
+      break;
+    }
+    if (j == i || j - i > 4) return false;
+    cur->push_back((int)wcstol(t.substr(i, j - i).c_str(), NULL, 16));
+    i = j;
+    if (i == t.size()) break;
+    if (t[i] != L':') return false;
+    if (i + 1 < t.size() && t[i + 1] == L':') {
+      if (gap) return false;
+      gap = true;
+      cur = &tail;
+      i += 2;
+    } else {
+      i++;
+      if (i == t.size()) return false;
+    }
+  }
+  size_t n = head.size() + tail.size();
+  if (n > 8 || (!gap && n != 8) || (gap && n == 8)) return false;
+  std::vector<int> all = head;
+  all.resize(8 - tail.size(), 0);
+  all.insert(all.end(), tail.begin(), tail.end());
+  for (int k = 0; k < 8; k++) {
+    out[2 * k] = (BYTE)(all[k] >> 8);
+    out[2 * k + 1] = (BYTE)all[k];
+  }
+  return true;
+}
+
+bool ParseNumber(const std::wstring& t, unsigned most, unsigned* out) {
+  if (t.empty() || t.size() > 5) return false;
+  unsigned v = 0;
+  for (wchar_t c : t) {
+    if (!iswdigit(c)) return false;
+    v = v * 10 + (c - L'0');
+  }
+  if (v > most) return false;
+  *out = v;
+  return true;
+}
+
+bool IsHostName(const std::wstring& t) {
+  if (t.empty() || t.size() > 255) return false;
+  size_t label = 0;
+  bool letter = false;
+  for (size_t i = 0; i < t.size(); i++) {
+    wchar_t c = t[i];
+    if (c == L'.') {
+      if (label == 0) return false;
+      label = 0;
+      continue;
+    }
+    if (!(iswalnum(c) || c == L'-' || c == L'_')) return false;
+    if (!iswdigit(c)) letter = true;
+    if (++label > 63) return false;
+  }
+  return letter;  // all digits and dots is an IPv4 address, or nothing
+}
+
+void Put16(BYTE* p, unsigned v) {
+  p[0] = (BYTE)v;
+  p[1] = (BYTE)(v >> 8);
+}
+
+// The text as an address of an allowed kind: the format in info, and the
+// port and prefix length; an error code otherwise.
+DWORD ParseAddress(std::wstring t, DWORD allow, NcAddress* nc) {
+  while (!t.empty() && iswspace(t[0])) t.erase(0, 1);
+  while (!t.empty() && iswspace(t.back())) t.pop_back();
+  if (t.empty()) return ERROR_INVALID_PARAMETER;
+  BYTE info[4 + 2 * (kNameChars + kPortChars)] = {};
+  unsigned port = 0, prefix = 0;
+  DWORD kind = 0;
+  std::wstring host = t, portText;
+  // A port after the host: "[v6]:p", "v4:p", "name:p".
+  if (t[0] == L'[') {
+    size_t close = t.find(L']');
+    if (close == std::wstring::npos) return ERROR_INVALID_PARAMETER;
+    host = t.substr(1, close - 1);
+    std::wstring rest = t.substr(close + 1);
+    if (!rest.empty()) {
+      if (rest[0] != L':' || !ParseNumber(rest.substr(1), 65535, &port)) return ERROR_INVALID_PARAMETER;
+      portText = rest.substr(1);
+    }
+  } else if (std::count(t.begin(), t.end(), L':') == 1) {
+    size_t colon = t.find(L':');
+    host = t.substr(0, colon);
+    if (!ParseNumber(t.substr(colon + 1), 65535, &port)) return ERROR_INVALID_PARAMETER;
+    portText = t.substr(colon + 1);
+  }
+  bool hasPort = !portText.empty();
+  // A network: "address/length".
+  size_t slash = host.find(L'/');
+  bool network = slash != std::wstring::npos;
+  std::wstring addr = network ? host.substr(0, slash) : host;
+  std::wstring scope;
+  size_t pct = addr.find(L'%');
+  if (pct != std::wstring::npos) {
+    scope = addr.substr(pct + 1);
+    addr = addr.substr(0, pct);
+  }
+  BYTE v4[4], v6[16];
+  if (scope.empty() && ParseIpv4(addr, v4)) {
+    if (network) {
+      if (hasPort || !ParseNumber(host.substr(slash + 1), 32, &prefix)) return ERROR_INVALID_PARAMETER;
+      kind = kIpv4Network;
+    } else {
+      kind = hasPort ? kIpv4Service : kIpv4Address;
+    }
+    *(DWORD*)info = 2;  // NET_ADDRESS_IPV4
+    Put16(info + 4, 2);  // AF_INET
+    info[6] = (BYTE)(port >> 8);
+    info[7] = (BYTE)port;
+    memcpy(info + 8, v4, 4);
+  } else if (ParseIpv6(addr, v6)) {
+    unsigned scopeId = 0;
+    if (!scope.empty() && !ParseNumber(scope, 0xFFFF, &scopeId)) return ERROR_INVALID_PARAMETER;
+    if (network) {
+      if (hasPort || !scope.empty() || !ParseNumber(host.substr(slash + 1), 128, &prefix)) return ERROR_INVALID_PARAMETER;
+      kind = kIpv6Network;
+    } else if (hasPort) {
+      kind = scope.empty() ? (kIpv6Service | kIpv6ServiceNoScope) : kIpv6Service;
+    } else {
+      kind = scope.empty() ? (kIpv6Address | kIpv6AddressNoScope) : kIpv6Address;
+    }
+    *(DWORD*)info = 3;  // NET_ADDRESS_IPV6
+    Put16(info + 4, 23);  // AF_INET6
+    info[6] = (BYTE)(port >> 8);
+    info[7] = (BYTE)port;
+    memcpy(info + 12, v6, 16);
+    memcpy(info + 28, &scopeId, 4);
+  } else if (!network && scope.empty() && IsHostName(addr)) {
+    kind = hasPort ? kNamedService : kNamedAddress;
+    *(DWORD*)info = 1;  // NET_ADDRESS_DNS_NAME
+    WCHAR* name = (WCHAR*)(info + 4);
+    for (size_t i = 0; i < addr.size(); i++) name[i] = addr[i];
+    WCHAR* portName = name + kNameChars;
+    for (size_t i = 0; i < portText.size() && i < kPortChars - 1; i++) portName[i] = portText[i];
+  } else {
+    return ERROR_INVALID_PARAMETER;
+  }
+  if (!(kind & allow)) return ERROR_INVALID_PARAMETER;
+  if (nc) {
+    if (nc->info) memcpy(nc->info, info, sizeof info);
+    nc->port = (USHORT)port;
+    nc->prefix = (BYTE)prefix;
+  }
+  return ERROR_SUCCESS;
+}
+
+WNDPROC EditClassProc() {
+  static WNDPROC proc = NULL;
+  if (!proc) {
+    WNDCLASSEXW wc = {sizeof wc};
+    if (GetClassInfoExW(NULL, L"Edit", &wc)) proc = wc.lpfnWndProc;
+  }
+  return proc;
+}
+
+LRESULT CALLBACK NetAddressProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  WNDPROC edit = EditClassProc();
+  switch (msg) {
+    case NETADDR_SETALLOWTYPE:
+      if (wp & ~(DWORD)0x3FF) return HRESULT_FROM_WIN32(ERROR_INVALID_PARAMETER);
+      SetPropW(h, kAllowProp, (HANDLE)(UINT_PTR)(wp | 0x80000000u));
+      return S_OK;
+    case NETADDR_GETALLOWTYPE: {
+      UINT_PTR v = (UINT_PTR)GetPropW(h, kAllowProp);
+      return v ? (LRESULT)(v & 0x3FF) : 0x3FF;
+    }
+    case NETADDR_GETADDRESS: {
+      UINT_PTR v = (UINT_PTR)GetPropW(h, kAllowProp);
+      DWORD allow = v ? (DWORD)(v & 0x3FF) : 0x3FF;
+      int n = GetWindowTextLengthW(h);
+      std::wstring text(n + 1, 0);
+      GetWindowTextW(h, &text[0], n + 1);
+      text.resize(wcslen(text.c_str()));
+      DWORD r = ParseAddress(text, allow, (NcAddress*)lp);
+      return r == ERROR_SUCCESS ? S_OK : HRESULT_FROM_WIN32(r);
+    }
+    case NETADDR_DISPLAYERRORTIP: {
+      EDITBALLOONTIP tip = {sizeof tip, L"Not an address",
+                            L"Type an address of the kind this box takes, such as 192.168.1.10 or example.com.",
+                            TTI_ERROR};
+      SendMessageW(h, EM_SHOWBALLOONTIP, 0, (LPARAM)&tip);
+      MessageBeep(MB_ICONEXCLAMATION);
+      return S_OK;
+    }
+    case WM_NCDESTROY:
+      RemovePropW(h, kAllowProp);
+      break;
+  }
+  return edit ? CallWindowProcW(edit, h, msg, wp, lp) : DefWindowProcW(h, msg, wp, lp);
+}
+
 }  // namespace
 
 namespace winport {
@@ -1032,6 +1303,14 @@ void RegisterExtraClasses() {
   RegisterSystemClass(WC_IPADDRESSW, IpProc, CS_GLOBALCLASS | CS_DBLCLKS, sizeof(void*), NULL, (LPCWSTR)IDC_IBEAM);
   RegisterSystemClass(WC_COMBOBOXEXW, ComboExProc, CS_GLOBALCLASS | CS_DBLCLKS, sizeof(void*), NULL, arrow);
   RegisterSystemClass(ANIMATE_CLASSW, AnimateProc, CS_GLOBALCLASS | CS_DBLCLKS, sizeof(void*), NULL, arrow);
+  RegisterSystemClass(L"msctls_netaddress", NetAddressProc, CS_GLOBALCLASS | CS_DBLCLKS | CS_PARENTDC, sizeof(void*),
+                      NULL, (LPCWSTR)IDC_IBEAM);
 }
 
 }  // namespace winport
+
+// The class is always there; shell32's call to make sure of it.
+extern "C" BOOL WINAPI InitNetworkAddressControl(void) {
+  winport::RegisterSystemClasses();
+  return TRUE;
+}

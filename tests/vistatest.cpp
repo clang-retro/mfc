@@ -240,9 +240,13 @@ INT_PTR CTestFileDialog::Run() {
   return nResult;
 }
 
-static BOOL EndsWith(const CString& str, LPCTSTR lpszEnd) {
-  int n = lstrlen(lpszEnd);
-  return str.GetLength() >= n && str.Right(n).CompareNoCase(lpszEnd) == 0;
+// Either separator: the native layer's paths have '/'.
+static BOOL EndsWith(CString str, LPCTSTR lpszEnd) {
+  CString strEnd(lpszEnd);
+  str.Replace(_T('/'), _T('\\'));
+  strEnd.Replace(_T('/'), _T('\\'));
+  int n = strEnd.GetLength();
+  return str.GetLength() >= n && str.Right(n).CompareNoCase(strEnd) == 0;
 }
 
 static void MakeFile(const CString& strPath) {
