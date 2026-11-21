@@ -198,7 +198,10 @@ window under the pointer, passing through controls that answer
 `WM_NCHITTEST` with `HTTRANSPARENT` (such as group boxes).
 
 Kernel objects go further than events, mutexes and semaphores: named
-ones (within the process), waitable timers, APCs and alertable waits
+ones, shared with the user's other processes through POSIX shared memory
+(a mutex whose owner's process ends is abandoned to the next waiter;
+waits in other processes look again every few milliseconds), waitable
+timers (named ones within the process), APCs and alertable waits
 (`QueueUserAPC`, `SleepEx`), I/O completion ports (packets posted, and
 the results of overlapped reads and writes on a file associated with
 one), and file mappings over `mmap` (a named mapping without a file is
