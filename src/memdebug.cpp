@@ -19,6 +19,14 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #define _AFX_MEMDEBUG_IMPL
+// A pointer in wsprintf, which on 16-bit Windows has no %p.
+#if defined(__WINDOWS__) && defined(__I86__) && !defined(_WIN32)
+#define _AFX_PTR_FMT "%08lX"
+#define _AFX_PTR_ARG(p) ((unsigned long)(p))
+#else
+#define _AFX_PTR_FMT "%p"
+#define _AFX_PTR_ARG(p) (p)
+#endif
 #include "stdafx.h"
 #include <new>
 
@@ -92,7 +100,7 @@ private:
   State* m_p;
 };
 
-size_t Hash(const void* pv, size_t n) { return (((size_t)pv) >> 4) * 2654435761u & (n - 1); }
+size_t Hash(const void* pv, size_t n) { return ((size_t)((DWORD_PTR)pv >> 4)) * 2654435761u & (n - 1); }
 
 void TableInsert(State* s, void* pv);
 
@@ -149,8 +157,8 @@ BOOL CheckBlock(CDumpContext& dc, Block* p) {
   BYTE* pData = Data(p);
   for (size_t i = 0; i < kGuard; i++) {
     if (pData[-(ptrdiff_t)kGuard + (ptrdiff_t)i] != kGuardFill) {
-      wsprintfA(sz, "DAMAGE: before %s block (#%ld) at $%p.\n", UseName(p->nUse), p->lRequest,
-                pData);
+      wsprintfA(sz, "DAMAGE: before %s block (#%ld) at $" _AFX_PTR_FMT ".\n", UseName(p->nUse),
+                p->lRequest, _AFX_PTR_ARG(pData));
       Output(dc, sz);
       bOK = FALSE;
       break;
@@ -158,8 +166,8 @@ BOOL CheckBlock(CDumpContext& dc, Block* p) {
   }
   for (size_t i = 0; i < kGuard; i++) {
     if (pData[p->nSize + i] != kGuardFill) {
-      wsprintfA(sz, "DAMAGE: after %s block (#%ld) at $%p.\n", UseName(p->nUse), p->lRequest,
-                pData);
+      wsprintfA(sz, "DAMAGE: after %s block (#%ld) at $" _AFX_PTR_FMT ".\n", UseName(p->nUse),
+                p->lRequest, _AFX_PTR_ARG(pData));
       Output(dc, sz);
       bOK = FALSE;
       break;
@@ -168,8 +176,8 @@ BOOL CheckBlock(CDumpContext& dc, Block* p) {
   if (p->nUse == CMemoryState::freeBlock) {
     for (size_t i = 0; i < p->nSize; i++) {
       if (pData[i] != kFreeFill) {
-        wsprintfA(sz, "DAMAGE: free block (#%ld) at $%p was written to after it was freed.\n",
-                  p->lRequest, pData);
+        wsprintfA(sz, "DAMAGE: free block (#%ld) at $" _AFX_PTR_FMT
+                  " was written to after it was freed.\n", p->lRequest, _AFX_PTR_ARG(pData));
         Output(dc, sz);
         bOK = FALSE;
         break;
@@ -201,15 +209,15 @@ void DumpBlock(CDumpContext& dc, Block* p) {
   if (p->nUse == CMemoryState::objectBlock) {
     CObject* pObject = (CObject*)pData;
     CRuntimeClass* pClass = pObject->GetRuntimeClass();
-    wsprintfA(sz, "{%ld} a %s object at $%p, %lu bytes long\n", p->lRequest,
-              pClass != NULL ? pClass->m_lpszClassName : "CObject", pData,
+    wsprintfA(sz, "{%ld} a %s object at $" _AFX_PTR_FMT ", %lu bytes long\n", p->lRequest,
+              pClass != NULL ? pClass->m_lpszClassName : "CObject", _AFX_PTR_ARG(pData),
               (unsigned long)p->nSize);
     Output(dc, sz);
     if (dc.GetDepth() > 0) pObject->Dump(dc);
     return;
   }
-  wsprintfA(sz, "{%ld} %s block at $%p, %lu bytes long.\n Data: <", p->lRequest,
-            UseName(p->nUse), pData, (unsigned long)p->nSize);
+  wsprintfA(sz, "{%ld} %s block at $" _AFX_PTR_FMT ", %lu bytes long.\n Data: <", p->lRequest,
+            UseName(p->nUse), _AFX_PTR_ARG(pData), (unsigned long)p->nSize);
   Output(dc, sz);
   size_t n = p->nSize < 16 ? p->nSize : 16;
   char szText[20], szHex[64];
@@ -395,6 +403,56 @@ _AFX_DELETE_LINKAGE void operator delete(void* p, const std::nothrow_t&) noexcep
 _AFX_DELETE_LINKAGE void operator delete[](void* p, const std::nothrow_t&) noexcept {
   GlobalDelete(p);
 }
+
+#ifdef _AFX_WIN16
+// The OMF linker has no weak definitions: the library gives the whole
+// set of global new and delete operators, so that the C++ runtime's
+// (which defines them all in one object) is not linked. As in MFC, new
+// throws CMemoryException when there is no memory.
+
+/// Allocates nSize bytes with malloc, or throws CMemoryException.
+static void* GlobalNew(size_t nSize) {
+  void* p = ::malloc(nSize != 0 ? nSize : 1);
+  if (p == NULL) AfxThrowMemoryException();
+  return p;
+}
+
+/// Allocates nSize bytes aligned to nAlign, or returns NULL.
+static void* GlobalNewAligned(size_t nSize, size_t nAlign) noexcept {
+  if (nSize == 0) nSize = 1;
+  if (nAlign <= sizeof(void*)) return ::malloc(nSize);
+  return ::aligned_alloc(nAlign, (nSize + nAlign - 1) / nAlign * nAlign);
+}
+
+void* operator new(size_t nSize) { return GlobalNew(nSize); }
+void* operator new[](size_t nSize) { return GlobalNew(nSize); }
+void* operator new(size_t nSize, const std::nothrow_t&) noexcept { return ::malloc(nSize ? nSize : 1); }
+void* operator new[](size_t nSize, const std::nothrow_t&) noexcept {
+  return ::malloc(nSize ? nSize : 1);
+}
+void* operator new(size_t nSize, std::align_val_t a) {
+  void* p = GlobalNewAligned(nSize, (size_t)a);
+  if (p == NULL) AfxThrowMemoryException();
+  return p;
+}
+void* operator new[](size_t nSize, std::align_val_t a) { return operator new(nSize, a); }
+void* operator new(size_t nSize, std::align_val_t a, const std::nothrow_t&) noexcept {
+  return GlobalNewAligned(nSize, (size_t)a);
+}
+void* operator new[](size_t nSize, std::align_val_t a, const std::nothrow_t&) noexcept {
+  return GlobalNewAligned(nSize, (size_t)a);
+}
+void operator delete(void* p, std::align_val_t) noexcept { GlobalDelete(p); }
+void operator delete[](void* p, std::align_val_t) noexcept { GlobalDelete(p); }
+void operator delete(void* p, size_t, std::align_val_t) noexcept { GlobalDelete(p); }
+void operator delete[](void* p, size_t, std::align_val_t) noexcept { GlobalDelete(p); }
+void operator delete(void* p, std::align_val_t, const std::nothrow_t&) noexcept {
+  GlobalDelete(p);
+}
+void operator delete[](void* p, std::align_val_t, const std::nothrow_t&) noexcept {
+  GlobalDelete(p);
+}
+#endif
 
 static volatile LONG g_bForeignDelete;  // a module's runtime delete won over the library's
 

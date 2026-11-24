@@ -67,7 +67,7 @@ inline BOOL AFXAPI CompareElements(const TYPE* pElement1, const ARG_TYPE* pEleme
 
 template <class ARG_KEY>
 inline UINT AFXAPI HashKey(ARG_KEY key) {
-  return (UINT)(((UINT_PTR)key) >> 4);
+  return (UINT)(((DWORD_PTR)key) >> 4);
 }
 template <> inline UINT AFXAPI HashKey<LPCSTR>(LPCSTR key) {
   UINT nHash = 0;

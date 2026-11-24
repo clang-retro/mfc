@@ -75,6 +75,18 @@ endif
 ALL_CXXFLAGS += -Iport/include -fPIC
 PORT_LIB = $(OUT)/libwinport.a
 endif
+# 16-bit Windows (make TARGET=i8086-pc-win16): the core classes in the
+# large model (CObject, CString, the collections, CFile, CArchive, CTime
+# and the exceptions), ANSI only: libmfc.a. The flags give the large model
+# and C++ exceptions.
+ifneq ($(findstring win16,$(TARGET)),)
+WIN16 = 1
+SRCS = $(addprefix src/,object.cpp strcore.cpp coll.cpp file.cpp archive.cpp except.cpp \
+  time.cpp memdebug.cpp state.cpp win16.cpp)
+WIN16_FLAGS ?= -mcmodel=large -fexceptions
+ALL_CXXFLAGS += $(WIN16_FLAGS) -frtti -ffunction-sections
+STDLIB =
+endif
 OBJS_A = $(patsubst src/%.cpp,$(OUT)/a/%.o,$(SRCS))
 OBJS_U = $(patsubst src/%.cpp,$(OUT)/u/%.o,$(SRCS))
 HDRS = $(wildcard include/*.h) $(wildcard src/*.h) src/wnd_handlers.inc
@@ -115,6 +127,11 @@ SHARED_DIR = $(OUT)/shared
 PORT_SHLIB = $(SHARED_DIR)/libwinport.$(SHLIB_EXT)
 SHARED_LIBS = $(SHARED_DIR)/libmfc.$(SHLIB_EXT) $(SHARED_DIR)/libmfcu.$(SHLIB_EXT) $(PORT_SHLIB) \
   $(OUT)/libmfcs.a $(OUT)/libmfcus.a
+endif
+
+ifeq ($(WIN16),1)
+STATIC_LIBS = $(OUT)/libmfc.a
+SHARED_LIBS =
 endif
 
 all: $(STATIC_LIBS) $(SHARED_LIBS)

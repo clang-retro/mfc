@@ -152,14 +152,14 @@ public:
   CStringT(PCXSTR psz) {
     Init();
     if (psz != NULL && IS_INTRESOURCE(psz))
-      LoadString((UINT)(UINT_PTR)psz);
+      LoadString((UINT)(DWORD_PTR)psz);
     else
       SetString(psz, Tr::Len(psz));
   }
   CStringT(PCYSTR psz) {
     Init();
     if (psz != NULL && IS_INTRESOURCE(psz))
-      LoadString((UINT)(UINT_PTR)psz);
+      LoadString((UINT)(DWORD_PTR)psz);
     else
       AssignOther(psz, -1);
   }

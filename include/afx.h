@@ -32,8 +32,17 @@
 #define _AFX_MINMAX
 #endif
 
+// 16-bit Windows: MFC needs the handle types told apart.
+#if defined(__WINDOWS__) && defined(__I86__) && !defined(_WIN32) && !defined(STRICT)
+#define STRICT 1
+#endif
 #include <windows.h>
-#ifdef WIN32_LEAN_AND_MEAN
+// 16-bit Windows (i8086-pc-win16): the Win32 names over the 16-bit API.
+#if defined(__WINDOWS__) && defined(__I86__) && !defined(_WIN32)
+#define _AFX_WIN16 1
+#include "afxwin16.h"
+#endif
+#if defined(WIN32_LEAN_AND_MEAN) && !defined(_AFX_WIN16)
 // The headers the library needs that a lean <windows.h> leaves out.
 #include <commdlg.h>
 #include <shellapi.h>
