@@ -153,7 +153,7 @@ public:
   CTimeSpan(__time64_t time) : m_timeSpan(time) {}
   CTimeSpan(LONG lDays, int nHours, int nMins, int nSecs)
       : m_timeSpan(nSecs + 60 * (nMins + 60 * (nHours + (__time64_t)24 * lDays))) {}
-  LONGLONG GetDays() const { return m_timeSpan / (24 * 3600); }
+  LONGLONG GetDays() const { return m_timeSpan / (24 * 3600L); }
   LONGLONG GetTotalHours() const { return m_timeSpan / 3600; }
   LONG GetHours() const { return (LONG)(GetTotalHours() - GetDays() * 24); }
   LONGLONG GetTotalMinutes() const { return m_timeSpan / 60; }

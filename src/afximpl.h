@@ -5,6 +5,17 @@
 #pragma once
 #include "stdafx.h"
 
+#ifdef _AFX_WIN16
+// 16-bit Windows builds the core classes only: the window classes are
+// names here.
+class CWnd;
+class CWinApp;
+class CWinThread;
+class CView;
+class CFrameWnd;
+class CDynLinkLibrary;
+class COleObjectFactory;
+#else
 // Bars made on a container's window while an object is active in place
 // there belong to the frame given (bars.cpp).
 void AFXAPI _AfxRegisterInPlaceDockSite(CFrameWnd* pFrame, BOOL bAdd);
@@ -64,6 +75,7 @@ extern const _AFX_OCC_BIND_HOOKS* _afxOccBindHooks;
 
 // Empties the type library caches (oleconn.cpp), before OLE goes.
 void AFXAPI _AfxReleaseTypeLibCaches();
+#endif  // _AFX_WIN16
 
 // Maps a Windows handle to the C++ object that wraps it. Each thread has
 // one map per handle kind. Objects the program creates go in the
@@ -195,6 +207,7 @@ struct CPushRoutingView {
   ~CPushRoutingView() { pThreadState->m_pRoutingView = pOldRoutingView; }
 };
 
+#ifndef _AFX_WIN16
 // A dialog template's string (16-bit units, whatever the size of wchar_t).
 CStringW AFXAPI _AfxTemplateString(const WORD* p);
 
@@ -240,6 +253,8 @@ private:
 // Creates a dialog bar from an in-memory template.
 BOOL AFXAPI _AfxCreateDialogBarIndirect(CDialogBar* pBar, CWnd* pParentWnd,
                                         LPCDLGTEMPLATE lpTemplate, UINT nStyle, UINT nID);
+
+#endif  // _AFX_WIN16
 
 // strftime with the codes MFC programs use (time.cpp).
 struct tm;

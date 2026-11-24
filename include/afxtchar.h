@@ -100,8 +100,8 @@ typedef int _TINT;
 // Case-insensitive comparisons, by the system's case mapping.
 inline int _afx_tcsnicmp(const _TCHAR* a, const _TCHAR* b, size_t n) {
   for (; n > 0; n--, a++, b++) {
-    _TCHAR ca = (_TCHAR)(UINT_PTR)::CharLower((LPTSTR)(UINT_PTR)(_TUCHAR)*a);
-    _TCHAR cb = (_TCHAR)(UINT_PTR)::CharLower((LPTSTR)(UINT_PTR)(_TUCHAR)*b);
+    _TCHAR ca = (_TCHAR)(DWORD_PTR)::CharLower((LPTSTR)(DWORD_PTR)(_TUCHAR)*a);
+    _TCHAR cb = (_TCHAR)(DWORD_PTR)::CharLower((LPTSTR)(DWORD_PTR)(_TUCHAR)*b);
     if (ca != cb) return (int)(_TUCHAR)ca - (int)(_TUCHAR)cb;
     if (ca == 0) return 0;
   }

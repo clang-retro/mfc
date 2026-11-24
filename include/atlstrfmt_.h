@@ -248,7 +248,7 @@ int VFormat(C* buf, int max, const C* f, va_list args) {
       break;
     }
     case 'p': {
-      UINT_PTR v = (UINT_PTR)va_arg(args, void*);
+      DWORD_PTR v = (DWORD_PTR)va_arg(args, void*);
       Spec ps = s;
       ps.prec = (int)sizeof(void*) * 2;
       ps.alt = false;

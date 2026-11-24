@@ -387,6 +387,13 @@ The ANSI code page there is UTF-8, `WCHAR` is the system's 32-bit
 `LONG*` needs `LONG`; in dispatch maps `long` remains the type of
 `VT_I4`, as MFC documents.
 
+### 16-bit Windows
+
+`make TARGET=i8086-pc-win16` builds the core classes (`CObject`,
+`CString`, the collections, `CFile`, `CArchive`, `CTime` and the
+exceptions) for 16-bit Windows, in the large model. The window classes
+are not there yet. See [docs/win16.md](docs/win16.md).
+
 ### The shared library
 
 A program built with `_AFXDLL` uses the library in `mfc.dll` (`mfcu.dll`
@@ -1330,7 +1337,9 @@ ATLVERIFY, ATLENSURE and ATLTRY, the trace categories (CTraceCategory,
 
 ## Plans
 
-Win16 (with win16-sdk), and finishing the portable layer (see Linux and
+The window, dialog and document/view classes for Win16 (with
+win16-sdk; the core classes are there, see
+[docs/win16.md](docs/win16.md)), and finishing the portable layer (see Linux and
 macOS above), with controls drawn in the classic style, so that MFC
 programs build and look the same on macOS and Linux.
 

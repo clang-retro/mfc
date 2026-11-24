@@ -48,6 +48,11 @@ void AFXAPI AfxSetResourceHandle(HINSTANCE hInstResource) {
 // (CDynLinkLibrary), then those of the DLLs marked as system DLLs.
 HINSTANCE AFXAPI AfxFindResourceHandle(LPCTSTR lpszName, LPCTSTR lpszType) {
   HINSTANCE hInst = AfxGetResourceHandle();
+#ifdef _AFX_WIN16  // no extension DLLs
+  (void)lpszName;
+  (void)lpszType;
+  return hInst;
+#else
   CDynLinkLibrary* pFirstDLL = AfxGetModuleState()->m_pFirstDLL;
   if (pFirstDLL == NULL || ::FindResource(hInst, lpszName, lpszType) != NULL)
     return hInst;
@@ -58,8 +63,10 @@ HINSTANCE AFXAPI AfxFindResourceHandle(LPCTSTR lpszName, LPCTSTR lpszType) {
     }
   }
   return hInst;
+#endif
 }
 
+#ifndef _AFX_WIN16
 // Whether the string table of hInst has string nID (strings are kept in
 // blocks of 16, each a length and that many characters).
 static BOOL HasString(HINSTANCE hInst, UINT nID) {
@@ -73,8 +80,14 @@ static BOOL HasString(HINSTANCE hInst, UINT nID) {
   return p < pEnd && *p != 0;
 }
 
+#endif
+
 HINSTANCE AFXAPI AfxFindStringResourceHandle(UINT nID) {
   HINSTANCE hInst = AfxGetResourceHandle();
+#ifdef _AFX_WIN16  // no extension DLLs
+  (void)nID;
+  return hInst;
+#else
   CDynLinkLibrary* pFirstDLL = AfxGetModuleState()->m_pFirstDLL;
   if (pFirstDLL == NULL || HasString(hInst, nID)) return hInst;
   for (int nPass = 0; nPass < 2; nPass++) {
@@ -84,11 +97,14 @@ HINSTANCE AFXAPI AfxFindStringResourceHandle(UINT nID) {
     }
   }
   return hInst;
+#endif
 }
 
 LPCTSTR AFXAPI AfxGetAppName() { return AfxGetModuleState()->m_lpszCurrentAppName; }
 
+#ifndef _AFX_WIN16
 CWinApp* AFXAPI AfxGetApp() { return AfxGetModuleState()->m_pCurrentWinApp; }
+#endif
 
 // ---------------------------------------------------------------------
 // Thread state
@@ -120,12 +136,15 @@ AFX_THREAD_STATE* AFXAPI AfxGetThreadState() {
   return pState;
 }
 
+#ifndef _AFX_WIN16
 static void DeleteMaps(_AFX_HANDLE_MAPS* pMaps);
+#endif
 
 void AFXAPI AfxTermThreadState() {
   if (g_nGlobalsInit != 2) return;
   AFX_THREAD_STATE* pState = (AFX_THREAD_STATE*)::TlsGetValue(g_tlsIndex);
   if (pState == NULL) return;
+#ifndef _AFX_WIN16
   if (pState->m_hHookOldCbtFilter != NULL) ::UnhookWindowsHookEx(pState->m_hHookOldCbtFilter);
   if (pState->m_hHookOldMsgFilter != NULL) ::UnhookWindowsHookEx(pState->m_hHookOldMsgFilter);
   DeleteMaps(&pState->m_maps);
@@ -135,6 +154,7 @@ void AFXAPI AfxTermThreadState() {
     DeleteMaps(p);
     ::free(p);
   }
+#endif
   if (pState->m_pSockState != NULL) pState->m_pfnSockTerm(pState->m_pSockState);
   ::free(pState);
   ::TlsSetValue(g_tlsIndex, NULL);
@@ -149,6 +169,7 @@ void AFXAPI AfxUnlockGlobals(int nLockType) {
   ::LeaveCriticalSection(&g_csGlobals[nLockType & 3]);
 }
 
+#ifndef _AFX_WIN16
 CWinThread* AFXAPI AfxGetThread() {
   CWinThread* pThread = AfxGetThreadState()->m_pCurrentWinThread;
   return pThread;
@@ -159,6 +180,7 @@ CWnd* AFXAPI AfxGetMainWnd() {
   if (pThread == NULL) pThread = AfxGetApp();
   return pThread != NULL ? pThread->GetMainWnd() : NULL;
 }
+
 
 // ---------------------------------------------------------------------
 // Handle maps
@@ -303,6 +325,8 @@ BOOL AFXAPI AfxUnlockTempMaps(BOOL bDeleteTemps) {
   }
   return pState->m_nTempMapLock != 0;
 }
+
+#endif  // _AFX_WIN16
 
 // ---------------------------------------------------------------------
 // Built-in text for the framework's own string IDs, used when the
@@ -492,5 +516,7 @@ void AFXAPI AfxDeleteObject(HGDIOBJ* pObject) {
   }
 }
 
+#ifndef _AFX_WIN16
 BOOL AFXAPI AfxInitRichEdit() { return ::LoadLibraryA("riched32.dll") != NULL; }
 BOOL AFXAPI AfxInitRichEdit2() { return ::LoadLibraryA("riched20.dll") != NULL; }
+#endif

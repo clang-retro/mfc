@@ -54,7 +54,7 @@ void CArchive::Abort() {
   m_lpBufStart = m_lpBufCur = m_lpBufMax = NULL;
   if (m_pLoadArray) {
     for (UINT i = 0; i < m_nMapCount; i++)
-      if ((UINT_PTR)m_pLoadArray[i] & 1) free((void*)((UINT_PTR)m_pLoadArray[i] & ~(UINT_PTR)1));
+      if ((DWORD_PTR)m_pLoadArray[i] & 1) free((void*)((DWORD_PTR)m_pLoadArray[i] & ~(DWORD_PTR)1));
     free(m_pLoadArray);
   }
   m_pLoadArray = NULL;
@@ -221,7 +221,7 @@ BOOL CArchive::ReadString(CString& rString) {
 
 DWORD CArchive::LookupStore(const void* key) const {
   if (!m_pStoreMap) return 0;
-  UINT h = (UINT)(((UINT_PTR)key >> 4) % m_nStoreMapSize);
+  UINT h = (UINT)(((DWORD_PTR)key >> 4) % m_nStoreMapSize);
   for (;;) {
     if (m_pStoreMap[h].key == NULL) return 0;
     if (m_pStoreMap[h].key == key) return m_pStoreMap[h].value;
@@ -241,7 +241,7 @@ void CArchive::AddStore(const void* key, DWORD value) {
       if (pOld[i].key) AddStore(pOld[i].key, pOld[i].value);
     free(pOld);
   }
-  UINT h = (UINT)(((UINT_PTR)key >> 4) % m_nStoreMapSize);
+  UINT h = (UINT)(((DWORD_PTR)key >> 4) % m_nStoreMapSize);
   while (m_pStoreMap[h].key != NULL) h = (h + 1) % m_nStoreMapSize;
   m_pStoreMap[h].key = key;
   m_pStoreMap[h].value = value;
@@ -378,12 +378,12 @@ CRuntimeClass* CArchive::ReadClass(const CRuntimeClass* pClassRefRequested, UINT
     if (!e) AfxThrowMemoryException();
     e->pClass = pClassRef;
     e->nSchema = nSchema;
-    AddLoad((void*)((UINT_PTR)e | 1));
+    AddLoad((void*)((DWORD_PTR)e | 1));
   } else {
     DWORD nClassIndex = obTag & ~dwBigClassTag;
     if (nClassIndex == 0 || nClassIndex >= m_nMapCount)
       AfxThrowArchiveException(CArchiveException::badIndex, m_strFileName);
-    UINT_PTR v = (UINT_PTR)m_pLoadArray[nClassIndex];
+    DWORD_PTR v = (DWORD_PTR)m_pLoadArray[nClassIndex];
     if (!(v & 1)) AfxThrowArchiveException(CArchiveException::badIndex, m_strFileName);
     ClassEntry* e = (ClassEntry*)(v & ~(UINT_PTR)1);
     pClassRef = e->pClass;
@@ -413,7 +413,7 @@ CObject* CArchive::ReadObject(const CRuntimeClass* pClassRefRequested) {
   if (pClassRef == NULL) {
     if (obTag >= m_nMapCount)
       AfxThrowArchiveException(CArchiveException::badIndex, m_strFileName);
-    if ((UINT_PTR)m_pLoadArray[obTag] & 1)
+    if ((DWORD_PTR)m_pLoadArray[obTag] & 1)
       AfxThrowArchiveException(CArchiveException::badIndex, m_strFileName);
     pOb = (CObject*)m_pLoadArray[obTag];
     if (pOb != NULL && pClassRefRequested != NULL && !pOb->IsKindOf(pClassRefRequested))

@@ -25,6 +25,7 @@ nav:
   - "Testing": testing.md
   - "What is there": contents.md
   - "Differences from Visual C++": differences.md
+  - "16-bit Windows": win16.md
   - "Plans and layout": plans.md
   - "Contributing": contributing.md
   - "License": license.md

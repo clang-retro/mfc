@@ -3,7 +3,9 @@
 #include <afxcoll.h>
 #include <afxtempl.h>
 #include <afxconv.h>
+#ifndef _AFX_WIN16  // 16-bit Windows has the core classes only
 #include <afxadv.h>
+#endif
 #include <stdio.h>
 
 static int g_failures = 0;
@@ -175,7 +177,20 @@ static void TestFileAndExceptions() {
     CHECK(f.Read(buf, 8) == 3 && strcmp(buf, "abc") == 0);
     CHECK(f.GetLength() == 3);
   }
+  {
+    CFileStatus status;
+    CHECK(CFile::GetStatus(szPath, status) && status.m_size == 3);
+    CFileFind find;
+    CHECK(find.FindFile(szPath));
+    find.FindNextFile();
+    CHECK(find.GetLength() == 3 && !find.IsDirectory());
+    CString strPath(szPath);
+    int iName = max(strPath.ReverseFind(_T('\\')), strPath.ReverseFind(_T('/'))) + 1;
+    CHECK(find.GetFileName().CompareNoCase(strPath.Mid(iName)) == 0);
+  }
   CFile::Remove(szPath);
+  CFileStatus gone;
+  CHECK(!CFile::GetStatus(szPath, gone));
 
   BOOL bCaught = FALSE;
   try {
@@ -218,18 +233,24 @@ static void TestConversion() {
   CHECK(A2W((LPCSTR)NULL) == NULL);
 
   // The classes, including code pages and strings longer than the buffer.
+  // (16-bit Windows has the ANSI code page only.)
+#ifndef _AFX_WIN16
   CHECK(lstrcmpA(CW2A(L"\x20AC", CP_UTF8), "\xE2\x82\xAC") == 0);
   CHECK(lstrcmpW(CA2W("\xE2\x82\xAC", CP_UTF8), L"\x20AC") == 0);
+#endif
   CStringA strLong('x', 500);
   CHECK(lstrlenW(CA2W(strLong)) == 500);
   CHECK(lstrcmp(CA2T("t"), _T("t")) == 0);
   CHECK(lstrcmpA(CT2A(_T("u")), "u") == 0);
   CHECK(lstrcmpW(CT2W(_T("w")), L"w") == 0);
+#ifndef _AFX_WIN16
   BSTR bstr = A2BSTR("bstr");
   CHECK(bstr != NULL && ::SysStringLen(bstr) == 4);
   ::SysFreeString(bstr);
+#endif
 }
 
+#ifndef _AFX_WIN16
 static void TestSharedFile() {
   CSharedFile file;
   CArchive ar(&file, CArchive::store);
@@ -252,10 +273,13 @@ static void TestSharedFile() {
   file2.Close();
   ::GlobalFree(hMem);  // SetHandle leaves the memory the caller's
 }
+#endif
 
 int main() {
   TestConversion();
+#ifndef _AFX_WIN16
   TestSharedFile();
+#endif
   TestString();
   TestCollections();
   TestRuntimeClass();
