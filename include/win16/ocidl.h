@@ -9,6 +9,7 @@
 #pragma once
 #include <ole2.h>
 #include <dispatch.h>
+#include <servprov.h>
 
 interface IConnectionPoint;
 interface IConnectionPointContainer;
@@ -125,3 +126,4 @@ WINPORT_UUIDOF(IEnumConnectionPoints)
 WINPORT_UUIDOF(IProvideClassInfo)
 WINPORT_UUIDOF(IProvideClassInfo2)
 WINPORT_UUIDOF(IClassFactory2)
+WINPORT_UUIDOF(IServiceProvider)

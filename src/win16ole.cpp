@@ -1,9 +1,9 @@
 // win16ole.cpp - the OLE parts of MFC that 16-bit Windows does not
-// have: the IIDs of the OLE control interfaces (ocidl.h), a replacement
-// for UnRegisterTypeLib, and the OLE parts of CWnd, CView and
-// CDocTemplate that the 16-bit library does not have yet. Each of those
-// says that the object has nothing of OLE. The file is empty in the
-// other builds.
+// have: the IIDs of the OLE control interfaces (ocidl.h) and of the
+// document object interfaces (docobj.h), replacements
+// for UnRegisterTypeLib and the CoTaskMem functions, and
+// CWnd::CreateControlSite, which says that a window cannot hold OLE
+// controls. The file is empty in the other builds.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -12,6 +12,7 @@
 #ifdef _AFX_WIN16
 #include "afximpl.h"
 #include <ocidl.h>
+#include <docobj.h>
 #include <shellapi.h>
 
 // The IIDs of the OLE control interfaces, with the values of Win32.
@@ -30,6 +31,19 @@ const IID FAR IID_IClassFactory2 = {
     0xB196B28FL, 0xBAB4, 0x101A, {0xB6, 0x9C, 0x00, 0xAA, 0x00, 0x34, 0x1D, 0x07}};
 const IID FAR IID_IProvideClassInfo2 = {
     0xA6BC3AC0L, 0xDBAA, 0x11CE, {0x9D, 0xE3, 0x00, 0xAA, 0x00, 0x4B, 0xB8, 0x51}};
+const IID FAR IID_IServiceProvider = {
+    0x6D5140C1L, 0x7436, 0x11CE, {0x80, 0x34, 0x00, 0xAA, 0x00, 0x60, 0x09, 0xFA}};
+
+// The IIDs of the document object interfaces (docobj.h of the portable
+// layer), with the values of Win32.
+#define _AFX_DOCOBJ_IID(l) {l, 0x4E68, 0x101B, {0xA2, 0xBC, 0x00, 0xAA, 0x00, 0x40, 0x47, 0x70}}
+const IID IID_IOleDocument = _AFX_DOCOBJ_IID(0xB722BCC5L);
+const IID IID_IOleDocumentView = _AFX_DOCOBJ_IID(0xB722BCC6L);
+const IID IID_IOleDocumentSite = _AFX_DOCOBJ_IID(0xB722BCC7L);
+const IID IID_IEnumOleDocumentViews = _AFX_DOCOBJ_IID(0xB722BCC8L);
+const IID IID_IPrint = _AFX_DOCOBJ_IID(0xB722BCC9L);
+const IID IID_IContinueCallback = _AFX_DOCOBJ_IID(0xB722BCCAL);
+const IID IID_IOleCommandTarget = _AFX_DOCOBJ_IID(0xB722BCCBL);
 }
 
 /// Removes the registration of a type library version. 16-bit TYPELIB has
@@ -59,6 +73,51 @@ HRESULT UnRegisterTypeLib(REFGUID libID, WORD wVerMajor, WORD wVerMinor, LCID lc
   return S_OK;
 }
 
+/// Allocates cb bytes with the IMalloc of the task. Gives NULL when
+/// there is no task allocator (OLE is not initialized) or no memory.
+LPVOID CoTaskMemAlloc(ULONG cb) {
+  LPMALLOC pMalloc = NULL;
+  if (::CoGetMalloc(MEMCTX_TASK, &pMalloc) != S_OK || pMalloc == NULL) return NULL;
+  LPVOID pv = pMalloc->Alloc(cb);
+  pMalloc->Release();
+  return pv;
+}
+
+/// Changes the size of a block of the task allocator, as IMalloc::Realloc.
+LPVOID CoTaskMemRealloc(LPVOID pv, ULONG cb) {
+  LPMALLOC pMalloc = NULL;
+  if (::CoGetMalloc(MEMCTX_TASK, &pMalloc) != S_OK || pMalloc == NULL) return NULL;
+  LPVOID pNew = pMalloc->Realloc(pv, cb);
+  pMalloc->Release();
+  return pNew;
+}
+
+/// Frees a block of the task allocator. A NULL pointer does nothing.
+void CoTaskMemFree(LPVOID pv) {
+  if (pv == NULL) return;
+  LPMALLOC pMalloc = NULL;
+  if (::CoGetMalloc(MEMCTX_TASK, &pMalloc) != S_OK || pMalloc == NULL) return;
+  pMalloc->Free(pv);
+  pMalloc->Release();
+}
+
+/// Counts the entries of an accelerator table. In 16-bit Windows the
+/// table is the resource itself: 5-byte entries (flags, key, command),
+/// and the flag 0x80 marks the last entry.
+int _AfxW16AcceleratorCount(HACCEL hAccel) {
+  if (hAccel == NULL) return 0;
+  const BYTE FAR* p = (const BYTE FAR*)::LockResource((HGLOBAL)hAccel);
+  if (p == NULL) return 0;
+  int n = 0;
+  for (;;) {
+    n++;
+    if (p[0] & 0x80) break;
+    p += 5;
+  }
+  ::UnlockResource((HGLOBAL)hAccel);
+  return n;
+}
+
 /// Gives FALSE: a window cannot hold OLE controls.
 BOOL CWnd::CreateControlSite(COleControlContainer* pContainer, COleControlSite** ppSite, UINT nID,
                              REFCLSID clsid) {
@@ -67,58 +126,6 @@ BOOL CWnd::CreateControlSite(COleControlContainer* pContainer, COleControlSite**
   (void)clsid;
   if (ppSite != NULL) *ppSite = NULL;
   return FALSE;
-}
-
-/// Gives DROPEFFECT_NONE (0): a view takes no OLE drops.
-DROPEFFECT CView::OnDragEnter(COleDataObject* pDataObject, DWORD dwKeyState, CPoint point) {
-  (void)pDataObject;
-  (void)dwKeyState;
-  (void)point;
-  return 0;
-}
-
-/// Gives DROPEFFECT_NONE (0): a view takes no OLE drops.
-DROPEFFECT CView::OnDragOver(COleDataObject* pDataObject, DWORD dwKeyState, CPoint point) {
-  (void)pDataObject;
-  (void)dwKeyState;
-  (void)point;
-  return 0;
-}
-
-/// Does nothing: a view takes no OLE drops.
-void CView::OnDragLeave() {}
-
-/// Gives FALSE: a view takes no OLE drops.
-BOOL CView::OnDrop(COleDataObject* pDataObject, DROPEFFECT dropEffect, CPoint point) {
-  (void)pDataObject;
-  (void)dropEffect;
-  (void)point;
-  return FALSE;
-}
-
-/// Gives (DROPEFFECT)-1, so that OnDrop is called (and fails).
-DROPEFFECT CView::OnDropEx(COleDataObject* pDataObject, DROPEFFECT dropDefault,
-                           DROPEFFECT dropList, CPoint point) {
-  (void)pDataObject;
-  (void)dropDefault;
-  (void)dropList;
-  (void)point;
-  return (DROPEFFECT)-1;
-}
-
-/// Gives DROPEFFECT_NONE (0): a view does not scroll for an OLE drag.
-DROPEFFECT CView::OnDragScroll(DWORD dwKeyState, CPoint point) {
-  (void)dwKeyState;
-  (void)point;
-  return 0;
-}
-
-/// Gives NULL: a document cannot be an OLE server.
-CFrameWnd* CDocTemplate::CreateOleFrame(CWnd* pParentWnd, CDocument* pDoc, BOOL bCreateView) {
-  (void)pParentWnd;
-  (void)pDoc;
-  (void)bCreateView;
-  return NULL;
 }
 
 #endif  // _AFX_WIN16

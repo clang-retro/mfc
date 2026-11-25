@@ -287,7 +287,7 @@ STDMETHODIMP COleFrameHook::XOleInPlaceFrame::RemoveMenus(HMENU hmenuShared) {
 STDMETHODIMP COleFrameHook::XOleInPlaceFrame::SetStatusText(LPCOLESTR pszStatusText) {
   METHOD_PROLOGUE_EX(COleFrameHook, OleInPlaceFrame)
   if (pThis->m_pFrameWnd == NULL) return E_UNEXPECTED;
-  CString strText(pszStatusText != NULL ? pszStatusText : L"");
+  CString strText(pszStatusText != NULL ? pszStatusText : OLESTR(""));
   pThis->m_pFrameWnd->SetMessageText(strText);
   return S_OK;
 }
@@ -452,7 +452,11 @@ BOOL COleClientItem::OnGetWindowContext(CFrameWnd** ppMainFrame, CFrameWnd** ppD
     CDocTemplate* pTemplate = ItemTemplate(this);
     HACCEL hAccel = pTemplate != NULL ? pTemplate->m_hAccelInPlace : NULL;
     lpFrameInfo->haccel = hAccel;
+#ifdef _AFX_WIN16
+    lpFrameInfo->cAccelEntries = ::_AfxW16AcceleratorCount(hAccel);
+#else
     lpFrameInfo->cAccelEntries = hAccel != NULL ? ::CopyAcceleratorTable(hAccel, NULL, 0) : 0;
+#endif
   }
   return TRUE;
 }

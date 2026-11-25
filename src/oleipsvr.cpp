@@ -256,7 +256,7 @@ LRESULT COleIPFrameWnd::OnSetMessageString(WPARAM wParam, LPARAM lParam) {
     strMessage = (LPCTSTR)lParam;
   else if (wParam != 0)
     GetMessageString((UINT)wParam, strMessage);
-  CStringW strText(strMessage);
+  CStringOle strText(strMessage);
   m_lpFrame->SetStatusText(strText);
   return nIDLast;
 }
@@ -458,7 +458,7 @@ BOOL COleServerDoc::UIActivate() {
   if (FAILED(m_lpInPlaceSite->OnUIActivate())) return FALSE;
   pFrame->m_bUIActive = TRUE;
 
-  CStringW strName(GetTitle());
+  CStringOle strName(GetTitle());
   LPOLEINPLACEACTIVEOBJECT lpActive = (LPOLEINPLACEACTIVEOBJECT)&m_xOleInPlaceActiveObject;
   if (pFrame->m_lpFrame != NULL) pFrame->m_lpFrame->SetActiveObject(lpActive, strName);
   if (pFrame->m_lpDocFrame != NULL) pFrame->m_lpDocFrame->SetActiveObject(lpActive, strName);
@@ -610,7 +610,7 @@ void COleServerDoc::OnDocWindowActivate(BOOL bActivate) {
   COleIPFrameWnd* pFrame = m_pInPlaceFrame;
   if (pFrame == NULL || !pFrame->m_bUIActive || pFrame->m_lpFrame == NULL) return;
   if (bActivate) {
-    CStringW strName(GetTitle());
+    CStringOle strName(GetTitle());
     pFrame->m_lpFrame->SetActiveObject((LPOLEINPLACEACTIVEOBJECT)&m_xOleInPlaceActiveObject,
                                        strName);
     pFrame->m_lpFrame->SetMenu(pFrame->m_hSharedMenu, pFrame->m_hOleMenu, pFrame->m_hWnd);

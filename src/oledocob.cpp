@@ -507,11 +507,22 @@ static BOOL InPageSet(const PAGESET* pSet, LONG nPage) {
 static HDC CreateTargetDC(const DVTARGETDEVICE* ptd) {
   if (ptd == NULL || ptd->tdDeviceNameOffset == 0) return NULL;
   const BYTE* pBase = (const BYTE*)ptd;
-  LPCWSTR pszDriver = ptd->tdDriverNameOffset ? (LPCWSTR)(pBase + ptd->tdDriverNameOffset) : NULL;
-  LPCWSTR pszDevice = (LPCWSTR)(pBase + ptd->tdDeviceNameOffset);
-  const DEVMODEW* pdm =
-      ptd->tdExtDevmodeOffset ? (const DEVMODEW*)(pBase + ptd->tdExtDevmodeOffset) : NULL;
+  // The names are OLE strings: ANSI on 16-bit Windows, wide on Win32.
+#ifdef _AFX_WIN16
+  typedef DEVMODE DEVMODEOLE;
+#else
+  typedef DEVMODEW DEVMODEOLE;
+#endif
+  LPCOLESTR pszDriver =
+      ptd->tdDriverNameOffset ? (LPCOLESTR)(pBase + ptd->tdDriverNameOffset) : NULL;
+  LPCOLESTR pszDevice = (LPCOLESTR)(pBase + ptd->tdDeviceNameOffset);
+  const DEVMODEOLE* pdm =
+      ptd->tdExtDevmodeOffset ? (const DEVMODEOLE*)(pBase + ptd->tdExtDevmodeOffset) : NULL;
+#ifdef _AFX_WIN16
+  return ::CreateDC(pszDriver, pszDevice, NULL, pdm);
+#else
   return ::CreateDCW(pszDriver, pszDevice, NULL, pdm);
+#endif
 }
 
 STDMETHODIMP CDocObjectServer::XPrint::Print(DWORD grfFlags, DVTARGETDEVICE** pptd,

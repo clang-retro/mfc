@@ -69,11 +69,39 @@ Wine's 16-bit `OLE2DISP` does not have `VariantClear`, `VariantCopy` and
 `IDispatch::Invoke`. It checks the names, the dispatch interface and
 the connection points (`tests/win16auto.cpp`).
 
+OLE documents (`afxole.h`):
+
+- containers: `COleDocument`, `COleClientItem`, `COleLinkingDoc`, in-place
+  activation of items, and `CRectTracker`
+- servers: `COleServerDoc`, `COleServerItem`, `COleIPFrameWnd`,
+  `COleResizeBar`, `COleTemplateServer`, `COleObjectFactory` and the
+  registry functions
+- data transfer: `COleDataSource`, `COleDataObject`, the clipboard,
+  `COleDropSource`, `COleDropTarget` and the drag and drop of `CView`
+- compound files: `COleStreamFile` and the storage of `COleDocument`
+- `COleMessageFilter`, the monikers of `CMonikerFile`, and document
+  objects (`CDocObjectServer`)
+
+16-bit OLE 2 has no OLE dialog DLL. The OLE 2 SDK gave the dialogs as
+sample source (OLE2UI). `src/win16oleui.cpp` gives the verb menu of an
+item (`OleUIAddVerbMenu`) and the update of links. The dialogs of
+`afxodlgs.h` (Insert Object, Paste Special, Links, Change Icon, Convert,
+Busy and Object Properties) compile, but `DoModal` gives `IDABORT`.
+
+16-bit Windows has no enhanced metafiles. `TYMED_ENHMF` is 0, and
+`CF_ENHMETAFILE` is a format that no 16-bit program gives.
+
+Wine's 16-bit OLE2.DLL is mostly stubs. Thus the Wine test of the OLE
+document classes is a link check: `tests/win16oledoc.cpp` makes
+containers, servers, drop targets and in-place frames in a function that
+does not run. The part that runs caches data in a `COleDataSource` and
+finds its format with `COleDataObject`. These classes need a real
+16-bit Windows with OLE 2 to run.
+
 ## What is not there
 
-- OLE controls, containers, servers and drag and drop. The OLE
-  functions of `CWnd`, `CView` and `CDocTemplate` are there, but they do
-  nothing (`src/win16ole.cpp`).
+- OLE controls. `CWnd::CreateControlSite` fails (`src/win16ole.cpp`).
+- The OLE dialogs (see "OLE documents").
 - The common controls. 16-bit Windows does not have `comctl32.dll`.
   The library draws the toolbar and the status bar itself (see "The
   toolbar and the status bar"). `CReBar` and the other classes of
