@@ -117,8 +117,9 @@ HRESULT WINAPI GetActiveObject(REFCLSID, void*, IUnknown**);
 #endif
 
 // Where long is wider than LONG (64-bit Linux and macOS), code written
-// for Windows passes a long for a LONG.
-#if defined(__LP64__)
+// for Windows passes a long for a LONG. C has no overloads, so only C++
+// gets this one.
+#if defined(__LP64__) && defined(__cplusplus)
 __WINPORT_INLINE HRESULT VarI4FromStr(LPCOLESTR s, LCID lcid, ULONG flags, long* out) {
   LONG v = 0;
   HRESULT hr = VarI4FromStr(s, lcid, flags, &v);
