@@ -1,6 +1,6 @@
-// sys/mman.h - the C library's, with POSIX shared memory. The classic
-// Mac OS has no virtual memory calls for this layer; mmap and the rest
-// are in port/src/macos_posix.cpp, over the heap.
+// sys/mman.h - the C library's, with the declarations of POSIX shared
+// memory, which picolibc's header does not have. mac-sdk's C library
+// has mmap, shm_open and the rest, over the heap (its docs/posix.md).
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only

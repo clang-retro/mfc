@@ -49,7 +49,8 @@ for t in $TESTS; do
   ok=1
   if [ $CPU = 68k ]; then
     for c in 68000 68020; do
-      python3 "$MACSDK/tools/sim68k.py" --cpu $c --os --files --exit-anywhere "$app" \
+      python3 "$MACSDK/tools/sim68k.py" --cpu $c --os --files --exit-anywhere \
+        --mem 16 --steps 400000000 "$app" \
         >"$T/$t-$c.log" 2>&1
       grep -q "^PASS" "$T/$t-$c.log" || { ok=0; echo "FAIL $t on a $c (see $T/$t-$c.log)"; }
     done

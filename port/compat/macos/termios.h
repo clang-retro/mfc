@@ -1,5 +1,5 @@
-// termios.h - the C library's, with cfmakeraw, which the layer uses
-// for serial ports (port/src/macos_posix.cpp).
+// termios.h - the C library's, with the declaration of cfmakeraw, which
+// the layer uses for serial ports. mac-sdk's C library has it.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only

@@ -1,6 +1,6 @@
 // sys/ioctl.h - the C library's, with the request numbers that the
 // layer names for serial ports and pipes. The classic Mac OS has no
-// such devices here: ioctl fails for them (port/src/macos_posix.cpp).
+// such devices here: mac-sdk's ioctl does only FIONREAD, for files.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
