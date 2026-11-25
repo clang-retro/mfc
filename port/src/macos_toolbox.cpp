@@ -150,11 +150,24 @@ void Handle(EventRecord& ev) {
 }
 
 }  // namespace
+}  // namespace mactb
+}  // namespace winport
+
+// Set to a value other than 0 by a program that starts the Toolbox
+// (InitGraf to InitCursor) itself, before the layer shows a window.
+extern "C" {
+int winport_mac_toolbox_started = 0;
+}
+
+namespace winport {
+namespace mactb {
 
 bool Start() {
-  // A program that set up the Toolbox itself has a current port.
+  // The low memory (MBarHeight, CurrentA5) does not tell if this program
+  // started the Toolbox: the Finder sets them before the program runs.
   GrafPtr port = NULL;
-  if (LMGetMBarHeight() <= 0 || !*(GrafPtr**)0x904) {
+  if (!winport_mac_toolbox_started) {
+    winport_mac_toolbox_started = 1;
     InitGraf(&g_qd.thePort);
     InitFonts();
     FlushEvents(everyEvent, 0);
