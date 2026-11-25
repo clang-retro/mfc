@@ -61,16 +61,16 @@ void PASCAL COleDispatchException::Process(EXCEPINFO* pInfo, const CException* e
     const COleDispatchException* pDisp = (const COleDispatchException*)e;
     pInfo->wCode = pDisp->m_wCode;
     pInfo->scode = pDisp->m_scError;
-    pInfo->bstrSource = ::SysAllocString(CStringW(pDisp->m_strSource));
-    pInfo->bstrDescription = ::SysAllocString(CStringW(pDisp->m_strDescription));
+    pInfo->bstrSource = ::SysAllocString(CStringOle(pDisp->m_strSource));
+    pInfo->bstrDescription = ::SysAllocString(CStringOle(pDisp->m_strDescription));
     if (!pDisp->m_strHelpFile.IsEmpty())
-      pInfo->bstrHelpFile = ::SysAllocString(CStringW(pDisp->m_strHelpFile));
+      pInfo->bstrHelpFile = ::SysAllocString(CStringOle(pDisp->m_strHelpFile));
     pInfo->dwHelpContext = pDisp->m_dwHelpContext;
   } else {
     pInfo->scode = COleException::Process(e);
     TCHAR szMessage[256];
     if (e != NULL && ((CException*)e)->GetErrorMessage(szMessage, 256))
-      pInfo->bstrDescription = ::SysAllocString(CStringW(szMessage));
+      pInfo->bstrDescription = ::SysAllocString(CStringOle(szMessage));
   }
 }
 
@@ -140,10 +140,15 @@ BOOL COleDispatchDriver::CreateDispatch(REFCLSID clsid, COleException* pError) {
   ReleaseDispatch();
   LPUNKNOWN lpUnknown = NULL;
   // A local server first, then whatever the class offers.
+#ifdef _AFX_WIN16
+  // 16-bit OLE 2 has no remote servers.
+  SCODE sc = ::CoCreateInstance(clsid, NULL, CLSCTX_ALL, IID_IUnknown, (void**)&lpUnknown);
+#else
   SCODE sc = ::CoCreateInstance(clsid, NULL, CLSCTX_ALL | CLSCTX_REMOTE_SERVER, IID_IUnknown,
                                 (void**)&lpUnknown);
   if (sc == E_INVALIDARG)
     sc = ::CoCreateInstance(clsid, NULL, CLSCTX_ALL, IID_IUnknown, (void**)&lpUnknown);
+#endif
   if (SUCCEEDED(sc)) {
     ::OleRun(lpUnknown);
     sc = lpUnknown->QueryInterface(IID_IDispatch, (void**)&m_lpDispatch);
@@ -160,7 +165,7 @@ BOOL COleDispatchDriver::CreateDispatch(REFCLSID clsid, COleException* pError) {
 
 BOOL COleDispatchDriver::CreateDispatch(LPCTSTR lpszProgID, COleException* pError) {
   CLSID clsid;
-  CStringW strProgID(lpszProgID);
+  CStringOle strProgID(lpszProgID);
   SCODE sc = ::CLSIDFromProgID(strProgID, &clsid);
   if (FAILED(sc)) {
     if (pError != NULL) pError->m_sc = sc;
@@ -247,7 +252,7 @@ static void _AfxArgFromList(VARIANT* pArg, BYTE bType, va_list& argList, _AFX_LO
       LPCSTR lpsz = va_arg(argList, LPCSTR);
       pArg->vt = VT_BSTR;
       if (lpsz != NULL) {
-        pArg->bstrVal = ::SysAllocString(CStringW(lpsz));
+        pArg->bstrVal = ::SysAllocString(CStringOle(lpsz));
         if (pArg->bstrVal == NULL) AfxThrowMemoryException();
       }
       break;
@@ -277,13 +282,14 @@ static void _AfxArgFromList(VARIANT* pArg, BYTE bType, va_list& argList, _AFX_LO
       AfxCheckError(::VariantCopy(pArg, (VARIANT*)pVar));
       break;
     }
-    case VT_I1:
-      pArg->vt = VT_I1;
-      pArg->cVal = (CHAR)va_arg(argList, int);
-      break;
     case VT_UI1:
       pArg->vt = VT_UI1;
       pArg->bVal = (BYTE)va_arg(argList, int);
+      break;
+#ifndef _AFX_WIN16  // 16-bit OLE 2 has none of these types
+    case VT_I1:
+      pArg->vt = VT_I1;
+      pArg->cVal = (CHAR)va_arg(argList, int);
       break;
     case VT_UI2:
       pArg->vt = VT_UI2;
@@ -301,6 +307,7 @@ static void _AfxArgFromList(VARIANT* pArg, BYTE bType, va_list& argList, _AFX_LO
       pArg->vt = VT_UI8;
       pArg->ullVal = va_arg(argList, ULONGLONG);
       break;
+#endif
     default:
       AfxThrowInvalidArgException();
   }
@@ -332,7 +339,7 @@ static void _AfxStoreResult(VARIANT* pResult, VARTYPE vtRet, void* pvRet) {
     case VT_BSTRA:
 #endif
       // A string comes back as a CString.
-      *(CString*)pvRet = CString(pResult->bstrVal != NULL ? pResult->bstrVal : L"");
+      *(CString*)pvRet = CString(pResult->bstrVal != NULL ? pResult->bstrVal : OLESTR(""));
       break;
     case VT_DISPATCH:
       *(LPDISPATCH*)pvRet = pResult->pdispVal;
@@ -344,12 +351,14 @@ static void _AfxStoreResult(VARIANT* pResult, VARTYPE vtRet, void* pvRet) {
       break;
     case VT_ERROR: *(SCODE*)pvRet = pResult->scode; break;
     case VT_BOOL: *(BOOL*)pvRet = pResult->boolVal != 0; break;
-    case VT_I1: *(CHAR*)pvRet = pResult->cVal; break;
     case VT_UI1: *(BYTE*)pvRet = pResult->bVal; break;
+#ifndef _AFX_WIN16  // 16-bit OLE 2 has none of these types
+    case VT_I1: *(CHAR*)pvRet = pResult->cVal; break;
     case VT_UI2: *(USHORT*)pvRet = pResult->uiVal; break;
     case VT_UI4: *(ULONG*)pvRet = pResult->ulVal; break;
     case VT_I8: *(LONGLONG*)pvRet = pResult->llVal; break;
     case VT_UI8: *(ULONGLONG*)pvRet = pResult->ullVal; break;
+#endif
     default: AfxThrowInvalidArgException();
   }
 }

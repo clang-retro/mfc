@@ -190,7 +190,7 @@ static const AFX_DISPMAP_ENTRY* FindByName(const AFX_DISPMAP* pMap, LPCOLESTR lp
     for (const AFX_DISPMAP_ENTRY* pEntry = pMap->lpEntries; pEntry->nKind != _AFX_DISP_END;
          pEntry++) {
       if (pEntry->nKind == _AFX_DISP_DEFVALUE || pEntry->lpszName == NULL) continue;
-      if (CStringW(pEntry->lpszName).CompareNoCase(lpszName) == 0) {
+      if (CStringOle(pEntry->lpszName).CompareNoCase(lpszName) == 0) {
         if (pDispID != NULL) *pDispID = EntryID(pEntry, pMap->lpEntries, nLevel);
         return pEntry;
       }
@@ -217,7 +217,7 @@ const AFX_DISPMAP_ENTRY* CCmdTarget::GetDispEntry(DISPID dispid) {
            pEntry++) {
         if (pEntry->nKind != _AFX_DISP_DEFVALUE) continue;
         if (pEntry->lpszName != NULL)
-          return FindByName(pFirstMap, CStringW(pEntry->lpszName), NULL);
+          return FindByName(pFirstMap, CStringOle(pEntry->lpszName), NULL);
         return pEntry->lDispID != DISPID_VALUE ? GetDispEntry(pEntry->lDispID) : NULL;
       }
     }
@@ -355,7 +355,7 @@ static void GetMember(void* pm, VARTYPE vt, VARIANT* pResult) {
   case VT_R8: case VT_DATE: pResult->dblVal = *(double*)pm; break;
   case VT_CY: pResult->cyVal = *(CY*)pm; break;
   case VT_BOOL: pResult->boolVal = *(BOOL*)pm ? VARIANT_TRUE : VARIANT_FALSE; break;
-  case VT_BSTR: pResult->bstrVal = ::SysAllocString(CStringW(*(CString*)pm)); break;
+  case VT_BSTR: pResult->bstrVal = ::SysAllocString(CStringOle(*(CString*)pm)); break;
   case VT_DISPATCH:
   case VT_UNKNOWN:
     pResult->punkVal = *(LPUNKNOWN*)pm;

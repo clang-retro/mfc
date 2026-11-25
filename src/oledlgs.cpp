@@ -330,7 +330,7 @@ STDMETHODIMP COleLinksDialog::XOleUILinkContainer::SetLinkSource(DWORD dwLink,
   LPOLELINK lpLink = NULL;
   HRESULT hr = pItem->m_lpObject->QueryInterface(IID_IOleLink, (void**)&lpLink);
   if (FAILED(hr)) return hr;
-  CStringW strName(lpszDisplayName);
+  CStringOle strName(lpszDisplayName);
   hr = lpLink->SetSourceDisplayName(strName);
   lpLink->Release();
   if (SUCCEEDED(hr)) {

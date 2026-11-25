@@ -88,7 +88,7 @@ static DWORD StgFlags(DWORD nOpenFlags) {
 
 BOOL COleStreamFile::OpenStream(LPSTORAGE lpStorage, LPCTSTR lpszStreamName, DWORD nOpenFlags,
                                 CFileException* pError) {
-  CStringW strName(lpszStreamName);
+  CStringOle strName(lpszStreamName);
   LPSTREAM lpStream = NULL;
   SCODE sc = lpStorage->OpenStream(strName, NULL, StgFlags(nOpenFlags), 0, &lpStream);
   if (FAILED(sc)) {
@@ -103,7 +103,7 @@ BOOL COleStreamFile::OpenStream(LPSTORAGE lpStorage, LPCTSTR lpszStreamName, DWO
 
 BOOL COleStreamFile::CreateStream(LPSTORAGE lpStorage, LPCTSTR lpszStreamName,
                                   DWORD nOpenFlags, CFileException* pError) {
-  CStringW strName(lpszStreamName);
+  CStringOle strName(lpszStreamName);
   LPSTREAM lpStream = NULL;
   DWORD grf = StgFlags(nOpenFlags);
   // modeCreate replaces a stream that is there; without it, an existing

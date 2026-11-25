@@ -64,16 +64,22 @@ static BOOL CopyStgMedium(CLIPFORMAT cfFormat, LPSTGMEDIUM lpDest, const STGMEDI
     ::GlobalUnlock(lpSource->hMetaFilePict);
     break;
   }
+#ifndef _AFX_WIN16
   case TYMED_ENHMF:
     lpDest->hEnhMetaFile = ::CopyEnhMetaFile(lpSource->hEnhMetaFile, NULL);
     break;
+#endif
   case TYMED_ISTREAM:
   case TYMED_ISTORAGE:
     lpDest->pstm = lpSource->pstm;
     lpDest->pstm->AddRef();
     return TRUE;
   case TYMED_FILE: {
+#ifdef _AFX_WIN16
+    int n = lstrlen(lpSource->lpszFileName) + 1;
+#else
     int n = lstrlenW(lpSource->lpszFileName) + 1;
+#endif
     lpDest->lpszFileName = (LPOLESTR)::CoTaskMemAlloc(n * sizeof(OLECHAR));
     if (lpDest->lpszFileName == NULL) return FALSE;
     memcpy(lpDest->lpszFileName, lpSource->lpszFileName, n * sizeof(OLECHAR));

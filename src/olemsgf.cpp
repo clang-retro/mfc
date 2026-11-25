@@ -101,7 +101,7 @@ STDMETHODIMP COleMessageFilter::XMessageFilter::QueryInterface(REFIID iid, LPVOI
 // callback) is still taken.
 STDMETHODIMP_(DWORD) COleMessageFilter::XMessageFilter::HandleInComingCall(DWORD dwCallType, HTASK,
                                                                            DWORD,
-                                                                           LPINTERFACEINFO) {
+                                                                           _AFX_INCOMINGINFO) {
   FILTER();
   if (pThis->m_nBusyCount == 0) return SERVERCALL_ISHANDLED;
   if (dwCallType == CALLTYPE_TOPLEVEL || dwCallType == CALLTYPE_TOPLEVEL_CALLPENDING)

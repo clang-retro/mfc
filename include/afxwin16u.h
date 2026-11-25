@@ -139,6 +139,13 @@ typedef const SCROLLINFO FAR *LPCSCROLLINFO;
 #define MIIM_STRING 0x0040
 #define MIIM_BITMAP 0x0080
 #define MIIM_FTYPE 0x0100
+// The MFT_ types of a MENUITEMINFO are the MF_ flags.
+#define MFT_STRING MF_STRING
+#define MFT_BITMAP MF_BITMAP
+#define MFT_SEPARATOR MF_SEPARATOR
+#define MFT_OWNERDRAW MF_OWNERDRAW
+#define MFT_MENUBARBREAK MF_MENUBARBREAK
+#define MFT_MENUBREAK MF_MENUBREAK
 typedef struct tagMENUITEMINFO {
   UINT cbSize;
   UINT fMask;
@@ -233,19 +240,34 @@ typedef struct tagTRACKMOUSEEVENT {
 } TRACKMOUSEEVENT, FAR *LPTRACKMOUSEEVENT;
 
 #define THREAD_PRIORITY_NORMAL 0
-#define TYPE_E_CANTLOADLIBRARY 0x80029C4AL
-#define DISPID_UNKNOWN (-1)
 
 // The OLE control interfaces, which the connection maps of CCmdTarget
-// name. 16-bit OLE 2 has no OLE controls, so nothing gives these
-// interfaces; the library answers that it has none.
-interface IConnectionPoint;
-interface IEnumConnectionPoints;
-interface IConnectionPointContainer : public IUnknown {
-  STDMETHOD(EnumConnectionPoints)(IEnumConnectionPoints FAR * FAR *ppEnum) = 0;
-  STDMETHOD(FindConnectionPoint)(REFIID riid, IConnectionPoint FAR * FAR *ppCP) = 0;
-};
-typedef IConnectionPoint FAR *LPCONNECTIONPOINT;
+// name (include/win16/ocidl.h).
+#include <ocidl.h>
+// 16-bit TYPELIB has no UnRegisterTypeLib: src/win16ole.cpp deletes the
+// registry keys of the version.
+HRESULT UnRegisterTypeLib(REFGUID libID, WORD wVerMajor, WORD wVerMinor, LCID lcid,
+                          SYSKIND syskind);
+// The task allocator functions of Win32 (src/win16ole.cpp). They use the
+// IMalloc of the task (CoGetMalloc with MEMCTX_TASK).
+LPVOID CoTaskMemAlloc(ULONG cb);
+LPVOID CoTaskMemRealloc(LPVOID pv, ULONG cb);
+void CoTaskMemFree(LPVOID pv);
+// Gives the number of entries of an accelerator table. 16-bit Windows has
+// no CopyAcceleratorTable; this reads the table resource.
+int _AfxW16AcceleratorCount(HACCEL hAccel);
+#define _HRESULT_TYPEDEF_(sc) ((HRESULT)(sc))
+// 16-bit Windows has no enhanced metafiles. CF_ENHMETAFILE is a clipboard
+// format that no 16-bit program gives, and TYMED_ENHMF adds no medium.
+#define CF_ENHMETAFILE 14
+#define TYMED_ENHMF 0
+// The errors of IOleCommandTarget (docobj.h), as in Win32.
+#define OLECMDERR_E_FIRST ((HRESULT)0x80040100L)
+#define OLECMDERR_E_NOTSUPPORTED OLECMDERR_E_FIRST
+#define OLECMDERR_E_DISABLED (OLECMDERR_E_FIRST + 1)
+#define OLECMDERR_E_NOHELP (OLECMDERR_E_FIRST + 2)
+#define OLECMDERR_E_CANCELED (OLECMDERR_E_FIRST + 3)
+#define OLECMDERR_E_UNKNOWNGROUP (OLECMDERR_E_FIRST + 4)
 
 // The common control types come from the portable layer (port/include),
 // which the build puts after the 16-bit SDK on the include path.

@@ -10,7 +10,7 @@
 #include <time.h>
 
 static CString _AfxBstrToString(BSTR bstr) {
-  CString str(bstr != NULL ? bstr : L"");
+  CString str(bstr != NULL ? bstr : OLESTR(""));
   return str;
 }
 
@@ -235,7 +235,7 @@ void COleVariant::SetString(LPCTSTR lpszSrc, VARTYPE vtSrc) {
 #else
   (void)vtSrc;
 #endif
-  CStringW str(lpszSrc);
+  CStringOle str(lpszSrc);
   bstrVal = ::SysAllocStringLen(str, (UINT)str.GetLength());
   if (bstrVal == NULL) AfxThrowMemoryException();
 }
@@ -427,7 +427,7 @@ CArchive& AFXAPI operator<<(CArchive& ar, COleVariant varSrc) {
     case VT_R8: ar << varSrc.dblVal; break;
     case VT_DATE: ar << varSrc.date; break;
     case VT_CY: ar << (LONG)varSrc.cyVal.Lo << (LONG)varSrc.cyVal.Hi; break;
-    case VT_BSTR: ar << CString(varSrc.bstrVal != NULL ? varSrc.bstrVal : L""); break;
+    case VT_BSTR: ar << CString(varSrc.bstrVal != NULL ? varSrc.bstrVal : OLESTR("")); break;
     default:
       if (varSrc.vt == (VT_ARRAY | VT_UI1)) {
         LONG lo, hi;

@@ -22,7 +22,11 @@ void CRectTracker::Construct() {
   m_nStyle = 0;
   m_rect.SetRectEmpty();
   // The width of an in-place border, as the system sets it.
+#ifdef _AFX_WIN16
+  m_nHandleSize = (int)::GetProfileInt("windows", "oleinplaceborderwidth", 4);
+#else
   m_nHandleSize = (int)::GetProfileIntA("windows", "oleinplaceborderwidth", 4);
+#endif
   if (m_nHandleSize <= 0) m_nHandleSize = 4;
   m_sizeMin = CSize(m_nHandleSize * 2, m_nHandleSize * 2);
   m_bAllowInvert = FALSE;
@@ -267,22 +271,24 @@ void CRectTracker::AdjustRect(int nHandle, LPRECT lpRect) {
   if (nHandle == hitMiddle) return;
   int *px, *py;
   GetModifyPointers(nHandle, &px, &py, NULL, NULL);
-  // px and py point into m_rect; work on lpRect's matching fields.
+  // px and py point into m_rect; work on lpRect's matching fields. A
+  // RECT field is a LONG on Win32 and an int on 16-bit Windows.
+  typedef decltype(lpRect->left) RectCoord;
   if (px != NULL) {
-    LONG* pMoving = px == (int*)&m_rect.left ? &lpRect->left : &lpRect->right;
-    LONG* pFixed = px == (int*)&m_rect.left ? &lpRect->right : &lpRect->left;
-    LONG nSign = pMoving == &lpRect->right ? 1 : -1;  // which way the moving edge grows
-    LONG nWidth = (*pMoving - *pFixed) * nSign;
+    RectCoord* pMoving = px == (int*)&m_rect.left ? &lpRect->left : &lpRect->right;
+    RectCoord* pFixed = px == (int*)&m_rect.left ? &lpRect->right : &lpRect->left;
+    RectCoord nSign = pMoving == &lpRect->right ? 1 : -1;  // which way the moving edge grows
+    RectCoord nWidth = (*pMoving - *pFixed) * nSign;
     if (!m_bAllowInvert && nWidth < m_sizeMin.cx)
       *pMoving = *pFixed + nSign * m_sizeMin.cx;
     else if (m_bAllowInvert && nWidth > -m_sizeMin.cx && nWidth < m_sizeMin.cx)
       *pMoving = *pFixed + nSign * (nWidth < 0 ? -m_sizeMin.cx : m_sizeMin.cx);
   }
   if (py != NULL) {
-    LONG* pMoving = py == (int*)&m_rect.top ? &lpRect->top : &lpRect->bottom;
-    LONG* pFixed = py == (int*)&m_rect.top ? &lpRect->bottom : &lpRect->top;
-    LONG nSign = pMoving == &lpRect->bottom ? 1 : -1;
-    LONG nHeight = (*pMoving - *pFixed) * nSign;
+    RectCoord* pMoving = py == (int*)&m_rect.top ? &lpRect->top : &lpRect->bottom;
+    RectCoord* pFixed = py == (int*)&m_rect.top ? &lpRect->bottom : &lpRect->top;
+    RectCoord nSign = pMoving == &lpRect->bottom ? 1 : -1;
+    RectCoord nHeight = (*pMoving - *pFixed) * nSign;
     if (!m_bAllowInvert && nHeight < m_sizeMin.cy)
       *pMoving = *pFixed + nSign * m_sizeMin.cy;
     else if (m_bAllowInvert && nHeight > -m_sizeMin.cy && nHeight < m_sizeMin.cy)

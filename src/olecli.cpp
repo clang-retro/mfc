@@ -6,11 +6,18 @@
 #include "afximpl.h"
 #include <afxole.h>
 // oledlg.h needs <tchar.h>, which some C libraries lack; this is the one
-// function used here.
+// function used here. OLE strings are ANSI on 16-bit Windows.
+#ifdef _AFX_WIN16
+extern "C" BOOL WINAPI OleUIAddVerbMenuA(LPOLEOBJECT lpOleObj, LPCSTR lpszShortType,
+                                         HMENU hMenu, UINT uPos, UINT uIDVerbMin,
+                                         UINT uIDVerbMax, BOOL bAddConvert, UINT idConvert,
+                                         HMENU FAR* lphMenu);
+#else
 extern "C" BOOL WINAPI OleUIAddVerbMenuW(LPOLEOBJECT lpOleObj, LPCWSTR lpszShortType,
                                          HMENU hMenu, UINT uPos, UINT uIDVerbMin,
                                          UINT uIDVerbMax, BOOL bAddConvert, UINT idConvert,
                                          HMENU* lphMenu);
+#endif
 
 IMPLEMENT_DYNAMIC(COleClientItem, CDocItem)
 
@@ -58,7 +65,11 @@ COleClientItem::~COleClientItem() {
 }
 
 void COleClientItem::GetItemName(LPOLESTR lpszName) const {
+#ifdef _AFX_WIN16
+  wsprintf(lpszName, "Embedding %lu", m_dwItemNumber);
+#else
   wsprintfW(lpszName, L"Embedding %lu", m_dwItemNumber);
+#endif
 }
 
 void COleClientItem::ReleaseStorage() {
@@ -254,7 +265,7 @@ BOOL COleClientItem::CreateFromFile(LPCTSTR lpszFileName, REFCLSID clsid, OLEREN
   Release();
   GetItemStorage();
   FORMATETC fe;
-  CStringW strFile(lpszFileName);
+  CStringOle strFile(lpszFileName);
   SCODE sc = ::OleCreateFromFile(clsid, strFile, IID_IOleObject, render,
                                  MakeFormatEtc(fe, cfFormat, lpFormatEtc), GetClientSite(),
                                  m_lpStorage, (void**)&m_lpObject);
@@ -266,7 +277,7 @@ BOOL COleClientItem::CreateLinkFromFile(LPCTSTR lpszFileName, OLERENDER render,
   Release();
   GetItemStorage();
   FORMATETC fe;
-  CStringW strFile(lpszFileName);
+  CStringOle strFile(lpszFileName);
   SCODE sc = ::OleCreateLinkToFile(strFile, IID_IOleObject, render,
                                    MakeFormatEtc(fe, cfFormat, lpFormatEtc), GetClientSite(),
                                    m_lpStorage, (void**)&m_lpObject);
@@ -679,20 +690,26 @@ DVTARGETDEVICE* AFXAPI _AfxOleCreateTargetDevice(const PRINTDLG* ppd) {
   if (ppd == NULL || ppd->hDevNames == NULL) return NULL;
   DEVNAMES* pdn = (DEVNAMES*)::GlobalLock(ppd->hDevNames);
   if (pdn == NULL) return NULL;
-  CStringW strDriver((LPCTSTR)pdn + pdn->wDriverOffset);
-  CStringW strDevice((LPCTSTR)pdn + pdn->wDeviceOffset);
-  CStringW strPort((LPCTSTR)pdn + pdn->wOutputOffset);
+  CStringOle strDriver((LPCTSTR)pdn + pdn->wDriverOffset);
+  CStringOle strDevice((LPCTSTR)pdn + pdn->wDeviceOffset);
+  CStringOle strPort((LPCTSTR)pdn + pdn->wOutputOffset);
   ::GlobalUnlock(ppd->hDevNames);
 
-  // The device mode, in its wide form.
-  DEVMODEW* pdmW = NULL;
+  // The device mode, in the form of OLE strings: wide on Win32, ANSI on
+  // 16-bit Windows.
+#ifdef _AFX_WIN16
+  typedef DEVMODE DEVMODEOLE;
+#else
+  typedef DEVMODEW DEVMODEOLE;
+#endif
+  DEVMODEOLE* pdmW = NULL;
   UINT cbDevMode = 0;
   if (ppd->hDevMode != NULL) {
     DEVMODE* pdm = (DEVMODE*)::GlobalLock(ppd->hDevMode);
     if (pdm != NULL) {
-#ifdef _UNICODE
+#if defined(_UNICODE) || defined(_AFX_WIN16)
       cbDevMode = pdm->dmSize + pdm->dmDriverExtra;
-      pdmW = (DEVMODEW*)malloc(cbDevMode);
+      pdmW = (DEVMODEOLE*)malloc(cbDevMode);
       memcpy(pdmW, pdm, cbDevMode);
 #else
       cbDevMode = sizeof(DEVMODEW) + pdm->dmDriverExtra;
@@ -731,9 +748,9 @@ DVTARGETDEVICE* AFXAPI _AfxOleCreateTargetDevice(const PRINTDLG* ppd) {
     ptd->tdDeviceNameOffset = (WORD)(cbHeader + cbDriver);
     ptd->tdPortNameOffset = (WORD)(cbHeader + cbDriver + cbDevice);
     ptd->tdExtDevmodeOffset = cbDevMode ? (WORD)(cbHeader + cbDriver + cbDevice + cbPort) : 0;
-    memcpy((BYTE*)ptd + ptd->tdDriverNameOffset, (LPCWSTR)strDriver, cbDriver);
-    memcpy((BYTE*)ptd + ptd->tdDeviceNameOffset, (LPCWSTR)strDevice, cbDevice);
-    memcpy((BYTE*)ptd + ptd->tdPortNameOffset, (LPCWSTR)strPort, cbPort);
+    memcpy((BYTE*)ptd + ptd->tdDriverNameOffset, (LPCOLESTR)strDriver, cbDriver);
+    memcpy((BYTE*)ptd + ptd->tdDeviceNameOffset, (LPCOLESTR)strDevice, cbDevice);
+    memcpy((BYTE*)ptd + ptd->tdPortNameOffset, (LPCOLESTR)strPort, cbPort);
     if (cbDevMode) memcpy((BYTE*)ptd + ptd->tdExtDevmodeOffset, pdmW, cbDevMode);
   }
   free(pdmW);
@@ -780,8 +797,8 @@ BOOL COleClientItem::SetPrintDevice(const PRINTDLG* ppd) {
 
 void COleClientItem::SetHostNames(LPCTSTR lpszHost, LPCTSTR lpszHostObj) {
   if (m_lpObject == NULL) return;
-  CStringW strHost(lpszHost);
-  CStringW strHostObj(lpszHostObj);
+  CStringOle strHost(lpszHost);
+  CStringOle strHostObj(lpszHostObj);
   m_scLast = m_lpObject->SetHostNames(strHost, strHostObj);
 }
 
@@ -867,8 +884,8 @@ void COleClientItem::GetClipboardData(COleDataSource* pDataSource, BOOL bInclude
   GetClassID(&clsid);
   CString strType;
   GetUserType(USERCLASSTYPE_FULL, strType);
-  CStringW strTypeW(strType);
-  CStringW strSource;
+  CStringOle strTypeW(strType);
+  CStringOle strSource;
   if (GetDocument() != NULL) strSource = GetDocument()->GetTitle();
   UINT cbType = (strTypeW.GetLength() + 1) * sizeof(WCHAR);
   UINT cbSource = (strSource.GetLength() + 1) * sizeof(WCHAR);
@@ -892,8 +909,8 @@ void COleClientItem::GetClipboardData(COleDataSource* pDataSource, BOOL bInclude
     m_lpObject->GetMiscStatus(m_nDrawAspect, &pod->dwStatus);
     pod->dwFullUserTypeName = sizeof(OBJECTDESCRIPTOR);
     pod->dwSrcOfCopy = sizeof(OBJECTDESCRIPTOR) + cbType;
-    memcpy((BYTE*)pod + pod->dwFullUserTypeName, (LPCWSTR)strTypeW, cbType);
-    memcpy((BYTE*)pod + pod->dwSrcOfCopy, (LPCWSTR)strSource, cbSource);
+    memcpy((BYTE*)pod + pod->dwFullUserTypeName, (LPCOLESTR)strTypeW, cbType);
+    memcpy((BYTE*)pod + pod->dwSrcOfCopy, (LPCOLESTR)strSource, cbSource);
     ::GlobalUnlock(hDesc);
     pDataSource->CacheGlobalData(CF_OBJECTDESCRIPTOR_, hDesc);
   }
@@ -1277,9 +1294,9 @@ STDMETHODIMP COleClientItem::XOleClientSite::GetMoniker(DWORD dwAssign, DWORD dw
   LPMONIKER lpItem = NULL;
   if (dwWhichMoniker != OLEWHICHMK_CONTAINER) {
     if (pThis->m_dwItemNumber == 0) return E_FAIL;
-    WCHAR szName[64];
+    OLECHAR szName[64];
     pThis->GetItemName(szName);
-    if (FAILED(::CreateItemMoniker(L"!", szName, &lpItem))) return E_FAIL;
+    if (FAILED(::CreateItemMoniker(OLESTR("!"), szName, &lpItem))) return E_FAIL;
     if (dwWhichMoniker == OLEWHICHMK_OBJREL) {
       *ppmk = lpItem;
       return S_OK;
@@ -1376,9 +1393,13 @@ void AFXAPI AfxOleSetEditMenu(COleClientItem* pClient, CMenu* pMenu, UINT iMenuI
   HMENU hPopup = NULL;
   CString strShort;
   if (pClient != NULL) pClient->GetUserType(USERCLASSTYPE_SHORT, strShort);
-  CStringW strShortW(strShort);
+  CStringOle strShortW(strShort);
   // OleUIAddVerbMenu reads the verbs from the registry and the object.
+#ifdef _AFX_WIN16
+  ::OleUIAddVerbMenuA(pClient != NULL ? pClient->m_lpObject : NULL,
+#else
   ::OleUIAddVerbMenuW(pClient != NULL ? pClient->m_lpObject : NULL,
-                      pClient != NULL ? (LPCWSTR)strShortW : NULL, pMenu->GetSafeHmenu(),
+#endif
+                      pClient != NULL ? (LPCOLESTR)strShortW : NULL, pMenu->GetSafeHmenu(),
                       iMenuItem, nIDVerbMin, nIDVerbMax, nIDConvert != 0, nIDConvert, &hPopup);
 }

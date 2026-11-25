@@ -214,7 +214,7 @@ BOOL COleDocument::OnOpenDocument(LPCTSTR lpszPathName) {
     ReleaseRoot();
   }
 
-  CStringW strPath(lpszPathName);
+  CStringOle strPath(lpszPathName);
   LPSTORAGE lpStorage = NULL;
   SCODE sc = ::StgOpenStorage(strPath, NULL,
                               STGM_READWRITE | STGM_TRANSACTED | STGM_SHARE_DENY_WRITE, NULL,
@@ -305,7 +305,7 @@ BOOL COleDocument::OnSaveDocument(LPCTSTR lpszPathName) {
   LPSTORAGE lpOldRoot = m_lpRootStg;
   LPSTORAGE lpStorage = m_lpRootStg;
   if (!bSame) {
-    CStringW strPath(lpszPathName);
+    CStringOle strPath(lpszPathName);
     SCODE sc = ::StgCreateDocfile(strPath,
                                   STGM_CREATE | STGM_READWRITE | STGM_TRANSACTED |
                                       STGM_SHARE_DENY_WRITE,

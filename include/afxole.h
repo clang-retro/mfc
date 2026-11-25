@@ -1261,9 +1261,16 @@ protected:
   BOOL m_bRegistered;
 
 public:
+  // The last argument of HandleInComingCall is a DWORD (reserved) in
+  // 16-bit OLE 2.
+#ifdef _AFX_WIN16
+  typedef DWORD _AFX_INCOMINGINFO;
+#else
+  typedef LPINTERFACEINFO _AFX_INCOMINGINFO;
+#endif
   BEGIN_INTERFACE_PART(MessageFilter, IMessageFilter)
     STDMETHOD_(DWORD, HandleInComingCall)(DWORD dwCallType, HTASK htaskCaller,
-                                          DWORD dwTickCount, LPINTERFACEINFO lpInterfaceInfo);
+                                          DWORD dwTickCount, _AFX_INCOMINGINFO lpInterfaceInfo);
     STDMETHOD_(DWORD, RetryRejectedCall)(HTASK htaskCallee, DWORD dwTickCount,
                                          DWORD dwRejectType);
     STDMETHOD_(DWORD, MessagePending)(HTASK htaskCallee, DWORD dwTickCount,

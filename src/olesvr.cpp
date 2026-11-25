@@ -34,10 +34,10 @@ static CLIPFORMAT s_cfEmbedSource, s_cfObjectDescriptor, s_cfLinkSource, s_cfLin
   }
 
 static LPOLESTR TaskString(LPCTSTR lpsz) {
-  CStringW str(lpsz);
+  CStringOle str(lpsz);
   UINT cb = (str.GetLength() + 1) * sizeof(WCHAR);
   LPOLESTR p = (LPOLESTR)::CoTaskMemAlloc(cb);
-  if (p != NULL) memcpy(p, (LPCWSTR)str, cb);
+  if (p != NULL) memcpy(p, (LPCOLESTR)str, cb);
   return p;
 }
 
@@ -126,7 +126,7 @@ BOOL COleLinkingDoc::Register(COleObjectFactory* pFactory, LPCTSTR lpszPathName)
   if (pFactory != NULL) m_pFactory = pFactory;
   if (lpszPathName == NULL || *lpszPathName == 0) return TRUE;
   LPMONIKER lpMoniker = NULL;
-  CStringW strPath(lpszPathName);
+  CStringOle strPath(lpszPathName);
   if (FAILED(::CreateFileMoniker(strPath, &lpMoniker))) return FALSE;
   BOOL bResult = RegisterRunning(this, lpMoniker, m_dwRegister, m_lpRunning);
   lpMoniker->Release();
@@ -158,12 +158,12 @@ COleServerItem* COleLinkingDoc::OnGetLinkedItem(LPCTSTR lpszItemName) {
 }
 
 COleClientItem* COleLinkingDoc::OnFindEmbeddedItem(LPCTSTR lpszItemName) {
-  CStringW strName(lpszItemName);
+  CStringOle strName(lpszItemName);
   POSITION pos = GetStartPosition();
   while (pos != NULL) {
     COleClientItem* pItem = GetNextClientItem(pos);
     if (pItem == NULL || pItem->m_dwItemNumber == 0) continue;
-    WCHAR szName[64];
+    OLECHAR szName[64];
     pItem->GetItemName(szName);
     if (strName == szName) return pItem;
   }
@@ -173,7 +173,7 @@ COleClientItem* COleLinkingDoc::OnFindEmbeddedItem(LPCTSTR lpszItemName) {
 LPMONIKER COleLinkingDoc::GetMoniker(OLEGETMONIKER) {
   if (m_strPathName.IsEmpty()) return NULL;
   LPMONIKER lpMoniker = NULL;
-  CStringW strPath(m_strPathName);
+  CStringOle strPath(m_strPathName);
   if (FAILED(::CreateFileMoniker(strPath, &lpMoniker))) return NULL;
   return lpMoniker;
 }
@@ -223,7 +223,8 @@ STDMETHODIMP COleLinkingDoc::XPersistFile::QueryInterface(REFIID iid, LPVOID* pp
 STDMETHODIMP COleLinkingDoc::XPersistFile::GetClassID(LPCLSID lpClassID) {
   METHOD_PROLOGUE_EX_(COleLinkingDoc, PersistFile)
   COleObjectFactory* pFactory = FactoryOf(pThis);
-  *lpClassID = pFactory != NULL ? pFactory->GetClassID() : CLSID_NULL;
+  *lpClassID = CLSID_NULL;
+  if (pFactory != NULL) *lpClassID = pFactory->GetClassID();
   return pFactory != NULL ? S_OK : E_FAIL;
 }
 
@@ -305,13 +306,13 @@ STDMETHODIMP COleLinkingDoc::XOleItemContainer::ParseDisplayName(LPBC, LPOLESTR 
   while (*pEnd != 0 && *pEnd != L'!' && *pEnd != L'/' && *pEnd != L'\\' && *pEnd != L':')
     pEnd++;
   if (pEnd == p) return MK_E_SYNTAX;
-  CStringW strItem(p, (int)(pEnd - p));
+  CStringOle strItem(p, (int)(pEnd - p));
   HRESULT hr = S_OK;
   OLE_TRY
     CString strName(strItem);
     if (pThis->OnFindEmbeddedItem(strName) == NULL && pThis->OnGetLinkedItem(strName) == NULL)
       return MK_E_NOOBJECT;
-    hr = ::CreateItemMoniker(L"!", strItem, ppmkOut);
+    hr = ::CreateItemMoniker(OLESTR("!"), strItem, ppmkOut);
   OLE_CATCH(hr)
   if (SUCCEEDED(hr)) *pchEaten = (ULONG)(pEnd - pszDisplayName);
   return hr;
@@ -478,7 +479,8 @@ COleServerItem* COleServerDoc::GetEmbeddedItem() {
 
 void COleServerDoc::GetClassIDOf(LPCLSID lpClassID) {
   COleObjectFactory* pFactory = FactoryOf(this);
-  *lpClassID = pFactory != NULL ? pFactory->GetClassID() : CLSID_NULL;
+  *lpClassID = CLSID_NULL;
+  if (pFactory != NULL) *lpClassID = pFactory->GetClassID();
 }
 
 void COleServerDoc::UpdateAllItems(COleServerItem* pSender, LPARAM lHint, CObject* pHint,
@@ -555,9 +557,9 @@ static LPMONIKER ItemMoniker(COleServerItem* pItem, LPMONIKER lpDoc) {
     return lpDoc;
   }
   if (pItem->GetItemName().IsEmpty()) return NULL;
-  CStringW strName(pItem->GetItemName());
+  CStringOle strName(pItem->GetItemName());
   LPMONIKER lpItem = NULL;
-  if (FAILED(::CreateItemMoniker(L"!", strName, &lpItem))) return NULL;
+  if (FAILED(::CreateItemMoniker(OLESTR("!"), strName, &lpItem))) return NULL;
   LPMONIKER lpFull = NULL;
   HRESULT hr = ::CreateGenericComposite(lpDoc, lpItem, &lpFull);
   lpItem->Release();
@@ -566,7 +568,7 @@ static LPMONIKER ItemMoniker(COleServerItem* pItem, LPMONIKER lpDoc) {
 
 void COleServerDoc::NotifyRename(LPCTSTR lpszNewName) {
   LPMONIKER lpMoniker = NULL;
-  CStringW strName(lpszNewName);
+  CStringOle strName(lpszNewName);
   if (FAILED(::CreateFileMoniker(strName, &lpMoniker))) return;
   if (m_lpOleAdviseHolder != NULL) m_lpOleAdviseHolder->SendOnRename(lpMoniker);
   CPtrArray items;
@@ -1007,8 +1009,8 @@ STDMETHODIMP COleServerDoc::XOleObject::SetHostNames(LPCOLESTR szContainerApp,
   METHOD_PROLOGUE_EX_(COleServerDoc, OleObject)
   HRESULT hr = S_OK;
   OLE_TRY
-    CString strApp(szContainerApp != NULL ? szContainerApp : L"");
-    CString strObj(szContainerObj != NULL ? szContainerObj : L"");
+    CString strApp(szContainerApp != NULL ? szContainerApp : OLESTR(""));
+    CString strObj(szContainerObj != NULL ? szContainerObj : OLESTR(""));
     pThis->OnSetHostNames(strApp, strObj);
   OLE_CATCH(hr)
   return hr;
@@ -1534,13 +1536,13 @@ void COleServerItem::GetObjectDescriptorData(LPPOINT lpOffset, LPSIZE lpSize,
   COleServerDoc* pDoc = GetDocument();
   CLSID clsid;
   pDoc->GetClassIDOf(&clsid);
-  CStringW strType;
+  CStringOle strType;
   LPOLESTR lpszType = NULL;
   if (SUCCEEDED(::OleRegGetUserType(clsid, USERCLASSTYPE_FULL, &lpszType)) && lpszType != NULL) {
     strType = lpszType;
     ::CoTaskMemFree(lpszType);
   }
-  CStringW strSource(pDoc->GetPathName().IsEmpty() ? pDoc->GetTitle() : pDoc->GetPathName());
+  CStringOle strSource(pDoc->GetPathName().IsEmpty() ? pDoc->GetTitle() : pDoc->GetPathName());
   CSize size(0, 0);
   if (lpSize != NULL && (lpSize->cx != 0 || lpSize->cy != 0))
     size = *lpSize;
@@ -1565,8 +1567,8 @@ void COleServerItem::GetObjectDescriptorData(LPPOINT lpOffset, LPSIZE lpSize,
   ::OleRegGetMiscStatus(clsid, DVASPECT_CONTENT, &pod->dwStatus);
   pod->dwFullUserTypeName = sizeof(OBJECTDESCRIPTOR);
   pod->dwSrcOfCopy = sizeof(OBJECTDESCRIPTOR) + cbType;
-  memcpy((BYTE*)pod + pod->dwFullUserTypeName, (LPCWSTR)strType, cbType);
-  memcpy((BYTE*)pod + pod->dwSrcOfCopy, (LPCWSTR)strSource, cbSource);
+  memcpy((BYTE*)pod + pod->dwFullUserTypeName, (LPCOLESTR)strType, cbType);
+  memcpy((BYTE*)pod + pod->dwSrcOfCopy, (LPCOLESTR)strSource, cbSource);
   ::GlobalUnlock(hDesc);
   lpStgMedium->tymed = TYMED_HGLOBAL;
   lpStgMedium->hGlobal = hDesc;
@@ -1711,8 +1713,8 @@ STDMETHODIMP COleServerItem::XOleObject::GetMoniker(DWORD dwAssign, DWORD dwWhic
         break;
       case OLEWHICHMK_OBJREL:
         if (!pThis->GetItemName().IsEmpty()) {
-          CStringW strName(pThis->GetItemName());
-          if (FAILED(::CreateItemMoniker(L"!", strName, ppmk))) *ppmk = NULL;
+          CStringOle strName(pThis->GetItemName());
+          if (FAILED(::CreateItemMoniker(OLESTR("!"), strName, ppmk))) *ppmk = NULL;
         }
         break;
       default:
