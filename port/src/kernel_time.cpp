@@ -77,7 +77,16 @@ void FromTicks(LONGLONG t, SYSTEMTIME* st) {
 long OffsetAt(time_t t) {
   struct tm tm;
   localtime_r(&t, &tm);
+#ifdef macintosh
+  // The classic Mac OS C library has no tm_gmtoff: the UTC fields read
+  // as local time give the moment that is the offset earlier.
+  struct tm g;
+  gmtime_r(&t, &g);
+  g.tm_isdst = tm.tm_isdst;
+  return (long)(t - mktime(&g));
+#else
   return tm.tm_gmtoff;
+#endif
 }
 
 LONGLONG UnixSeconds(LONGLONG ticks) { return (ticks - (LONGLONG)kEpochDelta) / kTicksPerSec; }

@@ -28,6 +28,23 @@ TARGET ?= i586-pc-windows5.1-gnu
 ifneq ($(findstring linux,$(TARGET))$(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
 PORTABLE = 1
 endif
+# The classic Mac OS (make TARGET=m68k-apple-macos or
+# TARGET=powerpc-apple-macos9 MACSDK=/path/to/mac-sdk) also builds over
+# the portable layer, with the C and C++ libraries of clang-retro/mac-sdk.
+# There are no shared libraries, no network and no X11, Wayland or Cocoa
+# backend. See docs/macos-classic.md.
+ifneq ($(filter m68k-apple-macos% powerpc-apple-macos%,$(TARGET)),)
+MACOS_CLASSIC = 1
+MACSDK ?= ../mac-sdk
+MACSDK_LIB = $(MACSDK)/lib
+CLASSIC_TRIPLE = $(if $(findstring m68k,$(TARGET)),m68k-apple-macos,powerpc-apple-macos9)
+CXXFLAGS ?= -Os
+STDLIB = -nostdinc++ -isystem $(MACSDK_LIB)/include/c++/15.2.0/$(CLASSIC_TRIPLE) \
+  -isystem $(MACSDK_LIB)/include/c++/15.2.0 -isystem port/compat/macos \
+  -isystem $(MACSDK_LIB)/include -I$(MACSDK)/include
+CLASSIC_FLAGS = $(if $(findstring m68k,$(TARGET)),-mcmodel=large) -femulated-tls \
+  -fexceptions -frtti -ffunction-sections -fdata-sections -D_GNU_SOURCE
+endif
 SYSROOT ?=
 ifneq ($(CFG),)
 OUT ?= build/$(basename $(notdir $(CFG)))
@@ -70,9 +87,21 @@ PORT_SRCS = $(wildcard port/src/*.cpp)
 PORT_OBJS = $(patsubst port/src/%.cpp,$(OUT)/port/%.o,$(PORT_SRCS))
 # macOS adds the AppKit half of the Cocoa backend, in Objective-C++.
 ifneq ($(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
+ifneq ($(MACOS_CLASSIC),1)
 PORT_OBJS += $(patsubst port/src/%.mm,$(OUT)/port/%.mm.o,$(wildcard port/src/*.mm))
 endif
+endif
+ifeq ($(MACOS_CLASSIC),1)
+# The classic Mac OS has no sockets, no services and no window system
+# that these files use.
+CLASSIC_SKIP = winsock wininet service tls com_remote sockcore \
+  backend_x11 backend_wayland backend_cocoa
+PORT_SRCS := $(filter-out $(patsubst %,port/src/%.cpp,$(CLASSIC_SKIP)),$(PORT_SRCS))
+PORT_OBJS = $(patsubst port/src/%.cpp,$(OUT)/port/%.o,$(PORT_SRCS))
+ALL_CXXFLAGS += -Iport/include $(CLASSIC_FLAGS)
+else
 ALL_CXXFLAGS += -Iport/include -fPIC
+endif
 PORT_LIB = $(OUT)/libwinport.a
 endif
 # 16-bit Windows (make TARGET=i8086-pc-win16): the core classes in the
@@ -142,6 +171,10 @@ endif
 
 ifeq ($(WIN16),1)
 STATIC_LIBS = $(OUT)/libmfc.a
+SHARED_LIBS =
+endif
+ifeq ($(MACOS_CLASSIC),1)
+STATIC_LIBS = $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PORT_LIB)
 SHARED_LIBS =
 endif
 
@@ -243,6 +276,12 @@ ifeq ($(WIN16),1)
 	cp include/win16/*.h $(DEST)/include/mfc/win16/
 	cp port/include/*.h $(DEST)/include/mfc/winport/
 	cp $(OUT)/libmfc.a $(DEST)/lib/
+else ifeq ($(MACOS_CLASSIC),1)
+	mkdir -p $(DEST)/include/libmfc/winport $(DEST)/include/libmfc/compat $(DEST)/lib
+	cp include/*.h include/*.rc include/*.cpp $(DEST)/include/libmfc/
+	cp port/include/*.h $(DEST)/include/libmfc/winport/
+	cp -R port/compat/macos/. $(DEST)/include/libmfc/compat/
+	cp $(STATIC_LIBS) $(DEST)/lib/
 else ifeq ($(PORTABLE),1)
 	mkdir -p $(DEST)/include/libmfc/winport $(DEST)/lib/libmfc-shared $(DEST)/lib/pkgconfig \
 	  $(DEST)/lib/cmake/libmfc $(DEST)/share/libmfc
@@ -267,7 +306,9 @@ else
 endif
 
 check: all
-ifeq ($(WIN16),1)
+ifeq ($(MACOS_CLASSIC),1)
+	BIN=$(BIN) MACSDK=$(MACSDK) TARGET=$(TARGET) OUT=$(OUT) sh tests/run-macos-tests.sh
+else ifeq ($(WIN16),1)
 	BIN=$(BIN) SYSROOT=$(SYSROOT) OUT=$(OUT) sh tests/run-win16-tests.sh
 else
 	BIN=$(BIN) STDLIB="$(STDLIB)" RC="$(TEST_RC)" LDFLAGS="$(LDFLAGS)" CFG=$(CFG) SYSROOT=$(SYSROOT) TARGET=$(TARGET) OUT=$(OUT) sh tests/run-tests.sh
