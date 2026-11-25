@@ -7,6 +7,9 @@
 
 #include <string.h>
 #include <sys/time.h>
+#if defined(macintosh) && !defined(__MACH__)
+#include <sys/timeb.h>
+#endif
 #include <time.h>
 
 using namespace winport;
@@ -375,5 +378,23 @@ struct tm* _gmtime64(const __time64_t* t) {
 
 __time64_t _mktime64(struct tm* tm) { return (__time64_t)mktime(tm); }
 __time64_t _mkgmtime64(struct tm* tm) { return (__time64_t)timegm(tm); }
+
+#if defined(macintosh) && !defined(__MACH__)
+// Gives the current time in *tb: the seconds and milliseconds since 1970
+// (UTC), the time zone in minutes west of UTC, and the daylight saving
+// time flag. The classic Mac OS C library declares ftime but does not
+// have it. Gives 0.
+int ftime(struct timeb* tb) {
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  struct tm tm;
+  localtime_r(&ts.tv_sec, &tm);
+  tb->time = ts.tv_sec;
+  tb->millitm = (unsigned short)(ts.tv_nsec / 1000000);
+  tb->timezone = (short)(-OffsetAt(ts.tv_sec) / 60 + (tm.tm_isdst > 0 ? 60 : 0));
+  tb->dstflag = (short)(tm.tm_isdst > 0);
+  return 0;
+}
+#endif
 
 }  // extern "C"
