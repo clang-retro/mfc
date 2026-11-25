@@ -251,6 +251,14 @@ typedef IConnectionPoint FAR *LPCONNECTIONPOINT;
 // which the build puts after the 16-bit SDK on the include path.
 #include <commctrl.h>
 
+// The library draws the toolbar and the status bar (src/win16bar.cpp).
+// Their classes have names of their own: Wine can also have the 32-bit
+// classes of comctl32.dll, which do not read the 16-bit structures.
+#undef TOOLBARCLASSNAME
+#undef STATUSCLASSNAME
+#define TOOLBARCLASSNAME "AfxToolbar16"
+#define STATUSCLASSNAME "AfxStatusBar16"
+
 // GDI.
 DWORD GetObjectType(HGDIOBJ h);
 HPEN ExtCreatePen(DWORD iPenStyle, DWORD cWidth, const LOGBRUSH FAR *plbrush, DWORD cStyle,

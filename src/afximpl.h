@@ -18,6 +18,10 @@ void AFXAPI _AfxRegisterInPlaceDockSite(CFrameWnd* pFrame, BOOL bAdd);
 int AFXAPI _AfxMergeMenus(HMENU hMenuShared, HMENU hMenuSource, LONG* lpMenuWidths,
                           int nFirstGroup, int nLastGroup = -1, BOOL bStop = FALSE);
 void AFXAPI _AfxUnmergeMenus(HMENU hMenuShared, HMENU hMenuSource);
+#ifdef _AFX_WIN16
+// Registers the toolbar and status bar classes of 16-bit Windows (win16bar.cpp).
+BOOL AFXAPI _AfxW16RegisterBarClasses();
+#endif
 
 // Idle updates for in-place frames, which are not under the main window
 // (thread.cpp calls it when set).

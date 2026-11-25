@@ -891,6 +891,11 @@ BOOL AFXAPI AfxDeferRegisterClass(LONG fToRegister) {
     if ((fToRegister & commctls[i].fReg) && _AfxInitCommonControls(commctls[i].dwICC))
       fRegisteredClasses |= commctls[i].fReg;
   }
+#ifdef _AFX_WIN16
+  // The library draws the toolbar and the status bar itself.
+  if ((fToRegister & AFX_WNDCOMMCTL_BAR_REG) && _AfxW16RegisterBarClasses())
+    fRegisteredClasses |= AFX_WNDCOMMCTL_BAR_REG;
+#endif
 
   AfxLockGlobals(0);
   pModuleState->m_fRegisteredClasses |= fRegisteredClasses;

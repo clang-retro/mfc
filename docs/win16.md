@@ -37,6 +37,8 @@ The window classes:
 - document/view: `CDocument`, `CView`, `CScrollView`, `CFormView`, `CEditView`,
   `CSingleDocTemplate`, `CMultiDocTemplate`, printing and print preview
 - the profile functions of `CWinApp`, with the INI file of the program
+- `CToolBar`, `CStatusBar` and `CDialogBar`, with docking, floating and
+  the idle update of the buttons and panes
 
 ## What is not there
 
@@ -44,8 +46,11 @@ The window classes:
   The OLE functions of `CCmdTarget`, `CWnd`, `CView` and `CDocTemplate`
   are there, but they do nothing (`src/win16ole.cpp`).
 - The common controls. 16-bit Windows does not have `comctl32.dll`.
-  Thus `CToolBar`, `CStatusBar`, `CReBar` and the classes of `afxcmn.h`
-  compile, but their windows are not made.
+  The library draws the toolbar and the status bar itself (see "The
+  toolbar and the status bar"). `CReBar` and the other classes of
+  `afxcmn.h` compile, but their windows are not made.
+- Tooltips. A toolbar with `CBRS_TOOLTIPS` shows no tooltip.
+  `CBRS_FLYBY` works: the status bar shows the prompt of the button.
 - The shell file dialog (`IFileDialog`). `CFileDialog` always shows the
   classic dialog.
 - Threads. `CWinThread::CreateThread` fails with `ERROR_NOT_SUPPORTED`.
@@ -171,6 +176,36 @@ A 16-bit task has one thread.
   `INFINITE` wait fails with `ERROR_POSSIBLE_DEADLOCK`.
   `MsgWaitForMultipleObjects` also ends when a message comes.
 
+### The toolbar and the status bar
+
+`src/win16bar.cpp` registers two window classes, `AfxToolbar16` and
+`AfxStatusBar16`. `afxwin16u.h` sets `TOOLBARCLASSNAME` and
+`STATUSCLASSNAME` to these names. Wine can also have the 32-bit classes
+of `comctl32.dll`, which do not read the 16-bit structures. Thus the
+names are not the names of the common controls.
+
+- The windows do the messages that `CToolBar` and `CStatusBar` send
+  (`TB_ADDBUTTONS`, `TB_SETSTATE`, `TB_GETITEMRECT`, `SB_SETPARTS`,
+  `SB_SETTEXT`, `SB_GETRECT` and others). Other messages go to
+  `DefWindowProc`.
+- A toolbar button has a raised edge. A pressed or checked button has a
+  sunken edge, and a checked button has a dithered face. A disabled
+  button shows its image in the highlight and shadow colors. With
+  `TBSTYLE_FLAT`, only a pressed or checked button has an edge.
+- A click sends `WM_COMMAND` with `BN_CLICKED` to the owner of the
+  toolbar, in the 16-bit packing.
+- The toolbar keeps the text of a button (`SetButtonText`), but it does
+  not draw it.
+- A status bar pane has a sunken edge, a raised edge (`SBPS_POPOUT`) or
+  no edge (`SBPS_NOBORDERS`). An owner-drawn pane sends `WM_DRAWITEM`
+  to the parent.
+- A press on the size grip of the status bar sizes the frame from its
+  lower-right corner.
+- A `UINT` has 16 bits. Thus a button style of `CToolBar` has the
+  `TBSTYLE_` bits in its low byte and the `TBSTATE_` bits in its high
+  byte, as in MFC 2.5. `SBPS_DISABLED` is `0x4000`, and `SBPS_STRETCH` is
+  `0x8000`.
+
 ### Handle maps
 
 A 16-bit handle is a near pointer. The handle maps of the library use
@@ -210,6 +245,7 @@ the handle as a word key (`CMapWordToPtr`).
 | `win16wnd` | `CWinApp`, `CFrameWnd`, a menu command, a button notification, `WM_CTLCOLOR`, a modal `CDialog` with DDX, and the INI profile |
 | `win16doc` | `CSingleDocTemplate`, File New, `OnDraw`, `OnUpdate`, and the command routing to the view and the document |
 | `win16mdi` | `CMultiDocTemplate`, two MDI children, the MDI menus, and `MDIGetActive`, `MDINext` and `MDIActivate` |
+| `win16bar` | `CToolBar` and `CStatusBar`: the button layout, a click, the idle update, the message pane, docking at the left edge, floating, and `ShowControlBar` |
 
 The window tests need an X display. Without one, the script starts
 itself under `xvfb-run`.
