@@ -8,8 +8,16 @@
 
 #include <windows.h>
 
+// Before Windows 98 (WINVER 0x040A), the headers declared the input
+// context as a DWORD. Programs of that time store the result of a BOOL
+// function in one.
+#if defined(WINVER) && WINVER < 0x040A
+typedef DWORD HIMC;
+typedef DWORD HIMCC;
+#else
 DECLARE_HANDLE(HIMC);
 DECLARE_HANDLE(HIMCC);
+#endif
 
 typedef struct tagCOMPOSITIONFORM {
   DWORD dwStyle;

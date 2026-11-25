@@ -164,12 +164,24 @@ typedef wchar_t WCHAR;
 typedef WCHAR OLECHAR;
 #define OLESTR(s) L##s
 
+// On a 32-bit processor, the pointer-sized types are INT, LONG, UINT,
+// ULONG and DWORD, as on Win32. Thus LRESULT is LONG and WPARAM is UINT,
+// and window procedures that old programs declare with LONG and UINT
+// have the type of WNDPROC. SIZE_T stays size_t.
+#if __SIZEOF_POINTER__ == 4
+typedef int INT_PTR;
+typedef int LONG_PTR;
+typedef unsigned int UINT_PTR;
+typedef unsigned int ULONG_PTR;
+typedef unsigned int DWORD_PTR;
+#else
 typedef intptr_t INT_PTR;
 typedef intptr_t LONG_PTR;
-typedef intptr_t SSIZE_T;
 typedef uintptr_t UINT_PTR;
 typedef uintptr_t ULONG_PTR;
 typedef uintptr_t DWORD_PTR;
+#endif
+typedef intptr_t SSIZE_T;
 typedef uintptr_t SIZE_T;
 typedef INT_PTR* PINT_PTR;
 typedef UINT_PTR* PUINT_PTR;
