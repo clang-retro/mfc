@@ -8,7 +8,9 @@
 
 #include <winbase.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 typedef ACCESS_MASK REGSAM;
 typedef LONG LSTATUS;
@@ -73,6 +75,8 @@ LONG WINAPI RegQueryInfoKeyW(HKEY, LPWSTR, LPDWORD, LPDWORD, LPDWORD, LPDWORD, L
 #define RegSetValueEx __WINPORT_AW(RegSetValueEx)
 #define RegQueryInfoKey __WINPORT_AW(RegQueryInfoKey)
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #endif

@@ -118,6 +118,7 @@ typedef struct tagOLEUIPASTEENTRYA {
   DWORD dwScratchSpace;
 } OLEUIPASTEENTRYA, *POLEUIPASTEENTRYA, *LPOLEUIPASTEENTRYA;
 
+#ifdef __cplusplus
 interface IOleUILinkContainerA : public IUnknown {
   STDMETHOD_(DWORD, GetNextLink)(DWORD dwLink) = 0;
   STDMETHOD(SetLinkUpdateOptions)(DWORD dwLink, DWORD dwUpdateOpt) = 0;
@@ -131,6 +132,9 @@ interface IOleUILinkContainerA : public IUnknown {
   STDMETHOD(UpdateLink)(DWORD dwLink, BOOL fErrorMessage, BOOL fReserved) = 0;
   STDMETHOD(CancelLink)(DWORD dwLink) = 0;
 };
+#else
+typedef struct IOleUILinkContainerA IOleUILinkContainerA;
+#endif
 typedef IOleUILinkContainerA* LPOLEUILINKCONTAINERA;
 
 typedef struct tagOLEUIINSERTOBJECTA {
@@ -257,6 +261,7 @@ typedef struct tagOLEUIPASTEENTRYW {
   DWORD dwScratchSpace;
 } OLEUIPASTEENTRYW, *POLEUIPASTEENTRYW, *LPOLEUIPASTEENTRYW;
 
+#ifdef __cplusplus
 interface IOleUILinkContainerW : public IUnknown {
   STDMETHOD_(DWORD, GetNextLink)(DWORD dwLink) = 0;
   STDMETHOD(SetLinkUpdateOptions)(DWORD dwLink, DWORD dwUpdateOpt) = 0;
@@ -270,6 +275,9 @@ interface IOleUILinkContainerW : public IUnknown {
   STDMETHOD(UpdateLink)(DWORD dwLink, BOOL fErrorMessage, BOOL fReserved) = 0;
   STDMETHOD(CancelLink)(DWORD dwLink) = 0;
 };
+#else
+typedef struct IOleUILinkContainerW IOleUILinkContainerW;
+#endif
 typedef IOleUILinkContainerW* LPOLEUILINKCONTAINERW;
 
 typedef struct tagOLEUIINSERTOBJECTW {
@@ -388,7 +396,9 @@ typedef struct tagOLEUIBUSYW {
   HWND* lphWndDialog;
 } OLEUIBUSYW, *POLEUIBUSYW, *LPOLEUIBUSYW;
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 UINT WINAPI OleUIInsertObjectA(LPOLEUIINSERTOBJECTA lp);
 UINT WINAPI OleUIPasteSpecialA(LPOLEUIPASTESPECIALA lp);
 UINT WINAPI OleUIEditLinksA(LPOLEUIEDITLINKSA lp);
@@ -409,7 +419,9 @@ BOOL WINAPI OleUIUpdateLinksW(LPOLEUILINKCONTAINERW lpOleUILinkCntr, HWND hwndPa
                               int cLinks);
 BOOL WINAPI OleUIAddVerbMenuW(LPOLEOBJECT lpOleObj, LPCWSTR lpszShortType, HMENU hMenu, UINT uPos, UINT uIDVerbMin,
                                UINT uIDVerbMax, BOOL bAddConvert, UINT idConvert, HMENU* lphMenu);
-}
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 #ifdef UNICODE
 #define OLEUIPASTEENTRY OLEUIPASTEENTRYW
@@ -490,10 +502,15 @@ BOOL WINAPI OleUIAddVerbMenuW(LPOLEOBJECT lpOleObj, LPCWSTR lpszShortType, HMENU
 #define VPF_DISABLERELATIVE 0x00000002L
 #define VPF_DISABLESCALE 0x00000004L
 
+#ifdef __cplusplus
 interface IOleUILinkInfoA : public IOleUILinkContainerA {
   STDMETHOD(GetLastUpdate)(DWORD dwLink, FILETIME* lpLastUpdate) = 0;
 };
+#else
+typedef struct IOleUILinkInfoA IOleUILinkInfoA;
+#endif
 typedef IOleUILinkInfoA* LPOLEUILINKINFOA;
+#ifdef __cplusplus
 interface IOleUIObjInfoA : public IUnknown {
   STDMETHOD(GetObjectInfo)(DWORD dwObject, DWORD* lpdwObjSize, LPSTR* lplpszLabel, LPSTR* lplpszType,
                            LPSTR* lplpszShortType, LPSTR* lplpszLocation) = 0;
@@ -504,6 +521,9 @@ interface IOleUIObjInfoA : public IUnknown {
   STDMETHOD(SetViewInfo)(DWORD dwObject, HGLOBAL hMetaPict, DWORD dvAspect, int nCurrentScale,
                          BOOL bRelativeToOrig) = 0;
 };
+#else
+typedef struct IOleUIObjInfoA IOleUIObjInfoA;
+#endif
 typedef IOleUIObjInfoA* LPOLEUIOBJINFOA;
 typedef struct tagOLEUICHANGESOURCEA {
   DWORD cbStruct;
@@ -566,10 +586,15 @@ typedef struct tagOLEUIOBJECTPROPSA {
   LPOLEUIVIEWPROPSA lpVP;
   LPOLEUILINKPROPSA lpLP;
 } OLEUIOBJECTPROPSA, *POLEUIOBJECTPROPSA, *LPOLEUIOBJECTPROPSA;
+#ifdef __cplusplus
 interface IOleUILinkInfoW : public IOleUILinkContainerW {
   STDMETHOD(GetLastUpdate)(DWORD dwLink, FILETIME* lpLastUpdate) = 0;
 };
+#else
+typedef struct IOleUILinkInfoW IOleUILinkInfoW;
+#endif
 typedef IOleUILinkInfoW* LPOLEUILINKINFOW;
+#ifdef __cplusplus
 interface IOleUIObjInfoW : public IUnknown {
   STDMETHOD(GetObjectInfo)(DWORD dwObject, DWORD* lpdwObjSize, LPWSTR* lplpszLabel, LPWSTR* lplpszType,
                            LPWSTR* lplpszShortType, LPWSTR* lplpszLocation) = 0;
@@ -580,6 +605,9 @@ interface IOleUIObjInfoW : public IUnknown {
   STDMETHOD(SetViewInfo)(DWORD dwObject, HGLOBAL hMetaPict, DWORD dvAspect, int nCurrentScale,
                          BOOL bRelativeToOrig) = 0;
 };
+#else
+typedef struct IOleUIObjInfoW IOleUIObjInfoW;
+#endif
 typedef IOleUIObjInfoW* LPOLEUIOBJINFOW;
 typedef struct tagOLEUICHANGESOURCEW {
   DWORD cbStruct;
@@ -643,12 +671,16 @@ typedef struct tagOLEUIOBJECTPROPSW {
   LPOLEUILINKPROPSW lpLP;
 } OLEUIOBJECTPROPSW, *POLEUIOBJECTPROPSW, *LPOLEUIOBJECTPROPSW;
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 UINT WINAPI OleUIChangeSourceA(LPOLEUICHANGESOURCEA lp);
 UINT WINAPI OleUIChangeSourceW(LPOLEUICHANGESOURCEW lp);
 UINT WINAPI OleUIObjectPropertiesA(LPOLEUIOBJECTPROPSA lp);
 UINT WINAPI OleUIObjectPropertiesW(LPOLEUIOBJECTPROPSW lp);
-}
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 #ifdef UNICODE
 #define IOleUILinkInfo IOleUILinkInfoW

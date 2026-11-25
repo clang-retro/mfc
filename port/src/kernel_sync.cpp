@@ -1212,6 +1212,29 @@ int WINAPI GetThreadPriority(HANDLE h) {
   return t ? t->priority : THREAD_PRIORITY_NORMAL;
 }
 
+// The current process's priority class, kept as it was last set; the
+// system's scheduling does not change.
+static DWORD g_priorityClass = NORMAL_PRIORITY_CLASS;
+
+// Returns the priority class of the current process (the only one known).
+DWORD WINAPI GetPriorityClass(HANDLE h) {
+  if (h != GetCurrentProcess()) {
+    SetLastError(ERROR_INVALID_HANDLE);
+    return 0;
+  }
+  return g_priorityClass;
+}
+
+// Records the priority class of the current process.
+BOOL WINAPI SetPriorityClass(HANDLE h, DWORD cls) {
+  if (h != GetCurrentProcess()) {
+    SetLastError(ERROR_INVALID_HANDLE);
+    return FALSE;
+  }
+  g_priorityClass = cls;
+  return TRUE;
+}
+
 HANDLE WINAPI GetCurrentThread(void) { return (HANDLE)(LONG_PTR)-2; }
 DWORD WINAPI GetCurrentThreadId(void) { return CurrentThreadId(); }
 HANDLE WINAPI GetCurrentProcess(void) { return (HANDLE)(LONG_PTR)-1; }

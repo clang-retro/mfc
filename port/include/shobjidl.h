@@ -15,19 +15,65 @@
 #include <oleidl.h>
 #include <shtypes.h>
 
+#ifdef __cplusplus
 interface IShellItem;
+#else
+typedef struct IShellItem IShellItem;
+#endif
+#ifdef __cplusplus
 interface IShellItemArray;
+#else
+typedef struct IShellItemArray IShellItemArray;
+#endif
+#ifdef __cplusplus
 interface IEnumShellItems;
+#else
+typedef struct IEnumShellItems IEnumShellItems;
+#endif
+#ifdef __cplusplus
 interface IShellItemFilter;
+#else
+typedef struct IShellItemFilter IShellItemFilter;
+#endif
+#ifdef __cplusplus
 interface IPropertyStore;
+#else
+typedef struct IPropertyStore IPropertyStore;
+#endif
+#ifdef __cplusplus
 interface IPropertyDescriptionList;
+#else
+typedef struct IPropertyDescriptionList IPropertyDescriptionList;
+#endif
+#ifdef __cplusplus
 interface IFileOperationProgressSink;
+#else
+typedef struct IFileOperationProgressSink IFileOperationProgressSink;
+#endif
+#ifdef __cplusplus
 interface IFileDialog;
+#else
+typedef struct IFileDialog IFileDialog;
+#endif
+#ifdef __cplusplus
 interface IFileDialogEvents;
+#else
+typedef struct IFileDialogEvents IFileDialogEvents;
+#endif
+#ifdef __cplusplus
 interface IFileDialogCustomize;
+#else
+typedef struct IFileDialogCustomize IFileDialogCustomize;
+#endif
+#ifdef __cplusplus
 interface IFileDialogControlEvents;
+#else
+typedef struct IFileDialogControlEvents IFileDialogControlEvents;
+#endif
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 extern const IID IID_IShellItem, IID_IShellItemArray, IID_IModalWindow, IID_IFileDialog, IID_IFileOpenDialog,
     IID_IFileSaveDialog, IID_IFileDialogEvents, IID_IFileDialogCustomize, IID_IFileDialogControlEvents;
@@ -131,8 +177,11 @@ typedef enum CDCONTROLSTATEF {
 // A shell item for a path, a file or a folder.
 HRESULT WINAPI SHCreateItemFromParsingName(PCWSTR pszPath, IBindCtx* pbc, REFIID riid, void** ppv);
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
+#ifdef __cplusplus
 interface IShellItem : public IUnknown {
   STDMETHOD(BindToHandler)(IBindCtx * pbc, REFGUID bhid, REFIID riid, void** ppv) = 0;
   STDMETHOD(GetParent)(IShellItem * *ppsi) = 0;
@@ -140,7 +189,11 @@ interface IShellItem : public IUnknown {
   STDMETHOD(GetAttributes)(SFGAOF sfgaoMask, SFGAOF * psfgaoAttribs) = 0;
   STDMETHOD(Compare)(IShellItem * psi, SICHINTF hint, int* piOrder) = 0;
 };
+#else
+typedef struct IShellItem IShellItem;
+#endif
 
+#ifdef __cplusplus
 interface IShellItemArray : public IUnknown {
   STDMETHOD(BindToHandler)(IBindCtx * pbc, REFGUID bhid, REFIID riid, void** ppvOut) = 0;
   STDMETHOD(GetPropertyStore)(GETPROPERTYSTOREFLAGS flags, REFIID riid, void** ppv) = 0;
@@ -150,11 +203,19 @@ interface IShellItemArray : public IUnknown {
   STDMETHOD(GetItemAt)(DWORD dwIndex, IShellItem * *ppsi) = 0;
   STDMETHOD(EnumItems)(IEnumShellItems * *ppenumShellItems) = 0;
 };
+#else
+typedef struct IShellItemArray IShellItemArray;
+#endif
 
+#ifdef __cplusplus
 interface IModalWindow : public IUnknown {
   STDMETHOD(Show)(HWND hwndOwner) = 0;
 };
+#else
+typedef struct IModalWindow IModalWindow;
+#endif
 
+#ifdef __cplusplus
 interface IFileDialog : public IModalWindow {
   STDMETHOD(SetFileTypes)(UINT cFileTypes, const COMDLG_FILTERSPEC* rgFilterSpec) = 0;
   STDMETHOD(SetFileTypeIndex)(UINT iFileType) = 0;
@@ -180,12 +241,20 @@ interface IFileDialog : public IModalWindow {
   STDMETHOD(ClearClientData)() = 0;
   STDMETHOD(SetFilter)(IShellItemFilter * pFilter) = 0;
 };
+#else
+typedef struct IFileDialog IFileDialog;
+#endif
 
+#ifdef __cplusplus
 interface IFileOpenDialog : public IFileDialog {
   STDMETHOD(GetResults)(IShellItemArray * *ppenum) = 0;
   STDMETHOD(GetSelectedItems)(IShellItemArray * *ppsai) = 0;
 };
+#else
+typedef struct IFileOpenDialog IFileOpenDialog;
+#endif
 
+#ifdef __cplusplus
 interface IFileSaveDialog : public IFileDialog {
   STDMETHOD(SetSaveAsItem)(IShellItem * psi) = 0;
   STDMETHOD(SetProperties)(IPropertyStore * pStore) = 0;
@@ -194,7 +263,11 @@ interface IFileSaveDialog : public IFileDialog {
   STDMETHOD(ApplyProperties)(IShellItem * psi, IPropertyStore * pStore, HWND hwnd,
                              IFileOperationProgressSink * pSink) = 0;
 };
+#else
+typedef struct IFileSaveDialog IFileSaveDialog;
+#endif
 
+#ifdef __cplusplus
 interface IFileDialogEvents : public IUnknown {
   STDMETHOD(OnFileOk)(IFileDialog * pfd) = 0;
   STDMETHOD(OnFolderChanging)(IFileDialog * pfd, IShellItem * psiFolder) = 0;
@@ -204,7 +277,11 @@ interface IFileDialogEvents : public IUnknown {
   STDMETHOD(OnTypeChange)(IFileDialog * pfd) = 0;
   STDMETHOD(OnOverwrite)(IFileDialog * pfd, IShellItem * psi, FDE_OVERWRITE_RESPONSE * pResponse) = 0;
 };
+#else
+typedef struct IFileDialogEvents IFileDialogEvents;
+#endif
 
+#ifdef __cplusplus
 interface IFileDialogCustomize : public IUnknown {
   STDMETHOD(EnableOpenDropDown)(DWORD dwIDCtl) = 0;
   STDMETHOD(AddMenu)(DWORD dwIDCtl, LPCWSTR pszLabel) = 0;
@@ -234,13 +311,20 @@ interface IFileDialogCustomize : public IUnknown {
   STDMETHOD(MakeProminent)(DWORD dwIDCtl) = 0;
   STDMETHOD(SetControlItemText)(DWORD dwIDCtl, DWORD dwIDItem, LPCWSTR pszLabel) = 0;
 };
+#else
+typedef struct IFileDialogCustomize IFileDialogCustomize;
+#endif
 
+#ifdef __cplusplus
 interface IFileDialogControlEvents : public IUnknown {
   STDMETHOD(OnItemSelected)(IFileDialogCustomize * pfdc, DWORD dwIDCtl, DWORD dwIDItem) = 0;
   STDMETHOD(OnButtonClicked)(IFileDialogCustomize * pfdc, DWORD dwIDCtl) = 0;
   STDMETHOD(OnCheckButtonToggled)(IFileDialogCustomize * pfdc, DWORD dwIDCtl, BOOL bChecked) = 0;
   STDMETHOD(OnControlActivating)(IFileDialogCustomize * pfdc, DWORD dwIDCtl) = 0;
 };
+#else
+typedef struct IFileDialogControlEvents IFileDialogControlEvents;
+#endif
 
 WINPORT_UUIDOF(IShellItem)
 WINPORT_UUIDOF(IShellItemArray)

@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <mutex>
 #include <set>
 #include <vector>

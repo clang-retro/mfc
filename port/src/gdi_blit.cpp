@@ -257,16 +257,36 @@ void PutPixels(DCObj* dst, int dx, int dy, int dw, int dh, const Source& s, cons
   }
   DrawScope ds(dst);
   if (!ds.ok) return;
+  // The source column of each destination column, worked out once: a
+  // division for each pixel is slow on 32-bit processors.
+  std::vector<int> cols((size_t)dw);
+  for (int x = 0; x < dw; x++) {
+    int tx = (int)((long long)x * s.w / dw);
+    cols[(size_t)x] = mirrorX ? s.w - 1 - tx : tx;
+  }
+  // A plain copy of color pixels at the same size, as SwapBuffers and
+  // SetDIBitsToDevice do for each frame.
+  bool plain = how.kind == kRop && how.rop == SRCCOPY && !mirrorX && !mirrorY && dw == s.w && dh == s.h &&
+               !s.mono && !dstMono;
   for (const RECT& c : ds.clip.Rects()) {
     RECT r = Intersect(c, drect);
     if (RectEmpty(r)) continue;
+    if (plain) {
+      for (int y = r.top; y < r.bottom; y++) {
+        DWORD* row = ds.px.Row(y + ds.origin.y) + ds.origin.x;
+        size_t base = (size_t)(y - dy) * s.w - dx;
+        for (int x = r.left; x < r.right; x++)
+          if (s.valid[base + x]) row[x] = s.pixels[base + x] & 0xFFFFFF;
+      }
+      ds.Dirty(r);
+      continue;
+    }
     for (int y = r.top; y < r.bottom; y++) {
       int ty = (int)((long long)(y - dy) * s.h / dh);
       if (mirrorY) ty = s.h - 1 - ty;
       DWORD* row = ds.px.Row(y + ds.origin.y) + ds.origin.x;
       for (int x = r.left; x < r.right; x++) {
-        int tx = (int)((long long)(x - dx) * s.w / dw);
-        if (mirrorX) tx = s.w - 1 - tx;
+        int tx = cols[(size_t)(x - dx)];
         size_t i = (size_t)ty * s.w + tx;
         if (!s.valid[i]) continue;
         DWORD sp = s.pixels[i];

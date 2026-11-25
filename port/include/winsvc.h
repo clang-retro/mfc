@@ -9,7 +9,9 @@
 
 #include <winbase.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 #define SERVICES_ACTIVE_DATABASEA "ServicesActive"
 #define SERVICES_ACTIVE_DATABASEW L"ServicesActive"
@@ -232,7 +234,9 @@ SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerExA(LPCSTR, LPHANDLER_FUN
 SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerExW(LPCWSTR, LPHANDLER_FUNCTION_EX, LPVOID);
 BOOL WINAPI SetServiceStatus(SERVICE_STATUS_HANDLE, LPSERVICE_STATUS);
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #define SERVICES_ACTIVE_DATABASE __WINPORT_AW(SERVICES_ACTIVE_DATABASE)
 #define SERVICES_FAILED_DATABASE __WINPORT_AW(SERVICES_FAILED_DATABASE)

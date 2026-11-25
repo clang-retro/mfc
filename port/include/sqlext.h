@@ -8,7 +8,9 @@
 
 #include <sql.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 // Extended SQL types
 #define SQL_DATE 9
@@ -306,6 +308,8 @@ SQLRETURN SQL_API SQLNativeSqlW(SQLHDBC hdbc, SQLWCHAR* szSqlStrIn, SQLINTEGER c
 #define SQLNativeSql SQLNativeSqlA
 #endif
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #endif

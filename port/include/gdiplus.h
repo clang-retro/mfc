@@ -68,9 +68,9 @@ typedef Status GpStatus;
 #define PixelFormat64bppPARGB (14 | (64 << 8) | PixelFormatAlpha | PixelFormatPAlpha | PixelFormatExtended)
 #define PixelFormatMax 15
 
-inline UINT GetPixelFormatSize(PixelFormat f) { return (f >> 8) & 0xFF; }
-inline BOOL IsIndexedPixelFormat(PixelFormat f) { return (f & PixelFormatIndexed) != 0; }
-inline BOOL IsAlphaPixelFormat(PixelFormat f) { return (f & PixelFormatAlpha) != 0; }
+__WINPORT_INLINE UINT GetPixelFormatSize(PixelFormat f) { return (f >> 8) & 0xFF; }
+__WINPORT_INLINE BOOL IsIndexedPixelFormat(PixelFormat f) { return (f & PixelFormatIndexed) != 0; }
+__WINPORT_INLINE BOOL IsAlphaPixelFormat(PixelFormat f) { return (f & PixelFormatAlpha) != 0; }
 
 enum PaletteFlags { PaletteFlagsHasAlpha = 1, PaletteFlagsGrayScale = 2, PaletteFlagsHalftone = 4 };
 
@@ -82,6 +82,7 @@ struct ColorPalette {
 
 enum ImageLockMode { ImageLockModeRead = 1, ImageLockModeWrite = 2, ImageLockModeUserInputBuf = 4 };
 
+#ifdef __cplusplus
 class BitmapData {
  public:
   UINT Width;
@@ -91,13 +92,20 @@ class BitmapData {
   VOID* Scan0;
   UINT_PTR Reserved;
 };
+#else
+typedef struct BitmapData BitmapData;
+#endif
 
+#ifdef __cplusplus
 class Rect {
  public:
   Rect() : X(0), Y(0), Width(0), Height(0) {}
   Rect(INT x, INT y, INT w, INT h) : X(x), Y(y), Width(w), Height(h) {}
   INT X, Y, Width, Height;
 };
+#else
+typedef struct Rect Rect;
+#endif
 
 enum ImageCodecFlags {
   ImageCodecFlagsEncoder = 0x00000001,
@@ -111,6 +119,7 @@ enum ImageCodecFlags {
   ImageCodecFlagsUser = 0x00040000
 };
 
+#ifdef __cplusplus
 class ImageCodecInfo {
  public:
   CLSID Clsid;
@@ -127,6 +136,9 @@ class ImageCodecInfo {
   const BYTE* SigPattern;
   const BYTE* SigMask;
 };
+#else
+typedef struct ImageCodecInfo ImageCodecInfo;
+#endif
 
 enum EncoderParameterValueType {
   EncoderParameterValueTypeByte = 1,
@@ -139,6 +151,7 @@ enum EncoderParameterValueType {
   EncoderParameterValueTypeRationalRange = 8
 };
 
+#ifdef __cplusplus
 class EncoderParameter {
  public:
   GUID Guid;
@@ -146,27 +159,34 @@ class EncoderParameter {
   ULONG Type;
   VOID* Value;
 };
+#else
+typedef struct EncoderParameter EncoderParameter;
+#endif
 
+#ifdef __cplusplus
 class EncoderParameters {
  public:
   UINT Count;
   EncoderParameter Parameter[1];
 };
+#else
+typedef struct EncoderParameters EncoderParameters;
+#endif
 
 // The formats, as ImageCodecInfo::FormatID names them.
-inline const GUID ImageFormatUndefined = {0xb96b3ca9, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
-inline const GUID ImageFormatMemoryBMP = {0xb96b3caa, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
-inline const GUID ImageFormatBMP = {0xb96b3cab, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
-inline const GUID ImageFormatEMF = {0xb96b3cac, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
-inline const GUID ImageFormatWMF = {0xb96b3cad, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
-inline const GUID ImageFormatJPEG = {0xb96b3cae, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
-inline const GUID ImageFormatPNG = {0xb96b3caf, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
-inline const GUID ImageFormatGIF = {0xb96b3cb0, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
-inline const GUID ImageFormatTIFF = {0xb96b3cb1, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
-inline const GUID ImageFormatEXIF = {0xb96b3cb2, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
-inline const GUID ImageFormatIcon = {0xb96b3cb5, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+__WINPORT_INLINE const GUID ImageFormatUndefined = {0xb96b3ca9, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+__WINPORT_INLINE const GUID ImageFormatMemoryBMP = {0xb96b3caa, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+__WINPORT_INLINE const GUID ImageFormatBMP = {0xb96b3cab, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+__WINPORT_INLINE const GUID ImageFormatEMF = {0xb96b3cac, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+__WINPORT_INLINE const GUID ImageFormatWMF = {0xb96b3cad, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+__WINPORT_INLINE const GUID ImageFormatJPEG = {0xb96b3cae, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+__WINPORT_INLINE const GUID ImageFormatPNG = {0xb96b3caf, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+__WINPORT_INLINE const GUID ImageFormatGIF = {0xb96b3cb0, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+__WINPORT_INLINE const GUID ImageFormatTIFF = {0xb96b3cb1, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+__WINPORT_INLINE const GUID ImageFormatEXIF = {0xb96b3cb2, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+__WINPORT_INLINE const GUID ImageFormatIcon = {0xb96b3cb5, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
 // The JPEG encoder's one parameter: the quality, a LONG from 0 to 100.
-inline const GUID EncoderQuality = {0x1d5be4b5, 0xfa4a, 0x452d, {0x9c, 0xdd, 0x5d, 0xb3, 0x51, 0x05, 0xe7, 0xeb}};
+__WINPORT_INLINE const GUID EncoderQuality = {0x1d5be4b5, 0xfa4a, 0x452d, {0x9c, 0xdd, 0x5d, 0xb3, 0x51, 0x05, 0xe7, 0xeb}};
 
 enum DebugEventLevel { DebugEventLevelFatal, DebugEventLevelWarning };
 typedef VOID(WINAPI* DebugEventProc)(DebugEventLevel level, CHAR* message);
@@ -191,17 +211,23 @@ struct GdiplusStartupOutput {
   NotificationUnhookProc NotificationUnhook;
 };
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 Status WINAPI GdiplusStartup(ULONG_PTR* token, const GdiplusStartupInput* input, GdiplusStartupOutput* output);
 VOID WINAPI GdiplusShutdown(ULONG_PTR token);
-}
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 // The objects behind the flat API's pointers.
 class GpImage {};
 class GpBitmap : public GpImage {};
 
 namespace DllExports {
+#ifdef __cplusplus
 extern "C" {
+#endif
 GpStatus WINAPI GdipCreateBitmapFromFile(const WCHAR* filename, GpBitmap** bitmap);
 GpStatus WINAPI GdipCreateBitmapFromFileICM(const WCHAR* filename, GpBitmap** bitmap);
 GpStatus WINAPI GdipCreateBitmapFromStream(IStream* stream, GpBitmap** bitmap);
@@ -234,7 +260,9 @@ GpStatus WINAPI GdipGetImageDecodersSize(UINT* numDecoders, UINT* size);
 GpStatus WINAPI GdipGetImageDecoders(UINT numDecoders, UINT size, ImageCodecInfo* decoders);
 GpStatus WINAPI GdipGetImageEncodersSize(UINT* numEncoders, UINT* size);
 GpStatus WINAPI GdipGetImageEncoders(UINT numEncoders, UINT size, ImageCodecInfo* encoders);
-}
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 }  // namespace DllExports
 
 }  // namespace Gdiplus

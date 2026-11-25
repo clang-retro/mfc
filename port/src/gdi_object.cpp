@@ -800,6 +800,9 @@ UINT WINAPI GetSystemPaletteEntries(HDC, UINT start, UINT n, LPPALETTEENTRY out)
 }
 
 UINT WINAPI GetSystemPaletteUse(HDC) { return SYSPAL_STATIC; }
+// The screen has no palette, so the static colors stay; returns the
+// previous use, which is always SYSPAL_STATIC.
+UINT WINAPI SetSystemPaletteUse(HDC, UINT) { return SYSPAL_STATIC; }
 
 // ---------------------------------------------------------------------
 // Bitmaps

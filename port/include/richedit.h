@@ -194,6 +194,7 @@ typedef struct _charformatw {
   WCHAR szFaceName[LF_FACESIZE];
 } CHARFORMATW;
 
+#ifdef __cplusplus
 typedef struct _charformat2a : CHARFORMATA {
   WORD wWeight;
   SHORT sSpacing;
@@ -207,6 +208,31 @@ typedef struct _charformat2a : CHARFORMATA {
   BYTE bRevAuthor;
   BYTE bReserved1;
 } CHARFORMAT2A;
+#else
+typedef struct _charformat2a {
+  UINT cbSize;
+  DWORD dwMask;
+  DWORD dwEffects;
+  LONG yHeight;
+  LONG yOffset;
+  COLORREF crTextColor;
+  BYTE bCharSet;
+  BYTE bPitchAndFamily;
+  char szFaceName[LF_FACESIZE];
+  WORD wWeight;
+  SHORT sSpacing;
+  COLORREF crBackColor;
+  LCID lcid;
+  DWORD dwReserved;
+  SHORT sStyle;
+  WORD wKerning;
+  BYTE bUnderlineType;
+  BYTE bAnimation;
+  BYTE bRevAuthor;
+  BYTE bReserved1;
+} CHARFORMAT2A;
+#endif
+#ifdef __cplusplus
 typedef struct _charformat2w : CHARFORMATW {
   WORD wWeight;
   SHORT sSpacing;
@@ -220,6 +246,30 @@ typedef struct _charformat2w : CHARFORMATW {
   BYTE bRevAuthor;
   BYTE bReserved1;
 } CHARFORMAT2W;
+#else
+typedef struct _charformat2w {
+  UINT cbSize;
+  DWORD dwMask;
+  DWORD dwEffects;
+  LONG yHeight;
+  LONG yOffset;
+  COLORREF crTextColor;
+  BYTE bCharSet;
+  BYTE bPitchAndFamily;
+  WCHAR szFaceName[LF_FACESIZE];
+  WORD wWeight;
+  SHORT sSpacing;
+  COLORREF crBackColor;
+  LCID lcid;
+  DWORD dwReserved;
+  SHORT sStyle;
+  WORD wKerning;
+  BYTE bUnderlineType;
+  BYTE bAnimation;
+  BYTE bRevAuthor;
+  BYTE bReserved1;
+} CHARFORMAT2W;
+#endif
 
 #ifdef UNICODE
 #define CHARFORMAT CHARFORMATW
@@ -375,6 +425,7 @@ typedef struct _paraformat {
   LONG rgxTabs[MAX_TAB_STOPS];
 } PARAFORMAT;
 
+#ifdef __cplusplus
 typedef struct _paraformat2 : PARAFORMAT {
   LONG dySpaceBefore;
   LONG dySpaceAfter;
@@ -391,6 +442,34 @@ typedef struct _paraformat2 : PARAFORMAT {
   WORD wBorderWidth;
   WORD wBorders;
 } PARAFORMAT2;
+#else
+typedef struct _paraformat2 {
+  UINT cbSize;
+  DWORD dwMask;
+  WORD wNumbering;
+  WORD wEffects;
+  LONG dxStartIndent;
+  LONG dxRightIndent;
+  LONG dxOffset;
+  WORD wAlignment;
+  SHORT cTabCount;
+  LONG rgxTabs[MAX_TAB_STOPS];
+  LONG dySpaceBefore;
+  LONG dySpaceAfter;
+  LONG dyLineSpacing;
+  SHORT sStyle;
+  BYTE bLineSpacingRule;
+  BYTE bOutlineLevel;
+  WORD wShadingWeight;
+  WORD wShadingStyle;
+  WORD wNumberingStart;
+  WORD wNumberingStyle;
+  WORD wNumberingTab;
+  WORD wBorderSpace;
+  WORD wBorderWidth;
+  WORD wBorders;
+} PARAFORMAT2;
+#endif
 
 #define PFM_STARTINDENT 0x00000001
 #define PFM_RIGHTINDENT 0x00000002

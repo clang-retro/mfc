@@ -10,7 +10,9 @@
 #include <mmsystem.h>
 #include <mmreg.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 DECLARE_HANDLE(HACMDRIVERID);
 DECLARE_HANDLE(HACMDRIVER);
@@ -228,7 +230,9 @@ MMRESULT WINAPI acmStreamConvert(HACMSTREAM, LPACMSTREAMHEADER, DWORD);
 MMRESULT WINAPI acmStreamPrepareHeader(HACMSTREAM, LPACMSTREAMHEADER, DWORD);
 MMRESULT WINAPI acmStreamUnprepareHeader(HACMSTREAM, LPACMSTREAMHEADER, DWORD);
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #define acmDriverDetails __WINPORT_AW(acmDriverDetails)
 #define acmFormatTagDetails __WINPORT_AW(acmFormatTagDetails)

@@ -19,6 +19,26 @@
 #define _WINPORT 1
 #endif
 
+// The headers serve C programs as well as C++ ones: names have C
+// linkage in both, and the C++-only parts (COM interfaces, templates,
+// overloads) are left out of C.
+#ifndef __WINPORT_EXTERN_C
+#ifdef __cplusplus
+#define __WINPORT_EXTERN_C extern "C"
+#else
+#define __WINPORT_EXTERN_C extern
+#endif
+#endif
+// A function defined in a header: inline in C++, static inline in C
+// (where a plain inline function needs a definition elsewhere).
+#ifndef __WINPORT_INLINE
+#ifdef __cplusplus
+#define __WINPORT_INLINE inline
+#else
+#define __WINPORT_INLINE static inline
+#endif
+#endif
+
 // Calling conventions and decorations mean nothing outside Windows.
 #define WINAPI
 #define WINAPIV
@@ -42,16 +62,16 @@
 #define WINUSERAPI
 #define WINGDIAPI
 #define WINADVAPI
-#define WINOLEAPI_(t) extern "C" t
-#define WINOLEAPI extern "C" HRESULT
-#define WINOLEAUTAPI_(t) extern "C" t
-#define WINOLEAUTAPI extern "C" HRESULT
+#define WINOLEAPI_(t) __WINPORT_EXTERN_C t
+#define WINOLEAPI __WINPORT_EXTERN_C HRESULT
+#define WINOLEAUTAPI_(t) __WINPORT_EXTERN_C t
+#define WINOLEAUTAPI __WINPORT_EXTERN_C HRESULT
 #define WINCOMMCTRLAPI
 #define WINSHELLAPI
-#define SHSTDAPI extern "C" HRESULT
-#define SHSTDAPI_(t) extern "C" t
-#define STDAPI extern "C" HRESULT
-#define STDAPI_(t) extern "C" t
+#define SHSTDAPI __WINPORT_EXTERN_C HRESULT
+#define SHSTDAPI_(t) __WINPORT_EXTERN_C t
+#define STDAPI __WINPORT_EXTERN_C HRESULT
+#define STDAPI_(t) __WINPORT_EXTERN_C t
 #define STDAPICALLTYPE
 #define STDMETHODCALLTYPE
 #define STDMETHODVCALLTYPE
@@ -223,6 +243,7 @@ typedef CHAR* LPCH;
 typedef CHAR* PCH;
 typedef CHAR* PSTR;
 typedef CHAR* NPSTR;
+typedef CHAR* PSZ;
 typedef const CHAR* LPCSTR;
 typedef const CHAR* PCSTR;
 typedef WCHAR* LPWSTR;
@@ -259,13 +280,20 @@ typedef TCHAR* PTCHAR;
 typedef TBYTE* PTBYTE;
 #define TEXT(q) __TEXT(q)
 
-// Handles: distinct pointer types, as with STRICT, which is always on.
+// Handles: distinct pointer types, as with STRICT, which is on unless a
+// C program defines NO_STRICT. Then, as in the first Win32 SDKs, every
+// handle is a HANDLE, so old C code that mixes them compiles.
+#if defined(NO_STRICT) && !defined(__cplusplus)
+#undef STRICT
+#define DECLARE_HANDLE(name) typedef HANDLE name
+#else
 #ifndef STRICT
 #define STRICT 1
 #endif
 #define DECLARE_HANDLE(name) \
   struct name##__ { int unused; }; \
   typedef struct name##__* name
+#endif
 DECLARE_HANDLE(HWND);
 DECLARE_HANDLE(HINSTANCE);
 DECLARE_HANDLE(HKEY);
@@ -364,5 +392,16 @@ typedef struct _FILETIME {
 #define DM_OUT_DEFAULT DM_UPDATE
 
 #define HFILE_ERROR ((HFILE)-1)
+
+// The min and max macros, for C only: in C++ they would replace
+// std::min and std::max of the standard library.
+#if !defined(NOMINMAX) && !defined(__cplusplus)
+#ifndef max
+#define max(a, b) (((a) > (b)) ? (a) : (b))
+#endif
+#ifndef min
+#define min(a, b) (((a) < (b)) ? (a) : (b))
+#endif
+#endif
 
 #endif

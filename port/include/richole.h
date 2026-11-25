@@ -9,12 +9,24 @@
 #include <oleidl.h>
 #include <richedit.h>
 
+#ifdef __cplusplus
 interface IRichEditOle;
+#else
+typedef struct IRichEditOle IRichEditOle;
+#endif
+#ifdef __cplusplus
 interface IRichEditOleCallback;
+#else
+typedef struct IRichEditOleCallback IRichEditOleCallback;
+#endif
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 extern const IID IID_IRichEditOle, IID_IRichEditOleCallback;
-}
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 typedef struct _reobject {
   DWORD cbStruct;
@@ -62,6 +74,7 @@ typedef struct _reobject {
 #define RECO_CUT 0x00000003L
 #define RECO_DRAG 0x00000004L
 
+#ifdef __cplusplus
 interface IRichEditOle : public IUnknown {
   STDMETHOD(GetClientSite)(LPOLECLIENTSITE* lplpolesite) = 0;
   STDMETHOD_(LONG, GetObjectCount)(void) = 0;
@@ -80,8 +93,12 @@ interface IRichEditOle : public IUnknown {
   STDMETHOD(GetClipboardData)(CHARRANGE* lpchrg, DWORD reco, LPDATAOBJECT* lplpdataobj) = 0;
   STDMETHOD(ImportDataObject)(LPDATAOBJECT lpdataobj, CLIPFORMAT cf, HGLOBAL hMetaPict) = 0;
 };
+#else
+typedef struct IRichEditOle IRichEditOle;
+#endif
 typedef IRichEditOle* LPRICHEDITOLE;
 
+#ifdef __cplusplus
 interface IRichEditOleCallback : public IUnknown {
   STDMETHOD(GetNewStorage)(LPSTORAGE* lplpstg) = 0;
   STDMETHOD(GetInPlaceContext)(LPOLEINPLACEFRAME* lplpFrame, LPOLEINPLACEUIWINDOW* lplpDoc,
@@ -96,6 +113,9 @@ interface IRichEditOleCallback : public IUnknown {
   STDMETHOD(GetDragDropEffect)(BOOL fDrag, DWORD grfKeyState, LPDWORD pdwEffect) = 0;
   STDMETHOD(GetContextMenu)(WORD seltype, LPOLEOBJECT lpoleobj, CHARRANGE* lpchrg, HMENU* lphmenu) = 0;
 };
+#else
+typedef struct IRichEditOleCallback IRichEditOleCallback;
+#endif
 typedef IRichEditOleCallback* LPRICHEDITOLECALLBACK;
 
 WINPORT_UUIDOF(IRichEditOle)

@@ -72,6 +72,11 @@ bool ReadAt(int fd, off_t off, void* buf, size_t n) {
 struct FontFile {
   std::string path;
   int index = 0;        // within a collection
+  // For a font in a Mac resource ('sfnt' in a .dfont or a suitcase):
+  // where the TrueType data starts in the file and how long it is.
+  // A length of 0 means the whole file.
+  off_t base = 0;
+  size_t length = 0;
   std::wstring family;  // name ID 1
   std::wstring style;   // name ID 2
   int weight = FW_NORMAL;
@@ -91,7 +96,10 @@ std::wstring NameString(const BYTE* p, int len, bool utf16) {
 }
 
 // Reads the name, OS/2, post and head tables of the font at offset off.
-bool ReadFontInfo(int fd, off_t off, FontFile* ff) {
+// Reads the names and style of the font whose table directory is at off.
+// The table offsets in the directory count from base: 0 for a font file,
+// the start of the resource for a font in a Mac resource.
+bool ReadFontInfo(int fd, off_t off, FontFile* ff, off_t base = 0) {
   BYTE hdr[12];
   if (!ReadAt(fd, off, hdr, 12)) return false;
   UINT32 ver = U32(hdr);
@@ -112,7 +120,7 @@ bool ReadFontInfo(int fd, off_t off, FontFile* ff) {
     if (!dst || tlen > (1u << 20)) continue;
     if (dst == &post && tlen > 32) tlen = 32;
     dst->resize(tlen);
-    if (!ReadAt(fd, (off_t)toff, dst->data(), tlen)) dst->clear();
+    if (!ReadAt(fd, base + (off_t)toff, dst->data(), tlen)) dst->clear();
   }
   if (name.size() < 6) return false;
   // Names: Windows Unicode English first, then any Windows Unicode, then Mac Roman.
@@ -164,13 +172,68 @@ bool ReadFontInfo(int fd, off_t off, FontFile* ff) {
   return true;
 }
 
+// Adds the TrueType fonts ('sfnt' resources) in a Mac resource fork to
+// out. fd is open on the fork: the data fork of a .dfont file, or the
+// resource fork of a font suitcase. path is the name that opens that fork.
+int ReadResourceFonts(int fd, const std::string& path, std::vector<FontFile>* out) {
+  BYTE hdr[16];
+  if (!ReadAt(fd, 0, hdr, 16)) return 0;
+  UINT32 dataOff = U32(hdr), mapOff = U32(hdr + 4), mapLen = U32(hdr + 12);
+  if (mapLen < 30 || mapLen > (1u << 24)) return 0;
+  std::vector<BYTE> map(mapLen);
+  if (!ReadAt(fd, (off_t)mapOff, map.data(), mapLen)) return 0;
+  size_t types = U16(&map[24]);
+  if (types + 2 > mapLen) return 0;
+  int nTypes = (int)U16(&map[types]) + 1;
+  int added = 0;
+  for (int t = 0; t < nTypes && t < 0x10000; t++) {
+    size_t te = types + 2 + (size_t)t * 8;
+    if (te + 8 > mapLen) break;
+    if (U32(&map[te]) != 0x73666E74 /* sfnt */) continue;
+    int count = (int)U16(&map[te + 4]) + 1;
+    size_t refs = types + U16(&map[te + 6]);
+    for (int i = 0; i < count; i++) {
+      size_t r = refs + (size_t)i * 12;
+      if (r + 12 > mapLen) break;
+      UINT32 at = dataOff + (U32(&map[r + 4]) & 0xFFFFFF);
+      BYTE len[4];
+      if (!ReadAt(fd, (off_t)at, len, 4)) continue;
+      FontFile ff;
+      ff.path = path;
+      ff.base = (off_t)at + 4;
+      ff.length = U32(len);
+      if (ReadFontInfo(fd, ff.base, &ff, ff.base)) {
+        out->push_back(ff);
+        added++;
+      }
+    }
+  }
+  return added;
+}
+
 // Adds the fonts in a file to out; a collection holds several.
 int ReadFontFile(const std::string& path, std::vector<FontFile>* out) {
+  const char* dot = strrchr(path.c_str(), '.');
+  const char* slash = strrchr(path.c_str(), '/');
+  bool dfont = dot && (!slash || dot > slash) && !strcasecmp(dot, ".dfont");
+#ifdef __APPLE__
+  // A font suitcase has no extension; its fonts are in the resource fork.
+  if (!dfont && (!dot || (slash && dot < slash))) {
+    std::string fork = path + "/..namedfork/rsrc";
+    int rfd = open(fork.c_str(), O_RDONLY);
+    if (rfd < 0) return 0;
+    int n = ReadResourceFonts(rfd, fork, out);
+    close(rfd);
+    return n;
+  }
+#endif
   int fd = open(path.c_str(), O_RDONLY);
   if (fd < 0) return 0;
   int added = 0;
   BYTE hdr[12];
-  if (ReadAt(fd, 0, hdr, 12)) {
+  if (dfont) {
+    added = ReadResourceFonts(fd, path, out);
+  } else if (ReadAt(fd, 0, hdr, 12)) {
     if (U32(hdr) == 0x74746366 /* ttcf */) {
       int n = (int)U32(hdr + 8);
       if (n > 0 && n < 256) {
@@ -199,10 +262,18 @@ int ReadFontFile(const std::string& path, std::vector<FontFile>* out) {
   return added;
 }
 
+// True for a file that can hold fonts: TrueType and OpenType files, Mac
+// .dfont files, and (on Mac OS X) files without an extension, which can be
+// font suitcases.
 bool FontExtension(const char* name) {
   const char* dot = strrchr(name, '.');
+#ifdef __APPLE__
+  if (!dot) return true;
+#else
   if (!dot) return false;
-  return !strcasecmp(dot, ".ttf") || !strcasecmp(dot, ".otf") || !strcasecmp(dot, ".ttc");
+#endif
+  return !strcasecmp(dot, ".ttf") || !strcasecmp(dot, ".otf") || !strcasecmp(dot, ".ttc") ||
+         !strcasecmp(dot, ".dfont");
 }
 
 void ScanDir(const std::string& dir, int depth, std::set<std::pair<dev_t, ino_t>>* seen,
@@ -421,16 +492,19 @@ const BYTE* Table(const FontSource* s, const char* tag, UINT32* len) {
 FontSource* LoadSource(const FontFile& ff) {
   static std::map<std::pair<std::string, int>, FontSource*>* loaded =
       new std::map<std::pair<std::string, int>, FontSource*>;
-  auto key = std::make_pair(ff.path, ff.index);
+  auto key = std::make_pair(ff.path, ff.index + (int)ff.base);
   auto it = loaded->find(key);
   if (it != loaded->end()) return it->second;
   FontSource* s = NULL;
   FILE* f = fopen(ff.path.c_str(), "rb");
   if (f) {
     std::unique_ptr<FontSource> src(new FontSource);
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
+    long size = (long)ff.length;
+    if (!ff.length) {
+      fseek(f, 0, SEEK_END);
+      size = ftell(f);
+    }
+    fseek(f, (long)ff.base, SEEK_SET);
     if (size > 0 && size < (64L << 20)) {
       src->data.resize((size_t)size);
       if (fread(src->data.data(), 1, (size_t)size, f) == (size_t)size) {
@@ -577,6 +651,70 @@ bool RealFont::HasGlyph(UINT32 ch) {
   if (!Source(ch, &s, &glyph, &sx, &sy)) return BuiltinRows(ch, false) != NULL;
   return glyph != 0;
 }
+
+// Gives the outline of character ch in font units, as closed contours of
+// points; curves are given by their on-curve and control points.
+bool RealFont::Outline(UINT32 ch, std::vector<std::vector<OutlinePoint>>* contours) {
+  contours->clear();
+  FontSource* from = NULL;
+  int glyph = 0;
+  float sx = scaleX, sy = scaleY;
+  if (!Source(ch, &from, &glyph, &sx, &sy)) return false;
+  std::lock_guard<std::mutex> g(lock_);
+  stbtt_vertex* v = NULL;
+  int n = stbtt_GetGlyphShape(&from->info, glyph, &v);
+  // Synthetic italic slants by a fifth of the height, as Render does.
+  float slant = synthItalic ? 0.2f : 0.0f;
+  auto add = [&](float x, float y, bool on) {
+    OutlinePoint p;
+    p.x = x * sx + y * sy * slant;
+    p.y = y * sy;
+    p.onCurve = on;
+    contours->back().push_back(p);
+  };
+  float cx = 0, cy = 0;  // the pen, in font units
+  for (int i = 0; i < n; i++) {
+    const stbtt_vertex& e = v[i];
+    switch (e.type) {
+      case STBTT_vmove:
+        contours->emplace_back();
+        add(e.x, e.y, true);
+        break;
+      case STBTT_vline:
+        if (!contours->empty()) add(e.x, e.y, true);
+        break;
+      case STBTT_vcurve:
+        if (!contours->empty()) {
+          add(e.cx, e.cy, false);
+          add(e.x, e.y, true);
+        }
+        break;
+      case STBTT_vcubic:
+        // CFF outlines: the cubic curve as eight straight segments.
+        if (!contours->empty())
+          for (int k = 1; k <= 8; k++) {
+            float t = k / 8.0f, u = 1 - t;
+            float x = u * u * u * cx + 3 * u * u * t * e.cx + 3 * u * t * t * e.cx1 + t * t * t * e.x;
+            float y = u * u * u * cy + 3 * u * u * t * e.cy + 3 * u * t * t * e.cy1 + t * t * t * e.y;
+            add(x, y, true);
+          }
+        break;
+    }
+    cx = e.x;
+    cy = e.y;
+  }
+  stbtt_FreeShape(&from->info, v);
+  // Drop the closing point where it repeats the first.
+  for (auto& c : *contours)
+    if (c.size() > 1 && c.back().onCurve && c.back().x == c.front().x && c.back().y == c.front().y) c.pop_back();
+  contours->erase(std::remove_if(contours->begin(), contours->end(),
+                                 [](const std::vector<OutlinePoint>& c) { return c.size() < 2; }),
+                  contours->end());
+  return true;
+}
+
+// Gives the size of the em square of the font, in font units.
+int RealFont::EmSquare() { return src ? src->unitsPerEm : 0; }
 
 const GlyphImage& RealFont::Glyph(UINT32 ch) {
   std::lock_guard<std::mutex> g(lock_);

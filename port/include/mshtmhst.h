@@ -57,8 +57,9 @@ typedef struct _DOCHOSTUIINFO {
   OLECHAR* pchHostNS;
 } DOCHOSTUIINFO;
 
-extern "C" const IID IID_IDocHostUIHandler;
+__WINPORT_EXTERN_C const IID IID_IDocHostUIHandler;
 
+#ifdef __cplusplus
 interface IDocHostUIHandler : public IUnknown {
   STDMETHOD(ShowContextMenu)(DWORD dwID, POINT* ppt, IUnknown* pcmdtReserved, IDispatch* pdispReserved) = 0;
   STDMETHOD(GetHostInfo)(DOCHOSTUIINFO* pInfo) = 0;
@@ -77,6 +78,9 @@ interface IDocHostUIHandler : public IUnknown {
   STDMETHOD(TranslateUrl)(DWORD dwTranslate, LPWSTR pchURLIn, LPWSTR* ppchURLOut) = 0;
   STDMETHOD(FilterDataObject)(IDataObject* pDO, IDataObject** ppDORet) = 0;
 };
+#else
+typedef struct IDocHostUIHandler IDocHostUIHandler;
+#endif
 
 WINPORT_UUIDOF(IDocHostUIHandler)
 

@@ -51,9 +51,9 @@ if [ $NATIVE = 1 ]; then
   CXXFLAGS="--target=$TARGET ${SYSROOT:+--sysroot=$SYSROOT} ${STDLIB--stdlib=libc++} -std=c++17"
   CXXFLAGS="$CXXFLAGS -Wall -Wno-unused-function -Wno-overloaded-virtual -Wno-missing-exception-spec"
   CXXFLAGS="$CXXFLAGS -Iport/include -Iinclude -Itests"
-  # What libwinport needs from the system: Cocoa on macOS.
+  # What libwinport needs from the system: Cocoa and OpenGL on macOS.
   case $TARGET in
-    *apple* | *darwin*) SYSLIBS="-framework Cocoa -lpthread" ;;
+    *apple* | *darwin*) SYSLIBS="-framework Cocoa -framework OpenGL -lpthread" ;;
     *) SYSLIBS="-ldl -lpthread" ;;
   esac
   nfail=0

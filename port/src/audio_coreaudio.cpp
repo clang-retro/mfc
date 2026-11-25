@@ -9,6 +9,33 @@
 
 #include "audio_ca.h"
 
+// Audio queues came with Mac OS X 10.5. With an older SDK there is no
+// Core Audio device here, and the layer has only the loopback device.
+#if !__has_include(<AudioToolbox/AudioQueue.h>)
+namespace winport {
+namespace audio {
+namespace ca {
+/// Says that there is no device: this SDK has no audio queues.
+bool Available(bool) { return false; }
+/// Opens nothing.
+Stream* Open(bool, int, int) { return nullptr; }
+/// Writes nothing.
+bool Write(Stream*, const int16_t*, size_t) { return false; }
+/// Reads nothing.
+size_t Read(Stream*, int16_t*, size_t) { return 0; }
+/// Has no frames waiting.
+size_t Delay(Stream*) { return 0; }
+/// Does nothing.
+void Pause(Stream*, bool) {}
+/// Does nothing.
+void Drop(Stream*) {}
+/// Does nothing.
+void Close(Stream*) {}
+}  // namespace ca
+}  // namespace audio
+}  // namespace winport
+#else
+
 #include <AudioToolbox/AudioQueue.h>
 #include <dlfcn.h>
 #include <string.h>
@@ -262,4 +289,5 @@ void Close(Stream* s) {
 }  // namespace audio
 }  // namespace winport
 
+#endif  // __has_include(<AudioToolbox/AudioQueue.h>)
 #endif

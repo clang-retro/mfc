@@ -95,7 +95,7 @@ clang++ -std=c++17 -Ipath/to/mfc/port/include -Ipath/to/mfc/include app.cpp \
   -Lpath/to/build/x86_64-linux-gnu -lmfc -lwinport -ldl -lpthread -o app
 ```
 
-On macOS the system libraries are `-framework Cocoa -lpthread` instead
+On macOS the system libraries are `-framework Cocoa -framework OpenGL -lpthread` instead
 of `-ldl -lpthread`.
 
 `make install` (to `/usr/local`, or `PREFIX=dir`; `DESTDIR` works too)
@@ -407,6 +407,17 @@ are not there yet. See
 `TARGET=powerpc-apple-macos9`) builds the core classes and the portable
 layer for System 7 to Mac OS 9, with the C and C++ libraries of
 clang-retro/mac-sdk. The Toolbox shows the windows. See [docs/macos-classic.md](docs/macos-classic.md).
+
+### Mac OS X 10.4 and 10.5
+
+`make TARGET=powerpc-apple-macosx10.4 SDK=path/to/MacOSX10.4u.sdk
+LIBCXX=path/to/libcxx-macosx static` builds the library and the portable
+layer for PowerPC Macs with Tiger or Leopard. Cocoa shows the windows, and
+OpenGL programs draw through `OpenGL.framework`. See
+[docs/macosx-10.4.md](docs/macosx-10.4.md).
+`tools/build-sdk-samples.py` builds samples of a Win32 SDK, such as
+MULTIPAD and the OpenGL screen savers. See
+[docs/sdk-samples.md](docs/sdk-samples.md).
 
 ### The shared library
 

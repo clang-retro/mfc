@@ -12,7 +12,9 @@
 #include <shtypes.h>
 #include <objidl.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 // An HDROP's memory: this header, then the paths from pFiles bytes in,
 // each ending with a NUL and the list with another; wide (WCHAR) when
@@ -226,16 +228,23 @@ PIDLIST_ABSOLUTE WINAPI ILCreateFromPathW(LPCWSTR pszPath);
 #define BFFM_VALIDATEFAILED BFFM_VALIDATEFAILEDA
 #endif
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
+#ifdef __cplusplus
 interface IEnumIDList : public IUnknown {
   STDMETHOD(Next)(ULONG celt, PITEMID_CHILD* rgelt, ULONG* pceltFetched) = 0;
   STDMETHOD(Skip)(ULONG celt) = 0;
   STDMETHOD(Reset)() = 0;
   STDMETHOD(Clone)(IEnumIDList** ppenum) = 0;
 };
+#else
+typedef struct IEnumIDList IEnumIDList;
+#endif
 typedef IEnumIDList* LPENUMIDLIST;
 
+#ifdef __cplusplus
 interface IShellFolder : public IUnknown {
   STDMETHOD(ParseDisplayName)(HWND hwnd, IBindCtx* pbc, LPWSTR pszDisplayName, ULONG* pchEaten,
                               PIDLIST_RELATIVE* ppidl, ULONG* pdwAttributes) = 0;
@@ -251,6 +260,9 @@ interface IShellFolder : public IUnknown {
   STDMETHOD(SetNameOf)(HWND hwnd, PCUITEMID_CHILD pidl, LPCWSTR pszName, SHGDNF uFlags,
                        PITEMID_CHILD* ppidlOut) = 0;
 };
+#else
+typedef struct IShellFolder IShellFolder;
+#endif
 typedef IShellFolder* LPSHELLFOLDER;
 #define SHCIDS_ALLFIELDS 0x80000000L
 #define SHCIDS_CANONICALONLY 0x10000000L
@@ -265,6 +277,7 @@ typedef IShellFolder* LPSHELLFOLDER;
 #define SLGP_SHORTPATH 0x0001
 #define SLGP_UNCPRIORITY 0x0002
 #define SLGP_RAWPATH 0x0004
+#ifdef __cplusplus
 interface IShellLinkA : public IUnknown {
   STDMETHOD(GetPath)(LPSTR pszFile, int cch, WIN32_FIND_DATAA* pfd, DWORD fFlags) = 0;
   STDMETHOD(GetIDList)(PIDLIST_ABSOLUTE* ppidl) = 0;
@@ -285,6 +298,10 @@ interface IShellLinkA : public IUnknown {
   STDMETHOD(Resolve)(HWND hwnd, DWORD fFlags) = 0;
   STDMETHOD(SetPath)(LPCSTR pszFile) = 0;
 };
+#else
+typedef struct IShellLinkA IShellLinkA;
+#endif
+#ifdef __cplusplus
 interface IShellLinkW : public IUnknown {
   STDMETHOD(GetPath)(LPWSTR pszFile, int cch, WIN32_FIND_DATAW* pfd, DWORD fFlags) = 0;
   STDMETHOD(GetIDList)(PIDLIST_ABSOLUTE* ppidl) = 0;
@@ -305,6 +322,9 @@ interface IShellLinkW : public IUnknown {
   STDMETHOD(Resolve)(HWND hwnd, DWORD fFlags) = 0;
   STDMETHOD(SetPath)(LPCWSTR pszFile) = 0;
 };
+#else
+typedef struct IShellLinkW IShellLinkW;
+#endif
 
 WINPORT_UUIDOF(IEnumIDList)
 WINPORT_UUIDOF(IShellFolder)

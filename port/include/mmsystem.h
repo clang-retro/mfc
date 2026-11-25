@@ -8,7 +8,9 @@
 
 #include <windows.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 typedef UINT MMRESULT;
 typedef UINT MMVERSION;
@@ -406,7 +408,9 @@ MMRESULT WINAPI mmioCreateChunk(HMMIO, LPMMCKINFO, UINT);
 FOURCC WINAPI mmioStringToFOURCCA(LPCSTR, UINT);
 FOURCC WINAPI mmioStringToFOURCCW(LPCWSTR, UINT);
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #define waveOutGetDevCaps __WINPORT_AW(waveOutGetDevCaps)
 #define waveOutGetErrorText __WINPORT_AW(waveOutGetErrorText)

@@ -8,7 +8,9 @@
 
 #include <windows.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 void WINAPI DragAcceptFiles(HWND, BOOL);
 UINT WINAPI DragQueryFileA(HDROP, UINT, LPSTR, UINT);
@@ -85,6 +87,8 @@ void WINAPI SHChangeNotify(LONG, UINT, LPCVOID, LPCVOID);
 #define SHFILEINFO __WINPORT_AW(SHFILEINFO)
 #define SHGetFileInfo __WINPORT_AW(SHGetFileInfo)
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #endif

@@ -205,9 +205,10 @@ typedef struct tagDBCOLUMNINFO {
   DBID columnid;
 } DBCOLUMNINFO;
 
-extern "C" const IID IID_IAccessor, IID_IRowset, IID_IRowsetChange, IID_IColumnsInfo, IID_IRowsetNotify,
+__WINPORT_EXTERN_C const IID IID_IAccessor, IID_IRowset, IID_IRowsetChange, IID_IColumnsInfo, IID_IRowsetNotify,
     IID_IRowPosition, IID_IRowPositionChange;
 
+#ifdef __cplusplus
 interface IAccessor : public IUnknown {
   STDMETHOD(AddRefAccessor)(HACCESSOR hAccessor, DBREFCOUNT* pcRefCount) = 0;
   STDMETHOD(CreateAccessor)(DBACCESSORFLAGS dwAccessorFlags, DBCOUNTITEM cBindings, const DBBINDING rgBindings[],
@@ -216,7 +217,11 @@ interface IAccessor : public IUnknown {
                          DBBINDING** prgBindings) = 0;
   STDMETHOD(ReleaseAccessor)(HACCESSOR hAccessor, DBREFCOUNT* pcRefCount) = 0;
 };
+#else
+typedef struct IAccessor IAccessor;
+#endif
 
+#ifdef __cplusplus
 interface IRowset : public IUnknown {
   STDMETHOD(AddRefRows)(DBCOUNTITEM cRows, const HROW rghRows[], DBREFCOUNT rgRefCounts[],
                         DBROWSTATUS rgRowStatus[]) = 0;
@@ -227,18 +232,30 @@ interface IRowset : public IUnknown {
                          DBREFCOUNT rgRefCounts[], DBROWSTATUS rgRowStatus[]) = 0;
   STDMETHOD(RestartPosition)(HCHAPTER hReserved) = 0;
 };
+#else
+typedef struct IRowset IRowset;
+#endif
 
+#ifdef __cplusplus
 interface IRowsetChange : public IUnknown {
   STDMETHOD(DeleteRows)(HCHAPTER hReserved, DBCOUNTITEM cRows, const HROW rghRows[], DBROWSTATUS rgRowStatus[]) = 0;
   STDMETHOD(SetData)(HROW hRow, HACCESSOR hAccessor, void* pData) = 0;
   STDMETHOD(InsertRow)(HCHAPTER hReserved, HACCESSOR hAccessor, void* pData, HROW* phRow) = 0;
 };
+#else
+typedef struct IRowsetChange IRowsetChange;
+#endif
 
+#ifdef __cplusplus
 interface IColumnsInfo : public IUnknown {
   STDMETHOD(GetColumnInfo)(DBORDINAL* pcColumns, DBCOLUMNINFO** prgInfo, OLECHAR** ppStringsBuffer) = 0;
   STDMETHOD(MapColumnIDs)(DBORDINAL cColumnIDs, const DBID rgColumnIDs[], DBORDINAL rgColumns[]) = 0;
 };
+#else
+typedef struct IColumnsInfo IColumnsInfo;
+#endif
 
+#ifdef __cplusplus
 interface IRowsetNotify : public IUnknown {
   STDMETHOD(OnFieldChange)(IRowset* pRowset, HROW hRow, DBORDINAL cColumns, DBORDINAL rgColumns[], DBREASON eReason,
                            DBEVENTPHASE ePhase, BOOL fCantDeny) = 0;
@@ -246,7 +263,11 @@ interface IRowsetNotify : public IUnknown {
                          DBEVENTPHASE ePhase, BOOL fCantDeny) = 0;
   STDMETHOD(OnRowsetChange)(IRowset* pRowset, DBREASON eReason, DBEVENTPHASE ePhase, BOOL fCantDeny) = 0;
 };
+#else
+typedef struct IRowsetNotify IRowsetNotify;
+#endif
 
+#ifdef __cplusplus
 interface IRowPosition : public IUnknown {
   STDMETHOD(ClearRowPosition)() = 0;
   STDMETHOD(GetRowPosition)(HCHAPTER* phChapter, HROW* phRow, DBPOSITIONFLAGS* pdwPositionFlags) = 0;
@@ -254,10 +275,17 @@ interface IRowPosition : public IUnknown {
   STDMETHOD(Initialize)(IUnknown* pRowset) = 0;
   STDMETHOD(SetRowPosition)(HCHAPTER hChapter, HROW hRow, DBPOSITIONFLAGS dwPositionFlags) = 0;
 };
+#else
+typedef struct IRowPosition IRowPosition;
+#endif
 
+#ifdef __cplusplus
 interface IRowPositionChange : public IUnknown {
   STDMETHOD(OnRowPositionChange)(DBREASON eReason, DBEVENTPHASE ePhase, BOOL fCantDeny) = 0;
 };
+#else
+typedef struct IRowPositionChange IRowPositionChange;
+#endif
 
 WINPORT_UUIDOF(IAccessor)
 WINPORT_UUIDOF(IRowset)

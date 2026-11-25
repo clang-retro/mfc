@@ -141,8 +141,14 @@ bool FindString(HINSTANCE h, UINT id, std::wstring* out) {
   const BYTE* p = (const BYTE*)LockResource(LoadResource(h, r));
   const BYTE* end = p + SizeofResource(h, r);
   if (p == NULL) return false;
+  // The numbers are in the order of the processor (NativeResourceData).
+  auto at = [](const BYTE* q) {
+    WORD v;
+    memcpy(&v, q, 2);
+    return (UINT)v;
+  };
   for (UINT i = 0; i < 16 && p + 2 <= end; i++) {
-    UINT n = p[0] | (p[1] << 8);
+    UINT n = at(p);
     p += 2;
     if (i == id % 16) {
       if (n == 0 || p + 2 * n > end) return false;
@@ -150,9 +156,9 @@ bool FindString(HINSTANCE h, UINT id, std::wstring* out) {
       // UTF-16 to wchar_t, joining surrogate pairs.
       out->clear();
       for (UINT k = 0; k < n; k++) {
-        UINT c = p[2 * k] | (p[2 * k + 1] << 8);
+        UINT c = at(p + 2 * k);
         if (c >= 0xd800 && c < 0xdc00 && k + 1 < n) {
-          UINT d = p[2 * k + 2] | (p[2 * k + 3] << 8);
+          UINT d = at(p + 2 * k + 2);
           if (d >= 0xdc00 && d < 0xe000) {
             c = 0x10000 + ((c - 0xd800) << 10) + (d - 0xdc00);
             k++;
@@ -820,6 +826,62 @@ BOOL WINAPI SystemParametersInfoW(UINT action, UINT uiParam, PVOID pv, UINT winI
       return FALSE;
   }
 }
+// Describes the screen's one display mode: its size, 32 bits a pixel and
+// 60 Hz. Only the current mode (or mode 0) exists.
+BOOL WINAPI EnumDisplaySettingsW(LPCWSTR, DWORD mode, DEVMODEW* dm) {
+  if (!dm || (mode != ENUM_CURRENT_SETTINGS && mode != ENUM_REGISTRY_SETTINGS && mode != 0)) return FALSE;
+  WORD extra = dm->dmDriverExtra;
+  memset(dm, 0, sizeof *dm);
+  dm->dmSize = sizeof *dm;
+  dm->dmDriverExtra = extra;
+  dm->dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
+  dm->dmBitsPerPel = 32;
+  dm->dmPelsWidth = (DWORD)GetSystemMetrics(SM_CXSCREEN);
+  dm->dmPelsHeight = (DWORD)GetSystemMetrics(SM_CYSCREEN);
+  dm->dmDisplayFrequency = 60;
+  return TRUE;
+}
+
+// The ANSI form of EnumDisplaySettingsW.
+BOOL WINAPI EnumDisplaySettingsA(LPCSTR, DWORD mode, DEVMODEA* dm) {
+  DEVMODEW w;
+  w.dmDriverExtra = 0;
+  if (!dm || !EnumDisplaySettingsW(NULL, mode, &w)) return FALSE;
+  WORD extra = dm->dmDriverExtra;
+  memset(dm, 0, sizeof *dm);
+  dm->dmSize = sizeof *dm;
+  dm->dmDriverExtra = extra;
+  dm->dmFields = w.dmFields;
+  dm->dmBitsPerPel = w.dmBitsPerPel;
+  dm->dmPelsWidth = w.dmPelsWidth;
+  dm->dmPelsHeight = w.dmPelsHeight;
+  dm->dmDisplayFrequency = w.dmDisplayFrequency;
+  return TRUE;
+}
+
+// The screen's mode does not change. Going back to the saved mode (no
+// DEVMODE) or asking for the current size succeeds; other modes are
+// refused.
+LONG WINAPI ChangeDisplaySettingsW(DEVMODEW* dm, DWORD) {
+  if (!dm) return DISP_CHANGE_SUCCESSFUL;
+  if ((dm->dmFields & DM_PELSWIDTH) && dm->dmPelsWidth != (DWORD)GetSystemMetrics(SM_CXSCREEN))
+    return DISP_CHANGE_BADMODE;
+  if ((dm->dmFields & DM_PELSHEIGHT) && dm->dmPelsHeight != (DWORD)GetSystemMetrics(SM_CYSCREEN))
+    return DISP_CHANGE_BADMODE;
+  return DISP_CHANGE_SUCCESSFUL;
+}
+
+// The ANSI form of ChangeDisplaySettingsW.
+LONG WINAPI ChangeDisplaySettingsA(DEVMODEA* dm, DWORD flags) {
+  if (!dm) return ChangeDisplaySettingsW(NULL, flags);
+  DEVMODEW w;
+  memset(&w, 0, sizeof w);
+  w.dmFields = dm->dmFields;
+  w.dmPelsWidth = dm->dmPelsWidth;
+  w.dmPelsHeight = dm->dmPelsHeight;
+  return ChangeDisplaySettingsW(&w, flags);
+}
+
 BOOL WINAPI SystemParametersInfoA(UINT action, UINT uiParam, PVOID pv, UINT winIni) {
   if (action == SPI_GETNONCLIENTMETRICS) {
     NONCLIENTMETRICSA* a = (NONCLIENTMETRICSA*)pv;

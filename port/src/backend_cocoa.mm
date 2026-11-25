@@ -31,6 +31,15 @@ typedef unsigned int NSUInteger;
 #if !defined(CGFLOAT_DEFINED) && !defined(GNUSTEP)
 typedef float CGFloat;
 #endif
+// The 10.4.0 SDK (Xcode 2.0) has no byte order flags: Quartz then reads
+// 32-bit pixels big-endian, which is the PowerPC's own order.
+#if !defined(kCGBitmapByteOrder32Host) && !defined(GNUSTEP)
+#if defined(__BIG_ENDIAN__)
+#define kCGBitmapByteOrder32Host 0
+#else
+#define kCGBitmapByteOrder32Host (2 << 12)
+#endif
+#endif
 
 using namespace winport::cocoa;
 
@@ -542,7 +551,13 @@ void Wake() {
     CGContextClipToRect(ctx, CGRectMake(dirty.origin.x, dirty.origin.y, dirty.size.width, dirty.size.height));
     CGContextSetInterpolationQuality(ctx, kCGInterpolationNone);
     // With alpha the picture replaces what was there, rather than going over it.
+#if (defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 1050) || defined(GNUSTEP)
     if (alpha) CGContextSetBlendMode(ctx, kCGBlendModeCopy);
+#else
+    // Before 10.5 there is no copy blend mode: clearing the area first
+    // gives the same result for a premultiplied picture.
+    if (alpha) CGContextClearRect(ctx, CGRectMake(0, h - height, width, height));
+#endif
     CGContextDrawImage(ctx, CGRectMake(0, h - height, width, height), img);
     CGContextRestoreGState(ctx);
     CGImageRelease(img);

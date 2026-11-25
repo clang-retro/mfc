@@ -15,6 +15,7 @@
 #include "com.h"
 
 #include <string.h>
+#include <atomic>
 #include <chrono>
 #include <unordered_map>
 
@@ -742,6 +743,25 @@ void WaitForWork(Queue* q, DWORD timeout) {
   }
 }
 
+// Lets the backend take the input of the system and show what was drawn,
+// as PeekMessage does on Windows. A loop that only peeks (an animation)
+// never waits, so without this its windows would not change on the
+// screen. The backend is asked at most every 10 ms, and only when no
+// other thread waits on it.
+void PollBackend() {
+  static std::atomic<ULONGLONG> last{0};
+  ULONGLONG now = Now();
+  if (now - last.load() < 10) return;
+  last = now;
+  UserGuard g(UserLock());
+  if (g_backendWaiter != 0) return;
+  g_backendWaiter = CurrentQueue()->tid;
+  g.unlock();
+  GetBackend()->Wait(0);
+  g.lock();
+  g_backendWaiter = 0;
+}
+
 BOOL GetCore(LPMSG m, HWND h, UINT min, UINT max) {
   if (!m) {
     SetLastError(ERROR_INVALID_PARAMETER);
@@ -749,6 +769,9 @@ BOOL GetCore(LPMSG m, HWND h, UINT min, UINT max) {
   }
   if (h && h != (HWND)-1 && !GetWindowOrFail(h)) return -1;
   for (;;) {
+    // A loop that always finds a message (paint, timers) never waits:
+    // let the backend take input and show the windows all the same.
+    PollBackend();
     if (PeekCore(m, h, min, max, PM_REMOVE)) return m->message != WM_QUIT;
     WaitForWork(CurrentQueue(), INFINITE);
   }
@@ -989,6 +1012,8 @@ BOOL WINAPI GetMessageA(LPMSG m, HWND h, UINT min, UINT max) { return GetCore(m,
 
 BOOL WINAPI PeekMessageW(LPMSG m, HWND h, UINT min, UINT max, UINT flags) {
   if (!m) return FALSE;
+  if (PeekCore(m, h, min, max, flags)) return TRUE;
+  PollBackend();
   return PeekCore(m, h, min, max, flags);
 }
 BOOL WINAPI PeekMessageA(LPMSG m, HWND h, UINT min, UINT max, UINT flags) {

@@ -13,14 +13,18 @@
 #define INTERFACE_USES_DISPEX 0x00000004
 #define INTERFACE_USES_SECURITY_MANAGER 0x00000008
 
-extern "C" const IID IID_IObjectSafety;
+__WINPORT_EXTERN_C const IID IID_IObjectSafety;
 
 // Like mingw-w64's, no __uuidof here: atlcom.h names it.
+#ifdef __cplusplus
 interface IObjectSafety : public IUnknown {
   STDMETHOD(GetInterfaceSafetyOptions)(REFIID riid, DWORD* pdwSupportedOptions,
                                        DWORD* pdwEnabledOptions) = 0;
   STDMETHOD(SetInterfaceSafetyOptions)(REFIID riid, DWORD dwOptionSetMask, DWORD dwEnabledOptions) = 0;
 };
+#else
+typedef struct IObjectSafety IObjectSafety;
+#endif
 typedef IObjectSafety* LPOBJECTSAFETY;
 
 #endif
