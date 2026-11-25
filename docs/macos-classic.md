@@ -12,7 +12,8 @@ C++ libraries of [clang-retro/mac-sdk](https://github.com/clang-retro/mac-sdk).
 | Memory diagnostics | Passes `tests/memtest.cpp` |
 | Threads (`CWinThread`, the synchronization objects) | Builds, over mac-sdk's cooperative threads |
 | Window classes | Build. The Toolbox backend shows the top-level windows (see [Windows](#windows)). |
-| Sockets (`CAsyncSocket`, `CSocket`) and WinInet (`CInternetSession`) | Build, over the sockets of mac-sdk's C library (MacTCP). `WSAAsyncSelect` events arrive in the simulators. `tests/socktest.cpp` and `tests/inettest.cpp` do not pass yet. HTTPS is not available (no OpenSSL). |
+| Sockets (`CAsyncSocket`, `CSocket`) and WinInet (`CInternetSession`) | Build, over the sockets of mac-sdk's C library (MacTCP). `tests/socktest.cpp` passes on a 68020. `tests/inettest.cpp` passes its HTTP and FTP checks, but it does not finish in the simulator's step limit. HTTPS is not available (no OpenSSL). |
+| OpenGL (`wgl`, `GL/gl.h`, `GL/glu.h`) | PowerPC only, over Apple OpenGL and AGL. Passes `tests/gltest.cpp` with the simulator's fake OpenGL. See [OpenGL](#opengl). |
 | Screen savers (`scrnsave.h`) | Pass `tests/sstest.cpp`. See [screensavers.md](screensavers.md). |
 | COM between programs | Not available. COM in one program works. |
 
@@ -109,8 +110,8 @@ programs have about 2 MB of code.
 
 `make check TARGET=m68k-apple-macos MACSDK=...` (or the PowerPC target)
 runs `tests/run-macos-tests.sh`. The script builds `tests/core.cpp`,
-`tests/memtest.cpp` and `tests/sstest.cpp` (set `MACOS_TESTS` for
-others, for example `wintest`) into applications and runs
+`tests/memtest.cpp` and `tests/sstest.cpp`, and `tests/gltest.cpp` on
+PowerPC (set `MACOS_TESTS` for others, for example `wintest`) into applications and runs
 them in mac-sdk's simulators: `tools/sim68k.py` as a 68000 and a 68020,
 or `tools/simppc.py`. The simulators need the Python module `unicorn`.
 Without it, the script only builds the tests.
@@ -119,6 +120,27 @@ The simulators have a 640 by 480 screen. They make the windows, check
 each `CopyBits` call, and give null events. A 68000 has no Color
 QuickDraw, so `wintest` tests the black and white path there and the
 color path on a 68020 and on PowerPC.
+
+## OpenGL
+
+On PowerPC, the `wgl` functions use Apple OpenGL through AGL
+(`port/src/opengl_agl.cpp`), in the same way that they use CGL on
+Mac OS X. Each rendering context draws off screen, into a buffer the
+size of the window. `SwapBuffers`, and `glFlush` or `glFinish` for a
+single-buffered format, copy the buffer into the window with GDI.
+
+- The headers and the imports are those of mac-sdk (`GL/gl.h`,
+  `GL/glu.h`, `AGL/agl.h`). OpenGL 1.2 is available, with the
+  extensions that Apple OpenGL exports.
+- `wglGetProcAddress` finds a function of `OpenGLLibrary` by its name
+  with the Code Fragment Manager (`FindSymbol`).
+- Apple OpenGL is a weak import. On a Mac without it, the program
+  starts and `wglCreateContext` fails with `ERROR_NOT_SUPPORTED`.
+- There is no OpenGL on 68k. The `wgl` functions fail there, and a
+  program that calls `gl` functions does not link.
+- The test runs in the simulator over a fake OpenGL that clears the
+  buffer but does not draw. On a real Mac, the program draws with
+  Apple's software renderer or the graphics card.
 
 ## Limits
 
