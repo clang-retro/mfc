@@ -11,6 +11,7 @@
 #   win16wnd  CWinApp, CFrameWnd, messages, controls, CDialog and DDX
 #   win16doc  document/view with CSingleDocTemplate
 #   win16mdi  document/view with CMultiDocTemplate (win16doc.cpp)
+#   win16bar  CToolBar, CStatusBar, docking and floating
 set -u
 : "${BIN:?set BIN}" "${SYSROOT:?set SYSROOT}"
 OUT=${OUT:-build/i8086-pc-win16}
@@ -62,12 +63,15 @@ test1() {
   tests/win16wnd.rc || exit 1
 "$BIN/llvm-rc" -win16 -I "$SYSROOT/include" -I include -I tests -FO "$T/win16doc.res" \
   tests/win16doc.rc || exit 1
+"$BIN/llvm-rc" -win16 -I "$SYSROOT/include" -I include -I tests -FO "$T/win16bar.res" \
+  tests/win16bar.rc || exit 1
 
 test1 core tests/core.cpp
 test1 memtest tests/memtest.cpp
 test1 win16wnd tests/win16wnd.cpp "$T/win16wnd.res"
 test1 win16doc tests/win16doc.cpp "$T/win16doc.res"
 test1 win16mdi tests/win16doc.cpp "$T/win16doc.res" -DTEST_MDI
+test1 win16bar tests/win16bar.cpp "$T/win16bar.res"
 
 echo "$npass passed, $nfail failed"
 [ $nfail = 0 ]

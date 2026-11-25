@@ -1193,12 +1193,12 @@ public:
   }
   BOOL SetItemID(int iLink, LPCWSTR szID);
   BOOL SetItemUrl(int iLink, LPCWSTR szUrl);
-  BOOL SetItemState(int iLink, UINT state, UINT stateMask = 0xFFFFFFFF);
+  BOOL SetItemState(int iLink, UINT state, UINT stateMask = (UINT)-1);
   BOOL GetItemID(int iLink, CString& strID) const;
   BOOL GetItemID(int iLink, LPWSTR szID, UINT cchID) const;
   BOOL GetItemUrl(int iLink, CString& strUrl) const;
   BOOL GetItemUrl(int iLink, LPWSTR szUrl, UINT cchUrl) const;
-  BOOL GetItemState(int iLink, UINT* pnState, UINT stateMask = 0xFFFFFFFF) const;
+  BOOL GetItemState(int iLink, UINT* pnState, UINT stateMask = (UINT)-1) const;
   BOOL LinkHitTest(PLHITTESTINFO phti) const {
     return (BOOL)::SendMessage(m_hWnd, LM_HITTEST, 0, (LPARAM)phti);
   }

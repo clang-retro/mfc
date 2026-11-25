@@ -391,8 +391,9 @@ The ANSI code page there is UTF-8, `WCHAR` is the system's 32-bit
 
 `make TARGET=i8086-pc-win16` builds the core classes and the window
 classes (`CWinApp`, the frames, MDI, dialogs, the controls, the GDI
-classes and document/view) for 16-bit Windows, in the large model. OLE
-and the common controls are not there yet. See
+classes, document/view, and a drawn toolbar and status bar) for 16-bit
+Windows, in the large model. OLE and the other common controls are not
+there yet. See
 [docs/win16.md](docs/win16.md).
 
 ### The shared library
@@ -1338,7 +1339,7 @@ ATLVERIFY, ATLENSURE and ATLTRY, the trace categories (CTraceCategory,
 
 ## Plans
 
-OLE 2 and drawn control bars for Win16 (the core and window classes
+OLE 2 for Win16 (the core and window classes and the control bars
 are there, see [docs/win16.md](docs/win16.md)), and finishing the
 portable layer (see Linux and
 macOS above), with controls drawn in the classic style, so that MFC

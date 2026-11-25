@@ -1,0 +1,13 @@
+// win16bar.rc - resources for win16bar, the toolbar and status bar test
+// for 16-bit Windows (llvm-rc -win16).
+#include <windows.h>
+#include "win16bar.h"
+
+STRINGTABLE
+BEGIN
+  ID_BAR_ONE "The first button"
+  ID_BAR_TWO "The second button"
+  ID_BAR_THREE "The third button"
+  ID_BAR_CHECK "The check button"
+  ID_INDICATOR_TEST "TEST"
+END

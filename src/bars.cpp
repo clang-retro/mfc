@@ -676,17 +676,17 @@ void CToolBar::GetItemRect(int nIndex, LPRECT lpRect) const {
 UINT CToolBar::GetButtonStyle(int nIndex) const {
   TBBUTTON button;
   _GetButton(nIndex, &button);
-  return MAKELONG(button.fsStyle, button.fsState) ^ TBBS_DISABLED;
+  return _AFX_TBBS(button.fsStyle, button.fsState) ^ TBBS_DISABLED;
 }
 
 void CToolBar::SetButtonStyle(int nIndex, UINT nStyle) {
   TBBUTTON button;
   _GetButton(nIndex, &button);
-  UINT nOld = MAKELONG(button.fsStyle, button.fsState) ^ TBBS_DISABLED;
+  UINT nOld = _AFX_TBBS(button.fsStyle, button.fsState) ^ TBBS_DISABLED;
   if (nOld == nStyle) return;
   nStyle ^= TBBS_DISABLED;
-  button.fsStyle = (BYTE)LOWORD(nStyle);
-  button.fsState = (BYTE)HIWORD(nStyle);
+  button.fsStyle = (BYTE)_AFX_TBBS_STYLE(nStyle);
+  button.fsState = (BYTE)_AFX_TBBS_STATE(nStyle);
   _SetButton(nIndex, &button);
   m_bDelayedButtonLayout = TRUE;
 }
@@ -695,7 +695,7 @@ void CToolBar::GetButtonInfo(int nIndex, UINT& nID, UINT& nStyle, int& iImage) c
   TBBUTTON button;
   _GetButton(nIndex, &button);
   nID = (UINT)button.idCommand;
-  nStyle = MAKELONG(button.fsStyle, button.fsState) ^ TBBS_DISABLED;
+  nStyle = _AFX_TBBS(button.fsStyle, button.fsState) ^ TBBS_DISABLED;
   iImage = button.iBitmap;
 }
 
@@ -704,8 +704,8 @@ void CToolBar::SetButtonInfo(int nIndex, UINT nID, UINT nStyle, int iImage) {
   _GetButton(nIndex, &button);
   nStyle ^= TBBS_DISABLED;
   button.idCommand = (int)nID;
-  button.fsStyle = (BYTE)LOWORD(nStyle);
-  button.fsState = (BYTE)HIWORD(nStyle);
+  button.fsStyle = (BYTE)_AFX_TBBS_STYLE(nStyle);
+  button.fsState = (BYTE)_AFX_TBBS_STATE(nStyle);
   button.iBitmap = iImage;
   _SetButton(nIndex, &button);
   m_bDelayedButtonLayout = TRUE;
