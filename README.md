@@ -133,6 +133,10 @@ python3 path/to/mfc/port/tools/res2cpp.py app.rc -o app-res.cpp
 
 MFC's include directory is searched after any given with `-I`.
 
+Screen savers link `libscrnsave.a` (`libscrnsavw.a` for Unicode), which
+has the `WinMain` of the SDK's `scrnsave.h`. See
+[docs/screensavers.md](docs/screensavers.md).
+
 It is a work in progress. So far the non-window classes, automation, the
 registry (kept in `~/.config/libmfc/registry.reg`), resources, sockets
 (with `WSAAsyncSelect`), ODBC through the system's driver manager

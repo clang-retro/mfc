@@ -271,6 +271,10 @@ void Wait(long ms, volatile bool* woken) {
   unsigned long end = TickCount() + (ms < 0 ? 0 : (unsigned long)(ms * 60 + 999) / 1000);
   for (;;) {
     EventRecord ev;
+    // Let the program's other threads run first: a stream of events
+    // (each one returns at once) must not stop them.
+    sched_yield();
+    if (*woken) return;
     // Sleep a tick at most, so that the program's other threads run.
     if (WaitNextEvent(everyEvent, &ev, 1, NULL)) {
       Handle(ev);

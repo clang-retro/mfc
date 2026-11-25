@@ -1292,3 +1292,36 @@ HICON WINAPI ExtractAssociatedIconA(HINSTANCE inst, LPSTR file, LPWORD index) {
 }
 
 HICON WINAPI DuplicateIcon(HINSTANCE, HICON icon) { return CopyIcon(icon); }
+
+// The about box of the shell, in a message box: the title is "About"
+// and the program's name (or the text before a "#" in app), the first
+// line is the name (or the text after the "#"), then the system's
+// version and the other text. The icon is not shown.
+int WINAPI ShellAboutW(HWND owner, LPCWSTR app, LPCWSTR other, HICON) {
+  std::wstring name = app ? app : L"";
+  std::wstring title, first;
+  size_t hash = name.find(L'#');
+  if (hash != std::wstring::npos) {
+    title = name.substr(0, hash);
+    first = name.substr(hash + 1);
+  } else {
+    title = L"About " + name;
+    first = name;
+  }
+  OSVERSIONINFOW v = {};
+  v.dwOSVersionInfoSize = sizeof v;
+  GetVersionExW(&v);
+  wchar_t version[64];
+  swprintf(version, 64, L"Version %lu.%lu (Build %lu)", (unsigned long)v.dwMajorVersion,
+           (unsigned long)v.dwMinorVersion, (unsigned long)v.dwBuildNumber);
+  std::wstring text = first + L"\n" + version;
+  if (other && *other) text += std::wstring(L"\n\n") + other;
+  MessageBoxW(owner, text.c_str(), title.c_str(), MB_OK | MB_ICONINFORMATION);
+  return TRUE;
+}
+
+// The ANSI form of ShellAboutW.
+int WINAPI ShellAboutA(HWND owner, LPCSTR app, LPCSTR other, HICON icon) {
+  return ShellAboutW(owner, app ? winport::Widen(app).c_str() : NULL,
+                     other ? winport::Widen(other).c_str() : NULL, icon);
+}

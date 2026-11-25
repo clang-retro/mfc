@@ -35,7 +35,7 @@ esac
 # WTL's headers, for wtltest (tools/fetch-wtl.sh puts them here).
 WTL_INCLUDE=${WTL_INCLUDE:-build/wtl/include}
 if [ $NATIVE = 1 ]; then
-  TESTS=${NATIVE_TESTS:-"core memtest wintest disptest isapitest dlgtest sditest mditest cmntest splittest docktest dbtest odbctest rvtest socktest occtest dlltest inettest oletest iptest docobtest linktest bindtest richtest richsrvtest autotest srvtest atlwintest atltest conntest ctltest wltest dragtest daotest dvtest htmltest atlctltest atlutiltest cdlgtest vistatest iotest audiotest wtltest"}
+  TESTS=${NATIVE_TESTS:-"core memtest wintest disptest isapitest dlgtest sditest mditest cmntest splittest docktest dbtest odbctest rvtest socktest occtest dlltest inettest oletest iptest docobtest linktest bindtest richtest richsrvtest autotest srvtest atlwintest atltest conntest ctltest wltest dragtest daotest dvtest htmltest atlctltest atlutiltest cdlgtest vistatest iotest audiotest wtltest sstest"}
   T=$OUT/tests
   mkdir -p "$T/a" "$T/u"
   python3 tests/gen-toolbar-bmp.py "$T/toolbar.bmp" 6 || exit 1
@@ -61,20 +61,22 @@ if [ $NATIVE = 1 ]; then
   # Runs a test for at most two minutes. macOS has no timeout(1), so a
   # watchdog stops it there, first writing the threads' stacks (sample)
   # to the log, so that a hang shows where it is.
-  run_limited() {  # log exe
+  run_limited() {  # log exe [args...]
+    log=$1
+    shift
     if [ -z "${MFC_TEST_WATCHDOG:-}" ] && command -v timeout >/dev/null 2>&1; then
-      timeout 120 "$2" > "$1" 2>&1
+      timeout 120 "$@" > "$log" 2>&1
       return
     fi
-    "$2" > "$1" 2>&1 &
+    "$@" > "$log" 2>&1 &
     pid=$!
     (
       n=0
       while [ $n -lt 120 ] && kill -0 $pid 2>/dev/null; do sleep 1; n=$((n + 1)); done
       if kill -0 $pid 2>/dev/null; then
-        echo "timed out; the threads were:" >> "$1"
+        echo "timed out; the threads were:" >> "$log"
         command -v sample >/dev/null 2>&1 && sample $pid 1 2>/dev/null |
-          sed -n '/^Call graph:/,/^Total number in stack/p' | grep -v '^ *$' | head -80 >> "$1"
+          sed -n '/^Call graph:/,/^Total number in stack/p' | grep -v '^ *$' | head -80 >> "$log"
         kill -9 $pid 2>/dev/null
       fi
     ) &
@@ -172,6 +174,12 @@ if [ $NATIVE = 1 ]; then
         2>"$T/$label-dll-$v-build.log" || {
         echo "FAIL   $label-$v (DLL build)"; cat "$T/$label-dll-$v-build.log"; nfail=$((nfail + 1)); return; }
     fi
+    # A screen saver gets WinMain from the screen saver library.
+    args=
+    if [ $name = sstest ]; then
+      args=/s
+      if [ $v = u ]; then libs="-lscrnsavw $libs"; else libs="-lscrnsave $libs"; fi
+    fi
     # shellcheck disable=SC2086
     "$CXX" $CXXFLAGS $flags $extra $exeflags $srcs $LDFLAGS $libs $SYSLIBS $rpath -o "$exe" \
       2>"$T/$label-$v-build.log" || {
@@ -181,7 +189,8 @@ if [ $NATIVE = 1 ]; then
     case $name in rvtest|dvtest) box=window ;; esac
     export WINPORT_MESSAGEBOX=$box MFC_TEST_OUT="$(cd "$outdir" && pwd)" WINPORT_BACKEND=${WINPORT_BACKEND:-headless}
     export WINPORT_REGISTRY="$outdir/registry.reg"
-    if run_limited "$outdir/$name.log" "$exe"; then
+    # A screen saver runs with /s, as Windows runs it.
+    if run_limited "$outdir/$name.log" "$exe" $args; then
       echo "PASS   $label-$v"; npass=$((npass + 1))
     else
       echo "FAIL   $label-$v"; sed 's/^/       /' "$outdir/$name.log"; nfail=$((nfail + 1))

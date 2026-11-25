@@ -398,6 +398,13 @@ const Api* Load() {
 
 // OpenSSL writes to the socket itself: a peer that has gone would raise
 // SIGPIPE, so it is held back while it writes, and taken back if it came.
+#if defined(macintosh)
+// The classic Mac OS sends no SIGPIPE: a write to a closed socket fails
+// with EPIPE only.
+struct NoSigpipe {
+  NoSigpipe() {}
+};
+#else
 struct NoSigpipe {
   sigset_t old, pipe;
   NoSigpipe() {
@@ -415,6 +422,7 @@ struct NoSigpipe {
     pthread_sigmask(SIG_SETMASK, &old, NULL);
   }
 };
+#endif
 
 typedef SSL* Session;
 

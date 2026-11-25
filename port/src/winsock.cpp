@@ -181,7 +181,10 @@ struct AsyncSelect {
     return getpeername(fd, (sockaddr*)&a, &n) == 0;
   }
 
+  int* postCount = nullptr;  // counts the posts of one round of Run
+
   void Post(int fd, AsyncSocket& a, LONG event, int error) {
+    if (postCount) ++*postCount;
     a.enabled &= ~event;
     PostMessageW(a.hwnd, a.msg, (WPARAM)fd, WSAMAKESELECTREPLY(event, error));
   }
@@ -201,17 +204,21 @@ struct AsyncSelect {
             if (!Connected(fd)) continue;
             a.connected = true;
           }
-          if (a.enabled & (FD_READ | FD_ACCEPT | FD_CLOSE | FD_OOB)) want |= POLLIN | POLLPRI;
+          // A listening socket reads only connections (FD_ACCEPT).
+          LONG reads = IsListening(fd) ? FD_ACCEPT : (FD_READ | FD_CLOSE | FD_OOB);
+          if (a.enabled & reads) want |= POLLIN | POLLPRI;
           if (a.enabled & (FD_WRITE | FD_CONNECT)) want |= POLLOUT;
           if (want) fds.push_back({fd, want, 0});
         }
       }
       if (poll(fds.data(), (nfds_t)fds.size(), 1000) <= 0) continue;
+      int posted = 0;
       if (fds[0].revents) {
         char buf[64];
         while (read(wake[0], buf, sizeof buf) > 0) {}
       }
-      std::lock_guard<std::mutex> g(lock);
+      std::unique_lock<std::mutex> g(lock);
+      postCount = &posted;
       for (size_t i = 1; i < fds.size(); i++) {
         if (!fds[i].revents) continue;
         auto it = sockets.find(fds[i].fd);
@@ -253,6 +260,13 @@ struct AsyncSelect {
         }
         if ((re & POLLOUT) && (a.enabled & FD_WRITE)) Post(fd, a, FD_WRITE, 0);
       }
+      postCount = nullptr;
+      g.unlock();
+      // A socket can be ready with its event posted already (data that
+      // the program has not read yet): wait a little before polling it
+      // again, so that this thread does not spin. With cooperative
+      // threads (the classic Mac OS), the wait also lets the program run.
+      if (!posted && !fds[0].revents) usleep(10000);
     }
   }
 };

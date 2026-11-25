@@ -12,7 +12,8 @@ C++ libraries of [clang-retro/mac-sdk](https://github.com/clang-retro/mac-sdk).
 | Memory diagnostics | Passes `tests/memtest.cpp` |
 | Threads (`CWinThread`, the synchronization objects) | Builds, over mac-sdk's cooperative threads |
 | Window classes | Build. The Toolbox backend shows the top-level windows (see [Windows](#windows)). |
-| Sockets (`CAsyncSocket`, `CSocket`) and WinInet (`CInternetSession`) | Not available |
+| Sockets (`CAsyncSocket`, `CSocket`) and WinInet (`CInternetSession`) | Build, over the sockets of mac-sdk's C library (MacTCP). `WSAAsyncSelect` events arrive in the simulators. `tests/socktest.cpp` and `tests/inettest.cpp` do not pass yet. HTTPS is not available (no OpenSSL). |
+| Screen savers (`scrnsave.h`) | Pass `tests/sstest.cpp`. See [screensavers.md](screensavers.md). |
 | COM between programs | Not available. COM in one program works. |
 
 ## Windows
@@ -68,7 +69,9 @@ make TARGET=powerpc-apple-macos9 BIN=path/to/llvm/bin MACSDK=path/to/mac-sdk sta
 
 `MACSDK` is `../mac-sdk` if you do not give it. The output goes to
 `build/<triple>`: `libmfc.a` (ANSI), `libmfcu.a` (Unicode) and
-`libwinport.a` (the portable layer). There are no shared libraries.
+`libwinport.a` (the portable layer), and `libscrnsave.a` and
+`libscrnsavw.a` (the screen saver library). There are no shared
+libraries.
 
 The Makefile does these steps for the classic Mac OS:
 
@@ -77,8 +80,8 @@ The Makefile does these steps for the classic Mac OS:
    use. On 68k, it uses 32-bit addresses (`-mcmodel=large`).
 2. It uses the libstdc++ headers of mac-sdk, then `port/compat/macos`,
    then the C library headers.
-3. It leaves out the files for sockets, WinInet, services, COM between
-   programs, and the X11, Wayland and Cocoa backends.
+3. It leaves out the files for services, COM between programs, and the
+   X11, Wayland and Cocoa backends.
 
 `port/compat/macos` has the declarations that picolibc's headers do not
 have (`shm_open`, `cfmakeraw`, `environ`, some `ioctl` requests), and an
@@ -106,7 +109,8 @@ programs have about 2 MB of code.
 
 `make check TARGET=m68k-apple-macos MACSDK=...` (or the PowerPC target)
 runs `tests/run-macos-tests.sh`. The script builds `tests/core.cpp`,
-`tests/memtest.cpp` and `tests/wintest.cpp` into applications and runs
+`tests/memtest.cpp` and `tests/sstest.cpp` (set `MACOS_TESTS` for
+others, for example `wintest`) into applications and runs
 them in mac-sdk's simulators: `tools/sim68k.py` as a 68000 and a 68020,
 or `tools/simppc.py`. The simulators need the Python module `unicorn`.
 Without it, the script only builds the tests.

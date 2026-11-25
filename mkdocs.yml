@@ -27,6 +27,7 @@ nav:
   - "Differences from Visual C++": differences.md
   - "16-bit Windows": win16.md
   - "Classic Mac OS": macos-classic.md
+  - "Screen savers": screensavers.md
   - "Plans and layout": plans.md
   - "Contributing": contributing.md
   - "License": license.md

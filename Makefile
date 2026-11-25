@@ -83,7 +83,7 @@ ALL_CXXFLAGS = $(TARGET_FLAGS) $(STDLIB) -fno-delete-null-pointer-checks \
 
 SRCS = $(wildcard src/*.cpp)
 ifeq ($(PORTABLE),1)
-PORT_SRCS = $(wildcard port/src/*.cpp)
+PORT_SRCS = $(filter-out port/src/scrnsave.cpp,$(wildcard port/src/*.cpp))
 PORT_OBJS = $(patsubst port/src/%.cpp,$(OUT)/port/%.o,$(PORT_SRCS))
 # macOS adds the AppKit half of the Cocoa backend, in Objective-C++.
 ifneq ($(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
@@ -92,19 +92,19 @@ PORT_OBJS += $(patsubst port/src/%.mm,$(OUT)/port/%.mm.o,$(wildcard port/src/*.m
 endif
 endif
 ifeq ($(MACOS_CLASSIC),1)
-# The classic Mac OS has no sockets, no services and no window system
-# that these files use.
-CLASSIC_SKIP = winsock wininet service tls com_remote com_proxy com_ole sockcore \
+# The classic Mac OS has no services and no window system that these
+# files use. mac-sdk's C library has the sockets (over MacTCP) that
+# Winsock, WinInet, CAsyncSocket and the internet classes use.
+CLASSIC_SKIP = service com_remote com_proxy com_ole \
   backend_x11 backend_wayland backend_cocoa
 PORT_SRCS := $(filter-out $(patsubst %,port/src/%.cpp,$(CLASSIC_SKIP)),$(PORT_SRCS))
-# CAsyncSocket, CSocket and the WinInet classes need the sockets.
-SRCS := $(filter-out src/sockcore.cpp src/inet.cpp,$(SRCS))
 PORT_OBJS = $(patsubst port/src/%.cpp,$(OUT)/port/%.o,$(PORT_SRCS))
 ALL_CXXFLAGS += -Iport/include $(CLASSIC_FLAGS)
 else
 ALL_CXXFLAGS += -Iport/include -fPIC
 endif
 PORT_LIB = $(OUT)/libwinport.a
+SCRNSAVE_LIBS = $(OUT)/libscrnsave.a $(OUT)/libscrnsavw.a
 endif
 # 16-bit Windows (make TARGET=i8086-pc-win16): the core classes in the
 # large model (CObject, CString, the collections, CFile, CArchive, CTime
@@ -159,7 +159,7 @@ SHARED_LIBS = $(OUT)/mfc.dll $(OUT)/mfcu.dll $(OUT)/libmfcs.a $(OUT)/libmfcus.a
 # Windows. The program's main stays in the program (libmfcs.a for MFC
 # programs), so the layer's crt0 is left out of libwinport.so.
 ifeq ($(PORTABLE),1)
-STATIC_LIBS += $(PORT_LIB)
+STATIC_LIBS += $(PORT_LIB) $(SCRNSAVE_LIBS)
 ifneq ($(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
 SHLIB_EXT = dylib
 SHLIB_SYSLIBS = -framework Cocoa -lpthread
@@ -180,7 +180,7 @@ STATIC_LIBS = $(OUT)/libmfc.a
 SHARED_LIBS =
 endif
 ifeq ($(MACOS_CLASSIC),1)
-STATIC_LIBS = $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PORT_LIB)
+STATIC_LIBS = $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PORT_LIB) $(SCRNSAVE_LIBS)
 SHARED_LIBS =
 endif
 
@@ -191,6 +191,21 @@ shared: $(SHARED_LIBS)
 $(PORT_LIB): $(PORT_OBJS)
 	rm -f $@
 	$(AR) rcs $@ $^
+
+# The screen saver library: WinMain for screen savers (scrnsave.h), ANSI
+# in libscrnsave.a and Unicode in libscrnsavw.a, as on Windows.
+$(OUT)/libscrnsave.a: $(OUT)/port/scrnsave-a.o
+	rm -f $@
+	$(AR) rcs $@ $^
+$(OUT)/libscrnsavw.a: $(OUT)/port/scrnsave-u.o
+	rm -f $@
+	$(AR) rcs $@ $^
+$(OUT)/port/scrnsave-a.o: port/src/scrnsave.cpp $(HDRS)
+	@mkdir -p $(dir $@)
+	$(CXX) $(ALL_CXXFLAGS) -Iport/src -c $< -o $@
+$(OUT)/port/scrnsave-u.o: port/src/scrnsave.cpp $(HDRS)
+	@mkdir -p $(dir $@)
+	$(CXX) $(ALL_CXXFLAGS) -DUNICODE -D_UNICODE -Iport/src -c $< -o $@
 
 $(OUT)/port/%.o: port/src/%.cpp $(HDRS)
 	@mkdir -p $(dir $@)
@@ -293,7 +308,7 @@ else ifeq ($(PORTABLE),1)
 	  $(DEST)/lib/cmake/libmfc $(DEST)/share/libmfc
 	cp include/*.h include/*.rc include/*.cpp $(DEST)/include/libmfc/
 	cp port/include/*.h $(DEST)/include/libmfc/winport/
-	cp $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PORT_LIB) $(OUT)/libmfcs.a $(OUT)/libmfcus.a $(DEST)/lib/
+	cp $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PORT_LIB) $(SCRNSAVE_LIBS) $(OUT)/libmfcs.a $(OUT)/libmfcus.a $(DEST)/lib/
 	cp $(filter-out %.a,$(SHARED_LIBS)) $(DEST)/lib/libmfc-shared/
 	cp port/tools/res2cpp.py $(DEST)/share/libmfc/
 	$(call pcfile,libmfc,,static,the ANSI static library)
