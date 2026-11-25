@@ -66,6 +66,11 @@ copies, not the files of the SDK:
 - When the compiler finds a variable that is not declared, it moves the
   declaration of a `for` variable out of its loop. The old C++ compilers
   kept such a variable after the loop.
+- For a big-endian target, it writes the numbers of the texture files
+  (`.bmp` and `.a8`) of the screen savers in the order of the processor.
+  The savers keep these files as resources of their own types (100 and
+  101), and the layer does not change such resources. The code of the
+  savers reads the numbers of these files in the order of the processor.
 - It makes some small changes to single files. The list is `PATCHES` in
   the script.
 

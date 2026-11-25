@@ -314,6 +314,92 @@ def compile_all(sources, objdir, includes, defines, env, log):
     return objs
 
 
+# The screen savers keep their textures as resources of their own types:
+# 100 for a .bmp file and 101 for a .a8 file. The layer does not change
+# the byte order of such resources, and the code of the savers reads their
+# numbers in the order of the processor. For a big-endian target, the
+# script therefore writes the numbers of these files in that order.
+TEXTURE_TYPES = {"100": "bmp", "101": "a8"}
+RC_TEXTURE = re.compile(r'^\s*\w+\s+(100|101)\s+[^"\n]*"([^"]+)"', re.M)
+
+
+# Turns the bytes of each 16-bit number in data[start:end] around.
+def swap16(data, start, end):
+    for i in range(start, end - 1, 2):
+        data[i], data[i + 1] = data[i + 1], data[i]
+
+
+# Turns the bytes of each 32-bit number in data[start:end] around.
+def swap32(data, start, end):
+    for i in range(start, end - 3, 4):
+        data[i:i + 4] = data[i:i + 4][::-1]
+
+
+# Gives a .bmp texture for a big-endian target. The loader (ssdib.c) reads
+# a 32-bit field as two 16-bit numbers, the low one first. Thus the script
+# turns around each 16-bit number of the headers and keeps their order.
+# The color table and the pixels are bytes.
+def bmp_big_endian(data):
+    start = 14 if data[:2] == b"BM" else 0
+    if len(data) < start + 4:
+        return data
+    size = data[start] | (data[start + 1] << 8)
+    swap16(data, 0, min(len(data), start + size))
+    return data
+
+
+# Gives a .a8 texture for a big-endian target. The loader (ssa8.c) reads
+# the six 32-bit numbers of the header whole. The palette holds the bytes
+# of the colors. Compressed data is a sequence of 16-bit codes. After some
+# codes, there is a 16-bit count or a number of bytes.
+def a8_big_endian(data):
+    if len(data) < 24 + 1024:
+        return data
+    compress = int.from_bytes(data[16:20], "little")
+    swap32(data, 0, 24)
+    if compress == 0:
+        return data
+    pos = 24 + 1024
+    while pos + 2 <= len(data):
+        run, esc = data[pos], data[pos + 1]
+        swap16(data, pos, pos + 2)
+        pos += 2
+        if run != 0:
+            continue
+        if esc == 1:  # The end of the image.
+            break
+        if esc == 2:  # A count of zero pixels.
+            swap16(data, pos, pos + 2)
+            pos += 2
+        elif esc >= 3:  # Pixels as bytes.
+            pos += esc - 2
+    return data
+
+
+# Writes the texture files that the resource script of folder names as
+# types 100 and 101 in big-endian order.
+def textures_big_endian(folder):
+    for rc in [f for f in os.listdir(folder) if f.endswith(".rc")]:
+        with open(os.path.join(folder, rc), "rb") as f:
+            text = f.read().decode("latin-1")
+        for rtype, name in RC_TEXTURE.findall(text):
+            path = os.path.join(folder, fix_include_path(name))
+            if not os.path.isfile(path):
+                continue
+            with open(path, "rb") as f:
+                data = bytearray(f.read())
+            convert = bmp_big_endian if TEXTURE_TYPES[rtype] == "bmp" else a8_big_endian
+            with open(path, "wb") as f:
+                f.write(convert(data))
+
+
+# Tells whether the target of the C compiler is big-endian.
+def big_endian_target(env):
+    r = subprocess.run([env["CC"]] + env["CFLAGS"] + ["-dM", "-E", "-x", "c", os.devnull],
+                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True)
+    return "__BYTE_ORDER__ __ORDER_BIG_ENDIAN__" in r.stdout
+
+
 # Builds one sample. Returns the path of the program.
 def build_sample(sample, sdk, out, env, log):
     name, tail, marker, saver, program = sample
@@ -322,6 +408,8 @@ def build_sample(sample, sdk, out, env, log):
         raise RuntimeError("%s: no folder %s in the SDK" % (name, tail))
     work = os.path.join(out, "src", name)
     copy_sources(src, work)
+    if env["BIG_ENDIAN"]:
+        textures_big_endian(work)
     folders = [work]
     objs, defines = read_makefile(work)
     sources = sources_for(work, objs)
@@ -376,6 +464,7 @@ def environment():
         "SYSLIBS": shlex.split(os.environ.get(
             "SYSLIBS", "-framework Cocoa -framework OpenGL -framework GLUT")),
     }
+    env["BIG_ENDIAN"] = big_endian_target(env)
     return env
 
 
