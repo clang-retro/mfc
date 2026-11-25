@@ -397,6 +397,14 @@ large model. OLE controls, the OLE dialogs and the other common controls
 are not there yet. See
 [docs/win16.md](docs/win16.md).
 
+### The classic Mac OS
+
+`make TARGET=m68k-apple-macos MACSDK=path/to/mac-sdk` (or
+`TARGET=powerpc-apple-macos9`) builds the core classes and the portable
+layer for System 7 to Mac OS 9, with the C and C++ libraries of
+clang-retro/mac-sdk. Windows stay in memory until the Toolbox backend
+is there. See [docs/macos-classic.md](docs/macos-classic.md).
+
 ### The shared library
 
 A program built with `_AFXDLL` uses the library in `mfc.dll` (`mfcu.dll`

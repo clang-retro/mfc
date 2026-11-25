@@ -18,51 +18,6 @@ namespace winport {
 namespace com {
 
 // ---------------------------------------------------------------------
-// Strings
-
-void Writer::Bstr(BSTR s) {
-  if (s == NULL) {
-    U32(0xffffffffu);
-    return;
-  }
-  Bytes(s, SysStringByteLen(s));
-}
-
-std::wstring Reader::Str(bool* isNull) {
-  uint32_t k = U32();
-  if (isNull) *isNull = k == 0xffffffffu;
-  if (k == 0xffffffffu || bad) return std::wstring();
-  if (n - pos < k) {
-    bad = true;
-    return std::wstring();
-  }
-  std::wstring s((const OLECHAR*)(p + pos), k / sizeof(OLECHAR));
-  pos += k;
-  return s;
-}
-
-LPOLESTR Reader::TaskStr() {
-  bool isNull;
-  std::wstring s = Str(&isNull);
-  if (isNull || bad) return NULL;
-  LPOLESTR out = (LPOLESTR)CoTaskMemAlloc((s.size() + 1) * sizeof(OLECHAR));
-  if (out) memcpy(out, s.c_str(), (s.size() + 1) * sizeof(OLECHAR));
-  return out;
-}
-
-BSTR Reader::Bstr() {
-  uint32_t k = U32();
-  if (k == 0xffffffffu || bad) return NULL;
-  if (n - pos < k) {
-    bad = true;
-    return NULL;
-  }
-  BSTR s = SysAllocStringByteLen((LPCSTR)(p + pos), k);
-  pos += k;
-  return s;
-}
-
-// ---------------------------------------------------------------------
 // VARIANTs
 
 namespace {
