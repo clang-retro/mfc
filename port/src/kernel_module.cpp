@@ -86,6 +86,17 @@ std::string ExecutablePath() {
     uint32_t n = sizeof buf;
     if (_NSGetExecutablePath(buf, &n) == 0) return RealPath(buf);
     return std::string();
+#elif defined(macintosh)
+    // The application's name (the low-memory global CurApName, a Pascal
+    // string at 0x910) in the folder that the Finder made the current
+    // one when it started the application. The first call is at startup.
+    const unsigned char* app = (const unsigned char*)0x910;
+    char dir[PATH_MAX];
+    if (!getcwd(dir, sizeof dir)) return std::string();
+    std::string p = dir;
+    if (p.empty() || p.back() != '/') p += '/';
+    p.append((const char*)app + 1, app[0] > 31 ? 31 : app[0]);
+    return p;
 #else
     char buf[PATH_MAX];
     ssize_t n = readlink("/proc/self/exe", buf, sizeof buf - 1);
