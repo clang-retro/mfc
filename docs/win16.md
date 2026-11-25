@@ -75,7 +75,7 @@ Use these flags:
 
 ```sh
 clang++ --target=i8086-pc-win16 -mcmodel=large -fexceptions -frtti \
-  -fno-threadsafe-statics --sysroot=/path/to/sysroot \
+  --sysroot=/path/to/sysroot \
   -Ipath/to/mfc/include -Ipath/to/mfc/include/win16 \
   -idirafter path/to/mfc/port/include \
   app.cpp app.res -Lpath/to/mfc/build/i8086-pc-win16 -lmfc -o app.exe
@@ -85,9 +85,11 @@ clang++ --target=i8086-pc-win16 -mcmodel=large -fexceptions -frtti \
   headers send the OLE names to the OLE 2 headers of the 16-bit SDK.
 - `-idirafter port/include` must come last. The SDK has no common
   control headers. The headers of the portable layer give their types.
-- `-fno-threadsafe-statics` is necessary. A function-local static
-  object otherwise needs `__atomic_load_1`, which the 16-bit libraries
-  do not have. A task has one thread, so the guard is not necessary.
+- The guard of a function-local static object calls `__atomic_load_1`.
+  The compiler-rt builtins of the sysroot have this function
+  (`compiler-rt/lib/builtins/i8086/atomic.c`). A sysroot that does not
+  have it is too old: build its builtins again. A task has one thread,
+  so `-fno-threadsafe-statics` is safe, and it makes the program smaller.
 - Compile the resources with `llvm-rc -win16`.
 
 A program with `main()` and the core classes only can use `-mquickwin`,

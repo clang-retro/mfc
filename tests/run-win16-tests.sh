@@ -25,7 +25,7 @@ fi
 
 T=$OUT/tests
 mkdir -p "$T"
-CXX="$BIN/clang++ --target=i8086-pc-win16 -mcmodel=large -fexceptions -frtti -fno-threadsafe-statics"
+CXX="$BIN/clang++ --target=i8086-pc-win16 -mcmodel=large -fexceptions -frtti"
 CXX="$CXX --sysroot=$SYSROOT -Iinclude -Iinclude/win16 -idirafter port/include -Itests"
 LIBS="-L$OUT -lmfc"
 npass=0

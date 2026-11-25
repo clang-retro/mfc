@@ -2,7 +2,8 @@
 // CFrameWnd with a message map, a menu command, a button notification,
 // WM_CTLCOLOR from a static control, timers, and a modal CDialog from a
 // resource with DDX. It prints ALL PASSED when each step worked, because
-// Wine gives the exit code 0 whatever a 16-bit program returns.
+// Wine gives the exit code 0 whatever a 16-bit program returns. A
+// function-local static object tests the guard (__atomic_load_1).
 #include <afxwin.h>
 #include <stdio.h>
 #include "win16wnd.h"
@@ -40,6 +41,12 @@ protected:
     return TRUE;
   }
 };
+
+/// Gives a string that is made on the first call only.
+static const CString& StaticName() {
+  static CString s_strName("static name");
+  return s_strName;
+}
 
 class CMainFrame : public CFrameWnd {
 public:
@@ -126,6 +133,8 @@ protected:
         CHECK(pApp->GetProfileInt("Test", "Value", 0) == 1234);
         CHECK(pApp->WriteProfileString("Test", "Name", "win16"));
         CHECK(pApp->GetProfileString("Test", "Name") == "win16");
+        CHECK(StaticName() == "static name");
+        CHECK(&StaticName() == &StaticName());
         g_bDone = TRUE;
         DestroyWindow();
         break;
