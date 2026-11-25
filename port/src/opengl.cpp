@@ -1,7 +1,9 @@
 // opengl.cpp - pixel formats and the wgl functions.
 //
 // On Mac OS X, OpenGL draws through CGL into an off-screen buffer in
-// memory (the software or hardware renderer, as the system chooses).
+// memory (the software or hardware renderer, as the system chooses). On
+// the classic Mac OS for PowerPC, it draws the same way through AGL
+// (opengl_agl.cpp). opengl_backend.h is the interface to the two.
 // SwapBuffers copies that buffer into the window with SetDIBitsToDevice,
 // so the picture goes through the same drawing path as GDI. For a
 // single-buffered format, glFlush and glFinish copy the buffer.
@@ -12,13 +14,18 @@
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
-#if defined(__APPLE__) && defined(__MACH__)
-#define WINPORT_CGL 1
+#include "opengl_backend.h"
+
+#ifdef WINPORT_CGL
 #include <OpenGL/CGLContext.h>
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/gl.h>
 #include <OpenGL/glu.h>
 #include <dlfcn.h>
+#endif
+#ifdef WINPORT_AGL
+#include <GL/gl.h>
+#include <GL/glu.h>
 #endif
 
 #include <windows.h>
@@ -44,7 +51,7 @@ T Unsupported(T r) {
 
 }  // namespace
 
-#ifndef WINPORT_CGL
+#ifndef WINPORT_GL
 
 // Without OpenGL, each function below fails with ERROR_NOT_SUPPORTED and
 // gives its failure value (Unsupported).
@@ -82,7 +89,82 @@ BOOL WINAPI wglUseFontOutlinesW(HDC, DWORD, DWORD, DWORD, FLOAT, FLOAT, int, LPG
 
 }  // extern "C"
 
-#else  // WINPORT_CGL
+#else  // WINPORT_GL
+
+#ifdef WINPORT_CGL
+
+namespace winport {
+namespace gl {
+
+// Gives the type of the count that CGLChoosePixelFormat writes: long in
+// the SDK of 10.4, GLint in later SDKs.
+template <class F>
+struct NpixArg;
+template <class R, class A, class B, class C>
+struct NpixArg<R (*)(A, B, C*)> {
+  typedef C type;
+};
+
+// Makes an off-screen CGL context (see opengl_backend.h).
+Native Make(Native share) {
+  CGLPixelFormatAttribute attrs[] = {kCGLPFAOffScreen,
+                                     kCGLPFAColorSize, (CGLPixelFormatAttribute)32,
+                                     kCGLPFAAlphaSize, (CGLPixelFormatAttribute)8,
+                                     kCGLPFADepthSize, (CGLPixelFormatAttribute)24,
+                                     kCGLPFAStencilSize, (CGLPixelFormatAttribute)8,
+                                     (CGLPixelFormatAttribute)0};
+  CGLPixelFormatObj pf = NULL;
+  NpixArg<decltype(&CGLChoosePixelFormat)>::type count = 0;
+  if (CGLChoosePixelFormat(attrs, &pf, &count) != kCGLNoError || !pf) {
+    // Without a stencil buffer, for renderers that have none.
+    attrs[7] = (CGLPixelFormatAttribute)0;
+    if (CGLChoosePixelFormat(attrs, &pf, &count) != kCGLNoError || !pf) return NULL;
+  }
+  CGLContextObj ctx = NULL;
+  CGLError e = CGLCreateContext(pf, (CGLContextObj)share, &ctx);
+  CGLDestroyPixelFormat(pf);
+  return e == kCGLNoError ? ctx : NULL;
+}
+
+// Destroys a context (see opengl_backend.h).
+void Destroy(Native ctx) {
+  if (CGLGetCurrentContext() == (CGLContextObj)ctx) CGLSetCurrentContext(NULL);
+  CGLDestroyContext((CGLContextObj)ctx);
+}
+
+// Makes ctx current (see opengl_backend.h).
+bool SetCurrent(Native ctx) { return CGLSetCurrentContext((CGLContextObj)ctx) == kCGLNoError; }
+
+// Points ctx at a buffer (see opengl_backend.h).
+bool SetBuffer(Native ctx, int w, int h, void* pixels) {
+  return CGLSetOffScreen((CGLContextObj)ctx, w, h, w * 4, pixels) == kCGLNoError;
+}
+
+// Copies context state (see opengl_backend.h).
+bool Copy(Native from, Native to, unsigned mask) {
+  return CGLCopyContext((CGLContextObj)from, (CGLContextObj)to, mask) == kCGLNoError;
+}
+
+// Calls the renderer's glFlush or glFinish for the current CGL context
+// through its dispatch table, bypassing the glFlush and glFinish of
+// opengl.cpp.
+void RealFlush(bool finish) {
+  CGLContextObj ctx = CGLGetCurrentContext();
+  if (!ctx) return;
+  if (finish)
+    ctx->disp.finish(ctx->rend);
+  else
+    ctx->disp.flush(ctx->rend);
+}
+
+// Finds a function by name: the OpenGL framework exports the extension
+// functions itself (see opengl_backend.h).
+void* FindProc(const char* name) { return dlsym(RTLD_DEFAULT, name); }
+
+}  // namespace gl
+}  // namespace winport
+
+#endif  // WINPORT_CGL
 
 namespace {
 
@@ -117,10 +199,10 @@ void Describe(int i, PIXELFORMATDESCRIPTOR* p) {
   p->iLayerType = PFD_MAIN_PLANE;
 }
 
-// One rendering context: a CGL context that draws into pixels, which are
+// One rendering context: a context of the system that draws into pixels, which are
 // sized to the window (or bitmap) it was last made current with.
 struct GLContext {
-  CGLContextObj cgl = NULL;
+  winport::gl::Native native = NULL;  // the system's context
   int format = 1;
   HDC dc = NULL;      // the DC it was last made current with
   HWND hwnd = NULL;   // that DC's window, or NULL for a memory DC
@@ -163,38 +245,6 @@ GLContext* ContextOf(HGLRC rc) {
   return it == s.contexts.end() ? NULL : it->second;
 }
 
-// Gives the type of the count that CGLChoosePixelFormat writes: long in
-// the SDK of 10.4, GLint in later SDKs.
-template <class F>
-struct NpixArg;
-template <class R, class A, class B, class C>
-struct NpixArg<R (*)(A, B, C*)> {
-  typedef C type;
-};
-
-// Makes a CGL context for format, sharing display lists with share
-// (which can be NULL).
-CGLContextObj MakeCGL(int format, CGLContextObj share) {
-  (void)format;
-  CGLPixelFormatAttribute attrs[] = {kCGLPFAOffScreen,
-                                     kCGLPFAColorSize, (CGLPixelFormatAttribute)32,
-                                     kCGLPFAAlphaSize, (CGLPixelFormatAttribute)8,
-                                     kCGLPFADepthSize, (CGLPixelFormatAttribute)24,
-                                     kCGLPFAStencilSize, (CGLPixelFormatAttribute)8,
-                                     (CGLPixelFormatAttribute)0};
-  CGLPixelFormatObj pf = NULL;
-  NpixArg<decltype(&CGLChoosePixelFormat)>::type count = 0;
-  if (CGLChoosePixelFormat(attrs, &pf, &count) != kCGLNoError || !pf) {
-    // Without a stencil buffer, for renderers that have none.
-    attrs[7] = (CGLPixelFormatAttribute)0;
-    if (CGLChoosePixelFormat(attrs, &pf, &count) != kCGLNoError || !pf) return NULL;
-  }
-  CGLContextObj ctx = NULL;
-  CGLError e = CGLCreateContext(pf, share, &ctx);
-  CGLDestroyPixelFormat(pf);
-  return e == kCGLNoError ? ctx : NULL;
-}
-
 // The size, in pixels, of what dc draws on: the client area of its
 // window, or its selected bitmap.
 void TargetSize(HDC dc, HWND hwnd, int* w, int* h) {
@@ -216,8 +266,8 @@ void TargetSize(HDC dc, HWND hwnd, int* w, int* h) {
   if (*h < 1) *h = 1;
 }
 
-// Sizes the context's pixels to its target and points CGL at them. CGL
-// keeps drawing into the old buffer until this is called, so a window that
+// Sizes the context's pixels to its target and points the system's
+// context at them. It keeps drawing into the old buffer until this is called, so a window that
 // changed size gets the new size from its next frame.
 void Resize(GLContext* c) {
   int w, h;
@@ -226,17 +276,17 @@ void Resize(GLContext* c) {
   c->w = w;
   c->h = h;
   c->pixels.assign((size_t)w * h, 0);
-  CGLSetOffScreen(c->cgl, w, h, w * 4, c->pixels.data());
+  winport::gl::SetBuffer(c->native, w, h, c->pixels.data());
 }
 
-// Copies the context's pixels to dc. CGL stores each pixel as a 32-bit
-// value 0xAARRGGBB in the machine's byte order, top row first; a 32-bit
+// Copies the context's pixels to dc. CGL and AGL store each pixel as a
+// 32-bit value 0xAARRGGBB in the machine's byte order, top row first; a 32-bit
 // DIB wants the bytes blue, green, red, alpha.
 void Present(GLContext* c, HDC dc) {
   if (c->pixels.empty()) return;
   // A color DC: the pixels go straight into its surface, in one pass. The
   // surface holds 0x00RRGGBB values in the machine's byte order, as CGL
-  // does.
+  // and AGL do.
   winport::DCObj* d = winport::DCOf(dc);
   if (d && !winport::IsMetaDC(d) && !winport::IsMonoDC(d)) {
     winport::DrawScope ds(d);
@@ -285,17 +335,6 @@ void PresentToTarget(GLContext* c) {
   } else if (c->dc) {
     Present(c, c->dc);
   }
-}
-
-// Calls the renderer's glFlush or glFinish for the current CGL context
-// through its dispatch table, bypassing the glFlush and glFinish below.
-void RealFlush(bool finish) {
-  CGLContextObj ctx = CGLGetCurrentContext();
-  if (!ctx) return;
-  if (finish)
-    ctx->disp.finish(ctx->rend);
-  else
-    ctx->disp.flush(ctx->rend);
 }
 
 }  // namespace
@@ -363,10 +402,10 @@ BOOL WINAPI SetPixelFormat(HDC dc, int i, const PIXELFORMATDESCRIPTOR*) {
 HGLRC WINAPI wglCreateContext(HDC dc) {
   int format = GetPixelFormat(dc);
   if (!format) return NULL;
-  CGLContextObj cgl = MakeCGL(format, NULL);
-  if (!cgl) return Unsupported((HGLRC)NULL);
+  winport::gl::Native native = winport::gl::Make(NULL);
+  if (!native) return Unsupported((HGLRC)NULL);
   GLContext* c = new GLContext;
-  c->cgl = cgl;
+  c->native = native;
   c->format = format;
   HGLRC rc = (HGLRC)c;
   GLState& s = State();
@@ -397,11 +436,11 @@ BOOL WINAPI wglDeleteContext(HGLRC rc) {
     s.contexts.erase(it);
   }
   if (tCurrent == c) {
-    CGLSetCurrentContext(NULL);
+    winport::gl::SetCurrent(NULL);
     tCurrent = NULL;
     tCurrentDC = NULL;
   }
-  CGLDestroyContext(c->cgl);
+  winport::gl::Destroy(c->native);
   delete c;
   return TRUE;
 }
@@ -409,13 +448,13 @@ BOOL WINAPI wglDeleteContext(HGLRC rc) {
 // Makes rc the current context of the thread, drawing for dc.
 BOOL WINAPI wglMakeCurrent(HDC dc, HGLRC rc) {
   if (!rc) {
-    if (tCurrent) RealFlush(false);
+    if (tCurrent) winport::gl::RealFlush(false);
     // What a skipped glFlush drew goes to the window now.
     if (tCurrent && tCurrent->pending) {
       tCurrent->pending = false;
       PresentToTarget(tCurrent);
     }
-    CGLSetCurrentContext(NULL);
+    winport::gl::SetCurrent(NULL);
     tCurrent = NULL;
     tCurrentDC = NULL;
     return TRUE;
@@ -428,7 +467,7 @@ BOOL WINAPI wglMakeCurrent(HDC dc, HGLRC rc) {
   c->dc = dc;
   c->hwnd = WindowFromDC(dc);
   Resize(c);
-  if (CGLSetCurrentContext(c->cgl) != kCGLNoError) return Unsupported(FALSE);
+  if (!winport::gl::SetCurrent(c->native)) return Unsupported(FALSE);
   tCurrent = c;
   tCurrentDC = dc;
   return TRUE;
@@ -447,13 +486,13 @@ BOOL WINAPI wglCopyContext(HGLRC from, HGLRC to, UINT mask) {
     SetLastError(ERROR_INVALID_HANDLE);
     return FALSE;
   }
-  return CGLCopyContext(a->cgl, b->cgl, mask) == kCGLNoError;
+  return winport::gl::Copy(a->native, b->native, mask);
 }
 
 // Lets context to use the display lists and textures of from.
 BOOL WINAPI wglShareLists(HGLRC from, HGLRC to) {
-  // CGL shares lists only when a context is made, so the second context is
-  // made again, sharing with the first. As on Windows, that is allowed
+  // CGL and AGL share lists only when a context is made, so the second
+  // context is made again, sharing with the first. As on Windows, that is allowed
   // only before the second context has lists of its own.
   GLContext* a = ContextOf(from);
   GLContext* b = ContextOf(to);
@@ -461,10 +500,10 @@ BOOL WINAPI wglShareLists(HGLRC from, HGLRC to) {
     SetLastError(ERROR_INVALID_HANDLE);
     return FALSE;
   }
-  CGLContextObj n = MakeCGL(b->format, a->cgl);
+  winport::gl::Native n = winport::gl::Make(a->native);
   if (!n) return Unsupported(FALSE);
-  CGLDestroyContext(b->cgl);
-  b->cgl = n;
+  winport::gl::Destroy(b->native);
+  b->native = n;
   b->w = b->h = 0;
   b->pixels.clear();
   return TRUE;
@@ -473,8 +512,7 @@ BOOL WINAPI wglShareLists(HGLRC from, HGLRC to) {
 // Gives the address of an OpenGL function by its name.
 PROC WINAPI wglGetProcAddress(LPCSTR name) {
   if (!name) return NULL;
-  // Extension functions are exported by the OpenGL framework itself.
-  return (PROC)dlsym(RTLD_DEFAULT, name);
+  return (PROC)winport::gl::FindProc(name);
 }
 
 // Copies the picture of the context of dc to the window.
@@ -495,7 +533,7 @@ BOOL WINAPI SwapBuffers(HDC dc) {
     SetLastError(ERROR_INVALID_HANDLE);
     return FALSE;
   }
-  if (c == tCurrent) RealFlush(true);
+  if (c == tCurrent) winport::gl::RealFlush(true);
   Present(c, dc);
   // Follow a change in the window's size from the next frame on.
   if (c == tCurrent) {
@@ -503,7 +541,7 @@ BOOL WINAPI SwapBuffers(HDC dc) {
     TargetSize(c->dc, c->hwnd, &w, &h);
     if (w != c->w || h != c->h) {
       Resize(c);
-      CGLSetCurrentContext(c->cgl);
+      winport::gl::SetCurrent(c->native);
     }
   }
   return TRUE;
@@ -514,7 +552,7 @@ BOOL WINAPI SwapBuffers(HDC dc) {
 // does. A program linked with libwinport ahead of the OpenGL framework
 // calls these.
 void glFlush(void) {
-  RealFlush(false);
+  winport::gl::RealFlush(false);
   GLContext* c = tCurrent;
   if (!c || c->format == 1) return;
   // A program can flush many times for one picture (a screen saver that
@@ -533,7 +571,7 @@ void glFlush(void) {
 
 // Waits for the renderer, then copies the picture to the window.
 void glFinish(void) {
-  RealFlush(true);
+  winport::gl::RealFlush(true);
   GLContext* c = tCurrent;
   if (!c || c->format == 1) return;
   c->lastFlush = GetTickCount();
@@ -841,7 +879,7 @@ BOOL WINAPI wglUseFontOutlinesW(HDC dc, DWORD first, DWORD count, DWORD listBase
 
 }  // extern "C"
 
-#endif  // WINPORT_CGL
+#endif  // WINPORT_GL
 
 extern "C" {
 

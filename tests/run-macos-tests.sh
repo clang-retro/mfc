@@ -15,11 +15,14 @@ TARGET=${TARGET:-m68k-apple-macos}
 OUT=${OUT:-build/$TARGET}
 MACSDK=${MACSDK:-../mac-sdk}
 BIN=${BIN:-}
-TESTS=${MACOS_TESTS:-"core memtest sstest"}
 case $TARGET in
   m68k*) CPU=68k ;;
   *) CPU=ppc ;;
 esac
+# OpenGL is PowerPC only.
+DEFAULT_TESTS="core memtest sstest"
+[ $CPU = ppc ] && DEFAULT_TESTS="$DEFAULT_TESTS gltest"
+TESTS=${MACOS_TESTS:-$DEFAULT_TESTS}
 CLANG=${BIN:+$BIN/}clang
 export CLANG
 T=$OUT/tests
