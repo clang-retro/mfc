@@ -9,7 +9,9 @@
 #include <windows.h>
 #include <prsht.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 typedef UINT_PTR(CALLBACK* LPOFNHOOKPROC)(HWND, UINT, WPARAM, LPARAM);
 typedef UINT_PTR(CALLBACK* LPCCHOOKPROC)(HWND, UINT, WPARAM, LPARAM);
@@ -615,22 +617,32 @@ DWORD WINAPI CommDlgExtendedError(void);
 #define PrintDlgEx __WINPORT_AW(PrintDlgEx)
 #define PageSetupDlg __WINPORT_AW(PageSetupDlg)
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 // PrintDlgEx's callback object (PRINTDLGEX::lpCallback) and the services
 // it can ask of the dialog.
 #include <unknwn.h>
-extern "C" const IID IID_IPrintDialogCallback, IID_IPrintDialogServices;
+__WINPORT_EXTERN_C const IID IID_IPrintDialogCallback, IID_IPrintDialogServices;
+#ifdef __cplusplus
 interface IPrintDialogCallback : public IUnknown {
   STDMETHOD(InitDone)() = 0;
   STDMETHOD(SelectionChange)() = 0;
   STDMETHOD(HandleMessage)(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam, LRESULT* pResult) = 0;
 };
+#else
+typedef struct IPrintDialogCallback IPrintDialogCallback;
+#endif
+#ifdef __cplusplus
 interface IPrintDialogServices : public IUnknown {
   STDMETHOD(GetCurrentDevMode)(LPDEVMODE pDevMode, UINT* pcbSize) = 0;
   STDMETHOD(GetCurrentPrinterName)(LPTSTR pPrinterName, UINT* pcchSize) = 0;
   STDMETHOD(GetCurrentPortName)(LPTSTR pPortName, UINT* pcchSize) = 0;
 };
+#else
+typedef struct IPrintDialogServices IPrintDialogServices;
+#endif
 WINPORT_UUIDOF(IPrintDialogCallback)
 WINPORT_UUIDOF(IPrintDialogServices)
 

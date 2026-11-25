@@ -11,7 +11,9 @@
 
 #include <winbase.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 #define CP_ACP 0
 #define CP_OEMCP 1
@@ -165,6 +167,8 @@ int WINAPI GetNumberFormatW(LCID, DWORD, LPCWSTR, const void*, LPWSTR, int);
 #define GetTimeFormat __WINPORT_AW(GetTimeFormat)
 #define GetNumberFormat __WINPORT_AW(GetNumberFormat)
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #endif

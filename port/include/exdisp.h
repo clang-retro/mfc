@@ -14,9 +14,9 @@
 #include <docobj.h>
 #include <shtypes.h>
 
-extern "C" const IID IID_IWebBrowser, IID_IWebBrowserApp, IID_IWebBrowser2, DIID_DWebBrowserEvents,
+__WINPORT_EXTERN_C const IID IID_IWebBrowser, IID_IWebBrowserApp, IID_IWebBrowser2, DIID_DWebBrowserEvents,
     DIID_DWebBrowserEvents2;
-extern "C" const CLSID CLSID_WebBrowser, CLSID_InternetExplorer;
+__WINPORT_EXTERN_C const CLSID CLSID_WebBrowser, CLSID_InternetExplorer;
 
 typedef enum BrowserNavConstants {
   navOpenInNewWindow = 0x1,
@@ -44,6 +44,7 @@ typedef enum RefreshConstants {
 
 typedef LONG_PTR SHANDLE_PTR;
 
+#ifdef __cplusplus
 interface IWebBrowser : public IDispatch {
   STDMETHOD(GoBack)() = 0;
   STDMETHOD(GoForward)() = 0;
@@ -71,7 +72,11 @@ interface IWebBrowser : public IDispatch {
   STDMETHOD(get_LocationURL)(BSTR* LocationURL) = 0;
   STDMETHOD(get_Busy)(VARIANT_BOOL* pBool) = 0;
 };
+#else
+typedef struct IWebBrowser IWebBrowser;
+#endif
 
+#ifdef __cplusplus
 interface IWebBrowserApp : public IWebBrowser {
   STDMETHOD(Quit)() = 0;
   STDMETHOD(ClientToWindow)(int* pcx, int* pcy) = 0;
@@ -94,7 +99,11 @@ interface IWebBrowserApp : public IWebBrowser {
   STDMETHOD(get_FullScreen)(VARIANT_BOOL* pbFullScreen) = 0;
   STDMETHOD(put_FullScreen)(VARIANT_BOOL bFullScreen) = 0;
 };
+#else
+typedef struct IWebBrowserApp IWebBrowserApp;
+#endif
 
+#ifdef __cplusplus
 interface IWebBrowser2 : public IWebBrowserApp {
   STDMETHOD(Navigate2)(VARIANT* URL, VARIANT* Flags, VARIANT* TargetFrameName, VARIANT* PostData,
                        VARIANT* Headers) = 0;
@@ -117,6 +126,9 @@ interface IWebBrowser2 : public IWebBrowserApp {
   STDMETHOD(get_Resizable)(VARIANT_BOOL* Value) = 0;
   STDMETHOD(put_Resizable)(VARIANT_BOOL Value) = 0;
 };
+#else
+typedef struct IWebBrowser2 IWebBrowser2;
+#endif
 
 // The events are a dispinterface: they arrive through IDispatch::Invoke.
 typedef IDispatch DWebBrowserEvents2;

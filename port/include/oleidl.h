@@ -8,36 +8,128 @@
 
 #include <objidl.h>
 
+#ifdef __cplusplus
 interface IOleWindow;
+#else
+typedef struct IOleWindow IOleWindow;
+#endif
+#ifdef __cplusplus
 interface IOleInPlaceObject;
+#else
+typedef struct IOleInPlaceObject IOleInPlaceObject;
+#endif
+#ifdef __cplusplus
 interface IOleInPlaceActiveObject;
+#else
+typedef struct IOleInPlaceActiveObject IOleInPlaceActiveObject;
+#endif
+#ifdef __cplusplus
 interface IOleInPlaceUIWindow;
+#else
+typedef struct IOleInPlaceUIWindow IOleInPlaceUIWindow;
+#endif
+#ifdef __cplusplus
 interface IOleInPlaceFrame;
+#else
+typedef struct IOleInPlaceFrame IOleInPlaceFrame;
+#endif
+#ifdef __cplusplus
 interface IOleInPlaceSite;
+#else
+typedef struct IOleInPlaceSite IOleInPlaceSite;
+#endif
+#ifdef __cplusplus
 interface IOleObject;
+#else
+typedef struct IOleObject IOleObject;
+#endif
+#ifdef __cplusplus
 interface IOleClientSite;
+#else
+typedef struct IOleClientSite IOleClientSite;
+#endif
+#ifdef __cplusplus
 interface IOleContainer;
+#else
+typedef struct IOleContainer IOleContainer;
+#endif
+#ifdef __cplusplus
 interface IOleItemContainer;
+#else
+typedef struct IOleItemContainer IOleItemContainer;
+#endif
+#ifdef __cplusplus
 interface IOleLink;
+#else
+typedef struct IOleLink IOleLink;
+#endif
+#ifdef __cplusplus
 interface IOleAdviseHolder;
+#else
+typedef struct IOleAdviseHolder IOleAdviseHolder;
+#endif
+#ifdef __cplusplus
 interface IOleCache;
+#else
+typedef struct IOleCache IOleCache;
+#endif
+#ifdef __cplusplus
 interface IOleCache2;
+#else
+typedef struct IOleCache2 IOleCache2;
+#endif
+#ifdef __cplusplus
 interface IOleCacheControl;
+#else
+typedef struct IOleCacheControl IOleCacheControl;
+#endif
+#ifdef __cplusplus
 interface IViewObject;
+#else
+typedef struct IViewObject IViewObject;
+#endif
+#ifdef __cplusplus
 interface IViewObject2;
+#else
+typedef struct IViewObject2 IViewObject2;
+#endif
+#ifdef __cplusplus
 interface IEnumOLEVERB;
+#else
+typedef struct IEnumOLEVERB IEnumOLEVERB;
+#endif
+#ifdef __cplusplus
 interface IRunnableObject;
+#else
+typedef struct IRunnableObject IRunnableObject;
+#endif
+#ifdef __cplusplus
 interface IParseDisplayName;
+#else
+typedef struct IParseDisplayName IParseDisplayName;
+#endif
+#ifdef __cplusplus
 interface IDropTarget;
+#else
+typedef struct IDropTarget IDropTarget;
+#endif
+#ifdef __cplusplus
 interface IDropSource;
+#else
+typedef struct IDropSource IDropSource;
+#endif
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 extern const IID IID_IOleWindow, IID_IOleInPlaceObject, IID_IOleInPlaceActiveObject, IID_IOleInPlaceUIWindow,
     IID_IOleInPlaceFrame, IID_IOleInPlaceSite, IID_IOleObject, IID_IOleClientSite, IID_IOleContainer,
     IID_IOleItemContainer, IID_IOleLink, IID_IOleAdviseHolder, IID_IOleCache, IID_IOleCache2,
     IID_IOleCacheControl, IID_IViewObject, IID_IViewObject2, IID_IEnumOLEVERB, IID_IRunnableObject,
     IID_IParseDisplayName, IID_IDropTarget, IID_IDropSource, IID_IContinue;
-}
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 typedef struct tagOleMenuGroupWidths {
   LONG width[6];
@@ -146,6 +238,7 @@ typedef enum tagDISCARDCACHE { DISCARDCACHE_SAVEIFDIRTY = 0, DISCARDCACHE_NOSAVE
 #define DD_DEFDRAGDELAY 200
 #define DD_DEFDRAGMINDIST 2
 
+#ifdef __cplusplus
 interface IOleAdviseHolder : public IUnknown {
   STDMETHOD(Advise)(IAdviseSink* pAdvise, DWORD* pdwConnection) = 0;
   STDMETHOD(Unadvise)(DWORD dwConnection) = 0;
@@ -154,8 +247,12 @@ interface IOleAdviseHolder : public IUnknown {
   STDMETHOD(SendOnSave)() = 0;
   STDMETHOD(SendOnClose)() = 0;
 };
+#else
+typedef struct IOleAdviseHolder IOleAdviseHolder;
+#endif
 typedef IOleAdviseHolder* LPOLEADVISEHOLDER;
 
+#ifdef __cplusplus
 interface IOleCache : public IUnknown {
   STDMETHOD(Cache)(FORMATETC* pformatetc, DWORD advf, DWORD* pdwConnection) = 0;
   STDMETHOD(Uncache)(DWORD dwConnection) = 0;
@@ -163,6 +260,9 @@ interface IOleCache : public IUnknown {
   STDMETHOD(InitCache)(IDataObject* pDataObject) = 0;
   STDMETHOD(SetData)(FORMATETC* pformatetc, STGMEDIUM* pmedium, BOOL fRelease) = 0;
 };
+#else
+typedef struct IOleCache IOleCache;
+#endif
 typedef IOleCache* LPOLECACHE;
 
 #define UPDFCACHE_NODATACACHE 0x00000001
@@ -174,29 +274,46 @@ typedef IOleCache* LPOLECACHE;
 #define UPDFCACHE_IFBLANKORONSAVECACHE (UPDFCACHE_IFBLANK | UPDFCACHE_ONSAVECACHE)
 #define UPDFCACHE_ALL ((DWORD)~UPDFCACHE_ONLYIFBLANK)
 #define UPDFCACHE_ALLBUTNODATACACHE (UPDFCACHE_ALL & (DWORD)~UPDFCACHE_NODATACACHE)
+#ifdef __cplusplus
 interface IOleCache2 : public IOleCache {
   STDMETHOD(UpdateCache)(LPDATAOBJECT pDataObject, DWORD grfUpdf, LPVOID pReserved) = 0;
   STDMETHOD(DiscardCache)(DWORD dwDiscardOptions) = 0;
 };
+#else
+typedef struct IOleCache2 IOleCache2;
+#endif
 typedef IOleCache2* LPOLECACHE2;
 
+#ifdef __cplusplus
 interface IOleCacheControl : public IUnknown {
   STDMETHOD(OnRun)(LPDATAOBJECT pDataObject) = 0;
   STDMETHOD(OnStop)() = 0;
 };
+#else
+typedef struct IOleCacheControl IOleCacheControl;
+#endif
 typedef IOleCacheControl* LPOLECACHECONTROL;
 
+#ifdef __cplusplus
 interface IParseDisplayName : public IUnknown {
   STDMETHOD(ParseDisplayName)(IBindCtx* pbc, LPOLESTR pszDisplayName, ULONG* pchEaten, IMoniker** ppmkOut) = 0;
 };
+#else
+typedef struct IParseDisplayName IParseDisplayName;
+#endif
 typedef IParseDisplayName* LPPARSEDISPLAYNAME;
 
+#ifdef __cplusplus
 interface IOleContainer : public IParseDisplayName {
   STDMETHOD(EnumObjects)(DWORD grfFlags, IEnumUnknown** ppenum) = 0;
   STDMETHOD(LockContainer)(BOOL fLock) = 0;
 };
+#else
+typedef struct IOleContainer IOleContainer;
+#endif
 typedef IOleContainer* LPOLECONTAINER;
 
+#ifdef __cplusplus
 interface IOleClientSite : public IUnknown {
   STDMETHOD(SaveObject)() = 0;
   STDMETHOD(GetMoniker)(DWORD dwAssign, DWORD dwWhichMoniker, IMoniker** ppmk) = 0;
@@ -205,8 +322,12 @@ interface IOleClientSite : public IUnknown {
   STDMETHOD(OnShowWindow)(BOOL fShow) = 0;
   STDMETHOD(RequestNewObjectLayout)() = 0;
 };
+#else
+typedef struct IOleClientSite IOleClientSite;
+#endif
 typedef IOleClientSite* LPOLECLIENTSITE;
 
+#ifdef __cplusplus
 interface IOleObject : public IUnknown {
   STDMETHOD(SetClientSite)(IOleClientSite* pClientSite) = 0;
   STDMETHOD(GetClientSite)(IOleClientSite** ppClientSite) = 0;
@@ -231,14 +352,22 @@ interface IOleObject : public IUnknown {
   STDMETHOD(GetMiscStatus)(DWORD dwAspect, DWORD* pdwStatus) = 0;
   STDMETHOD(SetColorScheme)(LOGPALETTE* pLogpal) = 0;
 };
+#else
+typedef struct IOleObject IOleObject;
+#endif
 typedef IOleObject* LPOLEOBJECT;
 
+#ifdef __cplusplus
 interface IOleWindow : public IUnknown {
   STDMETHOD(GetWindow)(HWND* phwnd) = 0;
   STDMETHOD(ContextSensitiveHelp)(BOOL fEnterMode) = 0;
 };
+#else
+typedef struct IOleWindow IOleWindow;
+#endif
 typedef IOleWindow* LPOLEWINDOW;
 
+#ifdef __cplusplus
 interface IOleLink : public IUnknown {
   STDMETHOD(SetUpdateOptions)(DWORD dwUpdateOpt) = 0;
   STDMETHOD(GetUpdateOptions)(DWORD* pdwUpdateOpt) = 0;
@@ -252,23 +381,35 @@ interface IOleLink : public IUnknown {
   STDMETHOD(UnbindSource)() = 0;
   STDMETHOD(Update)(IBindCtx* pbc) = 0;
 };
+#else
+typedef struct IOleLink IOleLink;
+#endif
 typedef IOleLink* LPOLELINK;
 
+#ifdef __cplusplus
 interface IOleItemContainer : public IOleContainer {
   STDMETHOD(GetObject)(LPOLESTR pszItem, DWORD dwSpeedNeeded, IBindCtx* pbc, REFIID riid, void** ppvObject) = 0;
   STDMETHOD(GetObjectStorage)(LPOLESTR pszItem, IBindCtx* pbc, REFIID riid, void** ppvStorage) = 0;
   STDMETHOD(IsRunning)(LPOLESTR pszItem) = 0;
 };
+#else
+typedef struct IOleItemContainer IOleItemContainer;
+#endif
 typedef IOleItemContainer* LPOLEITEMCONTAINER;
 
+#ifdef __cplusplus
 interface IOleInPlaceUIWindow : public IOleWindow {
   STDMETHOD(GetBorder)(LPRECT lprectBorder) = 0;
   STDMETHOD(RequestBorderSpace)(LPCBORDERWIDTHS pborderwidths) = 0;
   STDMETHOD(SetBorderSpace)(LPCBORDERWIDTHS pborderwidths) = 0;
   STDMETHOD(SetActiveObject)(IOleInPlaceActiveObject* pActiveObject, LPCOLESTR pszObjName) = 0;
 };
+#else
+typedef struct IOleInPlaceUIWindow IOleInPlaceUIWindow;
+#endif
 typedef IOleInPlaceUIWindow* LPOLEINPLACEUIWINDOW;
 
+#ifdef __cplusplus
 interface IOleInPlaceActiveObject : public IOleWindow {
   STDMETHOD(TranslateAccelerator)(LPMSG lpmsg) = 0;
   STDMETHOD(OnFrameWindowActivate)(BOOL fActivate) = 0;
@@ -276,8 +417,12 @@ interface IOleInPlaceActiveObject : public IOleWindow {
   STDMETHOD(ResizeBorder)(LPCRECT prcBorder, IOleInPlaceUIWindow* pUIWindow, BOOL fFrameWindow) = 0;
   STDMETHOD(EnableModeless)(BOOL fEnable) = 0;
 };
+#else
+typedef struct IOleInPlaceActiveObject IOleInPlaceActiveObject;
+#endif
 typedef IOleInPlaceActiveObject* LPOLEINPLACEACTIVEOBJECT;
 
+#ifdef __cplusplus
 interface IOleInPlaceFrame : public IOleInPlaceUIWindow {
   STDMETHOD(InsertMenus)(HMENU hmenuShared, LPOLEMENUGROUPWIDTHS lpMenuWidths) = 0;
   STDMETHOD(SetMenu)(HMENU hmenuShared, HOLEMENU holemenu, HWND hwndActiveObject) = 0;
@@ -286,16 +431,24 @@ interface IOleInPlaceFrame : public IOleInPlaceUIWindow {
   STDMETHOD(EnableModeless)(BOOL fEnable) = 0;
   STDMETHOD(TranslateAccelerator)(LPMSG lpmsg, WORD wID) = 0;
 };
+#else
+typedef struct IOleInPlaceFrame IOleInPlaceFrame;
+#endif
 typedef IOleInPlaceFrame* LPOLEINPLACEFRAME;
 
+#ifdef __cplusplus
 interface IOleInPlaceObject : public IOleWindow {
   STDMETHOD(InPlaceDeactivate)() = 0;
   STDMETHOD(UIDeactivate)() = 0;
   STDMETHOD(SetObjectRects)(LPCRECT lprcPosRect, LPCRECT lprcClipRect) = 0;
   STDMETHOD(ReactivateAndUndo)() = 0;
 };
+#else
+typedef struct IOleInPlaceObject IOleInPlaceObject;
+#endif
 typedef IOleInPlaceObject* LPOLEINPLACEOBJECT;
 
+#ifdef __cplusplus
 interface IOleInPlaceSite : public IOleWindow {
   STDMETHOD(CanInPlaceActivate)() = 0;
   STDMETHOD(OnInPlaceActivate)() = 0;
@@ -309,12 +462,20 @@ interface IOleInPlaceSite : public IOleWindow {
   STDMETHOD(DeactivateAndUndo)() = 0;
   STDMETHOD(OnPosRectChange)(LPCRECT lprcPosRect) = 0;
 };
+#else
+typedef struct IOleInPlaceSite IOleInPlaceSite;
+#endif
 typedef IOleInPlaceSite* LPOLEINPLACESITE;
 
+#ifdef __cplusplus
 interface IContinue : public IUnknown {
   STDMETHOD(FContinue)() = 0;
 };
+#else
+typedef struct IContinue IContinue;
+#endif
 
+#ifdef __cplusplus
 interface IViewObject : public IUnknown {
   STDMETHOD(Draw)(DWORD dwDrawAspect, LONG lindex, void* pvAspect, DVTARGETDEVICE* ptd, HDC hdcTargetDev,
                   HDC hdcDraw, LPCRECTL lprcBounds, LPCRECTL lprcWBounds, BOOL(STDMETHODCALLTYPE* pfnContinue)(ULONG_PTR),
@@ -326,35 +487,55 @@ interface IViewObject : public IUnknown {
   STDMETHOD(SetAdvise)(DWORD aspects, DWORD advf, IAdviseSink* pAdvSink) = 0;
   STDMETHOD(GetAdvise)(DWORD* pAspects, DWORD* pAdvf, IAdviseSink** ppAdvSink) = 0;
 };
+#else
+typedef struct IViewObject IViewObject;
+#endif
 typedef IViewObject* LPVIEWOBJECT;
 
+#ifdef __cplusplus
 interface IViewObject2 : public IViewObject {
   STDMETHOD(GetExtent)(DWORD dwDrawAspect, LONG lindex, DVTARGETDEVICE* ptd, LPSIZEL lpsizel) = 0;
 };
+#else
+typedef struct IViewObject2 IViewObject2;
+#endif
 typedef IViewObject2* LPVIEWOBJECT2;
 
+#ifdef __cplusplus
 interface IDropSource : public IUnknown {
   STDMETHOD(QueryContinueDrag)(BOOL fEscapePressed, DWORD grfKeyState) = 0;
   STDMETHOD(GiveFeedback)(DWORD dwEffect) = 0;
 };
+#else
+typedef struct IDropSource IDropSource;
+#endif
 typedef IDropSource* LPDROPSOURCE;
 
+#ifdef __cplusplus
 interface IDropTarget : public IUnknown {
   STDMETHOD(DragEnter)(IDataObject* pDataObj, DWORD grfKeyState, POINTL pt, DWORD* pdwEffect) = 0;
   STDMETHOD(DragOver)(DWORD grfKeyState, POINTL pt, DWORD* pdwEffect) = 0;
   STDMETHOD(DragLeave)() = 0;
   STDMETHOD(Drop)(IDataObject* pDataObj, DWORD grfKeyState, POINTL pt, DWORD* pdwEffect) = 0;
 };
+#else
+typedef struct IDropTarget IDropTarget;
+#endif
 typedef IDropTarget* LPDROPTARGET;
 
+#ifdef __cplusplus
 interface IEnumOLEVERB : public IUnknown {
   STDMETHOD(Next)(ULONG celt, LPOLEVERB rgelt, ULONG* pceltFetched) = 0;
   STDMETHOD(Skip)(ULONG celt) = 0;
   STDMETHOD(Reset)() = 0;
   STDMETHOD(Clone)(IEnumOLEVERB** ppenum) = 0;
 };
+#else
+typedef struct IEnumOLEVERB IEnumOLEVERB;
+#endif
 typedef IEnumOLEVERB* LPENUMOLEVERB;
 
+#ifdef __cplusplus
 interface IRunnableObject : public IUnknown {
   STDMETHOD(GetRunningClass)(LPCLSID lpClsid) = 0;
   STDMETHOD(Run)(LPBINDCTX pbc) = 0;
@@ -362,6 +543,9 @@ interface IRunnableObject : public IUnknown {
   STDMETHOD(LockRunning)(BOOL fLock, BOOL fLastUnlockCloses) = 0;
   STDMETHOD(SetContainedObject)(BOOL fContained) = 0;
 };
+#else
+typedef struct IRunnableObject IRunnableObject;
+#endif
 typedef IRunnableObject* LPRUNNABLEOBJECT;
 
 WINPORT_UUIDOF(IOleAdviseHolder)

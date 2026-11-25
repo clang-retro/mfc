@@ -26,6 +26,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <algorithm>
+#include <cstdlib>
 #include <mutex>
 #include <set>
 #include <string>

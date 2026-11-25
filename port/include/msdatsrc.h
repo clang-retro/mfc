@@ -12,14 +12,19 @@
 
 typedef BSTR DataMember;
 
-extern "C" const IID IID_DataSourceListener, IID_DataSource;
+__WINPORT_EXTERN_C const IID IID_DataSourceListener, IID_DataSource;
 
+#ifdef __cplusplus
 interface DataSourceListener : public IUnknown {
   STDMETHOD(dataMemberChanged)(DataMember bstrDM) = 0;
   STDMETHOD(dataMemberAdded)(DataMember bstrDM) = 0;
   STDMETHOD(dataMemberRemoved)(DataMember bstrDM) = 0;
 };
+#else
+typedef struct DataSourceListener DataSourceListener;
+#endif
 
+#ifdef __cplusplus
 interface DataSource : public IUnknown {
   STDMETHOD(getDataMember)(DataMember bstrDM, REFIID riid, IUnknown** ppunk) = 0;
   STDMETHOD(getDataMemberName)(long lIndex, DataMember* pbstrDM) = 0;
@@ -27,5 +32,8 @@ interface DataSource : public IUnknown {
   STDMETHOD(addDataSourceListener)(DataSourceListener* pDSL) = 0;
   STDMETHOD(removeDataSourceListener)(DataSourceListener* pDSL) = 0;
 };
+#else
+typedef struct DataSource DataSource;
+#endif
 
 #endif

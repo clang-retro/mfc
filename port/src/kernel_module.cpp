@@ -336,7 +336,8 @@ extern "C" void _WinportAddResources(const void* anchor, const void* data, size_
     if (!q) break;
     q = p + ((q - p + 3) & ~3);
     r.lang = q + 8 <= p + headerSize ? Le16(q + 6) : 0;
-    r.data = p + headerSize;
+    // The numbers of the standard types in the order of the processor.
+    r.data = NativeResourceData(r.typeId, p + headerSize, dataSize);
     r.size = dataSize;
     if (dataSize != 0 || r.typeId != 0) m->res.push_back(r);
     p += (headerSize + dataSize + 3) & ~3u;

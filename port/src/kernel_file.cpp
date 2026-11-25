@@ -199,7 +199,14 @@ timespec ToTimespec(const FILETIME* ft) {
 
 void StatTimes(const struct stat& st, FILETIME* c, FILETIME* a, FILETIME* w) {
 #if defined(__APPLE__)
+  // The creation time is in struct stat only with 64-bit inodes (always
+  // from 10.6 on 64-bit, never on 10.4); otherwise the change time is
+  // the nearest.
+#if defined(_DARWIN_FEATURE_64_BIT_INODE)
   if (c) *c = FileTimeFromUnix(st.st_birthtimespec.tv_sec, st.st_birthtimespec.tv_nsec);
+#else
+  if (c) *c = FileTimeFromUnix(st.st_ctimespec.tv_sec, st.st_ctimespec.tv_nsec);
+#endif
   if (a) *a = FileTimeFromUnix(st.st_atimespec.tv_sec, st.st_atimespec.tv_nsec);
   if (w) *w = FileTimeFromUnix(st.st_mtimespec.tv_sec, st.st_mtimespec.tv_nsec);
 #else
@@ -1041,6 +1048,44 @@ UINT WINAPI _lwrite(HFILE h, LPCSTR b, UINT n) {
 LONG WINAPI _llseek(HFILE h, LONG off, int origin) { return (LONG)lseek((int)h, off, origin); }
 
 HFILE WINAPI _lclose(HFILE h) { return close((int)h) == 0 ? 0 : HFILE_ERROR; }
+
+// Opens, creates, tests or deletes a file, and puts its full path in
+// of->szPathName. OF_PARSE only makes the full path; OF_EXIST opens the
+// file and closes it again. Returns the file (or 0, for OF_PARSE,
+// OF_EXIST and OF_DELETE) or HFILE_ERROR.
+HFILE WINAPI OpenFile(LPCSTR name, LPOFSTRUCT of, UINT style) {
+  if (!name || !of) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return HFILE_ERROR;
+  }
+  if (style & OF_REOPEN) name = of->szPathName;
+  char full[MAX_PATH];
+  if (!GetFullPathNameA(name, sizeof full, full, NULL)) lstrcpynA(full, name, sizeof full);
+  if (name != of->szPathName) lstrcpynA(of->szPathName, full, OFS_MAXPATHNAME);
+  of->cBytes = (BYTE)sizeof(OFSTRUCT);
+  of->fFixedDisk = 1;
+  of->nErrCode = 0;
+  if (style & OF_PARSE) return 0;
+  HFILE h;
+  if (style & OF_DELETE) {
+    if (DeleteFileA(full)) return 1;
+    of->nErrCode = (WORD)GetLastError();
+    return HFILE_ERROR;
+  }
+  if (style & OF_CREATE)
+    h = _lcreat(full, 0);
+  else
+    h = _lopen(full, (int)(style & 3));
+  if (h == HFILE_ERROR) {
+    of->nErrCode = (WORD)GetLastError();
+    return HFILE_ERROR;
+  }
+  if (style & OF_EXIST) {
+    _lclose(h);
+    return 1;
+  }
+  return h;
+}
 
 }  // extern "C"
 

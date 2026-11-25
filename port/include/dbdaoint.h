@@ -21,44 +21,149 @@
 #define DAOIndex _DAOIndex
 #define DAORelation _DAORelation
 
+#ifdef __cplusplus
 interface DAOError;
+#else
+typedef struct DAOError DAOError;
+#endif
+#ifdef __cplusplus
 interface DAOErrors;
+#else
+typedef struct DAOErrors DAOErrors;
+#endif
+#ifdef __cplusplus
 interface DAOProperty;
+#else
+typedef struct DAOProperty DAOProperty;
+#endif
+#ifdef __cplusplus
 interface DAOProperties;
+#else
+typedef struct DAOProperties DAOProperties;
+#endif
+#ifdef __cplusplus
 interface DAOField;
+#else
+typedef struct DAOField DAOField;
+#endif
+#ifdef __cplusplus
 interface DAOFields;
+#else
+typedef struct DAOFields DAOFields;
+#endif
+#ifdef __cplusplus
 interface DAOIndex;
+#else
+typedef struct DAOIndex DAOIndex;
+#endif
+#ifdef __cplusplus
 interface DAOIndexes;
+#else
+typedef struct DAOIndexes DAOIndexes;
+#endif
+#ifdef __cplusplus
 interface DAOIndexFields;
+#else
+typedef struct DAOIndexFields DAOIndexFields;
+#endif
+#ifdef __cplusplus
 interface DAOParameter;
+#else
+typedef struct DAOParameter DAOParameter;
+#endif
+#ifdef __cplusplus
 interface DAOParameters;
+#else
+typedef struct DAOParameters DAOParameters;
+#endif
+#ifdef __cplusplus
 interface DAORecordset;
+#else
+typedef struct DAORecordset DAORecordset;
+#endif
+#ifdef __cplusplus
 interface DAOQueryDef;
+#else
+typedef struct DAOQueryDef DAOQueryDef;
+#endif
+#ifdef __cplusplus
 interface DAOQueryDefs;
+#else
+typedef struct DAOQueryDefs DAOQueryDefs;
+#endif
+#ifdef __cplusplus
 interface DAOTableDef;
+#else
+typedef struct DAOTableDef DAOTableDef;
+#endif
+#ifdef __cplusplus
 interface DAOTableDefs;
+#else
+typedef struct DAOTableDefs DAOTableDefs;
+#endif
+#ifdef __cplusplus
 interface DAORelation;
+#else
+typedef struct DAORelation DAORelation;
+#endif
+#ifdef __cplusplus
 interface DAORelations;
+#else
+typedef struct DAORelations DAORelations;
+#endif
+#ifdef __cplusplus
 interface DAODatabase;
+#else
+typedef struct DAODatabase DAODatabase;
+#endif
+#ifdef __cplusplus
 interface DAODatabases;
+#else
+typedef struct DAODatabases DAODatabases;
+#endif
+#ifdef __cplusplus
 interface DAOWorkspace;
+#else
+typedef struct DAOWorkspace DAOWorkspace;
+#endif
+#ifdef __cplusplus
 interface DAOWorkspaces;
+#else
+typedef struct DAOWorkspaces DAOWorkspaces;
+#endif
+#ifdef __cplusplus
 interface DAODBEngine;
+#else
+typedef struct DAODBEngine DAODBEngine;
+#endif
 
 // Every DAO object has properties; collections count and enumerate.
+#ifdef __cplusplus
 interface _DAO : public IDispatch {
   STDMETHOD(get_Properties)(DAOProperties** ppprops) = 0;
 };
+#else
+typedef struct _DAO _DAO;
+#endif
+#ifdef __cplusplus
 interface _DAOCollection : public IDispatch {
   STDMETHOD(get_Count)(short* c) = 0;
   STDMETHOD(_NewEnum)(IUnknown** ppunk) = 0;
   STDMETHOD(Refresh)() = 0;
 };
+#else
+typedef struct _DAOCollection _DAOCollection;
+#endif
+#ifdef __cplusplus
 interface _DAODynaCollection : public _DAOCollection {
   STDMETHOD(Append)(IDispatch* Object) = 0;
   STDMETHOD(Delete)(BSTR Name) = 0;
 };
+#else
+typedef struct _DAODynaCollection _DAODynaCollection;
+#endif
 
+#ifdef __cplusplus
 interface DAOError : public IDispatch {
   STDMETHOD(get_Number)(LONG* pNumber) = 0;
   STDMETHOD(get_Source)(BSTR* pSource) = 0;
@@ -66,9 +171,17 @@ interface DAOError : public IDispatch {
   STDMETHOD(get_HelpFile)(BSTR* pHelpFile) = 0;
   STDMETHOD(get_HelpContext)(LONG* pHelpContext) = 0;
 };
+#else
+typedef struct DAOError DAOError;
+#endif
+#ifdef __cplusplus
 interface DAOErrors : public _DAOCollection {
   STDMETHOD(get_Item)(VARIANT Item, DAOError** ppItem) = 0;
 };
+#else
+typedef struct DAOErrors DAOErrors;
+#endif
+#ifdef __cplusplus
 interface DAOProperty : public _DAO {
   STDMETHOD(get_Value)(VARIANT* pValue) = 0;
   STDMETHOD(put_Value)(VARIANT Value) = 0;
@@ -78,9 +191,17 @@ interface DAOProperty : public _DAO {
   STDMETHOD(put_Type)(short Type) = 0;
   STDMETHOD(get_Inherited)(VARIANT_BOOL* pInherited) = 0;
 };
+#else
+typedef struct DAOProperty DAOProperty;
+#endif
+#ifdef __cplusplus
 interface DAOProperties : public _DAODynaCollection {
   STDMETHOD(get_Item)(VARIANT Item, DAOProperty** ppItem) = 0;
 };
+#else
+typedef struct DAOProperties DAOProperties;
+#endif
+#ifdef __cplusplus
 interface DAOField : public _DAO {
   STDMETHOD(get_CollatingOrder)(LONG* pCollatingOrder) = 0;
   STDMETHOD(get_Type)(short* pType) = 0;
@@ -116,9 +237,17 @@ interface DAOField : public _DAO {
   STDMETHOD(GetChunk)(LONG Offset, LONG Bytes, VARIANT* pChunk) = 0;
   STDMETHOD(CreateProperty)(VARIANT Name, VARIANT Type, VARIANT Value, VARIANT DDL, DAOProperty** ppProperty) = 0;
 };
+#else
+typedef struct DAOField DAOField;
+#endif
+#ifdef __cplusplus
 interface DAOFields : public _DAODynaCollection {
   STDMETHOD(get_Item)(VARIANT Item, DAOField** ppItem) = 0;
 };
+#else
+typedef struct DAOFields DAOFields;
+#endif
+#ifdef __cplusplus
 interface DAOIndex : public _DAO {
   STDMETHOD(get_Name)(BSTR* pName) = 0;
   STDMETHOD(put_Name)(BSTR Name) = 0;
@@ -139,12 +268,24 @@ interface DAOIndex : public _DAO {
   STDMETHOD(CreateField)(VARIANT Name, VARIANT Type, VARIANT Size, DAOField** ppField) = 0;
   STDMETHOD(CreateProperty)(VARIANT Name, VARIANT Type, VARIANT Value, VARIANT DDL, DAOProperty** ppProperty) = 0;
 };
+#else
+typedef struct DAOIndex DAOIndex;
+#endif
+#ifdef __cplusplus
 interface DAOIndexes : public _DAODynaCollection {
   STDMETHOD(get_Item)(VARIANT Item, DAOIndex** ppItem) = 0;
 };
+#else
+typedef struct DAOIndexes DAOIndexes;
+#endif
+#ifdef __cplusplus
 interface DAOIndexFields : public _DAODynaCollection {
   STDMETHOD(get_Item)(VARIANT Item, VARIANT* pItem) = 0;
 };
+#else
+typedef struct DAOIndexFields DAOIndexFields;
+#endif
+#ifdef __cplusplus
 interface DAOParameter : public _DAO {
   STDMETHOD(get_Name)(BSTR* pName) = 0;
   STDMETHOD(get_Value)(VARIANT* pValue) = 0;
@@ -154,9 +295,17 @@ interface DAOParameter : public _DAO {
   STDMETHOD(get_Direction)(short* pDirection) = 0;
   STDMETHOD(put_Direction)(short Direction) = 0;
 };
+#else
+typedef struct DAOParameter DAOParameter;
+#endif
+#ifdef __cplusplus
 interface DAOParameters : public _DAOCollection {
   STDMETHOD(get_Item)(VARIANT Item, DAOParameter** ppItem) = 0;
 };
+#else
+typedef struct DAOParameters DAOParameters;
+#endif
+#ifdef __cplusplus
 interface DAORecordset : public _DAO {
   STDMETHOD(get_BOF)(VARIANT_BOOL* pBOF) = 0;
   STDMETHOD(get_Bookmark)(SAFEARRAY** ppsaBookmark) = 0;
@@ -221,6 +370,10 @@ interface DAORecordset : public _DAO {
   STDMETHOD(_30_Update)() = 0;
   STDMETHOD(get_Collect)(VARIANT Item, VARIANT* pvar) = 0;
 };
+#else
+typedef struct DAORecordset DAORecordset;
+#endif
+#ifdef __cplusplus
 interface DAOQueryDef : public _DAO {
   STDMETHOD(get_DateCreated)(VARIANT* pDateCreated) = 0;
   STDMETHOD(get_LastUpdated)(VARIANT* pLastUpdated) = 0;
@@ -244,9 +397,17 @@ interface DAOQueryDef : public _DAO {
   STDMETHOD(CreateProperty)(VARIANT Name, VARIANT Type, VARIANT Value, VARIANT DDL, DAOProperty** ppProperty) = 0;
   STDMETHOD(OpenRecordset)(VARIANT Type, VARIANT Options, VARIANT LockEdit, DAORecordset** ppRecordset) = 0;
 };
+#else
+typedef struct DAOQueryDef DAOQueryDef;
+#endif
+#ifdef __cplusplus
 interface DAOQueryDefs : public _DAODynaCollection {
   STDMETHOD(get_Item)(VARIANT Item, DAOQueryDef** ppItem) = 0;
 };
+#else
+typedef struct DAOQueryDefs DAOQueryDefs;
+#endif
+#ifdef __cplusplus
 interface DAOTableDef : public _DAO {
   STDMETHOD(get_Attributes)(LONG* pAttributes) = 0;
   STDMETHOD(put_Attributes)(LONG Attributes) = 0;
@@ -272,9 +433,17 @@ interface DAOTableDef : public _DAO {
   STDMETHOD(CreateIndex)(VARIANT Name, DAOIndex** ppIndex) = 0;
   STDMETHOD(CreateProperty)(VARIANT Name, VARIANT Type, VARIANT Value, VARIANT DDL, DAOProperty** ppProperty) = 0;
 };
+#else
+typedef struct DAOTableDef DAOTableDef;
+#endif
+#ifdef __cplusplus
 interface DAOTableDefs : public _DAODynaCollection {
   STDMETHOD(get_Item)(VARIANT Item, DAOTableDef** ppItem) = 0;
 };
+#else
+typedef struct DAOTableDefs DAOTableDefs;
+#endif
+#ifdef __cplusplus
 interface DAORelation : public _DAO {
   STDMETHOD(get_Name)(BSTR* pName) = 0;
   STDMETHOD(put_Name)(BSTR Name) = 0;
@@ -287,9 +456,17 @@ interface DAORelation : public _DAO {
   STDMETHOD(get_Fields)(DAOFields** ppFields) = 0;
   STDMETHOD(CreateField)(VARIANT Name, VARIANT Type, VARIANT Size, DAOField** ppField) = 0;
 };
+#else
+typedef struct DAORelation DAORelation;
+#endif
+#ifdef __cplusplus
 interface DAORelations : public _DAODynaCollection {
   STDMETHOD(get_Item)(VARIANT Item, DAORelation** ppItem) = 0;
 };
+#else
+typedef struct DAORelations DAORelations;
+#endif
+#ifdef __cplusplus
 interface DAODatabase : public _DAO {
   STDMETHOD(get_CollatingOrder)(LONG* pCollatingOrder) = 0;
   STDMETHOD(get_Connect)(BSTR* pConnect) = 0;
@@ -314,9 +491,17 @@ interface DAODatabase : public _DAO {
   STDMETHOD(NewPassword)(BSTR OldPassword, BSTR NewPassword) = 0;
   STDMETHOD(OpenRecordset)(BSTR Name, VARIANT Type, VARIANT Options, VARIANT LockEdit, DAORecordset** ppRecordset) = 0;
 };
+#else
+typedef struct DAODatabase DAODatabase;
+#endif
+#ifdef __cplusplus
 interface DAODatabases : public _DAOCollection {
   STDMETHOD(get_Item)(VARIANT Item, DAODatabase** ppItem) = 0;
 };
+#else
+typedef struct DAODatabases DAODatabases;
+#endif
+#ifdef __cplusplus
 interface DAOWorkspace : public _DAO {
   STDMETHOD(get_Name)(BSTR* pName) = 0;
   STDMETHOD(put_Name)(BSTR Name) = 0;
@@ -336,9 +521,17 @@ interface DAOWorkspace : public _DAO {
   STDMETHOD(get_LoginTimeout)(LONG* pLoginTimeout) = 0;
   STDMETHOD(put_LoginTimeout)(LONG LoginTimeout) = 0;
 };
+#else
+typedef struct DAOWorkspace DAOWorkspace;
+#endif
+#ifdef __cplusplus
 interface DAOWorkspaces : public _DAODynaCollection {
   STDMETHOD(get_Item)(VARIANT Item, DAOWorkspace** ppItem) = 0;
 };
+#else
+typedef struct DAOWorkspaces DAOWorkspaces;
+#endif
+#ifdef __cplusplus
 interface DAODBEngine : public _DAO {
   STDMETHOD(get_Version)(BSTR* pVersion) = 0;
   STDMETHOD(get_IniPath)(BSTR* pIniPath) = 0;
@@ -367,6 +560,9 @@ interface DAODBEngine : public _DAO {
   STDMETHOD(put_DefaultType)(LONG DefaultType) = 0;
   STDMETHOD(SetOption)(LONG Option, VARIANT Value) = 0;
 };
+#else
+typedef struct DAODBEngine DAODBEngine;
+#endif
 
 // Constants
 #define dbParamInput 1

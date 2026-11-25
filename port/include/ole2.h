@@ -11,7 +11,9 @@
 #include <oleauto.h>
 #include <oleidl.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 #define E_DRAW VIEW_E_DRAW
 #define DATA_E_FORMATETC DV_E_FORMATETC
@@ -103,6 +105,8 @@ HGLOBAL WINAPI OleGetIconOfClass(REFCLSID rclsid, LPOLESTR lpszLabel, BOOL fUseT
 HGLOBAL WINAPI OleMetafilePictFromIconAndLabel(HICON hIcon, LPOLESTR lpszLabel, LPOLESTR lpszSourceFile,
                                                UINT iIconIndex);
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #endif

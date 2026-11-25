@@ -8,7 +8,9 @@
 
 #include <windows.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 typedef LPVOID HINTERNET;
 typedef HINTERNET* LPHINTERNET;
@@ -313,9 +315,13 @@ typedef INTERNET_STATUS_CALLBACK* LPINTERNET_STATUS_CALLBACK;
 #define GOPHER_TYPE_ASK 0x40000000
 #define GOPHER_TYPE_GOPHER_PLUS 0x80000000
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 typedef struct {
   DWORD dwStructSize;
@@ -526,7 +532,9 @@ BOOL WINAPI InternetQueryDataAvailable(HINTERNET hFile, LPDWORD lpdwNumberOfByte
                                        DWORD_PTR dwContext);
 DWORD WINAPI InternetErrorDlg(HWND hWnd, HINTERNET hRequest, DWORD dwError, DWORD dwFlags, LPVOID* lppvData);
 DWORD WINAPI FtpGetFileSize(HINTERNET hFile, LPDWORD lpdwFileSizeHigh);
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #ifdef UNICODE
 #define URL_COMPONENTS URL_COMPONENTSW

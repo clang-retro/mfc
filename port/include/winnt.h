@@ -68,25 +68,35 @@ typedef GUID CLSID;
 typedef CLSID* LPCLSID;
 typedef GUID FMTID;
 typedef FMTID* LPFMTID;
+#ifdef __cplusplus
 #define REFGUID const GUID&
 #define REFIID const IID&
 #define REFCLSID const CLSID&
 #define REFFMTID const FMTID&
 #define InlineIsEqualGUID(a, b) IsEqualGUID(a, b)
-inline bool IsEqualGUID(REFGUID a, REFGUID b) {
+__WINPORT_INLINE bool IsEqualGUID(REFGUID a, REFGUID b) {
   const DWORD* x = (const DWORD*)&a;
   const DWORD* y = (const DWORD*)&b;
   return x[0] == y[0] && x[1] == y[1] && x[2] == y[2] && x[3] == y[3];
 }
+__WINPORT_INLINE bool operator==(REFGUID a, REFGUID b) { return IsEqualGUID(a, b); }
+__WINPORT_INLINE bool operator!=(REFGUID a, REFGUID b) { return !IsEqualGUID(a, b); }
+#else
+// In C, as in the Windows SDK, a GUID goes by pointer.
+#define REFGUID const GUID*
+#define REFIID const IID*
+#define REFCLSID const CLSID*
+#define REFFMTID const FMTID*
+#define IsEqualGUID(a, b) (!memcmp((a), (b), sizeof(GUID)))
+#define InlineIsEqualGUID(a, b) IsEqualGUID(a, b)
+#endif
 #define IsEqualIID(a, b) IsEqualGUID(a, b)
 #define IsEqualCLSID(a, b) IsEqualGUID(a, b)
-inline bool operator==(REFGUID a, REFGUID b) { return IsEqualGUID(a, b); }
-inline bool operator!=(REFGUID a, REFGUID b) { return !IsEqualGUID(a, b); }
 #define DEFINE_GUID(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
-  extern "C" __attribute__((weak)) const GUID name = {l, w1, w2, {b1, b2, b3, b4, b5, b6, b7, b8}}
+  __WINPORT_EXTERN_C __attribute__((weak)) const GUID name = {l, w1, w2, {b1, b2, b3, b4, b5, b6, b7, b8}}
 #define DEFINE_OLEGUID(name, l, w1, w2) DEFINE_GUID(name, l, w1, w2, 0xC0, 0, 0, 0, 0, 0, 0, 0x46)
 #define GUID_NULL IID_NULL
-extern "C" const GUID IID_NULL;
+__WINPORT_EXTERN_C const GUID IID_NULL;
 #define CLSID_NULL IID_NULL
 #define FMTID_NULL IID_NULL
 
@@ -245,33 +255,33 @@ typedef struct _RTL_CRITICAL_SECTION {
   HANDLE OwningThread;
   HANDLE LockSemaphore;
   ULONG_PTR SpinCount;
-  alignas(16) unsigned char _Mutex[64];
+  __attribute__((aligned(16))) unsigned char _Mutex[64];
 } RTL_CRITICAL_SECTION, *PRTL_CRITICAL_SECTION, CRITICAL_SECTION, *PCRITICAL_SECTION,
     *LPCRITICAL_SECTION;
 
-inline LONG InterlockedIncrement(LONG volatile* p) { return __atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST); }
-inline LONG InterlockedDecrement(LONG volatile* p) { return __atomic_sub_fetch(p, 1, __ATOMIC_SEQ_CST); }
-inline LONG InterlockedExchange(LONG volatile* p, LONG v) {
+__WINPORT_INLINE LONG InterlockedIncrement(LONG volatile* p) { return __atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST); }
+__WINPORT_INLINE LONG InterlockedDecrement(LONG volatile* p) { return __atomic_sub_fetch(p, 1, __ATOMIC_SEQ_CST); }
+__WINPORT_INLINE LONG InterlockedExchange(LONG volatile* p, LONG v) {
   return __atomic_exchange_n(p, v, __ATOMIC_SEQ_CST);
 }
-inline LONG InterlockedExchangeAdd(LONG volatile* p, LONG v) {
+__WINPORT_INLINE LONG InterlockedExchangeAdd(LONG volatile* p, LONG v) {
   return __atomic_fetch_add(p, v, __ATOMIC_SEQ_CST);
 }
-inline LONG InterlockedCompareExchange(LONG volatile* p, LONG v, LONG cmp) {
-  __atomic_compare_exchange_n(p, &cmp, v, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+__WINPORT_INLINE LONG InterlockedCompareExchange(LONG volatile* p, LONG v, LONG cmp) {
+  __atomic_compare_exchange_n(p, &cmp, v, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
   return cmp;
 }
-inline LONGLONG InterlockedIncrement64(LONGLONG volatile* p) {
+__WINPORT_INLINE LONGLONG InterlockedIncrement64(LONGLONG volatile* p) {
   return __atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST);
 }
-inline LONGLONG InterlockedDecrement64(LONGLONG volatile* p) {
+__WINPORT_INLINE LONGLONG InterlockedDecrement64(LONGLONG volatile* p) {
   return __atomic_sub_fetch(p, 1, __ATOMIC_SEQ_CST);
 }
-inline PVOID InterlockedExchangePointer(PVOID volatile* p, PVOID v) {
+__WINPORT_INLINE PVOID InterlockedExchangePointer(PVOID volatile* p, PVOID v) {
   return __atomic_exchange_n(p, v, __ATOMIC_SEQ_CST);
 }
-inline PVOID InterlockedCompareExchangePointer(PVOID volatile* p, PVOID v, PVOID cmp) {
-  __atomic_compare_exchange_n(p, &cmp, v, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+__WINPORT_INLINE PVOID InterlockedCompareExchangePointer(PVOID volatile* p, PVOID v, PVOID cmp) {
+  __atomic_compare_exchange_n(p, &cmp, v, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
   return cmp;
 }
 #define MemoryBarrier() __atomic_thread_fence(__ATOMIC_SEQ_CST)

@@ -11,7 +11,9 @@
 #define SDDL_REVISION_1 1
 #define SDDL_REVISION SDDL_REVISION_1
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 BOOL WINAPI ConvertSidToStringSidA(PSID, LPSTR*);
 BOOL WINAPI ConvertSidToStringSidW(PSID, LPWSTR*);
@@ -24,7 +26,9 @@ BOOL WINAPI ConvertSecurityDescriptorToStringSecurityDescriptorW(PSECURITY_DESCR
 BOOL WINAPI ConvertStringSecurityDescriptorToSecurityDescriptorA(LPCSTR, DWORD, PSECURITY_DESCRIPTOR*, PULONG);
 BOOL WINAPI ConvertStringSecurityDescriptorToSecurityDescriptorW(LPCWSTR, DWORD, PSECURITY_DESCRIPTOR*, PULONG);
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #define ConvertSidToStringSid __WINPORT_AW(ConvertSidToStringSid)
 #define ConvertStringSidToSid __WINPORT_AW(ConvertStringSidToSid)

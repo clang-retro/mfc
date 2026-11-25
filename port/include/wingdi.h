@@ -9,7 +9,9 @@
 
 #include <winbase.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 #define RGB(r, g, b) ((COLORREF)(((BYTE)(r) | ((WORD)((BYTE)(g)) << 8)) | (((DWORD)(BYTE)(b)) << 16)))
 #define PALETTERGB(r, g, b) (0x02000000 | RGB(r, g, b))
@@ -738,6 +740,27 @@ typedef struct _GLYPHMETRICS {
   short gmCellIncX;
   short gmCellIncY;
 } GLYPHMETRICS, *LPGLYPHMETRICS;
+// GetGlyphOutline GGO_NATIVE and GGO_BEZIER: each contour is a header
+// followed by curve records, in 16.16 fixed point.
+typedef struct tagPOINTFX {
+  FIXED x;
+  FIXED y;
+} POINTFX, *LPPOINTFX;
+typedef struct tagTTPOLYCURVE {
+  WORD wType;
+  WORD cpfx;
+  POINTFX apfx[1];
+} TTPOLYCURVE, *LPTTPOLYCURVE;
+typedef struct tagTTPOLYGONHEADER {
+  DWORD cb;
+  DWORD dwType;
+  POINTFX pfxStart;
+} TTPOLYGONHEADER, *LPTTPOLYGONHEADER;
+#define TT_POLYGON_TYPE 24
+#define TT_PRIM_LINE 1
+#define TT_PRIM_QSPLINE 2
+#define TT_PRIM_CSPLINE 3
+#define GGO_UNHINTED 0x0100
 typedef int(CALLBACK* FONTENUMPROCA)(const LOGFONTA*, const TEXTMETRICA*, DWORD, LPARAM);
 typedef int(CALLBACK* FONTENUMPROCW)(const LOGFONTW*, const TEXTMETRICW*, DWORD, LPARAM);
 typedef FONTENUMPROCA OLDFONTENUMPROCA;
@@ -1017,6 +1040,7 @@ typedef struct _devicemodeW {
 #define DM_BITSPERPEL 0x00040000L
 #define DM_PELSWIDTH 0x00080000L
 #define DM_PELSHEIGHT 0x00100000L
+#define DM_DISPLAYFREQUENCY 0x00400000L
 #define DMORIENT_PORTRAIT 1
 #define DMORIENT_LANDSCAPE 2
 #define DMPAPER_LETTER 1
@@ -1344,6 +1368,7 @@ BOOL WINAPI UpdateColors(HDC);
 #define SYSPAL_NOSTATIC 2
 #define SYSPAL_NOSTATIC256 3
 UINT WINAPI GetSystemPaletteUse(HDC);
+UINT WINAPI SetSystemPaletteUse(HDC, UINT);
 
 // Metafiles
 HDC WINAPI CreateMetaFileA(LPCSTR);
@@ -1647,6 +1672,8 @@ int WINAPI wglGetLayerPaletteEntries(HDC, int, int, int, COLORREF*);
 BOOL WINAPI wglRealizeLayerPalette(HDC, int, BOOL);
 BOOL WINAPI wglSwapLayerBuffers(HDC, UINT);
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #endif

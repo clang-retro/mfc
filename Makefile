@@ -33,7 +33,8 @@ endif
 # the portable layer, with the C and C++ libraries of clang-retro/mac-sdk.
 # There are no shared libraries, no network and no X11, Wayland or Cocoa
 # backend. See docs/macos-classic.md.
-ifneq ($(filter m68k-apple-macos% powerpc-apple-macos%,$(TARGET)),)
+# (powerpc-apple-macosx is Mac OS X, below.)
+ifneq ($(filter m68k-apple-macos% powerpc-apple-macos%,$(if $(findstring macosx,$(TARGET)),,$(TARGET))),)
 MACOS_CLASSIC = 1
 MACSDK ?= ../mac-sdk
 MACSDK_LIB = $(MACSDK)/lib
@@ -44,6 +45,23 @@ STDLIB = -nostdinc++ -isystem $(MACSDK_LIB)/include/c++/15.2.0/$(CLASSIC_TRIPLE)
   -isystem $(MACSDK_LIB)/include -I$(MACSDK)/include
 CLASSIC_FLAGS = $(if $(findstring m68k,$(TARGET)),-mcmodel=large) -femulated-tls \
   -fexceptions -frtti -ffunction-sections -fdata-sections -D_GNU_SOURCE
+endif
+# Mac OS X 10.4 and 10.5 (make TARGET=powerpc-apple-macosx10.4
+# SDK=/path/to/MacOSX10.4u.sdk LIBCXX=/path/to/libcxx-macosx) build over
+# the portable layer with the Cocoa backend, against Apple's SDK and a
+# libc++ built with threads (dos-sdk's scripts/build-libcxx-macosx.sh, which
+# has them for 10.4). port/compat/macosx adds the C library functions that those
+# versions do not have, and thread_local is emulated. The archives are
+# made with Apple's ar (CCTOOLS, default powerpc-apple-darwin8-), because
+# ld64 cannot read the symbol table that llvm-ar writes for PowerPC. See
+# docs/macosx-10.4.md.
+ifneq ($(filter %-apple-macosx10.4 %-apple-macosx10.5 %-apple-darwin8 %-apple-darwin9,$(TARGET)),)
+MACOSX_LEGACY = 1
+SDK ?= /Developer/SDKs/MacOSX10.4u.sdk
+LIBCXX ?= ../libcxx-macosx
+CCTOOLS ?= powerpc-apple-darwin8-
+STDLIB = -nostdinc++ -isystem $(LIBCXX)/include/c++/v1 -isystem port/compat/macosx \
+  -isysroot $(SDK) -D__STDC_FORMAT_MACROS -DWINPORT_MACOSX_COMPAT -femulated-tls
 endif
 SYSROOT ?=
 ifneq ($(CFG),)
@@ -69,6 +87,10 @@ AR = $(if $(shell command -v llvm-ar 2>/dev/null),llvm-ar,ar)
 NM = $(if $(shell command -v llvm-nm 2>/dev/null),llvm-nm,nm)
 endif
 
+ifeq ($(MACOSX_LEGACY),1)
+AR = $(CCTOOLS)ar
+endif
+
 CXXFLAGS ?= -O2
 STDLIB ?= -stdlib=libc++
 TEST_RC ?=
@@ -83,7 +105,7 @@ ALL_CXXFLAGS = $(TARGET_FLAGS) $(STDLIB) -fno-delete-null-pointer-checks \
 
 SRCS = $(wildcard src/*.cpp)
 ifeq ($(PORTABLE),1)
-PORT_SRCS = $(filter-out port/src/scrnsave.cpp,$(wildcard port/src/*.cpp))
+PORT_SRCS = $(filter-out port/src/scrnsave.cpp port/src/glaux.cpp,$(wildcard port/src/*.cpp))
 PORT_OBJS = $(patsubst port/src/%.cpp,$(OUT)/port/%.o,$(PORT_SRCS))
 # macOS adds the AppKit half of the Cocoa backend, in Objective-C++.
 ifneq ($(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
@@ -105,6 +127,12 @@ ALL_CXXFLAGS += -Iport/include -fPIC
 endif
 PORT_LIB = $(OUT)/libwinport.a
 SCRNSAVE_LIBS = $(OUT)/libscrnsave.a $(OUT)/libscrnsavw.a
+# Mac OS X: the OpenGL auxiliary library (GL/glaux.h), over GLUT.
+ifneq ($(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
+ifneq ($(MACOS_CLASSIC),1)
+SCRNSAVE_LIBS += $(OUT)/libglaux.a
+endif
+endif
 endif
 # 16-bit Windows (make TARGET=i8086-pc-win16): the core classes in the
 # large model (CObject, CString, the collections, CFile, CArchive, CTime
@@ -137,7 +165,7 @@ OBJS_A = $(patsubst src/%.cpp,$(OUT)/a/%.o,$(SRCS))
 OBJS_U = $(patsubst src/%.cpp,$(OUT)/u/%.o,$(SRCS))
 HDRS = $(wildcard include/*.h) $(wildcard src/*.h) src/wnd_handlers.inc
 ifeq ($(PORTABLE),1)
-HDRS += $(wildcard port/include/*.h) $(wildcard port/src/*.h) $(wildcard port/src/*.inc)
+HDRS += $(wildcard port/include/*.h) $(wildcard port/include/GL/*.h) $(wildcard port/include/sys/*.h) $(wildcard port/src/*.h) $(wildcard port/src/*.inc)
 endif
 
 # The shared library: every source, built with _AFXDLL; the files that
@@ -162,7 +190,7 @@ ifeq ($(PORTABLE),1)
 STATIC_LIBS += $(PORT_LIB) $(SCRNSAVE_LIBS)
 ifneq ($(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
 SHLIB_EXT = dylib
-SHLIB_SYSLIBS = -framework Cocoa -lpthread
+SHLIB_SYSLIBS = -framework Cocoa -framework OpenGL -lpthread
 SHLIB_FLAGS = -dynamiclib -Wl,-install_name,@rpath/$(notdir $@) -Wl,-rpath,@loader_path
 else
 SHLIB_EXT = so
@@ -198,6 +226,9 @@ $(OUT)/libscrnsave.a: $(OUT)/port/scrnsave-a.o
 	rm -f $@
 	$(AR) rcs $@ $^
 $(OUT)/libscrnsavw.a: $(OUT)/port/scrnsave-u.o
+	rm -f $@
+	$(AR) rcs $@ $^
+$(OUT)/libglaux.a: $(OUT)/port/glaux.o
 	rm -f $@
 	$(AR) rcs $@ $^
 $(OUT)/port/scrnsave-a.o: port/src/scrnsave.cpp $(HDRS)

@@ -275,7 +275,9 @@ typedef struct _CRYPTOAPI_BLOB {
 #endif
 
 #ifdef __cplusplus
+#ifdef __cplusplus
 extern "C" {
+#endif
 #endif
 
 BOOL WINAPI CryptAcquireContextA(HCRYPTPROV*, LPCSTR, LPCSTR, DWORD, DWORD);
@@ -309,7 +311,9 @@ BOOL WINAPI CryptVerifySignatureA(HCRYPTHASH, const BYTE*, DWORD, HCRYPTKEY, LPC
 BOOL WINAPI CryptVerifySignatureW(HCRYPTHASH, const BYTE*, DWORD, HCRYPTKEY, LPCWSTR, DWORD);
 
 #ifdef __cplusplus
-}
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 #endif
 
 #ifdef UNICODE

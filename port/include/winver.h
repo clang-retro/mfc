@@ -7,7 +7,9 @@
 
 #include <winbase.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 #define VS_FILE_INFO RT_VERSION
 #define VS_VERSION_INFO 1
@@ -47,6 +49,8 @@ BOOL WINAPI VerQueryValueW(LPCVOID, LPCWSTR, LPVOID*, PUINT);
 #define GetFileVersionInfo __WINPORT_AW(GetFileVersionInfo)
 #define VerQueryValue __WINPORT_AW(VerQueryValue)
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #endif

@@ -11,7 +11,9 @@
 #define STIF_DEFAULT 0x00000000
 #define STIF_SUPPORT_HEX 0x00000001
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 LPSTR WINAPI PathAddBackslashA(LPSTR);
 LPWSTR WINAPI PathAddBackslashW(LPWSTR);
@@ -121,7 +123,9 @@ LPWSTR WINAPI StrCatBuffW(LPWSTR, LPCWSTR, int);
 LPSTR WINAPI StrFormatByteSize64A(LONGLONG, LPSTR, UINT);
 LPWSTR WINAPI StrFormatByteSize64W(LONGLONG, LPWSTR, UINT);
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #ifdef UNICODE
 #define PathAddBackslash PathAddBackslashW

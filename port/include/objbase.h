@@ -8,7 +8,9 @@
 
 #include <objidl.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 typedef enum tagCOINIT {
   COINIT_APARTMENTTHREADED = 0x2,
@@ -107,6 +109,8 @@ HRESULT WINAPI MonikerRelativePathTo(LPMONIKER, LPMONIKER, LPMONIKER*, BOOL);
 HRESULT WINAPI MonikerCommonPrefixWith(LPMONIKER, LPMONIKER, LPMONIKER*);
 HRESULT WINAPI CreateDataAdviseHolder(LPDATAADVISEHOLDER*);
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #endif

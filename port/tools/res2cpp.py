@@ -3,7 +3,7 @@
 # the compiled .res as a byte array, registered with the portable layer
 # when the program starts, so FindResource and the rest find it.
 #
-#   res2cpp.py [-I dir]... [-D name[=value]]... app.rc -o app-res.cpp
+#   res2cpp.py [-I dir]... [-D name[=value]]... [--codepage N] app.rc -o app-res.cpp
 #   res2cpp.py app.res -o app-res.cpp
 #
 # A .rc file is compiled with llvm-rc ($RC, default llvm-rc). The
@@ -85,6 +85,9 @@ def compile_rc(args, res):
             cmd += ["/I", MFC_INCLUDE]
         for d in args.D:
             cmd += ["/D", d]
+        # The code page of 8-bit strings, such as 1252 for Western scripts.
+        if args.codepage:
+            cmd += ["/C", str(args.codepage)]
         # Relative names in the script are found from its own directory.
         cmd += ["/I", os.path.dirname(os.path.abspath(args.input)) or "."]
         # The input after "--": an absolute path such as /Users/... would
@@ -130,6 +133,8 @@ def main():
     p.add_argument("-o", dest="output", required=True, help="the .cpp file to write")
     p.add_argument("-I", action="append", default=[], help="an include directory for the .rc file")
     p.add_argument("-D", action="append", default=[], help="a macro for the .rc file")
+    p.add_argument("--codepage", type=int, default=0,
+                   help="the code page of the script's 8-bit strings (for example 1252)")
     args = p.parse_args()
     if args.input.lower().endswith(".res"):
         data = open(args.input, "rb").read()

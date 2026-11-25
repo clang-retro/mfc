@@ -19,7 +19,9 @@
 #define ODBCVER 0x0351
 #endif
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 typedef unsigned char SQLCHAR;
 typedef signed char SQLSCHAR;
@@ -350,6 +352,8 @@ SQLRETURN SQL_API SQLTablesW(SQLHSTMT hstmt, SQLWCHAR* szCatalogName, SQLSMALLIN
 #define SQLTables SQLTablesA
 #endif
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #endif

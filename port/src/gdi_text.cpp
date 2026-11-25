@@ -537,13 +537,223 @@ BOOL WINAPI GetCharABCWidthsA(HDC hdc, UINT first, UINT last, LPABC out) {
   return GetCharABCWidthsW(hdc, first & 0xFF, last & 0xFF, out);
 }
 
-// Outlines, kerning and raw font tables are not offered.
+// Kerning and raw font tables are not offered.
 DWORD WINAPI GetKerningPairsW(HDC hdc, DWORD, LPKERNINGPAIR) { return DCOf(hdc) ? 0 : 0; }
 DWORD WINAPI GetKerningPairsA(HDC hdc, DWORD n, LPKERNINGPAIR p) { return GetKerningPairsW(hdc, n, p); }
-UINT WINAPI GetOutlineTextMetricsW(HDC, UINT, LPOUTLINETEXTMETRICW) { return 0; }
-UINT WINAPI GetOutlineTextMetricsA(HDC, UINT, LPOUTLINETEXTMETRICA) { return 0; }
-DWORD WINAPI GetGlyphOutlineW(HDC, UINT, UINT, LPGLYPHMETRICS, DWORD, LPVOID, const MAT2*) { return GDI_ERROR; }
-DWORD WINAPI GetGlyphOutlineA(HDC, UINT, UINT, LPGLYPHMETRICS, DWORD, LPVOID, const MAT2*) { return GDI_ERROR; }
+
+namespace {
+
+// The outline metrics of the DC's font without the name strings, in
+// logical units. False for the built-in bitmap font, which has no outline.
+bool OutlineMetrics(HDC hdc, OUTLINETEXTMETRICW* m, RealFont** font) {
+  DCObj* dc = DCOf(hdc);
+  if (!dc) return false;
+  RealFont* f = FontOf(dc);
+  if (!f->EmSquare()) return false;
+  memset(m, 0, sizeof *m);
+  FillMetrics(dc, f, &m->otmTextMetrics);
+  const TEXTMETRICW& tm = m->otmTextMetrics;
+  m->otmfsSelection = (f->italic ? 1u : 0u) | (f->weight >= FW_BOLD ? 0x20u : 0u);
+  m->otmsCharSlopeRise = 1;
+  m->otmItalicAngle = f->italic ? -120 : 0;  // tenths of a degree
+  m->otmEMSquare = (UINT)f->EmSquare();
+  m->otmAscent = tm.tmAscent;
+  m->otmDescent = -tm.tmDescent;
+  m->otmLineGap = (UINT)tm.tmExternalLeading;
+  m->otmsCapEmHeight = (UINT)(tm.tmAscent - tm.tmInternalLeading);
+  m->otmsXHeight = m->otmsCapEmHeight / 2;
+  m->otmrcFontBox.left = 0;
+  m->otmrcFontBox.top = tm.tmAscent;
+  m->otmrcFontBox.right = tm.tmMaxCharWidth;
+  m->otmrcFontBox.bottom = -tm.tmDescent;
+  m->otmMacAscent = tm.tmAscent;
+  m->otmMacDescent = -tm.tmDescent;
+  m->otmMacLineGap = (UINT)tm.tmExternalLeading;
+  m->otmusMinimumPPEM = 9;
+  m->otmptSubscriptSize.x = m->otmptSuperscriptSize.x = tm.tmAveCharWidth * 2 / 3;
+  m->otmptSubscriptSize.y = m->otmptSuperscriptSize.y = tm.tmHeight * 2 / 3;
+  m->otmptSubscriptOffset.y = tm.tmDescent / 2;
+  m->otmptSuperscriptOffset.y = tm.tmAscent / 2;
+  m->otmsStrikeoutSize = (UINT)dc->LogicalY(f->strikeSize);
+  m->otmsStrikeoutPosition = dc->LogicalY(f->strikePos);
+  m->otmsUnderscoreSize = dc->LogicalY(f->underlineSize);
+  m->otmsUnderscorePosition = -dc->LogicalY(f->underlinePos);
+  *font = f;
+  return true;
+}
+
+// 16.16 fixed point from a float.
+FIXED ToFixed(double v) {
+  LONG l = (LONG)floor(v * 65536.0 + 0.5);
+  FIXED f;
+  f.value = (short)(l >> 16);
+  f.fract = (WORD)(l & 0xFFFF);
+  return f;
+}
+
+// A float from 16.16 fixed point.
+double FromFixed(FIXED f) { return f.value + f.fract / 65536.0; }
+
+// Appends n bytes to a growing outline buffer.
+void Put(std::vector<BYTE>* out, const void* p, size_t n) {
+  out->insert(out->end(), (const BYTE*)p, (const BYTE*)p + n);
+}
+
+// The contours as GGO_NATIVE records: straight runs as TT_PRIM_LINE and
+// curves as TT_PRIM_QSPLINE (control points, then the end point).
+void NativeOutline(const std::vector<std::vector<OutlinePoint>>& contours, std::vector<BYTE>* out) {
+  for (const auto& c : contours) {
+    size_t start = out->size();
+    TTPOLYGONHEADER h = {};
+    h.dwType = TT_POLYGON_TYPE;
+    h.pfxStart.x = ToFixed(c[0].x);
+    h.pfxStart.y = ToFixed(c[0].y);
+    Put(out, &h, sizeof h);
+    // Visit the points after the start and back to the start, which
+    // closes the contour.
+    size_t n = c.size();
+    size_t i = 1;
+    while (i <= n) {
+      bool line = c[i % n].onCurve;
+      std::vector<POINTFX> pts;
+      if (line) {
+        while (i <= n && c[i % n].onCurve) {
+          POINTFX p = {ToFixed(c[i % n].x), ToFixed(c[i % n].y)};
+          pts.push_back(p);
+          i++;
+        }
+      } else {
+        while (i <= n) {
+          const OutlinePoint& q = c[i % n];
+          POINTFX p = {ToFixed(q.x), ToFixed(q.y)};
+          pts.push_back(p);
+          i++;
+          if (q.onCurve) break;
+        }
+      }
+      WORD type = line ? TT_PRIM_LINE : TT_PRIM_QSPLINE, count = (WORD)pts.size();
+      Put(out, &type, sizeof type);
+      Put(out, &count, sizeof count);
+      Put(out, pts.data(), pts.size() * sizeof(POINTFX));
+    }
+    DWORD cb = (DWORD)(out->size() - start);
+    memcpy(out->data() + start, &cb, sizeof cb);
+  }
+}
+
+}  // namespace
+
+// Fills the outline metrics of the font of hdc, with its names.
+UINT WINAPI GetOutlineTextMetricsW(HDC hdc, UINT size, LPOUTLINETEXTMETRICW out) {
+  OUTLINETEXTMETRICW m;
+  RealFont* f;
+  if (!OutlineMetrics(hdc, &m, &f)) return 0;
+  // The names follow the structure, as offsets from its start.
+  std::wstring style = f->weight >= FW_BOLD ? (f->italic ? L"Bold Italic" : L"Bold")
+                                            : (f->italic ? L"Italic" : L"Regular");
+  std::wstring full = f->family + L" " + style;
+  const std::wstring* names[4] = {&f->family, &f->face, &style, &full};
+  size_t total = sizeof m;
+  PSTR* slots[4] = {&m.otmpFamilyName, &m.otmpFaceName, &m.otmpStyleName, &m.otmpFullName};
+  for (int i = 0; i < 4; i++) {
+    *slots[i] = (PSTR)(uintptr_t)total;
+    total += (names[i]->size() + 1) * sizeof(WCHAR);
+  }
+  m.otmSize = (UINT)total;
+  if (!out) return (UINT)total;
+  if (size < sizeof m) return 0;
+  memcpy(out, &m, sizeof m);
+  for (int i = 0; i < 4; i++) {
+    size_t at = (size_t)(uintptr_t)*slots[i];
+    size_t bytes = (names[i]->size() + 1) * sizeof(WCHAR);
+    if (at + bytes <= size) memcpy((BYTE*)out + at, names[i]->c_str(), bytes);
+  }
+  return (UINT)std::min<size_t>(total, size);
+}
+
+// The ANSI form of GetOutlineTextMetricsW.
+UINT WINAPI GetOutlineTextMetricsA(HDC hdc, UINT size, LPOUTLINETEXTMETRICA out) {
+  OUTLINETEXTMETRICW m;
+  RealFont* f;
+  if (!OutlineMetrics(hdc, &m, &f)) return 0;
+  std::string family = ToAnsi(f->family), face = ToAnsi(f->face);
+  std::string style = f->weight >= FW_BOLD ? (f->italic ? "Bold Italic" : "Bold") : (f->italic ? "Italic" : "Regular");
+  std::string full = family + " " + style;
+  const std::string* names[4] = {&family, &face, &style, &full};
+  OUTLINETEXTMETRICA a;
+  memset(&a, 0, sizeof a);
+  // The fields after the text metrics are the same in both forms.
+  MetricsToA(m.otmTextMetrics, &a.otmTextMetrics);
+  memcpy(&a.otmFiller, &m.otmFiller, offsetof(OUTLINETEXTMETRICW, otmpFamilyName) - offsetof(OUTLINETEXTMETRICW, otmFiller));
+  size_t total = sizeof a;
+  PSTR* slots[4] = {&a.otmpFamilyName, &a.otmpFaceName, &a.otmpStyleName, &a.otmpFullName};
+  for (int i = 0; i < 4; i++) {
+    *slots[i] = (PSTR)(uintptr_t)total;
+    total += names[i]->size() + 1;
+  }
+  a.otmSize = (UINT)total;
+  if (!out) return (UINT)total;
+  if (size < sizeof a) return 0;
+  memcpy(out, &a, sizeof a);
+  for (int i = 0; i < 4; i++) {
+    size_t at = (size_t)(uintptr_t)*slots[i];
+    if (at + names[i]->size() + 1 <= size) memcpy((BYTE*)out + at, names[i]->c_str(), names[i]->size() + 1);
+  }
+  return (UINT)std::min<size_t>(total, size);
+}
+
+DWORD WINAPI GetGlyphOutlineW(HDC hdc, UINT ch, UINT format, LPGLYPHMETRICS gm, DWORD size, LPVOID buf,
+                              const MAT2* mat) {
+  DCObj* dc = DCOf(hdc);
+  if (!dc || !gm) return GDI_ERROR;
+  RealFont* f = FontOf(dc);
+  UINT kind = format & ~(UINT)(GGO_UNHINTED | GGO_GLYPH_INDEX);
+  // Glyph indexes are not kept: the character code stands for itself.
+  const GlyphImage& g = f->Glyph(ch);
+  gm->gmBlackBoxX = (UINT)std::max(1, dc->LogicalX(g.w));
+  gm->gmBlackBoxY = (UINT)std::max(1, dc->LogicalY(g.h));
+  gm->gmptGlyphOrigin.x = g.left < 0 ? -dc->LogicalX(-g.left) : dc->LogicalX(g.left);
+  gm->gmptGlyphOrigin.y = g.top < 0 ? dc->LogicalY(-g.top) : -dc->LogicalY(g.top);
+  gm->gmCellIncX = (short)dc->LogicalX(g.advance);
+  gm->gmCellIncY = 0;
+  if (kind == GGO_METRICS) return 0;
+  if (kind != GGO_NATIVE) {
+    // Bitmaps and cubic (GGO_BEZIER) outlines are not made.
+    SetLastError(ERROR_NOT_SUPPORTED);
+    return GDI_ERROR;
+  }
+  std::vector<std::vector<OutlinePoint>> contours;
+  if (!f->Outline(ch, &contours)) return GDI_ERROR;
+  // Device pixels to logical units, then the caller's transformation.
+  double ux = g.advance ? (double)dc->LogicalX(g.advance) / g.advance : 1.0;
+  double uy = dc->LogicalY(1000) / 1000.0;
+  double m11 = 1, m12 = 0, m21 = 0, m22 = 1;
+  if (mat) {
+    m11 = FromFixed(mat->eM11);
+    m12 = FromFixed(mat->eM12);
+    m21 = FromFixed(mat->eM21);
+    m22 = FromFixed(mat->eM22);
+  }
+  for (auto& c : contours)
+    for (OutlinePoint& p : c) {
+      double x = p.x * ux, y = p.y * uy;
+      p.x = (float)(m11 * x + m21 * y);
+      p.y = (float)(m12 * x + m22 * y);
+    }
+  std::vector<BYTE> data;
+  NativeOutline(contours, &data);
+  if (!buf || !size) return (DWORD)data.size();
+  if (size < data.size()) return GDI_ERROR;
+  memcpy(buf, data.data(), data.size());
+  return (DWORD)data.size();
+}
+
+DWORD WINAPI GetGlyphOutlineA(HDC hdc, UINT ch, UINT format, LPGLYPHMETRICS gm, DWORD size, LPVOID buf,
+                              const MAT2* mat) {
+  // A single byte stands for the Latin-1 character of the same number.
+  if (!(format & GGO_GLYPH_INDEX)) ch &= 0xFF;
+  return GetGlyphOutlineW(hdc, ch, format, gm, size, buf, mat);
+}
 DWORD WINAPI GetFontData(HDC, DWORD, DWORD, LPVOID, DWORD) { return GDI_ERROR; }
 DWORD WINAPI GetFontLanguageInfo(HDC hdc) { return 0; }
 

@@ -8,19 +8,47 @@
 
 #include <objidl.h>
 
+#ifdef __cplusplus
 interface IDispatch;
+#else
+typedef struct IDispatch IDispatch;
+#endif
+#ifdef __cplusplus
 interface ITypeInfo;
+#else
+typedef struct ITypeInfo ITypeInfo;
+#endif
+#ifdef __cplusplus
 interface ITypeLib;
+#else
+typedef struct ITypeLib ITypeLib;
+#endif
+#ifdef __cplusplus
 interface ITypeComp;
+#else
+typedef struct ITypeComp ITypeComp;
+#endif
+#ifdef __cplusplus
 interface IRecordInfo;
+#else
+typedef struct IRecordInfo IRecordInfo;
+#endif
+#ifdef __cplusplus
 interface IEnumVARIANT;
+#else
+typedef struct IEnumVARIANT IEnumVARIANT;
+#endif
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 extern const IID IID_IDispatch, IID_ITypeInfo, IID_ITypeInfo2, IID_ITypeLib, IID_ITypeLib2, IID_ITypeComp,
     IID_IEnumVARIANT, IID_IErrorInfo, IID_ICreateErrorInfo, IID_ISupportErrorInfo, IID_IRecordInfo,
     IID_ICreateTypeInfo, IID_ICreateTypeInfo2, IID_ICreateTypeLib, IID_ICreateTypeLib2, IID_ITypeChangeEvents, IID_IErrorLog,
     IID_IPropertyBag;
-}
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 typedef struct tagSAFEARRAYBOUND {
   ULONG cElements;
@@ -435,6 +463,7 @@ typedef union tagBINDPTR {
   ITypeComp* lptcomp;
 } BINDPTR, *LPBINDPTR;
 
+#ifdef __cplusplus
 interface IDispatch : public IUnknown {
   STDMETHOD(GetTypeInfoCount)(UINT* pctinfo) = 0;
   STDMETHOD(GetTypeInfo)(UINT iTInfo, LCID lcid, ITypeInfo** ppTInfo) = 0;
@@ -442,15 +471,23 @@ interface IDispatch : public IUnknown {
   STDMETHOD(Invoke)(DISPID dispIdMember, REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS* pDispParams,
                     VARIANT* pVarResult, EXCEPINFO* pExcepInfo, UINT* puArgErr) = 0;
 };
+#else
+typedef struct IDispatch IDispatch;
+#endif
 typedef IDispatch* LPDISPATCH;
 
+#ifdef __cplusplus
 interface ITypeComp : public IUnknown {
   STDMETHOD(Bind)(LPOLESTR szName, ULONG lHashVal, WORD wFlags, ITypeInfo** ppTInfo, DESCKIND* pDescKind,
                   BINDPTR* pBindPtr) = 0;
   STDMETHOD(BindType)(LPOLESTR szName, ULONG lHashVal, ITypeInfo** ppTInfo, ITypeComp** ppTComp) = 0;
 };
+#else
+typedef struct ITypeComp ITypeComp;
+#endif
 typedef ITypeComp* LPTYPECOMP;
 
+#ifdef __cplusplus
 interface ITypeInfo : public IUnknown {
   STDMETHOD(GetTypeAttr)(TYPEATTR** ppTypeAttr) = 0;
   STDMETHOD(GetTypeComp)(ITypeComp** ppTComp) = 0;
@@ -475,8 +512,12 @@ interface ITypeInfo : public IUnknown {
   STDMETHOD_(void, ReleaseFuncDesc)(FUNCDESC* pFuncDesc) = 0;
   STDMETHOD_(void, ReleaseVarDesc)(VARDESC* pVarDesc) = 0;
 };
+#else
+typedef struct ITypeInfo ITypeInfo;
+#endif
 typedef ITypeInfo* LPTYPEINFO;
 
+#ifdef __cplusplus
 interface ITypeLib : public IUnknown {
   STDMETHOD_(UINT, GetTypeInfoCount)() = 0;
   STDMETHOD(GetTypeInfo)(UINT index, ITypeInfo** ppTInfo) = 0;
@@ -491,16 +532,24 @@ interface ITypeLib : public IUnknown {
                       USHORT* pcFound) = 0;
   STDMETHOD_(void, ReleaseTLibAttr)(TLIBATTR* pTLibAttr) = 0;
 };
+#else
+typedef struct ITypeLib ITypeLib;
+#endif
 typedef ITypeLib* LPTYPELIB;
 
+#ifdef __cplusplus
 interface IEnumVARIANT : public IUnknown {
   STDMETHOD(Next)(ULONG celt, VARIANT* rgVar, ULONG* pCeltFetched) = 0;
   STDMETHOD(Skip)(ULONG celt) = 0;
   STDMETHOD(Reset)() = 0;
   STDMETHOD(Clone)(IEnumVARIANT** ppEnum) = 0;
 };
+#else
+typedef struct IEnumVARIANT IEnumVARIANT;
+#endif
 typedef IEnumVARIANT* LPENUMVARIANT;
 
+#ifdef __cplusplus
 interface IErrorInfo : public IUnknown {
   STDMETHOD(GetGUID)(GUID* pGUID) = 0;
   STDMETHOD(GetSource)(BSTR* pBstrSource) = 0;
@@ -508,7 +557,11 @@ interface IErrorInfo : public IUnknown {
   STDMETHOD(GetHelpFile)(BSTR* pBstrHelpFile) = 0;
   STDMETHOD(GetHelpContext)(DWORD* pdwHelpContext) = 0;
 };
+#else
+typedef struct IErrorInfo IErrorInfo;
+#endif
 typedef IErrorInfo* LPERRORINFO;
+#ifdef __cplusplus
 interface ICreateErrorInfo : public IUnknown {
   STDMETHOD(SetGUID)(REFGUID rguid) = 0;
   STDMETHOD(SetSource)(LPOLESTR szSource) = 0;
@@ -516,22 +569,38 @@ interface ICreateErrorInfo : public IUnknown {
   STDMETHOD(SetHelpFile)(LPOLESTR szHelpFile) = 0;
   STDMETHOD(SetHelpContext)(DWORD dwHelpContext) = 0;
 };
+#else
+typedef struct ICreateErrorInfo ICreateErrorInfo;
+#endif
 typedef ICreateErrorInfo* LPCREATEERRORINFO;
+#ifdef __cplusplus
 interface ISupportErrorInfo : public IUnknown {
   STDMETHOD(InterfaceSupportsErrorInfo)(REFIID riid) = 0;
 };
+#else
+typedef struct ISupportErrorInfo ISupportErrorInfo;
+#endif
 typedef ISupportErrorInfo* LPSUPPORTERRORINFO;
 
+#ifdef __cplusplus
 interface IErrorLog : public IUnknown {
   STDMETHOD(AddError)(LPCOLESTR pszPropName, EXCEPINFO* pExcepInfo) = 0;
 };
+#else
+typedef struct IErrorLog IErrorLog;
+#endif
 typedef IErrorLog* LPERRORLOG;
+#ifdef __cplusplus
 interface IPropertyBag : public IUnknown {
   STDMETHOD(Read)(LPCOLESTR pszPropName, VARIANT* pVar, IErrorLog* pErrorLog) = 0;
   STDMETHOD(Write)(LPCOLESTR pszPropName, VARIANT* pVar) = 0;
 };
+#else
+typedef struct IPropertyBag IPropertyBag;
+#endif
 typedef IPropertyBag* LPPROPERTYBAG;
 
+#ifdef __cplusplus
 interface IRecordInfo : public IUnknown {
   STDMETHOD(RecordInit)(PVOID pvNew) = 0;
   STDMETHOD(RecordClear)(PVOID pvExisting) = 0;
@@ -550,9 +619,13 @@ interface IRecordInfo : public IUnknown {
   STDMETHOD(RecordCreateCopy)(PVOID pvSource, PVOID* ppvDest) = 0;
   STDMETHOD(RecordDestroy)(PVOID pvRecord) = 0;
 };
+#else
+typedef struct IRecordInfo IRecordInfo;
+#endif
 
 // Making a type library: its types (ICreateTypeInfo) and itself
 // (ICreateTypeLib), saved to the file CreateTypeLib2 was given.
+#ifdef __cplusplus
 interface ICreateTypeInfo : public IUnknown {
   STDMETHOD(SetGuid)(REFGUID guid) = 0;
   STDMETHOD(SetTypeFlags)(UINT uTypeFlags) = 0;
@@ -578,7 +651,11 @@ interface ICreateTypeInfo : public IUnknown {
   STDMETHOD(SetTypeIdldesc)(IDLDESC* pIdlDesc) = 0;
   STDMETHOD(LayOut)() = 0;
 };
+#else
+typedef struct ICreateTypeInfo ICreateTypeInfo;
+#endif
 typedef ICreateTypeInfo* LPCREATETYPEINFO;
+#ifdef __cplusplus
 interface ICreateTypeInfo2 : public ICreateTypeInfo {
   STDMETHOD(DeleteFuncDesc)(UINT index) = 0;
   STDMETHOD(DeleteFuncDescByMemId)(MEMBERID memid, INVOKEKIND invKind) = 0;
@@ -596,7 +673,11 @@ interface ICreateTypeInfo2 : public ICreateTypeInfo {
   STDMETHOD(Invalidate)() = 0;
   STDMETHOD(SetName)(LPOLESTR szName) = 0;
 };
+#else
+typedef struct ICreateTypeInfo2 ICreateTypeInfo2;
+#endif
 typedef ICreateTypeInfo2* LPCREATETYPEINFO2;
+#ifdef __cplusplus
 interface ICreateTypeLib : public IUnknown {
   STDMETHOD(CreateTypeInfo)(LPOLESTR szName, TYPEKIND tkind, ICreateTypeInfo** ppCTInfo) = 0;
   STDMETHOD(SetName)(LPOLESTR szName) = 0;
@@ -609,13 +690,20 @@ interface ICreateTypeLib : public IUnknown {
   STDMETHOD(SetLibFlags)(UINT uLibFlags) = 0;
   STDMETHOD(SaveAllChanges)() = 0;
 };
+#else
+typedef struct ICreateTypeLib ICreateTypeLib;
+#endif
 typedef ICreateTypeLib* LPCREATETYPELIB;
+#ifdef __cplusplus
 interface ICreateTypeLib2 : public ICreateTypeLib {
   STDMETHOD(DeleteTypeInfo)(LPOLESTR szName) = 0;
   STDMETHOD(SetCustData)(REFGUID guid, VARIANT* pVarVal) = 0;
   STDMETHOD(SetHelpStringContext)(ULONG dwHelpStringContext) = 0;
   STDMETHOD(SetHelpStringDll)(LPOLESTR szFileName) = 0;
 };
+#else
+typedef struct ICreateTypeLib2 ICreateTypeLib2;
+#endif
 typedef ICreateTypeLib2* LPCREATETYPELIB2;
 
 WINPORT_UUIDOF(IDispatch)

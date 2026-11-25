@@ -9,15 +9,31 @@
 #include <oleidl.h>
 #include <ocidl.h>
 
+#ifdef __cplusplus
 interface IBinding;
+#else
+typedef struct IBinding IBinding;
+#endif
+#ifdef __cplusplus
 interface IBindStatusCallback;
+#else
+typedef struct IBindStatusCallback IBindStatusCallback;
+#endif
+#ifdef __cplusplus
 interface IBindHost;
+#else
+typedef struct IBindHost IBindHost;
+#endif
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 extern const IID IID_IBinding, IID_IBindStatusCallback, IID_IBindHost;
 #define SID_IBindHost IID_IBindHost
 #define SID_SBindHost IID_IBindHost
-}
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 #define MK_S_ASYNCHRONOUS _HRESULT_TYPEDEF_(0x000401E8)
 #define S_ASYNCHRONOUS MK_S_ASYNCHRONOUS
@@ -104,6 +120,7 @@ typedef struct _tagBINDINFO {
   DWORD dwReserved;
 } BINDINFO;
 
+#ifdef __cplusplus
 interface IBinding : public IUnknown {
   STDMETHOD(Abort)(void) = 0;
   STDMETHOD(Suspend)(void) = 0;
@@ -112,8 +129,12 @@ interface IBinding : public IUnknown {
   STDMETHOD(GetPriority)(LONG* pnPriority) = 0;
   STDMETHOD(GetBindResult)(CLSID* pclsidProtocol, DWORD* pdwResult, LPOLESTR* pszResult, DWORD* pdwReserved) = 0;
 };
+#else
+typedef struct IBinding IBinding;
+#endif
 typedef IBinding* LPBINDING;
 
+#ifdef __cplusplus
 interface IBindStatusCallback : public IUnknown {
   STDMETHOD(OnStartBinding)(DWORD dwReserved, IBinding* pib) = 0;
   STDMETHOD(GetPriority)(LONG* pnPriority) = 0;
@@ -124,8 +145,12 @@ interface IBindStatusCallback : public IUnknown {
   STDMETHOD(OnDataAvailable)(DWORD grfBSCF, DWORD dwSize, FORMATETC* pformatetc, STGMEDIUM* pstgmed) = 0;
   STDMETHOD(OnObjectAvailable)(REFIID riid, IUnknown* punk) = 0;
 };
+#else
+typedef struct IBindStatusCallback IBindStatusCallback;
+#endif
 typedef IBindStatusCallback* LPBINDSTATUSCALLBACK;
 
+#ifdef __cplusplus
 interface IBindHost : public IUnknown {
   STDMETHOD(CreateMoniker)(LPOLESTR szName, IBindCtx* pBC, IMoniker** ppmk, DWORD dwReserved) = 0;
   STDMETHOD(MonikerBindToStorage)(IMoniker* pMk, IBindCtx* pBC, IBindStatusCallback* pBSC, REFIID riid,
@@ -133,6 +158,9 @@ interface IBindHost : public IUnknown {
   STDMETHOD(MonikerBindToObject)(IMoniker* pMk, IBindCtx* pBC, IBindStatusCallback* pBSC, REFIID riid,
                                  void** ppvObj) = 0;
 };
+#else
+typedef struct IBindHost IBindHost;
+#endif
 typedef IBindHost* LPBINDHOST;
 
 WINPORT_UUIDOF(IBinding)
@@ -153,7 +181,7 @@ typedef enum tagURLZONE {
   URLZONE_USER_MAX = 10000
 } URLZONE;
 
-extern "C" const IID IID_IInternetSecurityMgrSite, IID_IInternetSecurityManager;
+__WINPORT_EXTERN_C const IID IID_IInternetSecurityMgrSite, IID_IInternetSecurityManager;
 #define SID_SInternetSecurityManager IID_IInternetSecurityManager
 
 #define INET_E_DEFAULT_ACTION _HRESULT_TYPEDEF_(0x800C0011)
@@ -213,11 +241,16 @@ extern "C" const IID IID_IInternetSecurityMgrSite, IID_IInternetSecurityManager;
 #define URLACTION_SHELL_FILE_DOWNLOAD 0x00001803
 #define URLACTION_SHELL_MAX 0x000019FF
 
+#ifdef __cplusplus
 interface IInternetSecurityMgrSite : public IUnknown {
   STDMETHOD(GetWindow)(HWND* phwnd) = 0;
   STDMETHOD(EnableModeless)(BOOL fEnable) = 0;
 };
+#else
+typedef struct IInternetSecurityMgrSite IInternetSecurityMgrSite;
+#endif
 
+#ifdef __cplusplus
 interface IInternetSecurityManager : public IUnknown {
   STDMETHOD(SetSecuritySite)(IInternetSecurityMgrSite* pSite) = 0;
   STDMETHOD(GetSecuritySite)(IInternetSecurityMgrSite** ppSite) = 0;
@@ -230,10 +263,15 @@ interface IInternetSecurityManager : public IUnknown {
   STDMETHOD(SetZoneMapping)(DWORD dwZone, LPCWSTR lpszPattern, DWORD dwFlags) = 0;
   STDMETHOD(GetZoneMappings)(DWORD dwZone, IEnumString** ppenumString, DWORD dwFlags) = 0;
 };
+#else
+typedef struct IInternetSecurityManager IInternetSecurityManager;
+#endif
 
 WINPORT_UUIDOF(IInternetSecurityManager)
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 HRESULT WINAPI CreateURLMoniker(LPMONIKER pMkCtx, LPCWSTR szURL, LPMONIKER* ppmk);
 HRESULT WINAPI CreateAsyncBindCtx(DWORD reserved, IBindStatusCallback* pBSCb, IEnumFORMATETC* pEFetc,
                                   IBindCtx** ppBC);
@@ -252,6 +290,8 @@ HRESULT WINAPI URLDownloadToFileW(LPUNKNOWN pCaller, LPCWSTR szURL, LPCWSTR szFi
 #else
 #define URLDownloadToFile URLDownloadToFileA
 #endif
-}
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 #endif

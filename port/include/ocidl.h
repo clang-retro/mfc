@@ -11,12 +11,30 @@
 #include <oleidl.h>
 #include <oaidl.h>
 
+#ifdef __cplusplus
 interface IConnectionPoint;
+#else
+typedef struct IConnectionPoint IConnectionPoint;
+#endif
+#ifdef __cplusplus
 interface IConnectionPointContainer;
+#else
+typedef struct IConnectionPointContainer IConnectionPointContainer;
+#endif
+#ifdef __cplusplus
 interface IEnumConnections;
+#else
+typedef struct IEnumConnections IEnumConnections;
+#endif
+#ifdef __cplusplus
 interface IEnumConnectionPoints;
+#else
+typedef struct IEnumConnectionPoints IEnumConnectionPoints;
+#endif
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 extern const IID IID_IConnectionPoint, IID_IConnectionPointContainer, IID_IEnumConnections,
     IID_IEnumConnectionPoints, IID_IProvideClassInfo, IID_IProvideClassInfo2, IID_IPersistStreamInit,
     IID_IPersistPropertyBag, IID_IPersistMemory, IID_IPropertyNotifySink, IID_ISpecifyPropertyPages,
@@ -25,21 +43,28 @@ extern const IID IID_IConnectionPoint, IID_IConnectionPointContainer, IID_IEnumC
     IID_IClassFactory2, IID_IQuickActivate, IID_IPointerInactive, IID_IViewObjectEx,
     IID_IOleInPlaceObjectWindowless, IID_IOleInPlaceSiteEx, IID_IOleInPlaceSiteWindowless,
     IID_IOleUndoManager, IID_IObjectWithSite, IID_IFontEventsDisp;
-}
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 typedef struct tagCONNECTDATA {
   IUnknown* pUnk;
   DWORD dwCookie;
 } CONNECTDATA, *PCONNECTDATA, *LPCONNECTDATA;
 
+#ifdef __cplusplus
 interface IEnumConnections : public IUnknown {
   STDMETHOD(Next)(ULONG cConnections, LPCONNECTDATA rgcd, ULONG* pcFetched) = 0;
   STDMETHOD(Skip)(ULONG cConnections) = 0;
   STDMETHOD(Reset)() = 0;
   STDMETHOD(Clone)(IEnumConnections** ppEnum) = 0;
 };
+#else
+typedef struct IEnumConnections IEnumConnections;
+#endif
 typedef IEnumConnections* LPENUMCONNECTIONS;
 typedef IEnumConnections* PENUMCONNECTIONS;
+#ifdef __cplusplus
 interface IConnectionPoint : public IUnknown {
   STDMETHOD(GetConnectionInterface)(IID* pIID) = 0;
   STDMETHOD(GetConnectionPointContainer)(IConnectionPointContainer** ppCPC) = 0;
@@ -47,33 +72,53 @@ interface IConnectionPoint : public IUnknown {
   STDMETHOD(Unadvise)(DWORD dwCookie) = 0;
   STDMETHOD(EnumConnections)(IEnumConnections** ppEnum) = 0;
 };
+#else
+typedef struct IConnectionPoint IConnectionPoint;
+#endif
 typedef IConnectionPoint* LPCONNECTIONPOINT;
 typedef IConnectionPoint* PCONNECTIONPOINT;
+#ifdef __cplusplus
 interface IEnumConnectionPoints : public IUnknown {
   STDMETHOD(Next)(ULONG cConnections, LPCONNECTIONPOINT* ppCP, ULONG* pcFetched) = 0;
   STDMETHOD(Skip)(ULONG cConnections) = 0;
   STDMETHOD(Reset)() = 0;
   STDMETHOD(Clone)(IEnumConnectionPoints** ppEnum) = 0;
 };
+#else
+typedef struct IEnumConnectionPoints IEnumConnectionPoints;
+#endif
 typedef IEnumConnectionPoints* LPENUMCONNECTIONPOINTS;
 typedef IEnumConnectionPoints* PENUMCONNECTIONPOINTS;
+#ifdef __cplusplus
 interface IConnectionPointContainer : public IUnknown {
   STDMETHOD(EnumConnectionPoints)(IEnumConnectionPoints** ppEnum) = 0;
   STDMETHOD(FindConnectionPoint)(REFIID riid, IConnectionPoint** ppCP) = 0;
 };
+#else
+typedef struct IConnectionPointContainer IConnectionPointContainer;
+#endif
 typedef IConnectionPointContainer* LPCONNECTIONPOINTCONTAINER;
 typedef IConnectionPointContainer* PCONNECTIONPOINTCONTAINER;
 
+#ifdef __cplusplus
 interface IProvideClassInfo : public IUnknown {
   STDMETHOD(GetClassInfo)(ITypeInfo** ppTI) = 0;
 };
+#else
+typedef struct IProvideClassInfo IProvideClassInfo;
+#endif
 typedef IProvideClassInfo* LPPROVIDECLASSINFO;
 typedef enum tagGUIDKIND { GUIDKIND_DEFAULT_SOURCE_DISP_IID = 1 } GUIDKIND;
+#ifdef __cplusplus
 interface IProvideClassInfo2 : public IProvideClassInfo {
   STDMETHOD(GetGUID)(DWORD dwGuidKind, GUID* pGUID) = 0;
 };
+#else
+typedef struct IProvideClassInfo2 IProvideClassInfo2;
+#endif
 typedef IProvideClassInfo2* LPPROVIDECLASSINFO2;
 
+#ifdef __cplusplus
 interface IPersistStreamInit : public IPersist {
   STDMETHOD(IsDirty)() = 0;
   STDMETHOD(Load)(LPSTREAM pStm) = 0;
@@ -81,7 +126,11 @@ interface IPersistStreamInit : public IPersist {
   STDMETHOD(GetSizeMax)(ULARGE_INTEGER* pCbSize) = 0;
   STDMETHOD(InitNew)() = 0;
 };
+#else
+typedef struct IPersistStreamInit IPersistStreamInit;
+#endif
 typedef IPersistStreamInit* LPPERSISTSTREAMINIT;
+#ifdef __cplusplus
 interface IPersistMemory : public IPersist {
   STDMETHOD(IsDirty)() = 0;
   STDMETHOD(Load)(LPVOID pMem, ULONG cbSize) = 0;
@@ -89,17 +138,28 @@ interface IPersistMemory : public IPersist {
   STDMETHOD(GetSizeMax)(ULONG* pCbSize) = 0;
   STDMETHOD(InitNew)() = 0;
 };
+#else
+typedef struct IPersistMemory IPersistMemory;
+#endif
+#ifdef __cplusplus
 interface IPersistPropertyBag : public IPersist {
   STDMETHOD(InitNew)() = 0;
   STDMETHOD(Load)(IPropertyBag* pPropBag, IErrorLog* pErrorLog) = 0;
   STDMETHOD(Save)(IPropertyBag* pPropBag, BOOL fClearDirty, BOOL fSaveAllProperties) = 0;
 };
+#else
+typedef struct IPersistPropertyBag IPersistPropertyBag;
+#endif
 typedef IPersistPropertyBag* LPPERSISTPROPERTYBAG;
 
+#ifdef __cplusplus
 interface IPropertyNotifySink : public IUnknown {
   STDMETHOD(OnChanged)(DISPID dispID) = 0;
   STDMETHOD(OnRequestEdit)(DISPID dispID) = 0;
 };
+#else
+typedef struct IPropertyNotifySink IPropertyNotifySink;
+#endif
 typedef IPropertyNotifySink* LPPROPERTYNOTIFYSINK;
 
 typedef struct tagCAUUID {
@@ -114,9 +174,13 @@ typedef struct tagCADWORD {
   ULONG cElems;
   DWORD* pElems;
 } CADWORD, *LPCADWORD;
+#ifdef __cplusplus
 interface ISpecifyPropertyPages : public IUnknown {
   STDMETHOD(GetPages)(CAUUID* pPages) = 0;
 };
+#else
+typedef struct ISpecifyPropertyPages ISpecifyPropertyPages;
+#endif
 typedef ISpecifyPropertyPages* LPSPECIFYPROPERTYPAGES;
 
 // Fonts and pictures
@@ -139,6 +203,7 @@ typedef VARIANT_BOOL OLE_CANCELBOOL;
 typedef VARIANT_BOOL OLE_ENABLEDEFAULTBOOL;
 typedef enum { triUnchecked = 0, triChecked = 1, triGray = 2 } OLE_TRISTATE;
 
+#ifdef __cplusplus
 interface IFont : public IUnknown {
   STDMETHOD(get_Name)(BSTR* pName) = 0;
   STDMETHOD(put_Name)(BSTR name) = 0;
@@ -165,8 +230,12 @@ interface IFont : public IUnknown {
   STDMETHOD(ReleaseHfont)(HFONT hFont) = 0;
   STDMETHOD(SetHdc)(HDC hDC) = 0;
 };
+#else
+typedef struct IFont IFont;
+#endif
 typedef IFont* LPFONT;
 
+#ifdef __cplusplus
 interface IPicture : public IUnknown {
   STDMETHOD(get_Handle)(OLE_HANDLE* pHandle) = 0;
   STDMETHOD(get_hPal)(OLE_HANDLE* phPal) = 0;
@@ -184,6 +253,9 @@ interface IPicture : public IUnknown {
   STDMETHOD(SaveAsFile)(LPSTREAM pStream, BOOL fSaveMemCopy, LONG* pCbSize) = 0;
   STDMETHOD(get_Attributes)(DWORD* pDwAttr) = 0;
 };
+#else
+typedef struct IPicture IPicture;
+#endif
 typedef IPicture* LPPICTURE;
 
 interface IFontDisp : public IDispatch {};
@@ -202,17 +274,22 @@ typedef struct tagPROPPAGEINFO {
   DWORD dwHelpContext;
 } PROPPAGEINFO, *LPPROPPAGEINFO;
 
+#ifdef __cplusplus
 interface IPropertyPageSite : public IUnknown {
   STDMETHOD(OnStatusChange)(DWORD dwFlags) = 0;
   STDMETHOD(GetLocaleID)(LCID* pLocaleID) = 0;
   STDMETHOD(GetPageContainer)(IUnknown** ppUnk) = 0;
   STDMETHOD(TranslateAccelerator)(MSG* pMsg) = 0;
 };
+#else
+typedef struct IPropertyPageSite IPropertyPageSite;
+#endif
 typedef IPropertyPageSite* LPPROPERTYPAGESITE;
 #define PROPPAGESTATUS_DIRTY 0x01
 #define PROPPAGESTATUS_VALIDATE 0x02
 #define PROPPAGESTATUS_CLEAN 0x04
 
+#ifdef __cplusplus
 interface IPropertyPage : public IUnknown {
   STDMETHOD(SetPageSite)(IPropertyPageSite* pPageSite) = 0;
   STDMETHOD(Activate)(HWND hWndParent, LPCRECT pRect, BOOL bModal) = 0;
@@ -226,19 +303,30 @@ interface IPropertyPage : public IUnknown {
   STDMETHOD(Help)(LPCOLESTR pszHelpDir) = 0;
   STDMETHOD(TranslateAccelerator)(MSG* pMsg) = 0;
 };
+#else
+typedef struct IPropertyPage IPropertyPage;
+#endif
 typedef IPropertyPage* LPPROPERTYPAGE;
 
+#ifdef __cplusplus
 interface IPropertyPage2 : public IPropertyPage {
   STDMETHOD(EditProperty)(DISPID dispID) = 0;
 };
+#else
+typedef struct IPropertyPage2 IPropertyPage2;
+#endif
 typedef IPropertyPage2* LPPROPERTYPAGE2;
 
+#ifdef __cplusplus
 interface IPerPropertyBrowsing : public IUnknown {
   STDMETHOD(GetDisplayString)(DISPID dispID, BSTR* pBstr) = 0;
   STDMETHOD(MapPropertyToPage)(DISPID dispID, CLSID* pClsid) = 0;
   STDMETHOD(GetPredefinedStrings)(DISPID dispID, CALPOLESTR* pCaStringsOut, CADWORD* pCaCookiesOut) = 0;
   STDMETHOD(GetPredefinedValue)(DISPID dispID, DWORD dwCookie, VARIANT* pVarOut) = 0;
 };
+#else
+typedef struct IPerPropertyBrowsing IPerPropertyBrowsing;
+#endif
 typedef IPerPropertyBrowsing* LPPERPROPERTYBROWSING;
 
 // Controls and their sites
@@ -251,12 +339,16 @@ typedef struct tagCONTROLINFO {
 #define CTRLINFO_EATS_RETURN 1
 #define CTRLINFO_EATS_ESCAPE 2
 
+#ifdef __cplusplus
 interface IOleControl : public IUnknown {
   STDMETHOD(GetControlInfo)(CONTROLINFO* pCI) = 0;
   STDMETHOD(OnMnemonic)(MSG* pMsg) = 0;
   STDMETHOD(OnAmbientPropertyChange)(DISPID dispID) = 0;
   STDMETHOD(FreezeEvents)(BOOL bFreeze) = 0;
 };
+#else
+typedef struct IOleControl IOleControl;
+#endif
 typedef IOleControl* LPOLECONTROL;
 
 typedef struct _POINTF {
@@ -269,6 +361,7 @@ typedef struct _POINTF {
 #define XFORMCOORDS_CONTAINERTOHIMETRIC 0x8
 #define XFORMCOORDS_EVENTCOMPAT 0x10
 
+#ifdef __cplusplus
 interface IOleControlSite : public IUnknown {
   STDMETHOD(OnControlInfoChanged)() = 0;
   STDMETHOD(LockInPlaceActive)(BOOL fLock) = 0;
@@ -278,12 +371,19 @@ interface IOleControlSite : public IUnknown {
   STDMETHOD(OnFocus)(BOOL fGotFocus) = 0;
   STDMETHOD(ShowPropertyFrame)() = 0;
 };
+#else
+typedef struct IOleControlSite IOleControlSite;
+#endif
 typedef IOleControlSite* LPOLECONTROLSITE;
 
+#ifdef __cplusplus
 interface ISimpleFrameSite : public IUnknown {
   STDMETHOD(PreMessageFilter)(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT* plResult, DWORD* pdwCookie) = 0;
   STDMETHOD(PostMessageFilter)(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT* plResult, DWORD dwCookie) = 0;
 };
+#else
+typedef struct ISimpleFrameSite ISimpleFrameSite;
+#endif
 typedef ISimpleFrameSite* LPSIMPLEFRAMESITE;
 
 typedef struct tagLICINFO {
@@ -292,12 +392,16 @@ typedef struct tagLICINFO {
   BOOL fLicVerified;
 } LICINFO, *LPLICINFO;
 
+#ifdef __cplusplus
 interface IClassFactory2 : public IClassFactory {
   STDMETHOD(GetLicInfo)(LICINFO* pLicInfo) = 0;
   STDMETHOD(RequestLicKey)(DWORD dwReserved, BSTR* pBstrKey) = 0;
   STDMETHOD(CreateInstanceLic)(IUnknown* pUnkOuter, IUnknown* pUnkReserved, REFIID riid, BSTR bstrKey,
                                PVOID* ppvObj) = 0;
 };
+#else
+typedef struct IClassFactory2 IClassFactory2;
+#endif
 typedef IClassFactory2* LPCLASSFACTORY2;
 
 typedef enum tagPOINTERINACTIVE {
@@ -305,11 +409,15 @@ typedef enum tagPOINTERINACTIVE {
   POINTERINACTIVE_DEACTIVATEONLEAVE = 2,
   POINTERINACTIVE_ACTIVATEONDRAG = 4
 } POINTERINACTIVE;
+#ifdef __cplusplus
 interface IPointerInactive : public IUnknown {
   STDMETHOD(GetActivationPolicy)(DWORD* pdwPolicy) = 0;
   STDMETHOD(OnInactiveMouseMove)(LPCRECT pRectBounds, LONG x, LONG y, DWORD grfKeyState) = 0;
   STDMETHOD(OnInactiveSetCursor)(LPCRECT pRectBounds, LONG x, LONG y, DWORD dwMouseMsg, BOOL fSetAlways) = 0;
 };
+#else
+typedef struct IPointerInactive IPointerInactive;
+#endif
 typedef IPointerInactive* LPPOINTERINACTIVE;
 
 typedef enum tagVIEWSTATUS {
@@ -333,6 +441,7 @@ typedef struct tagAspectInfo {
   DWORD dwFlags;
 } DVASPECTINFO;
 
+#ifdef __cplusplus
 interface IViewObjectEx : public IViewObject2 {
   STDMETHOD(GetRect)(DWORD dwAspect, LPRECTL pRect) = 0;
   STDMETHOD(GetViewStatus)(DWORD* pdwStatus) = 0;
@@ -343,25 +452,37 @@ interface IViewObjectEx : public IViewObject2 {
   STDMETHOD(GetNaturalExtent)(DWORD dwAspect, LONG lindex, DVTARGETDEVICE* ptd, HDC hicTargetDev,
                               DVEXTENTINFO* pExtentInfo, LPSIZEL pSizel) = 0;
 };
+#else
+typedef struct IViewObjectEx IViewObjectEx;
+#endif
 typedef IViewObjectEx* LPVIEWOBJECTEX;
 
+#ifdef __cplusplus
 interface IOleInPlaceObjectWindowless : public IOleInPlaceObject {
   STDMETHOD(OnWindowMessage)(UINT msg, WPARAM wParam, LPARAM lParam, LRESULT* plResult) = 0;
   STDMETHOD(GetDropTarget)(IDropTarget** ppDropTarget) = 0;
 };
+#else
+typedef struct IOleInPlaceObjectWindowless IOleInPlaceObjectWindowless;
+#endif
 typedef IOleInPlaceObjectWindowless* LPOLEINPLACEOBJECTWINDOWLESS;
 
 #define ACTIVATE_WINDOWLESS 1
+#ifdef __cplusplus
 interface IOleInPlaceSiteEx : public IOleInPlaceSite {
   STDMETHOD(OnInPlaceActivateEx)(BOOL* pfNoRedraw, DWORD dwFlags) = 0;
   STDMETHOD(OnInPlaceDeactivateEx)(BOOL fNoRedraw) = 0;
   STDMETHOD(RequestUIActivate)() = 0;
 };
+#else
+typedef struct IOleInPlaceSiteEx IOleInPlaceSiteEx;
+#endif
 typedef IOleInPlaceSiteEx* LPOLEINPLACESITEEX;
 
 #define OLEDC_NODRAW 0x01
 #define OLEDC_PAINTBKGND 0x02
 #define OLEDC_OFFSCREEN 0x04
+#ifdef __cplusplus
 interface IOleInPlaceSiteWindowless : public IOleInPlaceSiteEx {
   STDMETHOD(CanWindowlessActivate)() = 0;
   STDMETHOD(GetCapture)() = 0;
@@ -376,11 +497,18 @@ interface IOleInPlaceSiteWindowless : public IOleInPlaceSiteEx {
   STDMETHOD(AdjustRect)(LPRECT prc) = 0;
   STDMETHOD(OnDefWindowMessage)(UINT msg, WPARAM wParam, LPARAM lParam, LRESULT* plResult) = 0;
 };
+#else
+typedef struct IOleInPlaceSiteWindowless IOleInPlaceSiteWindowless;
+#endif
 typedef IOleInPlaceSiteWindowless* LPOLEINPLACESITEWINDOWLESS;
 
+#ifdef __cplusplus
 interface IAdviseSinkEx : public IAdviseSink {
   STDMETHOD_(void, OnViewStatusChange)(DWORD dwViewStatus) = 0;
 };
+#else
+typedef struct IAdviseSinkEx IAdviseSinkEx;
+#endif
 
 typedef enum tagQACONTAINERFLAGS {
   QACONTAINER_SHOWHATCHING = 0x1,
@@ -418,11 +546,15 @@ typedef struct tagQACONTROL {
   DWORD dwPropNotifyCookie;
   DWORD dwPointerActivationPolicy;
 } QACONTROL;
+#ifdef __cplusplus
 interface IQuickActivate : public IUnknown {
   STDMETHOD(QuickActivate)(QACONTAINER* pQaContainer, QACONTROL* pQaControl) = 0;
   STDMETHOD(SetContentExtent)(LPSIZEL pSizel) = 0;
   STDMETHOD(GetContentExtent)(LPSIZEL pSizel) = 0;
 };
+#else
+typedef struct IQuickActivate IQuickActivate;
+#endif
 typedef IQuickActivate* LPQUICKACTIVATE;
 
 typedef enum tagREADYSTATE {
@@ -433,18 +565,30 @@ typedef enum tagREADYSTATE {
   READYSTATE_COMPLETE = 4
 } READYSTATE;
 
+#ifdef __cplusplus
 interface IObjectWithSite : public IUnknown {
   STDMETHOD(SetSite)(IUnknown* pUnkSite) = 0;
   STDMETHOD(GetSite)(REFIID riid, void** ppvSite) = 0;
 };
+#else
+typedef struct IObjectWithSite IObjectWithSite;
+#endif
 
+#ifdef __cplusplus
 interface IOleUndoManager;
+#else
+typedef struct IOleUndoManager IOleUndoManager;
+#endif
 
 // Services
-extern "C" const IID IID_IServiceProvider;
+__WINPORT_EXTERN_C const IID IID_IServiceProvider;
+#ifdef __cplusplus
 interface IServiceProvider : public IUnknown {
   STDMETHOD(QueryService)(REFGUID guidService, REFIID riid, void** ppvObject) = 0;
 };
+#else
+typedef struct IServiceProvider IServiceProvider;
+#endif
 typedef IServiceProvider* LPSERVICEPROVIDER;
 
 WINPORT_UUIDOF(IEnumConnections)

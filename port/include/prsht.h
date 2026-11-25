@@ -7,7 +7,9 @@
 
 #include <windows.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 #define MAXPROPPAGES 100
 
@@ -323,6 +325,8 @@ typedef struct _PSHNOTIFY {
 #define PSM_SETHEADERSUBTITLE PSM_SETHEADERSUBTITLEA
 #endif
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #endif

@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <set>

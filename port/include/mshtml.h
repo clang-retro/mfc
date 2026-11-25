@@ -14,15 +14,32 @@
 #include <ocidl.h>
 #include <docobj.h>
 
-extern "C" const IID IID_IHTMLDocument, IID_IHTMLDocument2, IID_IHTMLElement, IID_IHTMLElementCollection,
+__WINPORT_EXTERN_C const IID IID_IHTMLDocument, IID_IHTMLDocument2, IID_IHTMLElement, IID_IHTMLElementCollection,
     IID_IHTMLEventObj, IID_IHTMLFramesCollection2, IID_IHTMLWindow2, IID_IHTMLSelectionObject,
     DIID_HTMLElementEvents2, DIID_HTMLDocumentEvents2;
 
+#ifdef __cplusplus
 interface IHTMLElement;
+#else
+typedef struct IHTMLElement IHTMLElement;
+#endif
+#ifdef __cplusplus
 interface IHTMLElementCollection;
+#else
+typedef struct IHTMLElementCollection IHTMLElementCollection;
+#endif
+#ifdef __cplusplus
 interface IHTMLWindow2;
+#else
+typedef struct IHTMLWindow2 IHTMLWindow2;
+#endif
+#ifdef __cplusplus
 interface IHTMLSelectionObject;
+#else
+typedef struct IHTMLSelectionObject IHTMLSelectionObject;
+#endif
 
+#ifdef __cplusplus
 interface IHTMLElementCollection : public IDispatch {
   STDMETHOD(toString)(BSTR* String) = 0;
   STDMETHOD(put_length)(LONG v) = 0;
@@ -31,7 +48,11 @@ interface IHTMLElementCollection : public IDispatch {
   STDMETHOD(item)(VARIANT name, VARIANT index, IDispatch** pdisp) = 0;
   STDMETHOD(tags)(VARIANT tagName, IDispatch** pdisp) = 0;
 };
+#else
+typedef struct IHTMLElementCollection IHTMLElementCollection;
+#endif
 
+#ifdef __cplusplus
 interface IHTMLElement : public IDispatch {
   STDMETHOD(setAttribute)(BSTR strAttributeName, VARIANT AttributeValue, LONG lFlags) = 0;
   STDMETHOD(getAttribute)(BSTR strAttributeName, LONG lFlags, VARIANT* AttributeValue) = 0;
@@ -60,7 +81,11 @@ interface IHTMLElement : public IDispatch {
   STDMETHOD(get_children)(IDispatch** p) = 0;
   STDMETHOD(get_all)(IDispatch** p) = 0;
 };
+#else
+typedef struct IHTMLElement IHTMLElement;
+#endif
 
+#ifdef __cplusplus
 interface IHTMLEventObj : public IDispatch {
   STDMETHOD(get_srcElement)(IHTMLElement** p) = 0;
   STDMETHOD(get_altKey)(VARIANT_BOOL* p) = 0;
@@ -88,18 +113,30 @@ interface IHTMLEventObj : public IDispatch {
   STDMETHOD(get_screenY)(LONG* p) = 0;
   STDMETHOD(get_srcFilter)(IDispatch** p) = 0;
 };
+#else
+typedef struct IHTMLEventObj IHTMLEventObj;
+#endif
 
+#ifdef __cplusplus
 interface IHTMLSelectionObject : public IDispatch {
   STDMETHOD(createRange)(IDispatch** range) = 0;
   STDMETHOD(empty)() = 0;
   STDMETHOD(clear)() = 0;
   STDMETHOD(get_type)(BSTR* p) = 0;
 };
+#else
+typedef struct IHTMLSelectionObject IHTMLSelectionObject;
+#endif
 
+#ifdef __cplusplus
 interface IHTMLDocument : public IDispatch {
   STDMETHOD(get_Script)(IDispatch** p) = 0;
 };
+#else
+typedef struct IHTMLDocument IHTMLDocument;
+#endif
 
+#ifdef __cplusplus
 interface IHTMLDocument2 : public IHTMLDocument {
   STDMETHOD(get_all)(IHTMLElementCollection** p) = 0;
   STDMETHOD(get_body)(IHTMLElement** p) = 0;
@@ -136,12 +173,20 @@ interface IHTMLDocument2 : public IHTMLDocument {
   STDMETHOD(createElement)(BSTR eTag, IHTMLElement** newElem) = 0;
   STDMETHOD(elementFromPoint)(LONG x, LONG y, IHTMLElement** elementHit) = 0;
 };
+#else
+typedef struct IHTMLDocument2 IHTMLDocument2;
+#endif
 
+#ifdef __cplusplus
 interface IHTMLFramesCollection2 : public IDispatch {
   STDMETHOD(item)(VARIANT* pvarIndex, VARIANT* pvarResult) = 0;
   STDMETHOD(get_length)(LONG* p) = 0;
 };
+#else
+typedef struct IHTMLFramesCollection2 IHTMLFramesCollection2;
+#endif
 
+#ifdef __cplusplus
 interface IHTMLWindow2 : public IHTMLFramesCollection2 {
   STDMETHOD(get_frames)(IHTMLFramesCollection2** p) = 0;
   STDMETHOD(put_defaultStatus)(BSTR v) = 0;
@@ -154,6 +199,9 @@ interface IHTMLWindow2 : public IHTMLFramesCollection2 {
   STDMETHOD(get_event)(IHTMLEventObj** p) = 0;
   STDMETHOD(execScript)(BSTR code, BSTR language, VARIANT* pvarRet) = 0;
 };
+#else
+typedef struct IHTMLWindow2 IHTMLWindow2;
+#endif
 
 WINPORT_UUIDOF(IHTMLDocument)
 WINPORT_UUIDOF(IHTMLDocument2)

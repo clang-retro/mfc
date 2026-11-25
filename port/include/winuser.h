@@ -9,7 +9,9 @@
 
 #include <wingdi.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 typedef LRESULT(CALLBACK* WNDPROC)(HWND, UINT, WPARAM, LPARAM);
 typedef INT_PTR(CALLBACK* DLGPROC)(HWND, UINT, WPARAM, LPARAM);
@@ -21,6 +23,7 @@ typedef void(CALLBACK* SENDASYNCPROC)(HWND, UINT, ULONG_PTR, LRESULT);
 typedef BOOL(CALLBACK* PROPENUMPROCA)(HWND, LPCSTR, HANDLE);
 typedef BOOL(CALLBACK* PROPENUMPROCW)(HWND, LPCWSTR, HANDLE);
 typedef BOOL(CALLBACK* DRAWSTATEPROC)(HDC, LPARAM, WPARAM, int, int);
+struct tagHELPINFO;
 typedef void(CALLBACK* MSGBOXCALLBACK)(struct tagHELPINFO*);
 typedef BOOL(CALLBACK* MONITORENUMPROC)(HMONITOR, HDC, LPRECT, LPARAM);
 typedef int(CALLBACK* EDITWORDBREAKPROCA)(LPSTR, int, int, int);
@@ -1036,6 +1039,13 @@ typedef struct tagWNDCLASSEXW {
 #define SPI_GETKEYBOARDSPEED 0x000A
 #define SPI_GETWORKAREA 0x0030
 #define SPI_SETWORKAREA 0x002F
+#define SPI_GETSCREENSAVETIMEOUT 0x000E
+#define SPI_SETSCREENSAVETIMEOUT 0x000F
+#define SPI_GETSCREENSAVEACTIVE 0x0010
+#define SPI_SETSCREENSAVEACTIVE 0x0011
+#define SPI_SETSCREENSAVERRUNNING 0x0061
+#define SPI_SCREENSAVERRUNNING SPI_SETSCREENSAVERRUNNING
+#define SPI_GETSCREENSAVERRUNNING 0x0072
 #define SPI_GETNONCLIENTMETRICS 0x0029
 #define SPI_SETNONCLIENTMETRICS 0x002A
 #define SPI_GETICONTITLELOGFONT 0x001F
@@ -1103,12 +1113,29 @@ typedef struct tagMONITORINFO {
   DWORD dwFlags;
 } MONITORINFO, *LPMONITORINFO;
 // With the display's name too (cbSize says which).
+#ifdef __cplusplus
 typedef struct tagMONITORINFOEXA : public tagMONITORINFO {
   CHAR szDevice[CCHDEVICENAME];
 } MONITORINFOEXA, *LPMONITORINFOEXA;
 typedef struct tagMONITORINFOEXW : public tagMONITORINFO {
   WCHAR szDevice[CCHDEVICENAME];
 } MONITORINFOEXW, *LPMONITORINFOEXW;
+#else
+typedef struct tagMONITORINFOEXA {
+  DWORD cbSize;
+  RECT rcMonitor;
+  RECT rcWork;
+  DWORD dwFlags;
+  CHAR szDevice[CCHDEVICENAME];
+} MONITORINFOEXA, *LPMONITORINFOEXA;
+typedef struct tagMONITORINFOEXW {
+  DWORD cbSize;
+  RECT rcMonitor;
+  RECT rcWork;
+  DWORD dwFlags;
+  WCHAR szDevice[CCHDEVICENAME];
+} MONITORINFOEXW, *LPMONITORINFOEXW;
+#endif
 
 // Virtual keys
 #define VK_LBUTTON 0x01
@@ -2802,6 +2829,29 @@ DWORD WINAPI GetClipboardSequenceNumber(void);
 int WINAPI GetSystemMetrics(int);
 BOOL WINAPI SystemParametersInfoA(UINT, UINT, PVOID, UINT);
 BOOL WINAPI SystemParametersInfoW(UINT, UINT, PVOID, UINT);
+// Display modes: the screen keeps the mode it has.
+#define ENUM_CURRENT_SETTINGS ((DWORD)-1)
+#define ENUM_REGISTRY_SETTINGS ((DWORD)-2)
+#define CDS_UPDATEREGISTRY 0x00000001
+#define CDS_TEST 0x00000002
+#define CDS_FULLSCREEN 0x00000004
+#define CDS_GLOBAL 0x00000008
+#define CDS_SET_PRIMARY 0x00000010
+#define CDS_RESET 0x40000000
+#define CDS_NORESET 0x10000000
+#define DISP_CHANGE_SUCCESSFUL 0
+#define DISP_CHANGE_RESTART 1
+#define DISP_CHANGE_FAILED (-1)
+#define DISP_CHANGE_BADMODE (-2)
+#define DISP_CHANGE_NOTUPDATED (-3)
+#define DISP_CHANGE_BADFLAGS (-4)
+#define DISP_CHANGE_BADPARAM (-5)
+BOOL WINAPI EnumDisplaySettingsA(LPCSTR, DWORD, DEVMODEA*);
+BOOL WINAPI EnumDisplaySettingsW(LPCWSTR, DWORD, DEVMODEW*);
+LONG WINAPI ChangeDisplaySettingsA(DEVMODEA*, DWORD);
+LONG WINAPI ChangeDisplaySettingsW(DEVMODEW*, DWORD);
+#define EnumDisplaySettings __WINPORT_AW(EnumDisplaySettings)
+#define ChangeDisplaySettings __WINPORT_AW(ChangeDisplaySettings)
 HMONITOR WINAPI MonitorFromWindow(HWND, DWORD);
 HMONITOR WINAPI MonitorFromPoint(POINT, DWORD);
 HMONITOR WINAPI MonitorFromRect(LPCRECT, DWORD);
@@ -2991,6 +3041,8 @@ int WINAPI wvsprintfW(LPWSTR, LPCWSTR, va_list);
 #define wsprintf __WINPORT_AW(wsprintf)
 #define wvsprintf __WINPORT_AW(wvsprintf)
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #endif

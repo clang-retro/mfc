@@ -103,11 +103,15 @@ typedef DWORD(WINAPI* PFN_HTTPEXTENSIONPROC)(EXTENSION_CONTROL_BLOCK* pECB);
 typedef BOOL(WINAPI* PFN_TERMINATEEXTENSION)(DWORD dwFlags);
 
 // What an extension DLL exports.
+#ifdef __cplusplus
 extern "C" {
+#endif
 BOOL WINAPI GetExtensionVersion(HSE_VERSION_INFO* pVer);
 DWORD WINAPI HttpExtensionProc(EXTENSION_CONTROL_BLOCK* pECB);
 BOOL WINAPI TerminateExtension(DWORD dwFlags);
-}
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 #define HSE_TERM_ADVISORY_UNLOAD 0x00000001
 #define HSE_TERM_MUST_UNLOAD 0x00000002

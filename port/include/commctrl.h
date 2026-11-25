@@ -12,7 +12,9 @@
 #include <prsht.h>
 #include <objidl.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 typedef struct _COLORMAP {
   COLORREF from;
@@ -3508,6 +3510,8 @@ BOOL WINAPI FlatSB_SetScrollProp(HWND, UINT, INT_PTR, BOOL);
 // Text with a shadow.
 int WINAPI DrawShadowText(HDC, LPCWSTR, UINT, RECT*, DWORD, COLORREF, COLORREF, int, int);
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #endif

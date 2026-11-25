@@ -48,7 +48,9 @@ typedef struct _MARGINS {
   int cyBottomHeight;
 } MARGINS, *PMARGINS;
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 HTHEME WINAPI OpenThemeData(HWND, LPCWSTR);
 HTHEME WINAPI OpenThemeDataEx(HWND, LPCWSTR, DWORD);
@@ -103,6 +105,8 @@ HRESULT WINAPI BufferedPaintUnInit(void);
 #define TMT_FLATMENUS 1001
 #define TMT_SCROLLBAR 1601  // the first system color (COLOR_SCROLLBAR)
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #endif  // _WINPORT_UXTHEME_H

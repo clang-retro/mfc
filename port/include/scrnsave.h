@@ -40,7 +40,9 @@
 #define SCRM_VERIFYPW WM_APP
 
 #ifdef __cplusplus
+#ifdef __cplusplus
 extern "C" {
+#endif
 #endif
 
 #ifdef UNICODE
@@ -78,7 +80,9 @@ extern TCHAR szNoHelpMemory[BUFFLEN];      // idsNoHelpMemory
 extern UINT MyHelpMessage;                 // the help message
 
 #ifdef __cplusplus
-}
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 #endif
 
 #endif

@@ -9,7 +9,9 @@
 #include <windows.h>
 #include <accctrl.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 DWORD WINAPI GetSecurityInfo(HANDLE, SE_OBJECT_TYPE, SECURITY_INFORMATION, PSID*, PSID*, PACL*, PACL*,
                              PSECURITY_DESCRIPTOR*);
@@ -27,7 +29,9 @@ void WINAPI BuildTrusteeWithSidW(PTRUSTEE_W, PSID);
 void WINAPI BuildTrusteeWithNameA(PTRUSTEE_A, LPSTR);
 void WINAPI BuildTrusteeWithNameW(PTRUSTEE_W, LPWSTR);
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #define GetNamedSecurityInfo __WINPORT_AW(GetNamedSecurityInfo)
 #define SetNamedSecurityInfo __WINPORT_AW(SetNamedSecurityInfo)

@@ -34,6 +34,15 @@ struct GlyphImage {
 
 struct FontSource;
 
+// One point of a glyph outline, in device pixels from the pen position on
+// the baseline, with y up. An off-curve point is the control point of a
+// quadratic curve; two off-curve points in sequence have an implied
+// on-curve point between them (as in TrueType).
+struct OutlinePoint {
+  float x = 0, y = 0;
+  bool onCurve = true;
+};
+
 // A font at one size. Sizes are in device pixels.
 struct RealFont {
   LOGFONTW lf = {};      // as asked for, with the height in device pixels
@@ -55,6 +64,11 @@ struct RealFont {
   const GlyphImage& Glyph(UINT32 ch);
   int Advance(UINT32 ch) { return Glyph(ch).advance; }
   bool HasGlyph(UINT32 ch);
+  // A character's outline as closed contours, each starting on the curve.
+  // False for the built-in bitmap font, which has no outlines.
+  bool Outline(UINT32 ch, std::vector<std::vector<OutlinePoint>>* contours);
+  // The font's design units per em; 0 for the built-in bitmap font.
+  int EmSquare();
 
   // How the font is made
   FontSource* src = NULL;  // NULL: the built-in bitmap font

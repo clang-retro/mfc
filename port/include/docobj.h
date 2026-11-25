@@ -10,19 +10,51 @@
 #include <oleidl.h>
 #include <objidl.h>
 
+#ifdef __cplusplus
 interface IOleDocument;
+#else
+typedef struct IOleDocument IOleDocument;
+#endif
+#ifdef __cplusplus
 interface IOleDocumentSite;
+#else
+typedef struct IOleDocumentSite IOleDocumentSite;
+#endif
+#ifdef __cplusplus
 interface IOleDocumentView;
+#else
+typedef struct IOleDocumentView IOleDocumentView;
+#endif
+#ifdef __cplusplus
 interface IEnumOleDocumentViews;
+#else
+typedef struct IEnumOleDocumentViews IEnumOleDocumentViews;
+#endif
+#ifdef __cplusplus
 interface IContinueCallback;
+#else
+typedef struct IContinueCallback IContinueCallback;
+#endif
+#ifdef __cplusplus
 interface IPrint;
+#else
+typedef struct IPrint IPrint;
+#endif
+#ifdef __cplusplus
 interface IOleCommandTarget;
+#else
+typedef struct IOleCommandTarget IOleCommandTarget;
+#endif
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 extern const IID IID_IOleDocument, IID_IOleDocumentSite, IID_IOleDocumentView, IID_IEnumOleDocumentViews,
     IID_IContinueCallback, IID_IPrint, IID_IOleCommandTarget;
 extern const GUID CGID_MSHTML, CGID_Explorer, CGID_ShellDocView;
-}
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 typedef enum {
   DOCMISC_CANCREATEMULTIPLEVIEWS = 1,
@@ -31,18 +63,27 @@ typedef enum {
   DOCMISC_NOFILESUPPORT = 8
 } DOCMISC;
 
+#ifdef __cplusplus
 interface IOleDocument : public IUnknown {
   STDMETHOD(CreateView)(IOleInPlaceSite* pIPSite, IStream* pstm, DWORD dwReserved, IOleDocumentView** ppView) = 0;
   STDMETHOD(GetDocMiscStatus)(DWORD* pdwStatus) = 0;
   STDMETHOD(EnumViews)(IEnumOleDocumentViews** ppEnum, IOleDocumentView** ppView) = 0;
 };
+#else
+typedef struct IOleDocument IOleDocument;
+#endif
 typedef IOleDocument* LPOLEDOCUMENT;
 
+#ifdef __cplusplus
 interface IOleDocumentSite : public IUnknown {
   STDMETHOD(ActivateMe)(IOleDocumentView* pViewToActivate) = 0;
 };
+#else
+typedef struct IOleDocumentSite IOleDocumentSite;
+#endif
 typedef IOleDocumentSite* LPOLEDOCUMENTSITE;
 
+#ifdef __cplusplus
 interface IOleDocumentView : public IUnknown {
   STDMETHOD(SetInPlaceSite)(IOleInPlaceSite* pIPSite) = 0;
   STDMETHOD(GetInPlaceSite)(IOleInPlaceSite** ppIPSite) = 0;
@@ -58,20 +99,31 @@ interface IOleDocumentView : public IUnknown {
   STDMETHOD(ApplyViewState)(LPSTREAM pstm) = 0;
   STDMETHOD(Clone)(IOleInPlaceSite* pIPSiteNew, IOleDocumentView** ppViewNew) = 0;
 };
+#else
+typedef struct IOleDocumentView IOleDocumentView;
+#endif
 typedef IOleDocumentView* LPOLEDOCUMENTVIEW;
 
+#ifdef __cplusplus
 interface IEnumOleDocumentViews : public IUnknown {
   STDMETHOD(Next)(ULONG cViews, IOleDocumentView** rgpView, ULONG* pcFetched) = 0;
   STDMETHOD(Skip)(ULONG cViews) = 0;
   STDMETHOD(Reset)(void) = 0;
   STDMETHOD(Clone)(IEnumOleDocumentViews** ppEnum) = 0;
 };
+#else
+typedef struct IEnumOleDocumentViews IEnumOleDocumentViews;
+#endif
 typedef IEnumOleDocumentViews* LPENUMOLEDOCUMENTVIEWS;
 
+#ifdef __cplusplus
 interface IContinueCallback : public IUnknown {
   STDMETHOD(FContinue)(void) = 0;
   STDMETHOD(FContinuePrinting)(LONG nCntPrinted, LONG nCurPage, wchar_t* pwszPrintStatus) = 0;
 };
+#else
+typedef struct IContinueCallback IContinueCallback;
+#endif
 typedef IContinueCallback* LPCONTINUECALLBACK;
 
 // Printing
@@ -100,12 +152,16 @@ typedef struct tagPAGESET {
 
 #define PAGESET_TOLASTPAGE ((WORD)(-1L))
 
+#ifdef __cplusplus
 interface IPrint : public IUnknown {
   STDMETHOD(SetInitialPageNum)(LONG nFirstPage) = 0;
   STDMETHOD(GetPageInfo)(LONG* pnFirstPage, LONG* pcPages) = 0;
   STDMETHOD(Print)(DWORD grfFlags, DVTARGETDEVICE** pptd, PAGESET** ppPageSet, STGMEDIUM* pstgmOptions,
                    IContinueCallback* pcallback, LONG nFirstPage, LONG* pcPagesPrinted, LONG* pnLastPage) = 0;
 };
+#else
+typedef struct IPrint IPrint;
+#endif
 typedef IPrint* LPPRINT;
 
 // Command targets
@@ -187,10 +243,14 @@ typedef enum {
 #define MSOCMDERR_E_CANCELED OLECMDERR_E_CANCELED
 #define MSOCMDERR_E_UNKNOWNGROUP OLECMDERR_E_UNKNOWNGROUP
 
+#ifdef __cplusplus
 interface IOleCommandTarget : public IUnknown {
   STDMETHOD(QueryStatus)(const GUID* pguidCmdGroup, ULONG cCmds, OLECMD prgCmds[], OLECMDTEXT* pCmdText) = 0;
   STDMETHOD(Exec)(const GUID* pguidCmdGroup, DWORD nCmdID, DWORD nCmdexecopt, VARIANT* pvaIn, VARIANT* pvaOut) = 0;
 };
+#else
+typedef struct IOleCommandTarget IOleCommandTarget;
+#endif
 typedef IOleCommandTarget* LPOLECOMMANDTARGET;
 
 WINPORT_UUIDOF(IOleDocument)

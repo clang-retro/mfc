@@ -10,7 +10,9 @@
 #include <ole2.h>
 #include <ocidl.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 extern const CLSID CLSID_CFontPropPage, CLSID_CColorPropPage, CLSID_CPicturePropPage, CLSID_PersistPropset,
     CLSID_ConvertVBX, CLSID_StdFont, CLSID_StdPicture;
@@ -231,6 +233,8 @@ HCURSOR WINAPI OleIconToCursor(HINSTANCE hinstExe, HICON hIcon);
 #define VT_PICTURE VT_DISPATCH
 #define VT_HANDLE VT_I4
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 #endif

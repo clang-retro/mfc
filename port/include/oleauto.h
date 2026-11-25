@@ -10,7 +10,9 @@
 
 #include <oaidl.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 BSTR WINAPI SysAllocString(const OLECHAR*);
 BSTR WINAPI SysAllocStringLen(const OLECHAR*, UINT);
@@ -110,12 +112,14 @@ HRESULT WINAPI RegisterActiveObject(IUnknown*, REFCLSID, DWORD, DWORD*);
 HRESULT WINAPI RevokeActiveObject(DWORD, void*);
 HRESULT WINAPI GetActiveObject(REFCLSID, void*, IUnknown**);
 
+#ifdef __cplusplus
 }  // extern "C"
+#endif
 
 // Where long is wider than LONG (64-bit Linux and macOS), code written
 // for Windows passes a long for a LONG.
 #if defined(__LP64__)
-inline HRESULT VarI4FromStr(LPCOLESTR s, LCID lcid, ULONG flags, long* out) {
+__WINPORT_INLINE HRESULT VarI4FromStr(LPCOLESTR s, LCID lcid, ULONG flags, long* out) {
   LONG v = 0;
   HRESULT hr = VarI4FromStr(s, lcid, flags, &v);
   if (SUCCEEDED(hr) && out) *out = v;

@@ -97,6 +97,13 @@ inline FILETIME ToFileTime(ULONGLONG v) {
 FILETIME FileTimeFromUnix(long long sec, long nsec);
 void UnixFromFileTime(const FILETIME& ft, long long* sec, long* nsec);
 
+// The data of a resource with its numbers in the order of the processor
+// (resource_order.cpp): on a big-endian processor, a converted copy.
+const BYTE* NativeResourceData(WORD type, const BYTE* data, DWORD size);
+// A copy of the data of a standard resource type, read little-endian and
+// written in the order of the processor; other types come back as they are.
+const BYTE* ConvertResourceData(WORD type, const BYTE* data, DWORD size);
+
 }  // namespace winport
 
 #endif
