@@ -402,8 +402,7 @@ are not there yet. See
 `make TARGET=m68k-apple-macos MACSDK=path/to/mac-sdk` (or
 `TARGET=powerpc-apple-macos9`) builds the core classes and the portable
 layer for System 7 to Mac OS 9, with the C and C++ libraries of
-clang-retro/mac-sdk. Windows stay in memory until the Toolbox backend
-is there. See [docs/macos-classic.md](docs/macos-classic.md).
+clang-retro/mac-sdk. The Toolbox shows the windows. See [docs/macos-classic.md](docs/macos-classic.md).
 
 ### The shared library
 

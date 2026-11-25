@@ -339,6 +339,7 @@ Backend* NewHeadlessBackend();
 Backend* NewX11Backend();  // NULL when there is no X display
 Backend* NewWaylandBackend();  // NULL when there is no Wayland compositor
 Backend* NewCocoaBackend();  // NULL except on macOS
+Backend* NewMacBackend();  // the Toolbox, on the classic Mac OS only
 
 }  // namespace winport
 

@@ -11,9 +11,43 @@ C++ libraries of [clang-retro/mac-sdk](https://github.com/clang-retro/mac-sdk).
 | Core classes (`CObject`, `CString`, the collections, `CFile`, `CArchive`, `CTime`, the exceptions) | Builds and passes `tests/core.cpp` |
 | Memory diagnostics | Passes `tests/memtest.cpp` |
 | Threads (`CWinThread`, the synchronization objects) | Builds, over mac-sdk's cooperative threads |
-| Window classes | Build. The windows stay in memory (the headless backend) until the Toolbox backend is there. |
+| Window classes | Build. The Toolbox backend shows the top-level windows (see [Windows](#windows)). |
 | Sockets (`CAsyncSocket`, `CSocket`) and WinInet (`CInternetSession`) | Not available |
 | COM between programs | Not available. COM in one program works. |
+
+## Windows
+
+The Toolbox backend shows each top-level window in a Toolbox window
+with no frame (`plainDBox`). The portable layer draws the whole window,
+also the caption and the frame, into 32-bit pixels. The backend copies
+the changed pixels to the screen with `CopyBits`:
+
+- With 32-bit Color QuickDraw, it copies them from a direct PixMap.
+- Without it (a Mac Plus, a Mac SE or a Classic), it dithers them to
+  black and white.
+
+The code is in two files, because the Win32 headers and the Toolbox
+headers use the same names (`ShowWindow`, `Rect`, `Point` and more):
+
+| File | Contents |
+| --- | --- |
+| `port/src/backend_macos.cpp` | The backend, with the Win32 headers. It gives the input to the portable layer. |
+| `port/src/macos_toolbox.cpp` | The Toolbox calls: windows, `CopyBits` and the event loop. |
+| `port/src/macos_toolbox.h` | The interface between the two files. |
+
+The backend gives the input to the program as Windows does:
+
+- The keyboard. Command works as Control, so Command+C copies. Option
+  works as Alt. Typed characters change from Mac Roman to Unicode.
+- The mouse. A click with Control held is a right-button click.
+- The Finder's Quit Application command asks the active window to close.
+
+The event loop calls `WaitNextEvent` with a sleep of one tick, and then
+lets the other threads run.
+
+To keep the windows in memory (for tests), set `WINPORT_BACKEND` to
+`headless`. The backend also uses the headless backend when the
+Toolbox cannot start.
 
 ## Requirements
 
@@ -71,11 +105,16 @@ programs have about 2 MB of code.
 ## Tests
 
 `make check TARGET=m68k-apple-macos MACSDK=...` (or the PowerPC target)
-runs `tests/run-macos-tests.sh`. The script builds `tests/core.cpp` and
-`tests/memtest.cpp` into applications and runs them in mac-sdk's
-simulators: `tools/sim68k.py` as a 68000 and a 68020, or
-`tools/simppc.py`. The simulators need the Python module `unicorn`.
+runs `tests/run-macos-tests.sh`. The script builds `tests/core.cpp`,
+`tests/memtest.cpp` and `tests/wintest.cpp` into applications and runs
+them in mac-sdk's simulators: `tools/sim68k.py` as a 68000 and a 68020,
+or `tools/simppc.py`. The simulators need the Python module `unicorn`.
 Without it, the script only builds the tests.
+
+The simulators have a 640 by 480 screen. They make the windows, check
+each `CopyBits` call, and give null events. A 68000 has no Color
+QuickDraw, so `wintest` tests the black and white path there and the
+color path on a 68020 and on PowerPC.
 
 ## Limits
 
