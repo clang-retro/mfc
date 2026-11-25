@@ -95,7 +95,7 @@ clang++ -std=c++17 -Ipath/to/mfc/port/include -Ipath/to/mfc/include app.cpp \
   -Lpath/to/build/x86_64-linux-gnu -lmfc -lwinport -ldl -lpthread -o app
 ```
 
-On macOS the system libraries are `-framework Cocoa -lpthread` instead
+On macOS the system libraries are `-framework Cocoa -framework OpenGL -lpthread` instead
 of `-ldl -lpthread`.
 
 `make install` (to `/usr/local`, or `PREFIX=dir`; `DESTDIR` works too)
