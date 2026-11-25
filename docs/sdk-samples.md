@@ -70,7 +70,9 @@ copies, not the files of the SDK:
   the script.
 
 The script compiles C with `-std=gnu89` and `-fcommon`, and with
-`NO_STRICT`, as the compilers of the time did.
+`NO_STRICT`, as the compilers of the time did. It makes the release build
+(`NDEBUG`). `rand` gives numbers up to `0x7FFF`, as in the C library of
+Visual C++: the samples compute `RAND_MAX + 1` in an `int`.
 
 The resource compiler reads the headers of a sample. The script gives it
 copies of the headers that keep only the preprocessor lines, as the

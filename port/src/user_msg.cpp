@@ -769,6 +769,9 @@ BOOL GetCore(LPMSG m, HWND h, UINT min, UINT max) {
   }
   if (h && h != (HWND)-1 && !GetWindowOrFail(h)) return -1;
   for (;;) {
+    // A loop that always finds a message (paint, timers) never waits:
+    // let the backend take input and show the windows all the same.
+    PollBackend();
     if (PeekCore(m, h, min, max, PM_REMOVE)) return m->message != WM_QUIT;
     WaitForWork(CurrentQueue(), INFINITE);
   }
