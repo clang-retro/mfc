@@ -56,6 +56,14 @@ struct HeadlessBackend : Backend {
 
 Backend* NewHeadlessBackend() { return new HeadlessBackend; }
 
+#if defined(macintosh)
+// The classic Mac OS: no X11, Wayland or Cocoa. The windows stay in
+// memory until the Toolbox backend comes.
+Backend* GetBackend() {
+  static Backend* b = NewHeadlessBackend();
+  return b;
+}
+#else
 Backend* GetBackend() {
   static Backend* b = [] {
     const char* name = getenv("WINPORT_BACKEND");
@@ -86,6 +94,7 @@ Backend* GetBackend() {
   }();
   return b;
 }
+#endif
 
 // The standard control classes register here as they are written.
 void RegisterSystemClasses() {

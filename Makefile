@@ -94,9 +94,11 @@ endif
 ifeq ($(MACOS_CLASSIC),1)
 # The classic Mac OS has no sockets, no services and no window system
 # that these files use.
-CLASSIC_SKIP = winsock wininet service tls com_remote sockcore \
+CLASSIC_SKIP = winsock wininet service tls com_remote com_proxy com_ole sockcore \
   backend_x11 backend_wayland backend_cocoa
 PORT_SRCS := $(filter-out $(patsubst %,port/src/%.cpp,$(CLASSIC_SKIP)),$(PORT_SRCS))
+# CAsyncSocket, CSocket and the WinInet classes need the sockets.
+SRCS := $(filter-out src/sockcore.cpp src/inet.cpp,$(SRCS))
 PORT_OBJS = $(patsubst port/src/%.cpp,$(OUT)/port/%.o,$(PORT_SRCS))
 ALL_CXXFLAGS += -Iport/include $(CLASSIC_FLAGS)
 else
