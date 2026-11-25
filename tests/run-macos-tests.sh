@@ -15,7 +15,7 @@ TARGET=${TARGET:-m68k-apple-macos}
 OUT=${OUT:-build/$TARGET}
 MACSDK=${MACSDK:-../mac-sdk}
 BIN=${BIN:-}
-TESTS=${MACOS_TESTS:-"core memtest"}
+TESTS=${MACOS_TESTS:-"core memtest sstest"}
 case $TARGET in
   m68k*) CPU=68k ;;
   *) CPU=ppc ;;
@@ -27,17 +27,39 @@ mkdir -p "$T"
 here=$(pwd)
 run=1
 python3 -c "import unicorn" 2>/dev/null || run=0
+# llvm-rc compiles the tests' resources: the one in BIN, on the PATH, or
+# one that came with an LLVM installed beside the system compiler.
+RC_NATIVE=${BIN:+$BIN/}llvm-rc
+if ! command -v "$RC_NATIVE" >/dev/null 2>&1; then
+  RC_NATIVE=llvm-rc
+  for rc in /usr/lib/llvm-*/bin/llvm-rc /opt/homebrew/opt/llvm*/bin/llvm-rc; do
+    [ -x "$rc" ] && RC_NATIVE=$rc
+  done
+fi
 nfail=0
 npass=0
 for t in $TESTS; do
   app=$T/$t-$CPU.bin
+  # Resources become C++ that registers them as the program starts.
+  srcs=tests/$t.cpp
+  if [ -f tests/$t.rc ]; then
+    if ! RC="$RC_NATIVE" python3 port/tools/res2cpp.py -I include -I tests -I "$T" \
+        tests/$t.rc -o "$T/$t-res.cpp" >"$T/$t-rc.log" 2>&1; then
+      echo "FAIL $t (resources; see $T/$t-rc.log)"
+      nfail=$((nfail + 1))
+      continue
+    fi
+    srcs="$srcs $T/$t-res.cpp"
+  fi
+  # A screen saver gets WinMain from the screen saver library.
+  libs="$OUT/libmfc.a $OUT/libwinport.a"
+  [ $t = sstest ] && libs="$OUT/libscrnsave.a $libs"
   # tools/macapp.py takes joined flags: it gives each word that starts
   # with "-" to clang and takes the others as sources.
   if ! python3 "$MACSDK/tools/macapp.py" --cpu $CPU --lib "$MACSDK/lib" --size 8192 \
       -o "$app" -- -Os -femulated-tls -D_GNU_SOURCE -fno-delete-null-pointer-checks \
       "-isystem$here/port/compat/macos" "-I$here/include" "-I$here/port/include" \
-      "-I$here/tests" -Wno-everything "tests/$t.cpp" \
-      "$OUT/libmfc.a" "$OUT/libwinport.a" >"$T/$t-build.log" 2>&1; then
+      "-I$here/tests" -Wno-everything $srcs $libs >"$T/$t-build.log" 2>&1; then
     echo "FAIL $t (build; see $T/$t-build.log)"
     nfail=$((nfail + 1))
     continue

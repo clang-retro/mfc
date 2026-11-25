@@ -25,6 +25,10 @@ HICON WINAPI ExtractAssociatedIconA(HINSTANCE, LPSTR, LPWORD);
 HICON WINAPI ExtractAssociatedIconW(HINSTANCE, LPWSTR, LPWORD);
 HICON WINAPI DuplicateIcon(HINSTANCE, HICON);
 LPWSTR* WINAPI CommandLineToArgvW(LPCWSTR, int*);
+// The about box of the shell: "About" and the program's name, the
+// other text and the system's name and version, in a message box.
+int WINAPI ShellAboutA(HWND, LPCSTR, LPCSTR, HICON);
+int WINAPI ShellAboutW(HWND, LPCWSTR, LPCWSTR, HICON);
 #define SE_ERR_FNF 2
 #define SE_ERR_PNF 3
 #define SE_ERR_ACCESSDENIED 5
@@ -76,6 +80,7 @@ void WINAPI SHChangeNotify(LONG, UINT, LPCVOID, LPCVOID);
 #define ShellExecute __WINPORT_AW(ShellExecute)
 #define FindExecutable __WINPORT_AW(FindExecutable)
 #define ExtractIcon __WINPORT_AW(ExtractIcon)
+#define ShellAbout __WINPORT_AW(ShellAbout)
 #define ExtractAssociatedIcon __WINPORT_AW(ExtractAssociatedIcon)
 #define SHFILEINFO __WINPORT_AW(SHFILEINFO)
 #define SHGetFileInfo __WINPORT_AW(SHGetFileInfo)

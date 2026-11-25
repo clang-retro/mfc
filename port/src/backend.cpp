@@ -57,10 +57,15 @@ struct HeadlessBackend : Backend {
 Backend* NewHeadlessBackend() { return new HeadlessBackend; }
 
 #if defined(macintosh)
-// The classic Mac OS: no X11, Wayland or Cocoa. The windows stay in
-// memory until the Toolbox backend comes.
+// The classic Mac OS: the Toolbox shows the windows, unless
+// WINPORT_BACKEND is "headless" or the Toolbox cannot.
 Backend* GetBackend() {
-  static Backend* b = NewHeadlessBackend();
+  static Backend* b = [] {
+    const char* name = getenv("WINPORT_BACKEND");
+    Backend* b = NULL;
+    if (!name || strcmp(name, "headless") != 0) b = NewMacBackend();
+    return b ? b : NewHeadlessBackend();
+  }();
   return b;
 }
 #else

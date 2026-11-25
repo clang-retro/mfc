@@ -1,6 +1,6 @@
 // sys/ioctl.h - the C library's, with the request numbers that the
-// layer names for serial ports and pipes. The classic Mac OS has no
-// such devices here: mac-sdk's ioctl does only FIONREAD, for files.
+// layer names for serial ports, pipes and sockets. mac-sdk's ioctl does
+// FIONREAD, FIONBIO and SIOCATMARK; the serial requests fail.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -9,6 +9,8 @@
 #include_next <sys/ioctl.h>
 
 #define FIONREAD 0x541B
+#define FIONBIO 0x5421
+#define SIOCATMARK 0x8905
 #define TIOCMGET 0x5415
 #define TIOCMBIS 0x5416
 #define TIOCMBIC 0x5417
