@@ -391,9 +391,9 @@ The ANSI code page there is UTF-8, `WCHAR` is the system's 32-bit
 
 `make TARGET=i8086-pc-win16` builds the core classes and the window
 classes (`CWinApp`, the frames, MDI, dialogs, the controls, the GDI
-classes, document/view, and a drawn toolbar and status bar) for 16-bit
-Windows, in the large model. OLE and the other common controls are not
-there yet. See
+classes, document/view, a drawn toolbar and status bar, and OLE
+automation) for 16-bit Windows, in the large model. The other parts of
+OLE and the other common controls are not there yet. See
 [docs/win16.md](docs/win16.md).
 
 ### The shared library

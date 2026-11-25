@@ -17,6 +17,13 @@ typedef ::CStringW _AtlTimeStringW;
 #else
 typedef ::ATL::CStringW _AtlTimeStringW;
 #endif
+// The string type of an OLECHAR string: wide, or ANSI with the OLE 2 of
+// 16-bit Windows.
+#ifdef _AFX_WIN16
+typedef ::CStringA _AtlTimeStringOle;
+#else
+typedef _AtlTimeStringW _AtlTimeStringOle;
+#endif
 
 class COleDateTime;
 class COleDateTimeSpan;
@@ -392,14 +399,14 @@ inline COleDateTimeSpan COleDateTime::operator-(const COleDateTime& date) const 
 }
 
 inline _AtlTimeString _AtlBstrToTimeString(BSTR bstr) {
-  _AtlTimeString str(bstr != NULL ? bstr : L"");
+  _AtlTimeString str(bstr != NULL ? bstr : OLESTR(""));
   return str;
 }
 
 inline BOOL COleDateTime::ParseDateTime(LPCTSTR lpszDate, DWORD dwFlags, LCID lcid) {
-  _AtlTimeStringW strDate(lpszDate);
+  _AtlTimeStringOle strDate(lpszDate);
   DATE dt;
-  HRESULT hr = ::VarDateFromStr((LPOLESTR)(LPCWSTR)strDate, lcid, dwFlags, &dt);
+  HRESULT hr = ::VarDateFromStr((LPOLESTR)(LPCOLESTR)strDate, lcid, dwFlags, &dt);
   if (FAILED(hr)) {
     m_dt = 0;
     m_status = invalid;
@@ -465,7 +472,7 @@ inline COleDateTimeSpan COleDateTimeSpan::operator-(const COleDateTimeSpan& s) c
 
 inline void COleDateTimeSpan::SetDateTimeSpan(long lDays, int nHours, int nMins, int nSecs) {
   m_span = lDays + ((double)nHours) / 24 + ((double)nMins) / (24 * 60) +
-           ((double)nSecs) / (24 * 60 * 60);
+           ((double)nSecs) / (24L * 60 * 60);
   m_status = valid;
 }
 

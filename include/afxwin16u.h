@@ -233,19 +233,14 @@ typedef struct tagTRACKMOUSEEVENT {
 } TRACKMOUSEEVENT, FAR *LPTRACKMOUSEEVENT;
 
 #define THREAD_PRIORITY_NORMAL 0
-#define TYPE_E_CANTLOADLIBRARY 0x80029C4AL
-#define DISPID_UNKNOWN (-1)
 
 // The OLE control interfaces, which the connection maps of CCmdTarget
-// name. 16-bit OLE 2 has no OLE controls, so nothing gives these
-// interfaces; the library answers that it has none.
-interface IConnectionPoint;
-interface IEnumConnectionPoints;
-interface IConnectionPointContainer : public IUnknown {
-  STDMETHOD(EnumConnectionPoints)(IEnumConnectionPoints FAR * FAR *ppEnum) = 0;
-  STDMETHOD(FindConnectionPoint)(REFIID riid, IConnectionPoint FAR * FAR *ppCP) = 0;
-};
-typedef IConnectionPoint FAR *LPCONNECTIONPOINT;
+// name (include/win16/ocidl.h).
+#include <ocidl.h>
+// 16-bit TYPELIB has no UnRegisterTypeLib: src/win16ole.cpp deletes the
+// registry keys of the version.
+HRESULT UnRegisterTypeLib(REFGUID libID, WORD wVerMajor, WORD wVerMinor, LCID lcid,
+                          SYSKIND syskind);
 
 // The common control types come from the portable layer (port/include),
 // which the build puts after the 16-bit SDK on the include path.

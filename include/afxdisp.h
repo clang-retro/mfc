@@ -18,6 +18,14 @@
 #include <type_traits>
 #include <utility>
 
+// The string type of an OLECHAR string: wide, or ANSI with the OLE 2 of
+// 16-bit Windows.
+#ifdef _AFX_WIN16
+typedef CStringA CStringOle;
+#else
+typedef CStringW CStringOle;
+#endif
+
 typedef const VARIANT* LPCVARIANT;
 typedef const SAFEARRAY* LPCSAFEARRAY;
 
@@ -407,8 +415,10 @@ inline const char* _AfxDispGet(AFX_DISPARG& a, const char**) {
   if (a.v.vt == VT_BSTR) a.strA = a.v.bstrVal;
   return a.strA;
 }
+#ifndef _AFX_WIN16  // 16-bit OLE 2 has ANSI BSTRs
 inline const wchar_t* _AfxDispGet(AFX_DISPARG& a, const wchar_t**) { return a.v.bstrVal; }
 inline wchar_t* _AfxDispGet(AFX_DISPARG& a, wchar_t**) { return a.v.bstrVal; }
+#endif
 // An interface pointer, or a pointer to a by-reference value.
 template <class T>
 inline T* _AfxDispPtr(AFX_DISPARG& a, std::true_type) {
@@ -417,6 +427,10 @@ inline T* _AfxDispPtr(AFX_DISPARG& a, std::true_type) {
 template <class T>
 inline T* _AfxDispPtr(AFX_DISPARG& a, std::false_type) {
   if (a.v.vt == VT_BOOL && sizeof(T) == sizeof(BOOL)) return (T*)&a.bVal;
+#ifdef _AFX_WIN16
+  // 16-bit OLE 2 has no 64-bit or unsigned 32-bit types.
+  return (T*)&a.v.lVal;  // the union's members all start here
+#else
   // A 32-bit value for a wider integer (long where it is 64 bits): widen
   // it in place; the caller reads back the low half, which on a
   // little-endian system is where the union keeps the 32-bit members.
@@ -425,6 +439,7 @@ inline T* _AfxDispPtr(AFX_DISPARG& a, std::false_type) {
   else if (std::is_integral<T>::value && sizeof(T) == 8 && a.v.vt == VT_UI4)
     a.v.ullVal = a.v.ulVal;
   return (T*)&a.v.llVal;  // the union's members all start here
+#endif
 }
 template <class T>
 inline T* _AfxDispGet(AFX_DISPARG& a, T**) {
@@ -438,12 +453,19 @@ _AfxDispSet(VARIANT& r, T value) {
   if (std::is_same<T, bool>::value) {
     r.vt = VT_BOOL;
     r.boolVal = value ? VARIANT_TRUE : VARIANT_FALSE;
+#ifdef _AFX_WIN16
+  } else if (sizeof(T) > 4 || (std::is_unsigned<T>::value && sizeof(T) == 4)) {
+    // 16-bit OLE 2 has no 64-bit or unsigned 32-bit types.
+    r.vt = VT_R8;
+    r.dblVal = (double)value;
+#else
   } else if (sizeof(T) > 4) {
     r.vt = std::is_unsigned<T>::value ? VT_UI8 : VT_I8;
     r.llVal = (LONGLONG)value;
   } else if (std::is_unsigned<T>::value && sizeof(T) == 4) {
     r.vt = VT_UI4;
     r.ulVal = (ULONG)value;
+#endif
   } else {
     r.vt = VT_I4;
     r.lVal = (LONG)value;

@@ -218,13 +218,13 @@ CConnectionPoint::~CConnectionPoint() {
 
 // A position is the index of the next connection plus one.
 POSITION CConnectionPoint::GetStartPosition() const {
-  return m_connections.GetSize() > 0 ? (POSITION)(INT_PTR)1 : NULL;
+  return m_connections.GetSize() > 0 ? (POSITION)(LONG_PTR)1 : NULL;
 }
 
 LPUNKNOWN CConnectionPoint::GetNextConnection(POSITION& pos) const {
-  INT_PTR i = (INT_PTR)pos - 1;
+  INT_PTR i = (INT_PTR)((LONG_PTR)pos - 1);
   LPUNKNOWN p = i >= 0 && i < m_connections.GetSize() ? (LPUNKNOWN)m_connections[i] : NULL;
-  pos = i + 1 < m_connections.GetSize() ? (POSITION)(INT_PTR)(i + 2) : NULL;
+  pos = i + 1 < m_connections.GetSize() ? (POSITION)(LONG_PTR)(i + 2) : NULL;
   return p;
 }
 
@@ -469,7 +469,7 @@ BOOL AFXAPI AfxOleRegisterTypeLib(HINSTANCE hInstance, REFGUID tlid, LPCTSTR psz
     if (::GetModuleFileName(hInstance, szModule, MAX_PATH) == 0) return FALSE;
     pszFileName = szModule;
   }
-  CStringW strFile(pszFileName);
+  CStringOle strFile(pszFileName);
   LPTYPELIB ptlib = NULL;
   if (FAILED(::LoadTypeLib(strFile, &ptlib))) return FALSE;
   BOOL bOK = FALSE;
@@ -479,10 +479,10 @@ BOOL AFXAPI AfxOleRegisterTypeLib(HINSTANCE hInstance, REFGUID tlid, LPCTSTR psz
     ptlib->ReleaseTLibAttr(pAttr);
   }
   if (bOK) {
-    CStringW strHelp;
+    CStringOle strHelp;
     if (pszHelpDir != NULL) strHelp = pszHelpDir;
-    bOK = SUCCEEDED(::RegisterTypeLib(ptlib, (LPOLESTR)(LPCWSTR)strFile,
-                                      pszHelpDir != NULL ? (LPOLESTR)(LPCWSTR)strHelp : NULL));
+    bOK = SUCCEEDED(::RegisterTypeLib(ptlib, (LPOLESTR)(LPCOLESTR)strFile,
+                                      pszHelpDir != NULL ? (LPOLESTR)(LPCOLESTR)strHelp : NULL));
   }
   ptlib->Release();
   return bOK;
@@ -497,7 +497,7 @@ BOOL AFXAPI AfxOleUnregisterTypeLib(REFGUID tlid, WORD wVerMajor, WORD wVerMinor
   OLECHAR szGuid[40];
   ::StringFromGUID2(tlid, szGuid, 40);
   CString strKey = CString(_T("TypeLib\\")) + CString(szGuid);
-  HKEY hKey = NULL;
+  HKEY hKey = 0;
   if (::RegOpenKeyEx(HKEY_CLASSES_ROOT, strKey, 0, KEY_READ, &hKey) != ERROR_SUCCESS) return FALSE;
   CStringArray versions;
   TCHAR szName[64];

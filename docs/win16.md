@@ -40,11 +40,40 @@ The window classes:
 - `CToolBar`, `CStatusBar` and `CDialogBar`, with docking, floating and
   the idle update of the buttons and panes
 
+OLE automation (`afxdisp.h`):
+
+- dispatch maps (`DISP_PROPERTY`, `DISP_FUNCTION` and the others), and
+  the `IDispatch` of a `CCmdTarget` (`EnableAutomation` and
+  `GetIDispatch`)
+- interface maps, connection maps and connection points, and event sink
+  maps
+- `COleDispatchDriver`, `COleVariant`, `COleDateTime`, `COleCurrency`
+  and `COleSafeArray`
+- type libraries: `AfxOleRegisterTypeLib` and `AfxOleUnregisterTypeLib`
+
+Strings in OLE 2 for 16-bit Windows are ANSI. A `BSTR` and an `OLECHAR`
+are `char`. `CStringOle` is `CStringA` on 16-bit Windows and `CStringW`
+on the other targets. Use it and `OLESTR` for OLE strings in code for
+both.
+
+16-bit OLE 2 does not have the OLE control interfaces (connection
+points, `IProvideClassInfo` and `IClassFactory2`). `include/win16/ocidl.h`
+declares them with the IIDs of Win32. MFC objects use them between each
+other in one program.
+
+16-bit TYPELIB has no `UnRegisterTypeLib`. On 16-bit Windows, MFC
+deletes the registry key of the version (`src/win16ole.cpp`).
+
+Wine's 16-bit `OLE2DISP` does not have `VariantClear`, `VariantCopy` and
+`VariantChangeType`. Thus the Wine test does not call
+`IDispatch::Invoke`. It checks the names, the dispatch interface and
+the connection points (`tests/win16auto.cpp`).
+
 ## What is not there
 
-- OLE: automation, OLE controls, containers, servers and drag and drop.
-  The OLE functions of `CCmdTarget`, `CWnd`, `CView` and `CDocTemplate`
-  are there, but they do nothing (`src/win16ole.cpp`).
+- OLE controls, containers, servers and drag and drop. The OLE
+  functions of `CWnd`, `CView` and `CDocTemplate` are there, but they do
+  nothing (`src/win16ole.cpp`).
 - The common controls. 16-bit Windows does not have `comctl32.dll`.
   The library draws the toolbar and the status bar itself (see "The
   toolbar and the status bar"). `CReBar` and the other classes of
