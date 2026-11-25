@@ -51,6 +51,43 @@ The programs go into `out/bin`. The log of the commands goes into
 For Mac OS X 10.4 on PowerPC, see [macosx-10.4.md](macosx-10.4.md) for
 the values of the variables.
 
+## Universal programs for current macOS
+
+A universal program for macOS 11 and later has an Intel (x86_64) part and
+an Apple silicon (arm64) part. The macOS SDK has the C++ library, so you
+do not need one of your own. Clang and `ld64.lld` can do the build on
+Linux too.
+
+1. Build the library two times, once for each processor:
+
+   ```sh
+   for a in x86_64 arm64; do
+     make static TARGET=$a-apple-macos11 STDLIB= AR=llvm-ar \
+       CXXFLAGS="-O2 -isysroot path/to/MacOSX11.sdk"
+   done
+   ```
+
+2. Build the samples two times, with these variables (`A` is `x86_64`,
+   then `arm64`):
+
+   ```sh
+   export CFLAGS="--target=$A-apple-macos11 -isysroot path/to/MacOSX11.sdk -O2"
+   export CXXFLAGS="-std=c++17"
+   export LDFLAGS="--target=$A-apple-macos11 -isysroot path/to/MacOSX11.sdk -fuse-ld=lld"
+   export MFC_OUT=build/$A-apple-macos11
+   python3 tools/build-sdk-samples.py --sdk path/to/SDK --out out-$A
+   ```
+
+3. Join the two parts of each program with `lipo`:
+
+   ```sh
+   lipo -create out-x86_64/bin/ssmaze.scr out-arm64/bin/ssmaze.scr -output ssmaze.scr
+   ```
+
+On a Mac, you can leave out `-fuse-ld=lld` and the `-isysroot` flags.
+The linker signs the arm64 part with an ad-hoc signature, which Apple
+silicon needs.
+
 ## What the script changes
 
 The script copies the files of a sample into `out/src`. It changes the
