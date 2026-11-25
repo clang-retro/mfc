@@ -1,0 +1,39 @@
+// win16doc.rc - resources for win16doc, the document/view test for 16-bit
+// Windows (llvm-rc -win16).
+#include <windows.h>
+#include <afxres.h>
+#include "win16wnd.h"
+
+IDR_MAINFRAME MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&New", ID_FILE_NEW
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+END
+
+STRINGTABLE
+BEGIN
+  IDR_MAINFRAME "DocTest\n\nTestDoc\n\n\nDocTest.Document\nTest Document"
+  AFX_IDS_UNTITLED "Untitled"
+END
+
+IDR_DOCTYPE MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&New", ID_FILE_NEW
+    MENUITEM "&Close", ID_FILE_CLOSE
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+  POPUP "&Window"
+  BEGIN
+    MENUITEM "&Cascade", ID_WINDOW_CASCADE
+  END
+END
+
+STRINGTABLE
+BEGIN
+  IDR_DOCTYPE "\nTestDoc\nTestDoc\n\n\nDocTest.Document\nTest Document"
+END

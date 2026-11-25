@@ -3,7 +3,9 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
+#ifndef _AFX_WIN16
 #include <afxole.h>
+#endif
 
 IMPLEMENT_DYNCREATE(CFrameWnd, CWnd)
 
@@ -72,7 +74,9 @@ CFrameWnd::CFrameWnd() {
 }
 
 CFrameWnd::~CFrameWnd() {
+#ifndef _AFX_WIN16
   if (m_pNotifyHook != NULL) m_pNotifyHook->OnFrameDestroy();
+#endif
   delete[] m_phWndDisable;
 }
 
@@ -314,7 +318,9 @@ void CFrameWnd::UpdateFrameTitleForDocument(LPCTSTR lpszDocName) {
 
 void CFrameWnd::OnUpdateFrameMenu(HMENU hMenuAlt) {
   // An object active in place keeps its shared menu up.
+#ifndef _AFX_WIN16
   if (m_pNotifyHook != NULL && m_pNotifyHook->OnUpdateFrameMenu()) return;
+#endif
   if (GetStyle() & WS_CHILD) return;
   if (hMenuAlt == NULL) {
     CDocument* pDoc = GetActiveDocument();
@@ -369,8 +375,10 @@ BOOL CFrameWnd::PreTranslateMessage(MSG* pMsg) {
   if (CWnd::PreTranslateMessage(pMsg)) return TRUE;
   if (pMsg->message >= WM_KEYFIRST && pMsg->message <= WM_KEYLAST) {
     // The object active in place, then the container's in-place keys.
+#ifndef _AFX_WIN16
     if (m_pNotifyHook != NULL && m_pNotifyHook->m_lpActiveObject != NULL)
       return m_pNotifyHook->OnPreTranslateMessage(pMsg);
+#endif
     HACCEL hAccel = GetDefaultAccelerator();
     return hAccel != NULL && ::TranslateAccelerator(m_hWnd, hAccel, pMsg);
   }
@@ -535,7 +543,9 @@ void CFrameWnd::RecalcLayout(BOOL bNotify) {
   RepositionBars(0, 0xFFFF, AFX_IDW_PANE_FIRST, reposExtra, &m_rectBorder);
   m_bInRecalcLayout = FALSE;
   // An object active in place lays its own bars out in what is left.
+#ifndef _AFX_WIN16
   if (m_pNotifyHook != NULL) m_pNotifyHook->OnRecalcLayout();
+#endif
 }
 
 BOOL CFrameWnd::NegotiateBorderSpace(UINT nBorderCmd, LPRECT lpRectBorder) {
@@ -583,7 +593,9 @@ void CFrameWnd::OnSetFocus(CWnd* pOldWnd) {
 
 void CFrameWnd::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized) {
   CWnd::OnActivate(nState, pWndOther, bMinimized);
+#ifndef _AFX_WIN16
   if (m_pNotifyHook != NULL) m_pNotifyHook->OnActivate(nState != WA_INACTIVE);
+#endif
   CFrameWnd* pActiveFrame = GetActiveFrame();
   CView* pActiveView = pActiveFrame != NULL ? pActiveFrame->GetActiveView() : NULL;
   if (pActiveView != NULL) {
@@ -695,7 +707,9 @@ void CFrameWnd::OnDestroy() {
   if (pApp != NULL && pApp->m_pMainWnd == this && pApp->m_pszHelpFilePath != NULL)
     ::WinHelp(m_hWnd, NULL, HELP_QUIT, 0);
 
+#ifndef _AFX_WIN16
   if (m_pNotifyHook != NULL) m_pNotifyHook->OnFrameDestroy();
+#endif
   DestroyDockBars();
   CWnd::OnDestroy();
 }

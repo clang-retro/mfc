@@ -82,7 +82,7 @@ BOOL CControlBarInfo::SaveState(LPCTSTR lpszProfileName, int nIndex) {
     for (int i = 0; i < m_arrBarID.GetSize(); i++) {
       CString strEntry;
       strEntry.Format(_T("Bar#%d"), i);
-      _WriteInt(pApp, strSection, strEntry, (int)(UINT_PTR)m_arrBarID[i]);
+      _WriteInt(pApp, strSection, strEntry, (int)(DWORD_PTR)m_arrBarID[i]);
     }
   }
   return TRUE;
@@ -137,7 +137,7 @@ void CControlBarInfo::Serialize(CArchive& ar, CDockState* pDockState) {
       ar << m_dwMRUFloatStyle << (LONG)m_ptMRUFloatPos.x << (LONG)m_ptMRUFloatPos.y;
     }
     ar << (WORD)m_arrBarID.GetSize();
-    for (int i = 0; i < m_arrBarID.GetSize(); i++) ar << (DWORD)(UINT_PTR)m_arrBarID[i];
+    for (int i = 0; i < m_arrBarID.GetSize(); i++) ar << (DWORD)(DWORD_PTR)m_arrBarID[i];
   } else {
     DWORD dw;
     LONG l1, l2, l3, l4;
@@ -376,7 +376,7 @@ void CFrameWnd::SetDockState(const CDockState& state) {
     CControlBarInfo* pInfo = (CControlBarInfo*)state.m_arrBarInfo[i];
     if (!pInfo->m_bDockBar) continue;
     for (int j = 0; j < pInfo->m_arrBarID.GetSize(); j++) {
-      UINT nID = (UINT)(UINT_PTR)pInfo->m_arrBarID[j];
+      UINT nID = (UINT)(DWORD_PTR)pInfo->m_arrBarID[j];
       if (nID == 0) continue;
       CControlBar* pBar = GetControlBar(nID);
       if (pBar != NULL && !pBar->IsDockBar() && pBar->m_pDockBar != NULL)
@@ -394,7 +394,7 @@ void CFrameWnd::SetDockState(const CDockState& state) {
       // The floating frame's style follows its first bar.
       DWORD dwStyle = pInfo->m_bHorz ? CBRS_ALIGN_TOP : CBRS_ALIGN_LEFT;
       for (int j = 0; j < pInfo->m_arrBarID.GetSize(); j++) {
-        CControlBar* pBar = GetControlBar((UINT)(UINT_PTR)pInfo->m_arrBarID[j]);
+        CControlBar* pBar = GetControlBar((UINT)(DWORD_PTR)pInfo->m_arrBarID[j]);
         if (pBar != NULL && !pBar->IsDockBar()) {
           dwStyle |= pBar->m_dwStyle & CBRS_SIZE_DYNAMIC;
           break;
@@ -412,7 +412,7 @@ void CFrameWnd::SetDockState(const CDockState& state) {
 
     BOOL bRowOpen = FALSE;
     for (int j = 0; j < pInfo->m_arrBarID.GetSize(); j++) {
-      UINT nID = (UINT)(UINT_PTR)pInfo->m_arrBarID[j];
+      UINT nID = (UINT)(DWORD_PTR)pInfo->m_arrBarID[j];
       if (nID == 0) {
         if (bRowOpen) pDockBar->m_arrBars.Add(NULL);
         bRowOpen = FALSE;

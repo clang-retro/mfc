@@ -389,10 +389,11 @@ The ANSI code page there is UTF-8, `WCHAR` is the system's 32-bit
 
 ### 16-bit Windows
 
-`make TARGET=i8086-pc-win16` builds the core classes (`CObject`,
-`CString`, the collections, `CFile`, `CArchive`, `CTime` and the
-exceptions) for 16-bit Windows, in the large model. The window classes
-are not there yet. See [docs/win16.md](docs/win16.md).
+`make TARGET=i8086-pc-win16` builds the core classes and the window
+classes (`CWinApp`, the frames, MDI, dialogs, the controls, the GDI
+classes and document/view) for 16-bit Windows, in the large model. OLE
+and the common controls are not there yet. See
+[docs/win16.md](docs/win16.md).
 
 ### The shared library
 
@@ -1337,9 +1338,9 @@ ATLVERIFY, ATLENSURE and ATLTRY, the trace categories (CTraceCategory,
 
 ## Plans
 
-The window, dialog and document/view classes for Win16 (with
-win16-sdk; the core classes are there, see
-[docs/win16.md](docs/win16.md)), and finishing the portable layer (see Linux and
+OLE 2 and drawn control bars for Win16 (the core and window classes
+are there, see [docs/win16.md](docs/win16.md)), and finishing the
+portable layer (see Linux and
 macOS above), with controls drawn in the classic style, so that MFC
 programs build and look the same on macOS and Linux.
 

@@ -2,9 +2,15 @@
 #ifndef __AFXMSG_WM__H__
 #define __AFXMSG_WM__H__
 
+#ifdef _AFX_WIN16
+#define ON_WM_ACTIVATE() \
+  {WM_ACTIVATE, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
+   [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnActivate((UINT)_w, _AfxWnd((WPARAM)LOWORD(_l)), (BOOL)HIWORD(_l)); return 0; }},
+#else
 #define ON_WM_ACTIVATE() \
   {WM_ACTIVATE, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnActivate(LOWORD(_w), _AfxWnd(_l), HIWORD(_w)); return 0; }},
+#endif
 #define ON_WM_ACTIVATEAPP() \
   {WM_ACTIVATEAPP, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnActivateApp((BOOL)_w, (DWORD)_l); return 0; }},
@@ -26,9 +32,15 @@
 #define ON_WM_CHAR() \
   {WM_CHAR, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnChar((UINT)_w, LOWORD(_l), HIWORD(_l)); return 0; }},
+#ifdef _AFX_WIN16
+#define ON_WM_CHARTOITEM() \
+  {WM_CHARTOITEM, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
+   [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; return (LRESULT)(static_cast<ThisClass*>(_t)->OnCharToItem((UINT)_w, (CListBox*)_AfxWnd((WPARAM)LOWORD(_l)), HIWORD(_l))); }},
+#else
 #define ON_WM_CHARTOITEM() \
   {WM_CHARTOITEM, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; return (LRESULT)(static_cast<ThisClass*>(_t)->OnCharToItem(LOWORD(_w), (CListBox*)_AfxWnd(_l), HIWORD(_w))); }},
+#endif
 #define ON_WM_CHILDACTIVATE() \
   {WM_CHILDACTIVATE, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnChildActivate(); return 0; }},
@@ -116,9 +128,15 @@
 #define ON_WM_HELPINFO() \
   {WM_HELP, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; return (LRESULT)(static_cast<ThisClass*>(_t)->OnHelpInfo((HELPINFO*)_l)); }},
+#ifdef _AFX_WIN16
+#define ON_WM_HSCROLL() \
+  {WM_HSCROLL, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
+   [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnHScroll((UINT)_w, (UINT)(short)LOWORD(_l), (CScrollBar*)_AfxWnd((WPARAM)HIWORD(_l))); return 0; }},
+#else
 #define ON_WM_HSCROLL() \
   {WM_HSCROLL, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnHScroll(LOWORD(_w), (UINT)(short)HIWORD(_w), (CScrollBar*)_AfxWnd(_l)); return 0; }},
+#endif
 #define ON_WM_HSCROLLCLIPBOARD() \
   {WM_HSCROLLCLIPBOARD, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnHScrollClipboard(_AfxWnd(_w), LOWORD(_l), HIWORD(_l)); return 0; }},
@@ -158,18 +176,36 @@
 #define ON_WM_MBUTTONUP() \
   {WM_MBUTTONUP, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnMButtonUp((UINT)_w, _AfxPt(_l)); return 0; }},
+#ifdef _AFX_WIN16
+#define ON_WM_MDIACTIVATE() \
+  {WM_MDIACTIVATE, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
+   [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnMDIActivate((BOOL)_w, _AfxWnd((WPARAM)LOWORD(_l)), _AfxWnd((WPARAM)HIWORD(_l))); return 0; }},
+#else
 #define ON_WM_MDIACTIVATE() \
   {WM_MDIACTIVATE, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnMDIActivate((HWND)_l == ((CWnd*)_t)->m_hWnd, _AfxWnd(_l), _AfxWnd(_w)); return 0; }},
+#endif
 #define ON_WM_MEASUREITEM() \
   {WM_MEASUREITEM, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnMeasureItem((int)_w, (LPMEASUREITEMSTRUCT)_l); return 0; }},
+#ifdef _AFX_WIN16
+#define ON_WM_MENUCHAR() \
+  {WM_MENUCHAR, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
+   [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; return (LRESULT)(static_cast<ThisClass*>(_t)->OnMenuChar((UINT)_w, LOWORD(_l), _AfxMenu((WPARAM)HIWORD(_l)))); }},
+#else
 #define ON_WM_MENUCHAR() \
   {WM_MENUCHAR, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; return (LRESULT)(static_cast<ThisClass*>(_t)->OnMenuChar(LOWORD(_w), HIWORD(_w), _AfxMenu(_l))); }},
+#endif
+#ifdef _AFX_WIN16
+#define ON_WM_MENUSELECT() \
+  {WM_MENUSELECT, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
+   [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnMenuSelect((UINT)_w, LOWORD(_l), (HMENU)HIWORD(_l)); return 0; }},
+#else
 #define ON_WM_MENUSELECT() \
   {WM_MENUSELECT, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnMenuSelect(LOWORD(_w), HIWORD(_w), (HMENU)_l); return 0; }},
+#endif
 #define ON_WM_MOUSEACTIVATE() \
   {WM_MOUSEACTIVATE, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; return (LRESULT)(static_cast<ThisClass*>(_t)->OnMouseActivate(_AfxWnd(_w), LOWORD(_l), HIWORD(_l))); }},
@@ -356,12 +392,24 @@
 #define ON_WM_TIMER() \
   {WM_TIMER, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnTimer((UINT_PTR)_w); return 0; }},
+#ifdef _AFX_WIN16
+#define ON_WM_VKEYTOITEM() \
+  {WM_VKEYTOITEM, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
+   [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; return (LRESULT)(static_cast<ThisClass*>(_t)->OnVKeyToItem((UINT)_w, (CListBox*)_AfxWnd((WPARAM)LOWORD(_l)), HIWORD(_l))); }},
+#else
 #define ON_WM_VKEYTOITEM() \
   {WM_VKEYTOITEM, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; return (LRESULT)(static_cast<ThisClass*>(_t)->OnVKeyToItem(LOWORD(_w), (CListBox*)_AfxWnd(_l), HIWORD(_w))); }},
+#endif
+#ifdef _AFX_WIN16
+#define ON_WM_VSCROLL() \
+  {WM_VSCROLL, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
+   [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnVScroll((UINT)_w, (UINT)(short)LOWORD(_l), (CScrollBar*)_AfxWnd((WPARAM)HIWORD(_l))); return 0; }},
+#else
 #define ON_WM_VSCROLL() \
   {WM_VSCROLL, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnVScroll(LOWORD(_w), (UINT)(short)HIWORD(_w), (CScrollBar*)_AfxWnd(_l)); return 0; }},
+#endif
 #define ON_WM_VSCROLLCLIPBOARD() \
   {WM_VSCROLLCLIPBOARD, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->OnVScrollClipboard(_AfxWnd(_w), LOWORD(_l), HIWORD(_l)); return 0; }},
@@ -398,18 +446,42 @@
 #define ON_WM_DELETEITEM_REFLECT() \
   {WM_REFLECT_BASE + WM_DELETEITEM, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->DeleteItem((LPDELETEITEMSTRUCT)_l); return 0; }},
+#ifdef _AFX_WIN16
+#define ON_WM_CHARTOITEM_REFLECT() \
+  {WM_REFLECT_BASE + WM_CHARTOITEM, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
+   [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; return (LRESULT)(static_cast<ThisClass*>(_t)->CharToItem((UINT)_w, HIWORD(_l))); }},
+#else
 #define ON_WM_CHARTOITEM_REFLECT() \
   {WM_REFLECT_BASE + WM_CHARTOITEM, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; return (LRESULT)(static_cast<ThisClass*>(_t)->CharToItem(LOWORD(_w), HIWORD(_w))); }},
+#endif
+#ifdef _AFX_WIN16
+#define ON_WM_VKEYTOITEM_REFLECT() \
+  {WM_REFLECT_BASE + WM_VKEYTOITEM, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
+   [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; return (LRESULT)(static_cast<ThisClass*>(_t)->VKeyToItem((UINT)_w, HIWORD(_l))); }},
+#else
 #define ON_WM_VKEYTOITEM_REFLECT() \
   {WM_REFLECT_BASE + WM_VKEYTOITEM, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; return (LRESULT)(static_cast<ThisClass*>(_t)->VKeyToItem(LOWORD(_w), HIWORD(_w))); }},
+#endif
+#ifdef _AFX_WIN16
+#define ON_WM_HSCROLL_REFLECT() \
+  {WM_REFLECT_BASE + WM_HSCROLL, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
+   [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->HScroll((UINT)_w, (UINT)(short)LOWORD(_l)); return 0; }},
+#else
 #define ON_WM_HSCROLL_REFLECT() \
   {WM_REFLECT_BASE + WM_HSCROLL, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->HScroll(LOWORD(_w), (UINT)(short)HIWORD(_w)); return 0; }},
+#endif
+#ifdef _AFX_WIN16
+#define ON_WM_VSCROLL_REFLECT() \
+  {WM_REFLECT_BASE + WM_VSCROLL, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
+   [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->VScroll((UINT)_w, (UINT)(short)LOWORD(_l)); return 0; }},
+#else
 #define ON_WM_VSCROLL_REFLECT() \
   {WM_REFLECT_BASE + WM_VSCROLL, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->VScroll(LOWORD(_w), (UINT)(short)HIWORD(_w)); return 0; }},
+#endif
 #define ON_WM_PARENTNOTIFY_REFLECT() \
   {WM_REFLECT_BASE + WM_PARENTNOTIFY, 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    [](CCmdTarget* _t, UINT _m, WPARAM _w, LPARAM _l) -> LRESULT { (void)_m; (void)_w; (void)_l; static_cast<ThisClass*>(_t)->ParentNotify((UINT)_w, _l); return 0; }},

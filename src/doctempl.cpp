@@ -695,11 +695,20 @@ BOOL CDocManager::DoPromptFileName(CString& fileName, UINT nIDSTitle, DWORD lFla
 // File New with several document types: a small list dialog, built in
 // memory so that applications need no resource for it.
 
+// What the dialog procedure gets: the templates, and the one the user
+// chose. The result of the dialog is IDOK or IDCANCEL, because a 16-bit
+// dialog result has no room for a pointer.
+struct AFX_NEWTYPE_STATE {
+  CPtrList* pList;
+  CDocTemplate* pChosen;
+};
+
 static INT_PTR CALLBACK _AfxNewTypeDlgProc(HWND hDlg, UINT message, WPARAM wParam,
                                            LPARAM lParam) {
   switch (message) {
     case WM_INITDIALOG: {
-      CPtrList* pList = (CPtrList*)lParam;
+      ::SetWindowLongPtr(hDlg, DWLP_USER, lParam);
+      CPtrList* pList = ((AFX_NEWTYPE_STATE*)lParam)->pList;
       HWND hList = ::GetDlgItem(hDlg, 100);
       POSITION pos = pList->GetHeadPosition();
       while (pos != NULL) {
@@ -716,15 +725,19 @@ static INT_PTR CALLBACK _AfxNewTypeDlgProc(HWND hDlg, UINT message, WPARAM wPara
       return FALSE;
     }
     case WM_COMMAND:
-      if (LOWORD(wParam) == IDOK || (LOWORD(wParam) == 100 && HIWORD(wParam) == LBN_DBLCLK)) {
+      if (GET_WM_COMMAND_ID(wParam, lParam) == IDOK ||
+          (GET_WM_COMMAND_ID(wParam, lParam) == 100 &&
+           GET_WM_COMMAND_CMD(wParam, lParam) == LBN_DBLCLK)) {
         HWND hList = ::GetDlgItem(hDlg, 100);
         int i = (int)::SendMessage(hList, LB_GETCURSEL, 0, 0);
         LPARAM lData = i >= 0 ? ::SendMessage(hList, LB_GETITEMDATA, i, 0) : 0;
-        ::EndDialog(hDlg, (INT_PTR)lData);
+        AFX_NEWTYPE_STATE* pState = (AFX_NEWTYPE_STATE*)::GetWindowLongPtr(hDlg, DWLP_USER);
+        pState->pChosen = (CDocTemplate*)lData;
+        ::EndDialog(hDlg, pState->pChosen != NULL ? IDOK : IDCANCEL);
         return TRUE;
       }
-      if (LOWORD(wParam) == IDCANCEL) {
-        ::EndDialog(hDlg, 0);
+      if (GET_WM_COMMAND_ID(wParam, lParam) == IDCANCEL) {
+        ::EndDialog(hDlg, IDCANCEL);
         return TRUE;
       }
       break;
@@ -781,6 +794,26 @@ static CDocTemplate* _AfxChooseNewType(CPtrList& templateList) {
   if (nCandidates == 0) return (CDocTemplate*)templateList.GetHead();
   if (nCandidates == 1) return pOnly;
 
+  AFX_NEWTYPE_STATE state = {&templateList, NULL};
+
+#ifdef _AFX_WIN16
+  // 16-bit Windows: the 16-bit template, in a global memory block, as
+  // DialogBoxIndirectParam needs it.
+  CAfxDlgTemplate dt(DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_CENTER, 186, 74,
+                     L"New", L"MS Sans Serif", 8);
+  dt.AddItem(0x83, LBS_NOTIFY | LBS_HASSTRINGS | WS_VSCROLL | WS_BORDER | WS_TABSTOP, 7, 7, 118,
+             60, 100, L"");
+  dt.AddItem(0x80, BS_DEFPUSHBUTTON | WS_TABSTOP, 130, 7, 50, 14, IDOK, L"OK");
+  dt.AddItem(0x80, BS_PUSHBUTTON | WS_TABSTOP, 130, 24, 50, 14, IDCANCEL, L"Cancel");
+  HGLOBAL hTemplate = ::GlobalAlloc(GMEM_MOVEABLE, (DWORD)dt.GetSize());
+  if (hTemplate == NULL) return NULL;
+  memcpy(::GlobalLock(hTemplate), dt.GetTemplate(), (size_t)dt.GetSize());
+  ::GlobalUnlock(hTemplate);
+  INT_PTR nResult = ::DialogBoxIndirectParam(AfxGetInstanceHandle(), hTemplate,
+                                             _AfxGetSafeOwner(NULL, NULL), _AfxNewTypeDlgProc,
+                                             (LPARAM)&state);
+  ::GlobalFree(hTemplate);
+#else
   DlgWriter w;
   w.Dword(DS_MODALFRAME | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_CENTER);
   w.Dword(0);
@@ -798,8 +831,9 @@ static CDocTemplate* _AfxChooseNewType(CPtrList& templateList) {
 
   INT_PTR nResult = ::DialogBoxIndirectParam(AfxGetInstanceHandle(), (LPCDLGTEMPLATE)w.buf,
                                              _AfxGetSafeOwner(NULL, NULL), _AfxNewTypeDlgProc,
-                                             (LPARAM)&templateList);
-  return nResult > 0 ? (CDocTemplate*)nResult : NULL;
+                                             (LPARAM)&state);
+#endif
+  return nResult == IDOK ? state.pChosen : NULL;
 }
 
 void CDocManager::OnFileNew() {

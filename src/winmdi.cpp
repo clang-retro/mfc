@@ -3,7 +3,9 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
+#ifndef _AFX_WIN16
 #include <afxole.h>
+#endif
 
 // ---------------------------------------------------------------------
 // CMDIFrameWnd
@@ -101,7 +103,15 @@ LRESULT CMDIFrameWnd::DefWindowProc(UINT message, WPARAM wParam, LPARAM lParam) 
 
 CMDIChildWnd* CMDIFrameWnd::MDIGetActive(BOOL* pbMaximized) const {
   if (m_hWndMDIClient == NULL) return NULL;
+#ifdef _AFX_WIN16
+  // 16-bit Windows gives the child in the low word and the maximized
+  // state in the high word.
+  LRESULT lActive = ::SendMessage(m_hWndMDIClient, WM_MDIGETACTIVE, 0, 0);
+  HWND hWnd = (HWND)LOWORD(lActive);
+  if (pbMaximized != NULL) *pbMaximized = HIWORD(lActive) != 0;
+#else
   HWND hWnd = (HWND)::SendMessage(m_hWndMDIClient, WM_MDIGETACTIVE, 0, (LPARAM)pbMaximized);
+#endif
   CWnd* pWnd = CWnd::FromHandlePermanent(hWnd);
   if (pWnd == NULL || !pWnd->IsKindOf(RUNTIME_CLASS(CMDIChildWnd))) return NULL;
   CMDIChildWnd* pChild = (CMDIChildWnd*)pWnd;
@@ -120,20 +130,46 @@ CFrameWnd* CMDIFrameWnd::GetActiveFrame() {
 }
 
 CMenu* CMDIFrameWnd::MDISetMenu(CMenu* pFrameMenu, CMenu* pWindowMenu) {
+#ifdef _AFX_WIN16
+  // 16-bit Windows: both menus are in lParam.
+  HMENU hOld = (HMENU)LOWORD(::SendMessage(
+      m_hWndMDIClient, WM_MDISETMENU, FALSE,
+      MAKELONG((UINT)(pFrameMenu != NULL ? pFrameMenu->m_hMenu : NULL),
+               (UINT)(pWindowMenu != NULL ? pWindowMenu->m_hMenu : NULL))));
+#else
   HMENU hOld = (HMENU)::SendMessage(m_hWndMDIClient, WM_MDISETMENU,
                                     (WPARAM)(pFrameMenu != NULL ? pFrameMenu->m_hMenu : NULL),
                                     (LPARAM)(pWindowMenu != NULL ? pWindowMenu->m_hMenu : NULL));
+#endif
   return CMenu::FromHandle(hOld);
+}
+
+/// Makes the MDI client put the menus of the active child again. 16-bit
+/// Windows has no WM_MDIREFRESHMENU: WM_MDISETMENU with wParam TRUE does
+/// it.
+static void _AfxMDIRefreshMenu(HWND hWndMDIClient) {
+#ifdef _AFX_WIN16
+  ::SendMessage(hWndMDIClient, WM_MDISETMENU, TRUE, 0);
+#else
+  ::SendMessage(hWndMDIClient, WM_MDIREFRESHMENU, 0, 0);
+#endif
 }
 
 static void _AfxSetMDIMenu(CMDIFrameWnd* pFrame, HMENU hMenu) {
   HMENU hWindowMenu = pFrame->GetWindowMenuPopup(hMenu);
+#ifdef _AFX_WIN16
+  ::SendMessage(pFrame->m_hWndMDIClient, WM_MDISETMENU, FALSE,
+                MAKELONG((UINT)hMenu, (UINT)hWindowMenu));
+#else
   ::SendMessage(pFrame->m_hWndMDIClient, WM_MDISETMENU, (WPARAM)hMenu, (LPARAM)hWindowMenu);
+#endif
   ::DrawMenuBar(pFrame->m_hWnd);
 }
 
 void CMDIFrameWnd::OnUpdateFrameMenu(HMENU hMenuAlt) {
+#ifndef _AFX_WIN16
   if (m_pNotifyHook != NULL && m_pNotifyHook->OnUpdateFrameMenu()) return;
+#endif
   CMDIChildWnd* pActiveWnd = MDIGetActive();
   if (pActiveWnd != NULL) {
     pActiveWnd->OnUpdateFrameMenu(TRUE, pActiveWnd, hMenuAlt);
@@ -353,7 +389,7 @@ BOOL CMDIChildWnd::Create(LPCTSTR lpszClassName, LPCTSTR lpszWindowName, DWORD d
     else
       ShowWindow(SW_SHOWNORMAL);
     pParentWnd->MDIActivate(this);
-    ::SendMessage(pParentWnd->m_hWndMDIClient, WM_MDIREFRESHMENU, 0, 0);
+    _AfxMDIRefreshMenu(pParentWnd->m_hWndMDIClient);
   } else if (cs.style & WS_MAXIMIZE) {
     m_nShowDelay = SW_SHOWMAXIMIZED;
   }
@@ -456,7 +492,7 @@ void CMDIChildWnd::ActivateFrame(int nCmdShow) {
 
   if (nCmdShow != -1) ShowWindow(nCmdShow);
   pFrameWnd->MDIActivate(this);
-  if (!bVisibleThen) ::SendMessage(pFrameWnd->m_hWndMDIClient, WM_MDIREFRESHMENU, 0, 0);
+  if (!bVisibleThen) _AfxMDIRefreshMenu(pFrameWnd->m_hWndMDIClient);
 }
 
 void CMDIChildWnd::OnUpdateFrameMenu(BOOL bActive, CWnd* pActivateWnd, HMENU hMenuAlt) {
@@ -487,7 +523,9 @@ void CMDIChildWnd::OnMDIActivate(BOOL bActivate, CWnd* pActivateWnd, CWnd* pDeac
 
   OnUpdateFrameMenu(bActivate, bActivate ? this : pActivateWnd, NULL);
   // An object active in place in this child puts its menu up or down.
+#ifndef _AFX_WIN16
   if (m_pNotifyHook != NULL) m_pNotifyHook->OnDocActivate(bActivate);
+#endif
 
   if (bActivate && pActiveView != NULL)
     pActiveView->OnActivateView(TRUE, pActiveView, pActiveView);

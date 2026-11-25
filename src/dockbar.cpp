@@ -61,7 +61,7 @@ BOOL CDockBar::Create(CWnd* pParentWnd, DWORD dwStyle, UINT nID) {
 CControlBar* CDockBar::GetDockedControlBar(int nPos) const {
   // Small values are placeholders, not bars.
   void* p = m_arrBars[nPos];
-  if ((UINT_PTR)p <= 0xFFFF) return NULL;
+  if ((DWORD_PTR)p <= 0xFFFF) return NULL;
   return (CControlBar*)p;
 }
 

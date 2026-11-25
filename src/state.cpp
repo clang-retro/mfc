@@ -102,9 +102,7 @@ HINSTANCE AFXAPI AfxFindStringResourceHandle(UINT nID) {
 
 LPCTSTR AFXAPI AfxGetAppName() { return AfxGetModuleState()->m_lpszCurrentAppName; }
 
-#ifndef _AFX_WIN16
 CWinApp* AFXAPI AfxGetApp() { return AfxGetModuleState()->m_pCurrentWinApp; }
-#endif
 
 // ---------------------------------------------------------------------
 // Thread state
@@ -136,15 +134,12 @@ AFX_THREAD_STATE* AFXAPI AfxGetThreadState() {
   return pState;
 }
 
-#ifndef _AFX_WIN16
 static void DeleteMaps(_AFX_HANDLE_MAPS* pMaps);
-#endif
 
 void AFXAPI AfxTermThreadState() {
   if (g_nGlobalsInit != 2) return;
   AFX_THREAD_STATE* pState = (AFX_THREAD_STATE*)::TlsGetValue(g_tlsIndex);
   if (pState == NULL) return;
-#ifndef _AFX_WIN16
   if (pState->m_hHookOldCbtFilter != NULL) ::UnhookWindowsHookEx(pState->m_hHookOldCbtFilter);
   if (pState->m_hHookOldMsgFilter != NULL) ::UnhookWindowsHookEx(pState->m_hHookOldMsgFilter);
   DeleteMaps(&pState->m_maps);
@@ -154,7 +149,6 @@ void AFXAPI AfxTermThreadState() {
     DeleteMaps(p);
     ::free(p);
   }
-#endif
   if (pState->m_pSockState != NULL) pState->m_pfnSockTerm(pState->m_pSockState);
   ::free(pState);
   ::TlsSetValue(g_tlsIndex, NULL);
@@ -169,7 +163,6 @@ void AFXAPI AfxUnlockGlobals(int nLockType) {
   ::LeaveCriticalSection(&g_csGlobals[nLockType & 3]);
 }
 
-#ifndef _AFX_WIN16
 CWinThread* AFXAPI AfxGetThread() {
   CWinThread* pThread = AfxGetThreadState()->m_pCurrentWinThread;
   return pThread;
@@ -193,12 +186,12 @@ CHandleMap::CHandleMap(CRuntimeClass* pClass, size_t nOffset, int nHandles)
 
 CObject* CHandleMap::LookupPermanent(HANDLE h) {
   void* p;
-  return m_permanentMap.Lookup(h, p) ? (CObject*)p : NULL;
+  return m_permanentMap.Lookup(Key(h), p) ? (CObject*)p : NULL;
 }
 
 CObject* CHandleMap::LookupTemporary(HANDLE h) {
   void* p;
-  return m_temporaryMap.Lookup(h, p) ? (CObject*)p : NULL;
+  return m_temporaryMap.Lookup(Key(h), p) ? (CObject*)p : NULL;
 }
 
 CObject* CHandleMap::FromHandle(HANDLE h) {
@@ -215,20 +208,20 @@ CObject* CHandleMap::FromHandle(HANDLE h) {
   HANDLE* ph = (HANDLE*)((BYTE*)pObject + m_nOffset);
   ph[0] = h;
   if (m_nHandles == 2) ph[1] = h;
-  m_temporaryMap.SetAt(h, pObject);
+  m_temporaryMap.SetAt(Key(h), pObject);
   return pObject;
 }
 
-void CHandleMap::SetPermanent(HANDLE h, CObject* pObject) { m_permanentMap[h] = pObject; }
+void CHandleMap::SetPermanent(HANDLE h, CObject* pObject) { m_permanentMap[Key(h)] = pObject; }
 
 void CHandleMap::RemoveHandle(HANDLE h) {
-  m_permanentMap.RemoveKey(h);
+  m_permanentMap.RemoveKey(Key(h));
 }
 
 void CHandleMap::DeleteTemp() {
   POSITION pos = m_temporaryMap.GetStartPosition();
   while (pos != NULL) {
-    void* h;
+    HandleKey h;
     void* p;
     m_temporaryMap.GetNextAssoc(pos, h, p);
     CObject* pObject = (CObject*)p;
@@ -326,7 +319,6 @@ BOOL AFXAPI AfxUnlockTempMaps(BOOL bDeleteTemps) {
   return pState->m_nTempMapLock != 0;
 }
 
-#endif  // _AFX_WIN16
 
 // ---------------------------------------------------------------------
 // Built-in text for the framework's own string IDs, used when the

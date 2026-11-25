@@ -196,10 +196,18 @@ void CEditView::Serialize(CArchive& ar) {
 // ---------------------------------------------------------------------
 // Finding text
 
+/// Tells whether the text starts with the nFind characters of lpszFind.
 static BOOL _AfxMatchAt(LPCTSTR lpszText, LPCTSTR lpszFind, int nFind, BOOL bCase) {
+#ifdef _AFX_WIN16
+  // 16-bit Windows has CompareString only in OLE2NLS.DLL.
+  CString strText(lpszText, nFind);
+  CString strFind(lpszFind, nFind);
+  return (bCase ? strText.Compare(strFind) : strText.CompareNoCase(strFind)) == 0;
+#else
   return (bCase ? ::CompareString(LOCALE_USER_DEFAULT, 0, lpszText, nFind, lpszFind, nFind)
                 : ::CompareString(LOCALE_USER_DEFAULT, NORM_IGNORECASE, lpszText, nFind, lpszFind,
                                   nFind)) == CSTR_EQUAL;
+#endif
 }
 
 BOOL CEditView::SameAsSelected(LPCTSTR lpszCompare, BOOL bCase) {

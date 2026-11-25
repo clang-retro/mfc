@@ -4,7 +4,9 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
+#ifndef _AFX_WIN16
 #include <afxocc.h>
+#endif
 
 const _AFX_OCC_HOOKS* _afxOccHooks = NULL;
 
@@ -155,7 +157,12 @@ void AFXAPI AfxHookWindowCreate(CWnd* pWnd) {
   if (pState->m_pWndInit == pWnd) return;
   if (pState->m_hHookOldCbtFilter == NULL) {
     pState->m_hHookOldCbtFilter =
+#ifdef _AFX_WIN16
+        // The hook of one task: the instance of the program and its task.
+        ::SetWindowsHookEx(WH_CBT, _AfxCbtFilterHook, AfxGetInstanceHandle(), ::GetCurrentTask());
+#else
         ::SetWindowsHookEx(WH_CBT, _AfxCbtFilterHook, NULL, ::GetCurrentThreadId());
+#endif
     if (pState->m_hHookOldCbtFilter == NULL) AfxThrowMemoryException();
   }
   pState->m_pWndInit = pWnd;
@@ -342,8 +349,15 @@ LRESULT CWnd::WindowProc(UINT message, WPARAM wParam, LPARAM lParam) {
   return lResult;
 }
 
+/// Gives an ambient property to an OLE control. Win16 has no control
+/// container, so on Win16 the function always returns FALSE.
 BOOL CWnd::OnAmbientProperty(COleControlSite* pSite, DISPID dispid, VARIANT* pvar) {
+#ifdef _AFX_WIN16
+  (void)pSite; (void)dispid; (void)pvar;
+  return FALSE;
+#else
   return m_pCtrlCont != NULL && m_pCtrlCont->GetAmbientProp(pSite, dispid, pvar);
+#endif
 }
 
 LRESULT CWnd::DefWindowProc(UINT nMsg, WPARAM wParam, LPARAM lParam) {
@@ -394,6 +408,17 @@ BOOL CWnd::OnWndMsg(UINT message, WPARAM wParam, LPARAM lParam, LRESULT* pResult
       goto LReturnTrue;
   }
 
+#ifdef _AFX_WIN16
+  // 16-bit Windows sends one WM_CTLCOLOR, with the control in the low
+  // word and the CTLCOLOR_ code in the high word of lParam. The library
+  // makes it the Win32 message of that code. Default() still sends the
+  // message that came.
+  if (message == WM_CTLCOLOR) {
+    message = WM_CTLCOLORMSGBOX + HIWORD(lParam);
+    lParam = (LPARAM)LOWORD(lParam);
+  }
+#endif
+
   {
     BOOL bCtlColor = message >= WM_CTLCOLORMSGBOX && message <= WM_CTLCOLORSTATIC;
     for (const AFX_MSGMAP* pMap = GetMessageMap(); pMap != NULL;
@@ -416,9 +441,9 @@ LReturnTrue:
 }
 
 BOOL CWnd::OnCommand(WPARAM wParam, LPARAM lParam) {
-  UINT nID = LOWORD(wParam);
-  HWND hWndCtrl = (HWND)lParam;
-  int nCode = HIWORD(wParam);
+  UINT nID = GET_WM_COMMAND_ID(wParam, lParam);
+  HWND hWndCtrl = GET_WM_COMMAND_HWND(wParam, lParam);
+  int nCode = (int)GET_WM_COMMAND_CMD(wParam, lParam);
 
   if (hWndCtrl == NULL) {
     // A menu item or accelerator: check it is still enabled.
@@ -507,7 +532,7 @@ BOOL CWnd::ReflectChildNotify(UINT message, WPARAM wParam, LPARAM lParam, LRESUL
       return FALSE;
 
     case WM_COMMAND: {
-      int nCode = HIWORD(wParam);
+      int nCode = (int)GET_WM_COMMAND_CMD(wParam, lParam);
       if (CCmdTarget::OnCmdMsg(0, MAKELONG(nCode, WM_REFLECT_BASE + WM_COMMAND), NULL, NULL)) {
         if (pResult != NULL) *pResult = 1;
         return TRUE;
@@ -526,6 +551,14 @@ BOOL CWnd::ReflectChildNotify(UINT message, WPARAM wParam, LPARAM lParam, LRESUL
     }
 
     default:
+#ifdef _AFX_WIN16
+      // 16-bit Windows: one WM_CTLCOLOR, with the CTLCOLOR_ code in the
+      // high word of lParam.
+      if (message == WM_CTLCOLOR) {
+        message = WM_CTLCOLORMSGBOX + HIWORD(lParam);
+        lParam = (LPARAM)LOWORD(lParam);
+      }
+#endif
       if (message >= WM_CTLCOLORMSGBOX && message <= WM_CTLCOLORSTATIC) {
         // Reflected as WM_REFLECT_BASE + WM_CTLCOLOR, wParam = HDC,
         // lParam = CTLCOLOR_xxx. A NULL brush means "not handled".
@@ -774,6 +807,11 @@ static BOOL _AfxRegisterWithIcon(WNDCLASS* pWndCls, LPCTSTR lpszClassName, UINT 
 typedef BOOL(WINAPI* PFN_INITCOMMONCONTROLSEX)(const INITCOMMONCONTROLSEX*);
 
 static BOOL _AfxInitCommonControls(DWORD dwFlags) {
+#ifdef _AFX_WIN16
+  // 16-bit Windows has no common controls.
+  (void)dwFlags;
+  return FALSE;
+#else
   // InitCommonControlsEx needs comctl32 4.70; fall back to the old call.
   HMODULE hComCtl = ::GetModuleHandleA("comctl32.dll");
   if (hComCtl == NULL) {
@@ -790,6 +828,7 @@ static BOOL _AfxInitCommonControls(DWORD dwFlags) {
   init.dwSize = sizeof(init);
   init.dwICC = dwFlags;
   return pfn(&init);
+#endif
 }
 
 BOOL AFXAPI AfxDeferRegisterClass(LONG fToRegister) {

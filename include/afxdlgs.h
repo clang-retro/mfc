@@ -12,7 +12,9 @@
 // The Vista file dialog's interfaces. The SDK declares them only for
 // NTDDI_VERSION >= Vista; CFileDialog needs just their names and the
 // customization state type, which it declares itself when they are out.
+#ifndef _AFX_WIN16
 #include <shobjidl.h>
+#endif
 struct IFileDialog;
 struct IFileOpenDialog;
 struct IFileSaveDialog;
@@ -224,6 +226,9 @@ public:
   PRINTDLG m_pdActual;
 };
 
+#ifndef _AFX_WIN16
+// 16-bit Windows has no PrintDlgEx and no PageSetupDlg.
+
 // The Windows 2000 print dialog (PrintDlgEx), with its General page.
 // DoModal returns the HRESULT PrintDlgEx gives; m_pdex.dwResultAction
 // says whether the user printed, applied or cancelled.
@@ -269,6 +274,7 @@ public:
   CSize GetPaperSize() const { return CSize(m_psd.ptPaperSize.x, m_psd.ptPaperSize.y); }
   void GetMargins(LPRECT lpRectMargins, LPRECT lpRectMinMargins) const;
 };
+#endif // !_AFX_WIN16
 
 // ---------------------------------------------------------------------
 // Find and Replace (modeless; allocate with new, it deletes itself)

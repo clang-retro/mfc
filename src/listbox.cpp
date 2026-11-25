@@ -280,7 +280,7 @@ void CCheckListBox::ToggleCheck(int nIndex) {
   if (nCheck >= 0) SetCheck(nIndex, nCheck);
   CWnd* pParent = GetParent();
   if (pParent != NULL)
-    pParent->SendMessage(WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(), CLBN_CHKCHANGE), (LPARAM)m_hWnd);
+    pParent->SendMessage(WM_COMMAND, GET_WM_COMMAND_MPS(GetDlgCtrlID(), m_hWnd, CLBN_CHKCHANGE));
 }
 
 void CCheckListBox::OnLButtonDown(UINT nFlags, CPoint point) {
@@ -298,8 +298,8 @@ void CCheckListBox::OnLButtonDown(UINT nFlags, CPoint point) {
         SetCurSel(nIndex);
         CWnd* pParent = GetParent();
         if (pParent != NULL)
-          pParent->SendMessage(WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(), LBN_SELCHANGE),
-                               (LPARAM)m_hWnd);
+          pParent->SendMessage(WM_COMMAND,
+                               GET_WM_COMMAND_MPS(GetDlgCtrlID(), m_hWnd, LBN_SELCHANGE));
       }
       ToggleCheck(nIndex);
       return;

@@ -5,17 +5,6 @@
 #pragma once
 #include "stdafx.h"
 
-#ifdef _AFX_WIN16
-// 16-bit Windows builds the core classes only: the window classes are
-// names here.
-class CWnd;
-class CWinApp;
-class CWinThread;
-class CView;
-class CFrameWnd;
-class CDynLinkLibrary;
-class COleObjectFactory;
-#else
 // Bars made on a container's window while an object is active in place
 // there belong to the frame given (bars.cpp).
 void AFXAPI _AfxRegisterInPlaceDockSite(CFrameWnd* pFrame, BOOL bAdd);
@@ -75,7 +64,6 @@ extern const _AFX_OCC_BIND_HOOKS* _afxOccBindHooks;
 
 // Empties the type library caches (oleconn.cpp), before OLE goes.
 void AFXAPI _AfxReleaseTypeLibCaches();
-#endif  // _AFX_WIN16
 
 // Maps a Windows handle to the C++ object that wraps it. Each thread has
 // one map per handle kind. Objects the program creates go in the
@@ -93,8 +81,20 @@ public:
   void RemoveHandle(HANDLE h);
   void DeleteTemp();
 
+#ifdef _AFX_WIN16
+  // A 16-bit handle is a near pointer: one word.
+  typedef WORD HandleKey;
+  CMapWordToPtr m_permanentMap;
+  CMapWordToPtr m_temporaryMap;
+  // Gives the key of a handle in the maps.
+  static HandleKey Key(HANDLE h) { return (WORD)(UINT)h; }
+#else
+  typedef void* HandleKey;
   CMapPtrToPtr m_permanentMap;
   CMapPtrToPtr m_temporaryMap;
+  // Gives the key of a handle in the maps.
+  static HandleKey Key(HANDLE h) { return (void*)h; }
+#endif
   CRuntimeClass* m_pClass;
   size_t m_nOffset;  // offset of the first handle in the object
   int m_nHandles;    // CDC holds two handles
@@ -207,7 +207,6 @@ struct CPushRoutingView {
   ~CPushRoutingView() { pThreadState->m_pRoutingView = pOldRoutingView; }
 };
 
-#ifndef _AFX_WIN16
 // A dialog template's string (16-bit units, whatever the size of wchar_t).
 CStringW AFXAPI _AfxTemplateString(const WORD* p);
 
@@ -242,6 +241,8 @@ public:
   void AddItem(WORD nClass, DWORD dwStyle, int x, int y, int cx, int cy, WORD nID,
                LPCWSTR lpszText);
   LPCDLGTEMPLATE GetTemplate() const { return (LPCDLGTEMPLATE)m_data.GetData(); }
+  // The size of the template in bytes.
+  INT_PTR GetSize() const { return m_data.GetSize(); }
 
 private:
   void Align(int n);
@@ -253,8 +254,6 @@ private:
 // Creates a dialog bar from an in-memory template.
 BOOL AFXAPI _AfxCreateDialogBarIndirect(CDialogBar* pBar, CWnd* pParentWnd,
                                         LPCDLGTEMPLATE lpTemplate, UINT nStyle, UINT nID);
-
-#endif  // _AFX_WIN16
 
 // strftime with the codes MFC programs use (time.cpp).
 struct tm;
