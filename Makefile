@@ -94,7 +94,7 @@ SRCS = $(addprefix src/,object.cpp strcore.cpp coll.cpp file.cpp archive.cpp exc
   viewedit.cpp viewprnt.cpp \
   viewprev.cpp)
 WIN16_FLAGS ?= -mcmodel=large -fexceptions
-ALL_CXXFLAGS += $(WIN16_FLAGS) -frtti -fno-threadsafe-statics -ffunction-sections \
+ALL_CXXFLAGS += $(WIN16_FLAGS) -frtti -ffunction-sections \
   -Iinclude/win16 -idirafter port/include
 STDLIB =
 endif
