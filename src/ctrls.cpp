@@ -78,10 +78,18 @@ BOOL CListBox::OnChildNotify(UINT message, WPARAM wParam, LPARAM lParam, LRESULT
       DeleteItem((LPDELETEITEMSTRUCT)lParam);
       break;
     case WM_VKEYTOITEM:
+#ifdef _AFX_WIN16
+      if (pResult != NULL) *pResult = VKeyToItem((UINT)wParam, HIWORD(lParam));
+#else
       if (pResult != NULL) *pResult = VKeyToItem(LOWORD(wParam), HIWORD(wParam));
+#endif
       break;
     case WM_CHARTOITEM:
+#ifdef _AFX_WIN16
+      if (pResult != NULL) *pResult = CharToItem((UINT)wParam, HIWORD(lParam));
+#else
       if (pResult != NULL) *pResult = CharToItem(LOWORD(wParam), HIWORD(wParam));
+#endif
       break;
     default:
       return CWnd::OnChildNotify(message, wParam, lParam, pResult);

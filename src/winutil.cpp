@@ -5,7 +5,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 #include <afxext.h>
+#ifndef _AFX_WIN16
 #include <afxocc.h>
+#endif
 
 // ---------------------------------------------------------------------
 // Styles and ownership
@@ -189,10 +191,12 @@ void CWnd::SendMessageToDescendants(UINT message, WPARAM wParam, LPARAM lParam, 
 // Text
 
 void CWnd::GetWindowText(CString& rString) const {
+#ifndef _AFX_WIN16
   if (m_pCtrlSite != NULL) {
     m_pCtrlSite->GetWindowText(rString);
     return;
   }
+#endif
   int nLen = ::GetWindowTextLength(m_hWnd);
   ::GetWindowText(m_hWnd, rString.GetBufferSetLength(nLen), nLen + 1);
   rString.ReleaseBuffer();
@@ -200,6 +204,7 @@ void CWnd::GetWindowText(CString& rString) const {
 
 int CWnd::GetDlgItemText(int nID, CString& rString) const {
   rString.Empty();
+#ifndef _AFX_WIN16
   if (m_pCtrlCont != NULL) {
     COleControlSite* pSite = m_pCtrlCont->FindItem((UINT)nID);
     if (pSite != NULL) {
@@ -207,6 +212,7 @@ int CWnd::GetDlgItemText(int nID, CString& rString) const {
       return rString.GetLength();
     }
   }
+#endif
   HWND hWnd = ::GetDlgItem(m_hWnd, nID);
   if (hWnd == NULL) return 0;
   int nLen = ::GetWindowTextLength(hWnd);

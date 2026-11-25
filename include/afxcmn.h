@@ -353,7 +353,7 @@ public:
     upper = (short)LOWORD(dw);
   }
   void GetRange32(int& lower, int& upper) const {
-    ::SendMessage(m_hWnd, UDM_GETRANGE32, (WPARAM)&lower, (LPARAM)&upper);
+    ::SendMessage(m_hWnd, UDM_GETRANGE32, (WPARAM)(DWORD_PTR)&lower, (LPARAM)&upper);
   }
 };
 
@@ -831,7 +831,7 @@ public:
   long GetTextLengthEx(DWORD dwFlags = GTL_DEFAULT, UINT uCodePage = (UINT)-1) const {
     GETTEXTLENGTHEX gtl = {dwFlags, uCodePage};
     if (uCodePage == (UINT)-1) gtl.codepage = sizeof(TCHAR) == 2 ? 1200 : CP_ACP;
-    return (long)::SendMessage(m_hWnd, EM_GETTEXTLENGTHEX, (WPARAM)&gtl, 0);
+    return (long)::SendMessage(m_hWnd, EM_GETTEXTLENGTHEX, (WPARAM)(DWORD_PTR)&gtl, 0);
   }
   UINT GetOptions() const { return (UINT)::SendMessage(m_hWnd, EM_GETOPTIONS, 0, 0); }
   void SetOptions(WORD wOp, DWORD dwFlags) { ::SendMessage(m_hWnd, EM_SETOPTIONS, wOp, dwFlags); }
@@ -889,7 +889,7 @@ public:
   void RequestResize() { ::SendMessage(m_hWnd, EM_REQUESTRESIZE, 0, 0); }
   CPoint GetCharPos(long lChar) const {
     POINTL pt = {0, 0};
-    ::SendMessage(m_hWnd, EM_POSFROMCHAR, (WPARAM)&pt, lChar);
+    ::SendMessage(m_hWnd, EM_POSFROMCHAR, (WPARAM)(DWORD_PTR)&pt, lChar);
     return CPoint(pt.x, pt.y);
   }
   BOOL DisplayBand(LPRECT pDisplayRect) {

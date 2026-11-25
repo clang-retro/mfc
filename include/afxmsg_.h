@@ -26,7 +26,7 @@ struct AFX_MSGMAP_ENTRY {
   UINT nCode;      // control or notification code
   UINT nID;        // control or command ID (0 for window messages)
   UINT nLastID;    // last ID of a range
-  UINT_PTR nSig;   // AfxSig, or for registered messages a UINT*
+  DWORD_PTR nSig;  // AfxSig, or for registered messages a UINT* (a far pointer on Win16)
   AFX_PMSG pfn;    // not used by these entries
   AFX_THUNK pThunk;
 };
@@ -184,13 +184,13 @@ protected: \
   {(UINT)(message), 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    _AFX_THUNK(_AFX_CALL(memberFxn)(); return 0;)},
 #define ON_REGISTERED_MESSAGE(nMessageVariable, memberFxn) \
-  {0xC000, 0, 0, 0, (UINT_PTR)(UINT*)(&nMessageVariable), (AFX_PMSG)0, \
+  {0xC000, 0, 0, 0, (DWORD_PTR)(UINT*)(&nMessageVariable), (AFX_PMSG)0, \
    _AFX_THUNK(return (LRESULT)_AFX_CALL(memberFxn)(_w, _l);)},
 #define ON_THREAD_MESSAGE(message, memberFxn) \
   {(UINT)(message), 0, 0, 0, AfxSig_thunk, (AFX_PMSG)0, \
    _AFX_THUNK(_AFX_CALL(memberFxn)(_w, _l); return TRUE;)},
 #define ON_REGISTERED_THREAD_MESSAGE(nMessageVariable, memberFxn) \
-  {0xC000, 0, 0, 0, (UINT_PTR)(UINT*)(&nMessageVariable), (AFX_PMSG)0, \
+  {0xC000, 0, 0, 0, (DWORD_PTR)(UINT*)(&nMessageVariable), (AFX_PMSG)0, \
    _AFX_THUNK(_AFX_CALL(memberFxn)(_w, _l); return TRUE;)},
 
 // ---------------------------------------------------------------------

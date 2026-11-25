@@ -369,9 +369,11 @@ extern "C" BOOL WINAPI _AfxW16FlushFileBuffers(HANDLE hFile) {
 
 static BOOL FindCloseSlot(HANDLE hFind);
 
-/// Closes a file handle or a find handle.
+/// Closes a file handle, a find handle, or the handle of an event, a
+/// mutex or a semaphore.
 extern "C" BOOL WINAPI _AfxW16CloseHandle(HANDLE hObject) {
   if (FindCloseSlot(hObject)) return TRUE;
+  if (_AfxW16CloseSyncHandle(hObject)) return TRUE;
   if (close(Fd(hObject)) < 0) return FailErrno();
   return TRUE;
 }
@@ -1053,17 +1055,5 @@ extern "C" BOOL WINAPI _AfxW16TlsSetValue(DWORD dwTlsIndex, LPVOID lpTlsValue) {
   g_tls[dwTlsIndex] = lpTlsValue;
   return TRUE;
 }
-
-// ---------------------------------------------------------------------
-// The parts of afxwin.h that the core classes call
-
-/// Shows a message box with the program's name as its title.
-int AFXAPI AfxMessageBox(LPCTSTR lpszText, UINT nType, UINT) {
-  LPCTSTR lpszTitle = AfxGetAppName();
-  return ::MessageBox(NULL, lpszText, lpszTitle != NULL ? lpszTitle : "", nType);
-}
-
-/// Frees the library's state when the program ends.
-void AFXAPI AfxWinTerm() { AfxTermThreadState(); }
 
 #endif  // _AFX_WIN16

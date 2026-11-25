@@ -385,6 +385,7 @@ HDC CPrintDialog::CreatePrinterDC() {
   return m_pd.hDC;
 }
 
+#ifndef _AFX_WIN16  // 16-bit Windows has no PrintDlgEx and no PageSetupDlg
 // ---------------------------------------------------------------------
 // CPrintDialogEx
 
@@ -482,6 +483,8 @@ void CPageSetupDialog::GetMargins(LPRECT lpRectMargins, LPRECT lpRectMinMargins)
   if (lpRectMargins != NULL) *lpRectMargins = m_psd.rtMargin;
   if (lpRectMinMargins != NULL) *lpRectMinMargins = m_psd.rtMinMargin;
 }
+
+#endif  // !_AFX_WIN16
 
 // ---------------------------------------------------------------------
 // CFindReplaceDialog

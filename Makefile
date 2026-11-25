@@ -77,14 +77,25 @@ PORT_LIB = $(OUT)/libwinport.a
 endif
 # 16-bit Windows (make TARGET=i8086-pc-win16): the core classes in the
 # large model (CObject, CString, the collections, CFile, CArchive, CTime
-# and the exceptions), ANSI only: libmfc.a. The flags give the large model
-# and C++ exceptions.
+# and the exceptions) and the window classes (CWinApp, CWnd, CFrameWnd,
+# CMDIFrameWnd, CDialog, the controls, CDC, CMenu, the documents and the
+# views), ANSI only: libmfc.a. The flags give the large model and C++
+# exceptions. include/win16 replaces the OLE headers of the portable
+# layer; port/include is last, for the Win32 types that the headers of
+# the 16-bit SDK do not have.
 ifneq ($(findstring win16,$(TARGET)),)
 WIN16 = 1
 SRCS = $(addprefix src/,object.cpp strcore.cpp coll.cpp file.cpp archive.cpp except.cpp \
-  time.cpp memdebug.cpp state.cpp win16.cpp)
+  time.cpp memdebug.cpp state.cpp win16.cpp win16u.cpp win16ole.cpp \
+  wincore.cpp winocc.cpp winutil.cpp app.cpp appmain.cpp cmdtarg.cpp thread.cpp mtcore.cpp \
+  frame.cpp winmdi.cpp winmini.cpp winsplit.cpp bars.cpp dockbar.cpp dockcont.cpp dockstat.cpp \
+  dlgcore.cpp dlgdata.cpp dlgtmpl.cpp dlgcomm.cpp dlgvista.cpp \
+  ctrls.cpp listbox.cpp gdi.cpp dcprev.cpp doccore.cpp doctempl.cpp view.cpp viewform.cpp \
+  viewedit.cpp viewprnt.cpp \
+  viewprev.cpp)
 WIN16_FLAGS ?= -mcmodel=large -fexceptions
-ALL_CXXFLAGS += $(WIN16_FLAGS) -frtti -ffunction-sections
+ALL_CXXFLAGS += $(WIN16_FLAGS) -frtti -fno-threadsafe-statics -ffunction-sections \
+  -Iinclude/win16 -idirafter port/include
 STDLIB =
 endif
 OBJS_A = $(patsubst src/%.cpp,$(OUT)/a/%.o,$(SRCS))
@@ -226,7 +237,13 @@ PC_LIBS_static = -L$${libdir} -l@LIB@ -lwinport
 PC_LIBS_shared = -L$${shareddir} -L$${libdir} -l@LIB@s -l@LIB@ -lwinport -Wl,-rpath,$${shareddir}
 
 install: all
-ifeq ($(PORTABLE),1)
+ifeq ($(WIN16),1)
+	mkdir -p $(DEST)/include/mfc/win16 $(DEST)/include/mfc/winport $(DEST)/lib
+	cp include/*.h include/*.rc $(DEST)/include/mfc/
+	cp include/win16/*.h $(DEST)/include/mfc/win16/
+	cp port/include/*.h $(DEST)/include/mfc/winport/
+	cp $(OUT)/libmfc.a $(DEST)/lib/
+else ifeq ($(PORTABLE),1)
 	mkdir -p $(DEST)/include/libmfc/winport $(DEST)/lib/libmfc-shared $(DEST)/lib/pkgconfig \
 	  $(DEST)/lib/cmake/libmfc $(DEST)/share/libmfc
 	cp include/*.h include/*.rc include/*.cpp $(DEST)/include/libmfc/
@@ -250,7 +267,11 @@ else
 endif
 
 check: all
+ifeq ($(WIN16),1)
+	BIN=$(BIN) SYSROOT=$(SYSROOT) OUT=$(OUT) sh tests/run-win16-tests.sh
+else
 	BIN=$(BIN) STDLIB="$(STDLIB)" RC="$(TEST_RC)" LDFLAGS="$(LDFLAGS)" CFG=$(CFG) SYSROOT=$(SYSROOT) TARGET=$(TARGET) OUT=$(OUT) sh tests/run-tests.sh
+endif
 
 clean:
 	rm -rf $(OUT)

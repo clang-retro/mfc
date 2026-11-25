@@ -12,10 +12,18 @@
 #include <afxres.h>
 #include <afxcoll.h>
 #include <atltypes.h>
+#ifdef _AFX_WIN16
+// 16-bit Windows has no common controls and no OLE controls: afxwin16u.h
+// gives the declarations of them that the window classes use.
+#include <commdlg.h>
+#include <shellapi.h>
+#include <afxwin16u.h>
+#else
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shellapi.h>
 #include <ocidl.h>
+#endif
 
 // Resource types MFC adds
 #ifndef RT_DLGINIT
@@ -2202,7 +2210,14 @@ public:
   void GetRect(LPRECT lpRect) const { ::SendMessage(m_hWnd, EM_GETRECT, 0, (LPARAM)lpRect); }
   DWORD GetSel() const { return (DWORD)::SendMessage(m_hWnd, EM_GETSEL, 0, 0); }
   void GetSel(int& nStartChar, int& nEndChar) const {
+#ifdef _AFX_WIN16
+    // The 16-bit message gives both positions in its result only.
+    DWORD dwSel = (DWORD)::SendMessage(m_hWnd, EM_GETSEL, 0, 0);
+    nStartChar = LOWORD(dwSel);
+    nEndChar = HIWORD(dwSel);
+#else
     ::SendMessage(m_hWnd, EM_GETSEL, (WPARAM)&nStartChar, (LPARAM)&nEndChar);
+#endif
   }
   HLOCAL GetHandle() const { return (HLOCAL)::SendMessage(m_hWnd, EM_GETHANDLE, 0, 0); }
   void SetHandle(HLOCAL hBuffer) { ::SendMessage(m_hWnd, EM_SETHANDLE, (WPARAM)hBuffer, 0); }
@@ -3393,6 +3408,24 @@ void AFXAPI AfxDeleteObject(HGDIOBJ* pObject);
 // ---------------------------------------------------------------------
 // Helpers used by the message map thunks
 
+// The parts of WM_COMMAND, as in windowsx.h of Win32. Win32 puts the
+// notification code in the high word of wParam; 16-bit Windows puts the
+// control in the low word and the code in the high word of lParam.
+// GET_WM_COMMAND_MPS gives the wParam and lParam to send.
+#ifndef GET_WM_COMMAND_ID
+#ifdef _AFX_WIN16
+#define GET_WM_COMMAND_ID(wp, lp) ((UINT)(wp))
+#define GET_WM_COMMAND_HWND(wp, lp) ((HWND)LOWORD(lp))
+#define GET_WM_COMMAND_CMD(wp, lp) ((UINT)HIWORD(lp))
+#define GET_WM_COMMAND_MPS(id, hwnd, cmd) (WPARAM)(id), MAKELONG((UINT)(hwnd), (cmd))
+#else
+#define GET_WM_COMMAND_ID(wp, lp) LOWORD(wp)
+#define GET_WM_COMMAND_HWND(wp, lp) ((HWND)(lp))
+#define GET_WM_COMMAND_CMD(wp, lp) HIWORD(wp)
+#define GET_WM_COMMAND_MPS(id, hwnd, cmd) (WPARAM)MAKELONG(id, cmd), (LPARAM)(hwnd)
+#endif
+#endif
+
 inline CWnd* _AfxWnd(WPARAM h) { return CWnd::FromHandle((HWND)h); }
 inline CWnd* _AfxWnd(LPARAM h) { return CWnd::FromHandle((HWND)h); }
 inline CDC* _AfxDC(WPARAM h) { return CDC::FromHandle((HDC)h); }
@@ -3406,7 +3439,10 @@ inline UINT _AfxCtlType(UINT msg) {
 
 #include <afxdll_.h>
 
-// CTaskDialog comes with the windows, as in MFC 10.
+// CTaskDialog comes with the windows, as in MFC 10. It needs the common
+// controls, which 16-bit Windows does not have.
+#ifndef _AFX_WIN16
 #include <afxtaskdialog.h>
+#endif
 
 #endif // __AFXWIN_H__

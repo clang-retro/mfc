@@ -11,6 +11,49 @@
 #endif
 #include "afximpl.h"
 #include <afxdlgs.h>
+
+#ifdef _AFX_WIN16
+// 16-bit Windows has only the classic file dialog (GetOpenFileName).
+// CFileDialog never uses the shell dialog, and the customization calls
+// are not there.
+
+/// Destroys the dialog object. There is no shell dialog to release.
+CFileDialog::~CFileDialog() {}
+
+/// Does nothing: only the shell dialog has custom buttons.
+void CFileDialog::OnButtonClicked(DWORD) {}
+/// Does nothing: only the shell dialog has custom check buttons.
+void CFileDialog::OnCheckButtonToggled(DWORD, BOOL) {}
+/// Does nothing: only the shell dialog has custom controls.
+void CFileDialog::OnControlActivating(DWORD) {}
+/// Does nothing: only the shell dialog has custom items.
+void CFileDialog::OnItemSelected(DWORD, DWORD) {}
+
+/// Gives NULL: there is no shell dialog.
+IFileDialog* CFileDialog::_AfxEnsureShellDialog() { return NULL; }
+
+/// Gives FALSE: DoModal uses the classic dialog.
+BOOL CFileDialog::_AfxUseShellDialog() { return FALSE; }
+
+/// Gives IDCANCEL: there is no shell dialog.
+INT_PTR CFileDialog::_AfxDoModalShell() { return IDCANCEL; }
+
+/// Does nothing: there is no shell dialog.
+void CFileDialog::ApplyOFNToShellDialog() {}
+
+/// Does nothing: there is no shell dialog.
+void CFileDialog::UpdateOFNFromShellDialog() {}
+
+/// Gives NULL: there is no shell dialog.
+IFileOpenDialog* CFileDialog::GetIFileOpenDialog() { return NULL; }
+
+/// Gives NULL: there is no shell dialog.
+IFileSaveDialog* CFileDialog::GetIFileSaveDialog() { return NULL; }
+
+/// Gives NULL: there is no shell dialog.
+IFileDialogCustomize* CFileDialog::GetIFileDialogCustomize() { return NULL; }
+
+#else
 #include <shlobj.h>
 
 IMPLEMENT_DYNAMIC(CFolderPickerDialog, CFileDialog)
@@ -594,3 +637,5 @@ INT_PTR CFolderPickerDialog::DoModal() {
   if (_AfxUseShellDialog()) return _AfxDoModalShell();
   return _AfxBrowseForFolder(this, m_pParentWnd);
 }
+
+#endif  // !_AFX_WIN16
