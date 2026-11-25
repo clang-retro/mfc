@@ -163,6 +163,15 @@ GLContext* ContextOf(HGLRC rc) {
   return it == s.contexts.end() ? NULL : it->second;
 }
 
+// Gives the type of the count that CGLChoosePixelFormat writes: long in
+// the SDK of 10.4, GLint in later SDKs.
+template <class F>
+struct NpixArg;
+template <class R, class A, class B, class C>
+struct NpixArg<R (*)(A, B, C*)> {
+  typedef C type;
+};
+
 // Makes a CGL context for format, sharing display lists with share
 // (which can be NULL).
 CGLContextObj MakeCGL(int format, CGLContextObj share) {
@@ -174,11 +183,11 @@ CGLContextObj MakeCGL(int format, CGLContextObj share) {
                                      kCGLPFAStencilSize, (CGLPixelFormatAttribute)8,
                                      (CGLPixelFormatAttribute)0};
   CGLPixelFormatObj pf = NULL;
-  long count = 0;
-  if (CGLChoosePixelFormat(attrs, &pf, (decltype(count)*)&count) != kCGLNoError || !pf) {
+  NpixArg<decltype(&CGLChoosePixelFormat)>::type count = 0;
+  if (CGLChoosePixelFormat(attrs, &pf, &count) != kCGLNoError || !pf) {
     // Without a stencil buffer, for renderers that have none.
     attrs[7] = (CGLPixelFormatAttribute)0;
-    if (CGLChoosePixelFormat(attrs, &pf, (decltype(count)*)&count) != kCGLNoError || !pf) return NULL;
+    if (CGLChoosePixelFormat(attrs, &pf, &count) != kCGLNoError || !pf) return NULL;
   }
   CGLContextObj ctx = NULL;
   CGLError e = CGLCreateContext(pf, share, &ctx);
