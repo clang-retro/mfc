@@ -54,25 +54,42 @@ the values of the variables.
 ## What the script changes
 
 The script copies the files of a sample into `out/src`. It changes the
-copies, not the files of the SDK:
+copies, not the files of the SDK. Where the layer or a compiler flag can
+give a sample what it expects, the script does not change its code. It
+changes the code only where clang has no flag for an old idiom:
 
 - It makes the file names lower case, and the `#include` paths use `/`.
 - It adds the commas that old resource scripts do not have after a
   string. `llvm-rc` needs them.
 - It changes the cast-as-lvalue idiom `*((TYPE *)p)++` to standard C.
-- It gives the type `int` to the old declarations `static name;`.
-- It gives the type `LRESULT` to window procedures that the samples
-  declare as `LONG`.
+- It gives the type `int` to the old declarations `static name;` in C++.
+- For a 64-bit target only, it gives the type `LRESULT` to window
+  procedures that the samples declare as `LONG`. On a 32-bit target the
+  layer makes `LRESULT` the same type as `LONG`, as on Win32.
 - When the compiler finds a variable that is not declared, it moves the
   declaration of a `for` variable out of its loop. The old C++ compilers
   kept such a variable after the loop.
-- It makes some small changes to single files. The list is `PATCHES` in
-  the script.
+- For a big-endian target, it writes the numbers of the texture files
+  (`.bmp` and `.a8`) of the screen savers in the order of the processor.
+  The savers keep these files as resources of their own types (100 and
+  101), and the layer does not change such resources. The code of the
+  savers reads the numbers of these files in the order of the processor.
+- It declares a structure before a prototype that names it first
+  (`maze.h`). The list is `PATCHES` in the script.
 
 The script compiles C with `-std=gnu89` and `-fcommon`, and with
 `NO_STRICT`, as the compilers of the time did. It makes the release build
 (`NDEBUG`). `rand` gives numbers up to `0x7FFF`, as in the C library of
 Visual C++: the samples compute `RAND_MAX + 1` in an `int`.
+
+The layer and the flags give the samples what the headers and compilers
+of their time gave:
+
+| What | How |
+| --- | --- |
+| `HIMC` is a `DWORD` | `imm.h` declares it so when `WINVER` is less than `0x040A`. The script sets `WINVER` to `0x0400`. |
+| `index` and `rindex` are not functions | `string.h` and `strings.h` of the layer hide them. C compiles with `-fno-builtin-index -fno-builtin-rindex`. |
+| A `main` that returns `void` | The screen savers compile with `-Dmain=ss_old_main`. The layer has the `main` of the program. |
 
 The resource compiler reads the headers of a sample. The script gives it
 copies of the headers that keep only the preprocessor lines, as the

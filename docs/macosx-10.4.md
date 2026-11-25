@@ -1,14 +1,15 @@
-# Mac OS X 10.4 and 10.5 on PowerPC
+# Mac OS X 10.4 and 10.5 on PowerPC and Intel
 
 The portable layer and the library build for Mac OS X 10.4 (Tiger) and
-10.5 (Leopard) on 32-bit PowerPC Macs. The windows show with the Cocoa
+10.5 (Leopard) on 32-bit PowerPC Macs and on 32-bit Intel Macs (i386).
+A fat program has both and runs on both. The windows show with the Cocoa
 backend. OpenGL programs draw through `OpenGL.framework`.
 
 ## Requirements
 
-- clang from clang-retro/llvm. This clang uses emulated TLS for
-  PowerPC Mac OS X before 10.7, and it lets `std::atomic` call the
-  atomic library functions on these versions.
+- clang from clang-retro/llvm. This clang uses emulated TLS for 32-bit
+  Mac OS X before 10.7 (PowerPC and Intel), and it lets `std::atomic`
+  call the atomic library functions on these versions.
 - The cctools of dos-sdk (`scripts/build-cctools-ppc.sh`): `ld64`,
   `ar`, `ranlib` and `libtool` for PowerPC. `ld64` cannot read the symbol
   table that `llvm-ar` writes for PowerPC.
@@ -19,7 +20,13 @@ backend. OpenGL programs draw through `OpenGL.framework`.
 - libc++ of dos-sdk (`scripts/build-libcxx-macosx.sh`). For 10.4 and
   later, it has threads, locales, wide characters and the file system
   library.
-- The Mac OS X 10.4 SDK (`MacOSX10.4u.sdk` or `MacOSX10.4.0.sdk`).
+- The Mac OS X 10.4 SDK. For Intel and for fat programs, use
+  `MacOSX10.4u.sdk`: `MacOSX10.4.0.sdk` has only PowerPC.
+
+dos-sdk's `scripts/build-runtime-macosx.sh` builds libc++ and the builtins
+for both processors as fat libraries. CI publishes them as the
+`macosx10.4` sysroot. `packaging/get-toolchain.sh -s macosx10.4 DIR`
+downloads it with `MacOSX10.4u.sdk`.
 
 ## Build the library
 
@@ -30,7 +37,8 @@ make TARGET=powerpc-apple-macosx10.4 BIN=path/to/clang/bin \
 ```
 
 The archives go into `build/powerpc-apple-macosx10.4`. Use `static`: the
-shared library is not available for these versions.
+shared library is not available for these versions. For Intel, use
+`TARGET=i386-apple-macosx10.4`.
 
 ## Build a program
 
@@ -80,6 +88,15 @@ Compile the resources with `port/tools/res2cpp.py`.
 
 On other systems, the `wgl` functions are stubs that fail.
 
+## Make a fat program
+
+Build the program once for each processor, then join the two with
+`lipo`:
+
+```sh
+powerpc-apple-darwin8-lipo -create app-ppc app-i386 -output app
+```
+
 ## Build the samples of the Win32 SDK
 
 Set these variables for `tools/build-sdk-samples.py` (see
@@ -97,6 +114,10 @@ export LDFLAGS="--target=powerpc-apple-macosx10.4 -isysroot $SDK \
 export MFC_OUT=path/to/mfc/build/powerpc-apple-macosx10.4
 python3 tools/build-sdk-samples.py --sdk path/to/SDK --out out
 ```
+
+For Intel, use `--target=i386-apple-macosx10.4` and the Intel build of
+the library. Then join the programs of `out-ppc/bin` and `out-i386/bin`
+with `lipo`.
 
 ## Test on Tiger
 

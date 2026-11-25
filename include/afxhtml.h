@@ -499,7 +499,9 @@ struct _AfxDHtmlAx<pfn, R (C::*)(A...)> {
     return _AfxDHtmlAxInvoke<C, R (C::*)(A...), R, A...>(pSink, pfn, pdp, pResult);
   }
 };
-#if defined(__i386__) || defined(_M_IX86)
+// On 32-bit Windows, __stdcall makes another member function type. The
+// portable layer defines __stdcall as nothing.
+#if (defined(__i386__) || defined(_M_IX86)) && !defined(_WINPORT)
 template <auto pfn, class C, class R, class... A>
 struct _AfxDHtmlAx<pfn, R (__stdcall C::*)(A...)> {
   static HRESULT Invoke(CDHtmlEventSink* pSink, DISPPARAMS* pdp, VARIANT* pResult) {

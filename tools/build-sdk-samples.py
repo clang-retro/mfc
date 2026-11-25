@@ -51,12 +51,6 @@ COMMON = ("scrsave/common", "glscrnsv.cxx")
 # Small fixes to single files, as (file, pattern, replacement): code
 # that only the compilers of the time accepted.
 PATCHES = [
-    # A BOOL function's result stored in an input context (a DWORD then).
-    ("scrnsave.cxx", r"hPrevImc = ImmFnc\(", "hPrevImc = (HIMC)(UINT_PTR)ImmFnc("),
-    # A main that returns void, for old NT screen savers; the layer has main.
-    ("scrnsave.cxx", r"void _cdecl main\(", "static void _cdecl ss_old_main("),
-    # A global named index, which is also a function of the C library.
-    ("geom.c", r"\bindex\b", "vertex_index"),
     # A structure named first in a prototype, which C scopes to it.
     ("maze.h", r"(BOOL InitMaze\()", r"struct _MazeGoal;\n\1"),
 ]
@@ -135,9 +129,10 @@ def fix_implicit_int(text):
     return re.sub(r"\bstatic(\s+)(?!int\b|const\b|volatile\b)([A-Za-z_]\w*)(\s*[;=])", r"static\1int \2\3", text)
 
 
-# Gives LRESULT to window procedures that old samples declare as LONG:
-# LRESULT is wider than LONG on a 64-bit system, and C++ does not convert
-# the function pointer.
+# Gives LRESULT to window procedures that old samples declare as LONG.
+# The script uses it only for a 64-bit target: there LRESULT is wider than
+# LONG, and C++ does not convert the function pointer. On a 32-bit target
+# the layer makes LRESULT the same type as LONG.
 def fix_window_procs(text):
     return re.sub(r"\bLONG(\s+(?:APIENTRY\s+|WINAPI\s+|CALLBACK\s+|FAR\s+PASCAL\s+|PASCAL\s+)?)((?:\w+|\(\s*\*\s*\w+\s*\))\s*\(\s*(?:register\s+)?HWND\b)",
                   r"LRESULT\1\2", text)
@@ -145,7 +140,7 @@ def fix_window_procs(text):
 
 # Copies the files of folder src into dst with lower-case names, and fixes
 # the #include lines of the text files and the commas of resource scripts.
-def copy_sources(src, dst):
+def copy_sources(src, dst, env):
     os.makedirs(dst, exist_ok=True)
     for name in sorted(os.listdir(src)):
         path = os.path.join(src, name)
@@ -159,7 +154,7 @@ def copy_sources(src, dst):
             if name.lower().endswith(SOURCE_EXTS):
                 text = fix_lvalue_casts(text)
                 text = fix_implicit_int(text)
-            if name.lower().endswith(SOURCE_EXTS + (".h", ".hxx")):
+            if name.lower().endswith(SOURCE_EXTS + (".h", ".hxx")) and env["POINTER_SIZE"] == 8:
                 text = fix_window_procs(text)
             for file, pattern, replacement in PATCHES:
                 if name.lower() == file:
@@ -297,8 +292,10 @@ def compile_all(sources, objdir, includes, defines, env, log):
             # HANDLE, window procedures declared with UINT and LONG, and
             # functions used before they are declared. Globals defined in
             # more than one file without a value share one variable
-            # (-fcommon), as with the linkers of that time.
-            cmd += ["-DNO_STRICT", "-std=gnu89", "-fcommon", "-Wno-incompatible-function-pointer-types",
+            # (-fcommon), as with the linkers of that time. index and
+            # rindex are not functions of the C library of Windows: the
+            # samples use the names for their own variables.
+            cmd += ["-DNO_STRICT", "-std=gnu89", "-fcommon", "-fno-builtin-index", "-fno-builtin-rindex", "-Wno-incompatible-function-pointer-types",
                     "-Wno-incompatible-pointer-types", "-Wno-int-conversion",
                     "-Wno-implicit-function-declaration", "-Wno-implicit-int"]
         cmd += [a for i in includes for a in ("-I", i)] + defines + ["-c", src, "-o", obj]
@@ -314,6 +311,98 @@ def compile_all(sources, objdir, includes, defines, env, log):
     return objs
 
 
+# The screen savers keep their textures as resources of their own types:
+# 100 for a .bmp file and 101 for a .a8 file. The layer does not change
+# the byte order of such resources, and the code of the savers reads their
+# numbers in the order of the processor. For a big-endian target, the
+# script therefore writes the numbers of these files in that order.
+TEXTURE_TYPES = {"100": "bmp", "101": "a8"}
+RC_TEXTURE = re.compile(r'^\s*\w+\s+(100|101)\s+[^"\n]*"([^"]+)"', re.M)
+
+
+# Turns the bytes of each 16-bit number in data[start:end] around.
+def swap16(data, start, end):
+    for i in range(start, end - 1, 2):
+        data[i], data[i + 1] = data[i + 1], data[i]
+
+
+# Turns the bytes of each 32-bit number in data[start:end] around.
+def swap32(data, start, end):
+    for i in range(start, end - 3, 4):
+        data[i:i + 4] = data[i:i + 4][::-1]
+
+
+# Gives a .bmp texture for a big-endian target. The loader (ssdib.c) reads
+# a 32-bit field as two 16-bit numbers, the low one first. Thus the script
+# turns around each 16-bit number of the headers and keeps their order.
+# The color table and the pixels are bytes.
+def bmp_big_endian(data):
+    start = 14 if data[:2] == b"BM" else 0
+    if len(data) < start + 4:
+        return data
+    size = data[start] | (data[start + 1] << 8)
+    swap16(data, 0, min(len(data), start + size))
+    return data
+
+
+# Gives a .a8 texture for a big-endian target. The loader (ssa8.c) reads
+# the six 32-bit numbers of the header whole. The palette holds the bytes
+# of the colors. Compressed data is a sequence of 16-bit codes. After some
+# codes, there is a 16-bit count or a number of bytes.
+def a8_big_endian(data):
+    if len(data) < 24 + 1024:
+        return data
+    compress = int.from_bytes(data[16:20], "little")
+    swap32(data, 0, 24)
+    if compress == 0:
+        return data
+    pos = 24 + 1024
+    while pos + 2 <= len(data):
+        run, esc = data[pos], data[pos + 1]
+        swap16(data, pos, pos + 2)
+        pos += 2
+        if run != 0:
+            continue
+        if esc == 1:  # The end of the image.
+            break
+        if esc == 2:  # A count of zero pixels.
+            swap16(data, pos, pos + 2)
+            pos += 2
+        elif esc >= 3:  # Pixels as bytes.
+            pos += esc - 2
+    return data
+
+
+# Writes the texture files that the resource script of folder names as
+# types 100 and 101 in big-endian order.
+def textures_big_endian(folder):
+    for rc in [f for f in os.listdir(folder) if f.endswith(".rc")]:
+        with open(os.path.join(folder, rc), "rb") as f:
+            text = f.read().decode("latin-1")
+        for rtype, name in RC_TEXTURE.findall(text):
+            path = os.path.join(folder, fix_include_path(name))
+            if not os.path.isfile(path):
+                continue
+            with open(path, "rb") as f:
+                data = bytearray(f.read())
+            convert = bmp_big_endian if TEXTURE_TYPES[rtype] == "bmp" else a8_big_endian
+            with open(path, "wb") as f:
+                f.write(convert(data))
+
+
+# Gives the predefined macros of the C compiler for the target, as a
+# dictionary of names and values.
+def target_macros(env):
+    r = subprocess.run([env["CC"]] + env["CFLAGS"] + ["-dM", "-E", "-x", "c", os.devnull],
+                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True)
+    macros = {}
+    for line in r.stdout.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) >= 2 and parts[0] == "#define":
+            macros[parts[1]] = parts[2] if len(parts) == 3 else ""
+    return macros
+
+
 # Builds one sample. Returns the path of the program.
 def build_sample(sample, sdk, out, env, log):
     name, tail, marker, saver, program = sample
@@ -321,7 +410,9 @@ def build_sample(sample, sdk, out, env, log):
     if not src:
         raise RuntimeError("%s: no folder %s in the SDK" % (name, tail))
     work = os.path.join(out, "src", name)
-    copy_sources(src, work)
+    copy_sources(src, work, env)
+    if env["BIG_ENDIAN"]:
+        textures_big_endian(work)
     folders = [work]
     objs, defines = read_makefile(work)
     sources = sources_for(work, objs)
@@ -330,13 +421,16 @@ def build_sample(sample, sdk, out, env, log):
         if not csrc:
             raise RuntimeError("%s: no folder %s in the SDK" % (name, COMMON[0]))
         common = os.path.join(out, "src", "common")
-        copy_sources(csrc, common)
+        copy_sources(csrc, common, env)
         folders.append(common)
         cobjs, cdefs = read_makefile(common)
         sources += sources_for(common, cobjs)
     includes = folders
     objdir = os.path.join(out, "obj", name)
-    objects = compile_all(sources, objdir, includes, defines, env, log)
+    # The common code of the savers has a main for old NT screen savers,
+    # which returns void. The layer has the main of the program.
+    cdefs = defines + (["-Dmain=ss_old_main"] if saver else [])
+    objects = compile_all(sources, objdir, includes, cdefs, env, log)
     # The resources, as C++ that registers them when the program starts.
     rcs = [f for f in os.listdir(work) if f.endswith(".rc")]
     if rcs:
@@ -376,6 +470,9 @@ def environment():
         "SYSLIBS": shlex.split(os.environ.get(
             "SYSLIBS", "-framework Cocoa -framework OpenGL -framework GLUT")),
     }
+    macros = target_macros(env)
+    env["BIG_ENDIAN"] = macros.get("__BYTE_ORDER__") == "__ORDER_BIG_ENDIAN__"
+    env["POINTER_SIZE"] = int(macros.get("__SIZEOF_POINTER__", "4"))
     return env
 
 
