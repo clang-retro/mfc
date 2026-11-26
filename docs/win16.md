@@ -106,8 +106,9 @@ finds its format with `COleDataObject`. These classes need a real
   The library draws the toolbar and the status bar itself (see "The
   toolbar and the status bar"). `CReBar` and the other classes of
   `afxcmn.h` compile, but their windows are not made.
-- Tooltips. A toolbar with `CBRS_TOOLTIPS` shows no tooltip.
-  `CBRS_FLYBY` works: the status bar shows the prompt of the button.
+- Tooltips of other windows. Only the toolbar shows tooltips (see "The
+  toolbar and the status bar"). `CToolTipCtrl` and
+  `CWnd::EnableToolTips` make no window.
 - The shell file dialog (`IFileDialog`). `CFileDialog` always shows the
   classic dialog.
 - Threads. `CWinThread::CreateThread` fails with `ERROR_NOT_SUPPORTED`.
@@ -238,7 +239,7 @@ A 16-bit task has one thread.
 ### The toolbar and the status bar
 
 `src/win16bar.cpp` registers two window classes, `AfxToolbar16` and
-`AfxStatusBar16`. `afxwin16u.h` sets `TOOLBARCLASSNAME` and
+`AfxStatusBar16`, and the class of the toolbar's tooltips. `afxwin16u.h` sets `TOOLBARCLASSNAME` and
 `STATUSCLASSNAME` to these names. Wine can also have the 32-bit classes
 of `comctl32.dll`, which do not read the 16-bit structures. Thus the
 names are not the names of the common controls.
@@ -255,6 +256,15 @@ names are not the names of the common controls.
   toolbar, in the 16-bit packing.
 - The toolbar keeps the text of a button (`SetButtonText`), but it does
   not draw it.
+- 16-bit Windows has no tooltip control. A toolbar with
+  `CBRS_TOOLTIPS` (`TBSTYLE_TOOLTIPS`) shows the tip of a button itself.
+  When the mouse stays on a button for half a second, the toolbar sends
+  `TTN_NEEDTEXTA` to its owner, and shows the text below the mouse in a
+  window of the class `AfxW16ToolTip`. `CFrameWnd` gives the part of the
+  command's string after the newline. A timer finds when the mouse
+  leaves the button, because 16-bit Windows does not tell the window.
+  `CBRS_FLYBY` also works: the status bar shows the prompt of the
+  button.
 - A status bar pane has a sunken edge, a raised edge (`SBPS_POPOUT`) or
   no edge (`SBPS_NOBORDERS`). An owner-drawn pane sends `WM_DRAWITEM`
   to the parent.
@@ -304,7 +314,7 @@ the handle as a word key (`CMapWordToPtr`).
 | `win16wnd` | `CWinApp`, `CFrameWnd`, a menu command, a button notification, `WM_CTLCOLOR`, a modal `CDialog` with DDX, and the INI profile |
 | `win16doc` | `CSingleDocTemplate`, File New, `OnDraw`, `OnUpdate`, and the command routing to the view and the document |
 | `win16mdi` | `CMultiDocTemplate`, two MDI children, the MDI menus, and `MDIGetActive`, `MDINext` and `MDIActivate` |
-| `win16bar` | `CToolBar` and `CStatusBar`: the button layout, a click, the idle update, the message pane, docking at the left edge, floating, and `ShowControlBar` |
+| `win16bar` | `CToolBar` and `CStatusBar`: the button layout, a click, the idle update, the message pane, docking at the left edge, floating, the tooltip of a button, and `ShowControlBar` |
 
 The window tests need an X display. Without one, the script starts
 itself under `xvfb-run`.

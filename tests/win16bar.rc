@@ -5,8 +5,8 @@
 
 STRINGTABLE
 BEGIN
-  ID_BAR_ONE "The first button"
-  ID_BAR_TWO "The second button"
+  ID_BAR_ONE "The first button\nFirst"
+  ID_BAR_TWO "The second button\nSecond"
   ID_BAR_THREE "The third button"
   ID_BAR_CHECK "The check button"
   ID_INDICATOR_TEST "TEST"
