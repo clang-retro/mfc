@@ -1629,8 +1629,9 @@ LRESULT CALLBACK W16TabProc(HWND hWnd, UINT nMsg, WPARAM wParam, LPARAM lParam) 
 /// Registers the control classes of the AFX_WNDCOMMCTL_ flags in fReg
 /// that the library has on 16-bit Windows: the progress bar, the
 /// trackbar and the tooltip (AFX_WNDCOMMCTL_BAR_REG), the up-down
-/// control, the tab control, the header and list view, and the tree
-/// view. Gives the flags of the classes that are there.
+/// control, the tab control, the header and list view, the tree view,
+/// the hot key, the IP address control, the pager and the link control.
+/// Gives the flags of the classes that are there.
 LONG AFXAPI _AfxW16RegisterCtlClasses(LONG fReg) {
   LONG fDone = 0;
   if ((fReg & AFX_WNDCOMMCTL_PROGRESS_REG) &&
@@ -1652,6 +1653,7 @@ LONG AFXAPI _AfxW16RegisterCtlClasses(LONG fReg) {
     fDone |= AFX_WNDCOMMCTL_LISTVIEW_REG;
   if ((fReg & AFX_WNDCOMMCTL_TREEVIEW_REG) && _AfxW16RegisterTreeClass())
     fDone |= AFX_WNDCOMMCTL_TREEVIEW_REG;
+  fDone |= _AfxW16RegisterMiscClasses(fReg);
   return fDone;
 }
 

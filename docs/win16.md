@@ -125,10 +125,12 @@ hook that closes them. These classes need a real
 - Most of the common controls. 16-bit Windows does not have
   `comctl32.dll`. The library draws the toolbar, the status bar, the
   progress bar, the trackbar, the up-down control, the tab control, the
-  header control, the list view and the tree view itself (see "The
-  toolbar and the status bar" and "The other common controls").
-  `CReBar` and the other classes of `afxcmn.h` compile, but their
-  windows are not made.
+  header control, the list view, the tree view, the tooltip, the hot
+  key, the IP address control, the pager and the link control itself
+  (see "The toolbar and the status bar" and "The other common
+  controls"). `CReBar`, `CComboBoxEx`, `CDateTimeCtrl`,
+  `CMonthCalCtrl` and `CAnimateCtrl` compile, but their windows are not
+  made.
 - `CWnd::EnableToolTips`. It does nothing on any target of the library.
   Use a `CToolTipCtrl` (see "The other common controls").
 - The shell file dialog (`IFileDialog`). `CFileDialog` always shows the
@@ -299,8 +301,9 @@ names are not the names of the common controls.
 
 ### The other common controls
 
-`src/win16ctl.cpp`, `src/win16lv.cpp`, `src/win16tv.cpp` and
-`src/win16tt.cpp` register eight more window classes. `afxwin16u.h` sets the class names to the names of the
+`src/win16ctl.cpp`, `src/win16lv.cpp`, `src/win16tv.cpp`,
+`src/win16tt.cpp` and `src/win16misc.cpp` register twelve more window
+classes. `afxwin16u.h` sets the class names to the names of the
 library, as for the toolbar:
 
 | Class | Name | MFC class |
@@ -313,11 +316,16 @@ library, as for the toolbar:
 | list view | `AfxListView16` | `CListCtrl` |
 | tree view | `AfxTreeView16` | `CTreeCtrl` |
 | tooltip | `AfxToolTip16` | `CToolTipCtrl` |
+| hot key | `AfxHotKey16` | `CHotKeyCtrl` |
+| IP address | `AfxIPAddress16` | `CIPAddressCtrl` |
+| pager | `AfxPager16` | `CPagerCtrl` |
+| link | `SysLink` | `CLinkCtrl` |
 
 The files also register each class with the name of `comctl32.dll`
 (`msctls_progress32`, `msctls_trackbar32`, `msctls_updown32`,
-`SysTabControl32`, `SysHeader32`, `SysListView32`, `SysTreeView32`
-and `tooltips_class32`). Thus a dialog template can use these names.
+`SysTabControl32`, `SysHeader32`, `SysListView32`, `SysTreeView32`,
+`tooltips_class32`, `msctls_hotkey32`, `SysIPAddress32` and
+`SysPager`). `CLinkCtrl` always uses the name `SysLink`. Thus a dialog template can use these names.
 
 - The windows do the messages of the common controls in ANSI. They send
   `WM_HSCROLL` and `WM_VSCROLL` in the 16-bit packing: the code in
@@ -365,6 +373,23 @@ and `tooltips_class32`). Thus a dialog template can use these names.
   it leaves a tool. There are no balloon tips. A 16-bit `wParam` cannot
   hold a `COLORREF`, so `TTM_SETTIPBKCOLOR` and `TTM_SETTIPTEXTCOLOR`
   take the color from `lParam` when `lParam` is not 0.
+- The hot key control shows the modifiers and the name of the key
+  (`GetKeyNameText`), and sends `EN_CHANGE`. `HKM_SETRULES` works.
+  Backspace, Delete, Esc and Space with no modifier clear the key.
+- The IP address control has four edit controls. Three digits, a dot
+  or a space go to the next field, and the arrow keys and Backspace
+  cross the fields. A field that loses the focus sends
+  `IPN_FIELDCHANGED` and goes into its range (`IPM_SETRANGE`).
+- The pager asks the parent for the size of the child
+  (`PGN_CALCSIZE`). Its buttons show only when the child can scroll in
+  that direction. A pressed button repeats `PGN_SCROLL`. The
+  notifications of the child go to the parent of the pager.
+- The link control reads the `<a href="..." id="...">` markup, breaks
+  the lines at spaces, and sends `NM_CLICK` (or `NM_RETURN` with
+  `LWS_IGNORERETURN`) with an `NMLINK`. The links are blue, and purple
+  when visited. The IDs and URLs of an `LITEM` are Unicode: the window
+  changes each character to one byte. 16-bit Windows has no hand
+  cursor, so the cursor stays an arrow.
 - The toolbar does not use this tooltip. It shows its own tips (see
   "The toolbar and the status bar").
 - An `HTREEITEM` has 16 bits. `TVI_ROOT`, `TVI_FIRST`, `TVI_LAST` and
@@ -415,7 +440,7 @@ the handle as a word key (`CMapWordToPtr`).
 | `win16doc` | `CSingleDocTemplate`, File New, `OnDraw`, `OnUpdate`, and the command routing to the view and the document |
 | `win16mdi` | `CMultiDocTemplate`, two MDI children, the MDI menus, and `MDIGetActive`, `MDINext` and `MDIActivate` |
 | `win16bar` | `CToolBar` and `CStatusBar`: the button layout, a click, the idle update, the message pane, docking at the left edge, floating, the tooltip of a button, and `ShowControlBar` |
-| `win16cmn` | `CImageList`, `CProgressCtrl`, `CSliderCtrl`, `CSpinButtonCtrl`, `CTabCtrl`, `CListCtrl`, `CTreeCtrl` and `CToolTipCtrl`: the images and masks, the ranges and positions, the keys, the buddy of the up-down control, a click on a tab, the columns, items, find and sort of a report view, the links, expansion, selection and sort of a tree, the tools, text, hit test, show and pop of a tooltip, and the notifications |
+| `win16cmn` | `CImageList`, `CProgressCtrl`, `CSliderCtrl`, `CSpinButtonCtrl`, `CTabCtrl`, `CListCtrl`, `CTreeCtrl`, `CToolTipCtrl`, `CHotKeyCtrl`, `CIPAddressCtrl`, `CPagerCtrl` and `CLinkCtrl`: the images and masks, the ranges and positions, the keys, the buddy of the up-down control, a click on a tab, the columns, items, find and sort of a report view, the links, expansion, selection and sort of a tree, the tools, text, hit test, show and pop of a tooltip, a hot key and its rules, the fields and ranges of an IP address, the buttons and position of a pager, the links of a link control, and the notifications |
 
 The window tests need an X display. Without one, the script starts
 itself under `xvfb-run`.

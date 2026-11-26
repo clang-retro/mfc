@@ -294,8 +294,12 @@ int _AfxW16AcceleratorCount(HACCEL hAccel);
 
 // The library also draws the header control and the list view
 // (src/win16lv.cpp), the tree view (src/win16tv.cpp) and the tooltip
-// (src/win16tt.cpp).
+// (src/win16tt.cpp), and the hot key, the IP address control and the
+// pager (src/win16misc.cpp).
 #undef TOOLTIPS_CLASS
+#undef HOTKEY_CLASS
+#undef WC_IPADDRESS
+#undef WC_PAGESCROLLER
 #undef WC_HEADER
 #undef WC_LISTVIEW
 #undef WC_TREEVIEW
@@ -303,6 +307,9 @@ int _AfxW16AcceleratorCount(HACCEL hAccel);
 #define WC_LISTVIEW "AfxListView16"
 #define WC_TREEVIEW "AfxTreeView16"
 #define TOOLTIPS_CLASS "AfxToolTip16"
+#define HOTKEY_CLASS "AfxHotKey16"
+#define WC_IPADDRESS "AfxIPAddress16"
+#define WC_PAGESCROLLER "AfxPager16"
 
 // GDI.
 DWORD GetObjectType(HGDIOBJ h);

@@ -34,6 +34,10 @@ BOOL AFXAPI _AfxW16RegisterTreeClass();
 // Registers the tooltip class of 16-bit Windows (win16tt.cpp). Gives TRUE
 // when the class is there.
 BOOL AFXAPI _AfxW16RegisterTipClass();
+// Registers the hot key, IP address, pager and link classes of 16-bit
+// Windows (win16misc.cpp) for the AFX_WNDCOMMCTL_ flags in fReg. Gives
+// the flags of the classes that are there.
+LONG AFXAPI _AfxW16RegisterMiscClasses(LONG fReg);
 #endif
 
 // Idle updates for in-place frames, which are not under the main window

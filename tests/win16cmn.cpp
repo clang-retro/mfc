@@ -1,7 +1,7 @@
 // win16cmn.cpp - the common controls that the library draws on 16-bit
 // Windows: CImageList, CProgressCtrl, CSliderCtrl, CSpinButtonCtrl and
-// CTabCtrl, CHeaderCtrl, CListCtrl, CTreeCtrl and CToolTipCtrl. The frame
-// makes each control, sends it messages and checks the
+// CTabCtrl, CHeaderCtrl, CListCtrl, CTreeCtrl, CToolTipCtrl, CHotKeyCtrl,
+// CIPAddressCtrl, CPagerCtrl and CLinkCtrl. The frame makes each control, sends it messages and checks the
 // notifications that the frame gets. It prints ALL PASSED when each
 // check holds, because Wine gives the exit code 0 whatever a 16-bit
 // program returns.
@@ -20,7 +20,8 @@ static BOOL g_bDone = FALSE;  // the test ran to the end
     }                                                        \
   } while (0)
 
-enum { IDC_PROGRESS = 100, IDC_SLIDER, IDC_BUDDY, IDC_SPIN, IDC_TAB, IDC_LIST, IDC_TREE, IDT_RECT = 500 };
+enum { IDC_PROGRESS = 100, IDC_SLIDER, IDC_BUDDY, IDC_SPIN, IDC_TAB, IDC_LIST, IDC_TREE, IDC_HOTKEY, IDC_IPADDR, IDC_PAGER,
+       IDC_PAGERCHILD, IDC_LINK, IDT_RECT = 500 };
 
 class CMainFrame : public CFrameWnd {
 public:
@@ -32,6 +33,10 @@ public:
   CListCtrl m_list;
   CTreeCtrl m_tree;
   CToolTipCtrl m_tip;
+  CHotKeyCtrl m_hotkey;
+  CIPAddressCtrl m_ipaddr;
+  CPagerCtrl m_pager;
+  CLinkCtrl m_link;
   UINT m_nLastHScroll;    // the code of the last WM_HSCROLL from the slider
   int m_nLastHScrollPos;  // its position
   int m_nVScrolls;        // the WM_VSCROLL messages from the up-down control
@@ -47,13 +52,19 @@ public:
   int m_nTipText;         // the TTN_NEEDTEXT notifications of IDT_RECT
   int m_nTipShow;         // the TTN_SHOW notifications of IDT_RECT
   int m_nTipPop;          // the TTN_POP notifications of IDT_RECT
+  int m_nHotKeyChange;    // the EN_CHANGE notifications of the hot key
+  int m_nFieldChanged;    // the IPN_FIELDCHANGED notifications
+  int m_nCalcSize;        // the PGN_CALCSIZE notifications
+  int m_nLinkClick;       // the NM_CLICK notifications of the link control
+  int m_iLastLink;        // the link of the last NM_CLICK
 
   /// Starts with no notifications.
   CMainFrame()
       : m_nLastHScroll(0xFFFF), m_nLastHScrollPos(-1), m_nVScrolls(0), m_nDeltaPos(0),
         m_nLastDelta(0), m_nSelChanging(0), m_nSelChange(0), m_bRefuseTab(FALSE),
         m_nItemChanged(0), m_nExpanding(0), m_nTreeSelChanged(0), m_nTreeDeleted(0),
-        m_nTipText(0), m_nTipShow(0), m_nTipPop(0) {}
+        m_nTipText(0), m_nTipShow(0), m_nTipPop(0), m_nHotKeyChange(0), m_nFieldChanged(0),
+        m_nCalcSize(0), m_nLinkClick(0), m_iLastLink(-1) {}
 
   /// Makes the controls and runs the checks.
   void RunTests() {
@@ -65,6 +76,10 @@ public:
     TestListView();
     TestTreeView();
     TestToolTip();
+    TestHotKey();
+    TestIPAddress();
+    TestPager();
+    TestLink();
     g_bDone = TRUE;
   }
 
@@ -460,6 +475,110 @@ protected:
     m_tip.DestroyWindow();
   }
 
+  /// Checks a hot key control: the key and its modifiers, a key press,
+  /// and the rules that replace a combination that is not valid.
+  void TestHotKey() {
+    CHECK(m_hotkey.Create(WS_CHILD | WS_VISIBLE | WS_BORDER, CRect(10, 310, 150, 330), this,
+                          IDC_HOTKEY));
+    WORD vk = 1, mods = 1;
+    m_hotkey.GetHotKey(vk, mods);
+    CHECK(vk == 0 && mods == 0);
+    m_hotkey.SetHotKey('K', HOTKEYF_CONTROL | HOTKEYF_ALT);
+    m_hotkey.GetHotKey(vk, mods);
+    CHECK(vk == 'K' && mods == (HOTKEYF_CONTROL | HOTKEYF_ALT));
+    CHECK(m_nHotKeyChange == 0);  // HKM_SETHOTKEY does not notify
+    // A key with no modifier is not valid: Ctrl replaces none.
+    m_hotkey.SetRules(HKCOMB_NONE, HOTKEYF_CONTROL);
+    m_hotkey.SendMessage(WM_KEYDOWN, VK_F5, 0);
+    m_hotkey.GetHotKey(vk, mods);
+    CHECK(vk == VK_F5 && mods == HOTKEYF_CONTROL);
+    CHECK(m_nHotKeyChange == 1);
+    m_hotkey.SendMessage(WM_KEYDOWN, VK_BACK, 0);
+    CHECK(m_hotkey.GetHotKey() == 0);
+    m_hotkey.UpdateWindow();
+  }
+
+  /// Checks an IP address control: blank, an address, the fields, a range
+  /// and IPN_FIELDCHANGED when a field loses the focus.
+  void TestIPAddress() {
+    CHECK(m_ipaddr.Create(WS_CHILD | WS_VISIBLE | WS_BORDER, CRect(160, 310, 300, 330), this,
+                          IDC_IPADDR));
+    CHECK(m_ipaddr.IsBlank());
+    DWORD dw = 1;
+    CHECK(m_ipaddr.GetAddress(dw) == 0 && dw == 0);
+    m_ipaddr.SetAddress(192, 168, 1, 20);
+    CHECK(!m_ipaddr.IsBlank());
+    BYTE b0 = 0, b1 = 0, b2 = 0, b3 = 0;
+    CHECK(m_ipaddr.GetAddress(b0, b1, b2, b3) == 4);
+    CHECK(b0 == 192 && b1 == 168 && b2 == 1 && b3 == 20);
+    // A value above the range of the field goes down to the top of the
+    // range when the field loses the focus.
+    m_ipaddr.SetFieldRange(3, 1, 100);
+    m_ipaddr.SetAddress(10, 0, 0, 200);
+    m_ipaddr.SetFieldFocus(3);
+    SetFocus();
+    CHECK(m_nFieldChanged >= 1);
+    CHECK(m_ipaddr.GetAddress(dw) == 4 && FOURTH_IPADDRESS(dw) == 100);
+    m_ipaddr.ClearAddress();
+    CHECK(m_ipaddr.IsBlank());
+    m_ipaddr.UpdateWindow();
+  }
+
+  /// Checks a pager: the size of the child from PGN_CALCSIZE, the
+  /// buttons and the scroll position.
+  void TestPager() {
+    CHECK(m_pager.Create(WS_CHILD | WS_VISIBLE | PGS_HORZ, CRect(310, 310, 410, 340), this,
+                         IDC_PAGER));
+    CWnd wndChild;
+    CHECK(wndChild.Create(_T("STATIC"), _T("A wide child window"), WS_CHILD | WS_VISIBLE,
+                          CRect(0, 0, 300, 30), &m_pager, IDC_PAGERCHILD));
+    m_pager.SetChild(wndChild.m_hWnd);
+    CHECK(m_nCalcSize >= 1);
+    CHECK(m_pager.GetScrollPos() == 0);
+    CHECK(m_pager.IsButtonInvisible(PGB_TOPORLEFT));
+    CHECK(m_pager.IsButtonNormal(PGB_BOTTOMORRIGHT));
+    m_pager.SetScrollPos(50);
+    CHECK(m_pager.GetScrollPos() == 50);
+    CHECK(m_pager.IsButtonNormal(PGB_TOPORLEFT));
+    CRect rcChild;
+    wndChild.GetWindowRect(&rcChild);
+    m_pager.ScreenToClient(&rcChild);
+    CHECK(rcChild.Width() == 300 && rcChild.left < 0);
+    CHECK(m_pager.SetButtonSize(16) == 12 && m_pager.GetButtonSize() == 16);
+    m_pager.UpdateWindow();
+    wndChild.DestroyWindow();
+  }
+
+  /// Checks a link control: the links of the markup, their IDs and URLs,
+  /// a hit test, a click and the ideal height.
+  void TestLink() {
+    CHECK(m_link.Create(_T("See <a href=\"http://a.example/\">one</a> or ")
+                            _T("<a id=\"two\">two</a>."),
+                        WS_CHILD | WS_VISIBLE, CRect(10, 340, 300, 370), this, IDC_LINK));
+    CString str;
+    CHECK(m_link.GetItemUrl(0, str) && str == "http://a.example/");
+    CHECK(m_link.GetItemID(1, str) && str == "two");
+    CHECK(!m_link.GetItemUrl(2, str));
+    CHECK(m_link.GetIdealHeight() > 0);
+    // Find the first link with hit tests along the first line.
+    LHITTESTINFO* pHit = new LHITTESTINFO;
+    int xLink = -1;
+    for (int x = 0; x < 200 && xLink < 0; x++) {
+      memset(pHit, 0, sizeof(*pHit));
+      pHit->pt.x = x;
+      pHit->pt.y = 4;
+      if (m_link.LinkHitTest(pHit) && pHit->item.iLink == 0) xLink = x;
+    }
+    delete pHit;
+    CHECK(xLink > 0);
+    m_link.SendMessage(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(xLink + 1, 4));
+    m_link.SendMessage(WM_LBUTTONUP, 0, MAKELPARAM(xLink + 1, 4));
+    CHECK(m_nLinkClick == 1 && m_iLastLink == 0);
+    UINT state = 0;
+    CHECK(m_link.GetItemState(0, &state, LIS_VISITED) && (state & LIS_VISITED));
+    m_link.UpdateWindow();
+  }
+
   /// Keeps the code and the position of the scroll messages of the
   /// slider.
   afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar) {
@@ -549,6 +668,31 @@ protected:
     *pResult = 0;
   }
 
+  /// Counts EN_CHANGE of the hot key control.
+  afx_msg void OnHotKeyChange() { m_nHotKeyChange++; }
+
+  /// Counts IPN_FIELDCHANGED.
+  afx_msg void OnFieldChanged(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nFieldChanged++;
+    *pResult = 0;
+  }
+
+  /// Gives the pager the width of its child for PGN_CALCSIZE.
+  afx_msg void OnCalcSize(NMHDR* pNMHDR, LRESULT* pResult) {
+    NMPGCALCSIZE* pCalc = (NMPGCALCSIZE*)pNMHDR;
+    if (pCalc->dwFlag & PGF_CALCWIDTH) pCalc->iWidth = 300;
+    m_nCalcSize++;
+    *pResult = 0;
+  }
+
+  /// Keeps the link of NM_CLICK.
+  afx_msg void OnLinkClick(NMHDR* pNMHDR, LRESULT* pResult) {
+    m_nLinkClick++;
+    m_iLastLink = ((NMLINK*)pNMHDR)->item.iLink;
+    *pResult = 0;
+  }
+
   DECLARE_MESSAGE_MAP()
 };
 
@@ -565,6 +709,10 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
   ON_NOTIFY(TTN_NEEDTEXT, IDT_RECT, OnTipNeedText)
   ON_NOTIFY(TTN_SHOW, IDT_RECT, OnTipShow)
   ON_NOTIFY(TTN_POP, IDT_RECT, OnTipPop)
+  ON_EN_CHANGE(IDC_HOTKEY, OnHotKeyChange)
+  ON_NOTIFY(IPN_FIELDCHANGED, IDC_IPADDR, OnFieldChanged)
+  ON_NOTIFY(PGN_CALCSIZE, IDC_PAGER, OnCalcSize)
+  ON_NOTIFY(NM_CLICK, IDC_LINK, OnLinkClick)
 END_MESSAGE_MAP()
 
 class CTestApp : public CWinApp {

@@ -13,7 +13,8 @@
 #   win16mdi  document/view with CMultiDocTemplate (win16doc.cpp)
 #   win16bar  CToolBar, CStatusBar, docking and floating
 #   win16cmn  CImageList, CProgressCtrl, CSliderCtrl, CSpinButtonCtrl, CTabCtrl
-#             CListCtrl, CTreeCtrl and CToolTipCtrl
+#             CListCtrl, CTreeCtrl, CToolTipCtrl, CHotKeyCtrl, CIPAddressCtrl,
+#             CPagerCtrl and CLinkCtrl
 #   win16auto dispatch maps, IDispatch and connection points
 #   win16oledoc  OLE data transfer and the OLE dialogs; containers, servers
 #             and drag and drop are linked, not run
