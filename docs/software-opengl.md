@@ -49,7 +49,8 @@ To remove the generic implementation, compile with
 ## How MFC builds the renderer
 
 The makefile compiles the files of `port/softgl/src` and
-`port/softgl/glu` with the portable layer and puts the objects in
+`port/softgl/glu` (the NURBS of GLU, `glu/libnurbs`, are C++) with the
+portable layer and puts the objects in
 `libwinport.a`. A program links only with `libwinport.a`. Add
 `-Iport/softgl/include` after `-Iport/include`, so that `<GL/gl.h>`
 finds the headers. `libglaux.a` gives the `aux` functions of the
