@@ -1,7 +1,7 @@
 // win16cmn.cpp - the common controls that the library draws on 16-bit
 // Windows: CImageList, CProgressCtrl, CSliderCtrl, CSpinButtonCtrl and
 // CTabCtrl, CHeaderCtrl, CListCtrl, CTreeCtrl, CToolTipCtrl, CHotKeyCtrl,
-// CIPAddressCtrl, CPagerCtrl and CLinkCtrl. The frame makes each control, sends it messages and checks the
+// CIPAddressCtrl, CPagerCtrl, CLinkCtrl and CComboBoxEx. The frame makes each control, sends it messages and checks the
 // notifications that the frame gets. It prints ALL PASSED when each
 // check holds, because Wine gives the exit code 0 whatever a 16-bit
 // program returns.
@@ -21,7 +21,7 @@ static BOOL g_bDone = FALSE;  // the test ran to the end
   } while (0)
 
 enum { IDC_PROGRESS = 100, IDC_SLIDER, IDC_BUDDY, IDC_SPIN, IDC_TAB, IDC_LIST, IDC_TREE, IDC_HOTKEY, IDC_IPADDR, IDC_PAGER,
-       IDC_PAGERCHILD, IDC_LINK, IDT_RECT = 500 };
+       IDC_PAGERCHILD, IDC_LINK, IDC_COMBOEX, IDT_RECT = 500 };
 
 class CMainFrame : public CFrameWnd {
 public:
@@ -37,6 +37,7 @@ public:
   CIPAddressCtrl m_ipaddr;
   CPagerCtrl m_pager;
   CLinkCtrl m_link;
+  CComboBoxEx m_comboEx;
   UINT m_nLastHScroll;    // the code of the last WM_HSCROLL from the slider
   int m_nLastHScrollPos;  // its position
   int m_nVScrolls;        // the WM_VSCROLL messages from the up-down control
@@ -57,6 +58,8 @@ public:
   int m_nCalcSize;        // the PGN_CALCSIZE notifications
   int m_nLinkClick;       // the NM_CLICK notifications of the link control
   int m_iLastLink;        // the link of the last NM_CLICK
+  int m_nCbInserted;      // the CBEN_INSERTITEM notifications
+  int m_nCbDeleted;       // the CBEN_DELETEITEM notifications
 
   /// Starts with no notifications.
   CMainFrame()
@@ -64,7 +67,7 @@ public:
         m_nLastDelta(0), m_nSelChanging(0), m_nSelChange(0), m_bRefuseTab(FALSE),
         m_nItemChanged(0), m_nExpanding(0), m_nTreeSelChanged(0), m_nTreeDeleted(0),
         m_nTipText(0), m_nTipShow(0), m_nTipPop(0), m_nHotKeyChange(0), m_nFieldChanged(0),
-        m_nCalcSize(0), m_nLinkClick(0), m_iLastLink(-1) {}
+        m_nCalcSize(0), m_nLinkClick(0), m_iLastLink(-1), m_nCbInserted(0), m_nCbDeleted(0) {}
 
   /// Makes the controls and runs the checks.
   void RunTests() {
@@ -80,6 +83,7 @@ public:
     TestIPAddress();
     TestPager();
     TestLink();
+    TestComboBoxEx();
     g_bDone = TRUE;
   }
 
@@ -579,6 +583,47 @@ protected:
     m_link.UpdateWindow();
   }
 
+  /// Checks an extended combo box: items with images, indents and data,
+  /// the CB_ messages through the window, and the notifications.
+  void TestComboBoxEx() {
+    CHECK(m_comboEx.Create(WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, CRect(310, 345, 450, 445),
+                           this, IDC_COMBOEX));
+    CImageList il;
+    CHECK(il.Create(16, 16, ILC_COLOR, 2, 0));
+    m_comboEx.SetImageList(&il);
+    CHECK(m_comboEx.GetImageList() != NULL);
+    static const char* const names[] = {"Drive", "Folder", "File"};
+    for (int i = 0; i < 3; i++) {
+      COMBOBOXEXITEM item;
+      memset(&item, 0, sizeof(item));
+      item.mask = CBEIF_TEXT | CBEIF_IMAGE | CBEIF_SELECTEDIMAGE | CBEIF_INDENT | CBEIF_LPARAM;
+      item.iItem = i;
+      item.pszText = (LPSTR)names[i];
+      item.iImage = item.iSelectedImage = i % 2;
+      item.iIndent = i;
+      item.lParam = 100 + i;
+      CHECK(m_comboEx.InsertItem(&item) == i);
+    }
+    CHECK(m_nCbInserted == 3);
+    CHECK(m_comboEx.GetCount() == 3);
+    CHECK(m_comboEx.GetItemData(2) == 102);
+    char szText[32];
+    COMBOBOXEXITEM item;
+    memset(&item, 0, sizeof(item));
+    item.mask = CBEIF_TEXT | CBEIF_INDENT;
+    item.iItem = 1;
+    item.pszText = szText;
+    item.cchTextMax = sizeof(szText);
+    CHECK(m_comboEx.GetItem(&item) && strcmp(szText, "Folder") == 0 && item.iIndent == 1);
+    CHECK(m_comboEx.SetCurSel(2) == 2 && m_comboEx.GetCurSel() == 2);
+    CHECK(m_comboEx.GetComboBoxCtrl() != NULL);
+    CHECK(m_comboEx.GetEditCtrl() == NULL);  // a drop-down list has no edit control
+    CHECK(m_comboEx.DeleteItem(0) == 2);
+    CHECK(m_nCbDeleted == 1);
+    CHECK(m_comboEx.GetItemData(0) == 101);
+    m_comboEx.UpdateWindow();
+  }
+
   /// Keeps the code and the position of the scroll messages of the
   /// slider.
   afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar) {
@@ -693,6 +738,20 @@ protected:
     *pResult = 0;
   }
 
+  /// Counts CBEN_INSERTITEM.
+  afx_msg void OnCbInsertItem(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nCbInserted++;
+    *pResult = 0;
+  }
+
+  /// Counts CBEN_DELETEITEM.
+  afx_msg void OnCbDeleteItem(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nCbDeleted++;
+    *pResult = 0;
+  }
+
   DECLARE_MESSAGE_MAP()
 };
 
@@ -713,6 +772,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
   ON_NOTIFY(IPN_FIELDCHANGED, IDC_IPADDR, OnFieldChanged)
   ON_NOTIFY(PGN_CALCSIZE, IDC_PAGER, OnCalcSize)
   ON_NOTIFY(NM_CLICK, IDC_LINK, OnLinkClick)
+  ON_NOTIFY(CBEN_INSERTITEM, IDC_COMBOEX, OnCbInsertItem)
+  ON_NOTIFY(CBEN_DELETEITEM, IDC_COMBOEX, OnCbDeleteItem)
 END_MESSAGE_MAP()
 
 class CTestApp : public CWinApp {

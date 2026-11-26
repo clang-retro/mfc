@@ -126,11 +126,11 @@ hook that closes them. These classes need a real
   `comctl32.dll`. The library draws the toolbar, the status bar, the
   progress bar, the trackbar, the up-down control, the tab control, the
   header control, the list view, the tree view, the tooltip, the hot
-  key, the IP address control, the pager and the link control itself
+  key, the IP address control, the pager, the link control and the
+  extended combo box itself
   (see "The toolbar and the status bar" and "The other common
-  controls"). `CReBar`, `CComboBoxEx`, `CDateTimeCtrl`,
-  `CMonthCalCtrl` and `CAnimateCtrl` compile, but their windows are not
-  made.
+  controls"). `CReBar`, `CDateTimeCtrl`, `CMonthCalCtrl` and
+  `CAnimateCtrl` compile, but their windows are not made.
 - `CWnd::EnableToolTips`. It does nothing on any target of the library.
   Use a `CToolTipCtrl` (see "The other common controls").
 - The shell file dialog (`IFileDialog`). `CFileDialog` always shows the
@@ -302,8 +302,8 @@ names are not the names of the common controls.
 ### The other common controls
 
 `src/win16ctl.cpp`, `src/win16lv.cpp`, `src/win16tv.cpp`,
-`src/win16tt.cpp` and `src/win16misc.cpp` register twelve more window
-classes. `afxwin16u.h` sets the class names to the names of the
+`src/win16tt.cpp`, `src/win16misc.cpp` and `src/win16cbex.cpp`
+register thirteen more window classes. `afxwin16u.h` sets the class names to the names of the
 library, as for the toolbar:
 
 | Class | Name | MFC class |
@@ -320,12 +320,13 @@ library, as for the toolbar:
 | IP address | `AfxIPAddress16` | `CIPAddressCtrl` |
 | pager | `AfxPager16` | `CPagerCtrl` |
 | link | `SysLink` | `CLinkCtrl` |
+| extended combo box | `AfxComboBoxEx16` | `CComboBoxEx` |
 
 The files also register each class with the name of `comctl32.dll`
 (`msctls_progress32`, `msctls_trackbar32`, `msctls_updown32`,
 `SysTabControl32`, `SysHeader32`, `SysListView32`, `SysTreeView32`,
-`tooltips_class32`, `msctls_hotkey32`, `SysIPAddress32` and
-`SysPager`). `CLinkCtrl` always uses the name `SysLink`. Thus a dialog template can use these names.
+`tooltips_class32`, `msctls_hotkey32`, `SysIPAddress32`, `SysPager`
+and `ComboBoxEx32`). `CLinkCtrl` always uses the name `SysLink`. Thus a dialog template can use these names.
 
 - The windows do the messages of the common controls in ANSI. They send
   `WM_HSCROLL` and `WM_VSCROLL` in the 16-bit packing: the code in
@@ -390,6 +391,16 @@ The files also register each class with the name of `comctl32.dll`
   when visited. The IDs and URLs of an `LITEM` are Unicode: the window
   changes each character to one byte. 16-bit Windows has no hand
   cursor, so the cursor stays an arrow.
+- The extended combo box holds an owner-drawn combo box and draws the
+  indent, the image and the text of each item. It sends
+  `CBEN_INSERTITEM`, `CBEN_DELETEITEM`, `CBEN_GETDISPINFO`,
+  `CBEN_BEGINEDIT` and `CBEN_ENDEDIT`, and gives the `CB_` messages to
+  the combo box. The edit control of `CBS_DROPDOWN` shows no image.
+- The `CB_` messages of 16-bit Windows are `WM_USER` + 0 to `WM_USER` +
+  24: the numbers of the `CBEM_` messages of `comctl32.dll`. Thus
+  `afxwin16u.h` moves the `CBEM_` messages to `WM_USER` + 0x101 and
+  above. `CBEM_DELETEITEM` stays `CB_DELETESTRING`. Code that sends a
+  `CBEM_` message by its number, not by its name, does not work.
 - The toolbar does not use this tooltip. It shows its own tips (see
   "The toolbar and the status bar").
 - An `HTREEITEM` has 16 bits. `TVI_ROOT`, `TVI_FIRST`, `TVI_LAST` and
@@ -440,7 +451,7 @@ the handle as a word key (`CMapWordToPtr`).
 | `win16doc` | `CSingleDocTemplate`, File New, `OnDraw`, `OnUpdate`, and the command routing to the view and the document |
 | `win16mdi` | `CMultiDocTemplate`, two MDI children, the MDI menus, and `MDIGetActive`, `MDINext` and `MDIActivate` |
 | `win16bar` | `CToolBar` and `CStatusBar`: the button layout, a click, the idle update, the message pane, docking at the left edge, floating, the tooltip of a button, and `ShowControlBar` |
-| `win16cmn` | `CImageList`, `CProgressCtrl`, `CSliderCtrl`, `CSpinButtonCtrl`, `CTabCtrl`, `CListCtrl`, `CTreeCtrl`, `CToolTipCtrl`, `CHotKeyCtrl`, `CIPAddressCtrl`, `CPagerCtrl` and `CLinkCtrl`: the images and masks, the ranges and positions, the keys, the buddy of the up-down control, a click on a tab, the columns, items, find and sort of a report view, the links, expansion, selection and sort of a tree, the tools, text, hit test, show and pop of a tooltip, a hot key and its rules, the fields and ranges of an IP address, the buttons and position of a pager, the links of a link control, and the notifications |
+| `win16cmn` | `CImageList`, `CProgressCtrl`, `CSliderCtrl`, `CSpinButtonCtrl`, `CTabCtrl`, `CListCtrl`, `CTreeCtrl`, `CToolTipCtrl`, `CHotKeyCtrl`, `CIPAddressCtrl`, `CPagerCtrl`, `CLinkCtrl` and `CComboBoxEx`: the images and masks, the ranges and positions, the keys, the buddy of the up-down control, a click on a tab, the columns, items, find and sort of a report view, the links, expansion, selection and sort of a tree, the tools, text, hit test, show and pop of a tooltip, a hot key and its rules, the fields and ranges of an IP address, the buttons and position of a pager, the links of a link control, the items of an extended combo box, and the notifications |
 
 The window tests need an X display. Without one, the script starts
 itself under `xvfb-run`.

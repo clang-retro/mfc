@@ -307,6 +307,38 @@ int _AfxW16AcceleratorCount(HACCEL hAccel);
 #define WC_LISTVIEW "AfxListView16"
 #define WC_TREEVIEW "AfxTreeView16"
 #define TOOLTIPS_CLASS "AfxToolTip16"
+#undef WC_COMBOBOXEX
+#define WC_COMBOBOXEX "AfxComboBoxEx16"
+
+// The CB_ messages of 16-bit Windows are WM_USER + 0 to WM_USER + 24, the
+// numbers of the CBEM_ messages of comctl32.dll. The extended combo box
+// gives the CB_ messages to its combo box, so its own messages move to
+// WM_USER + 0x101 and above (src/win16cbex.cpp). CBEM_DELETEITEM stays
+// CB_DELETESTRING.
+#undef CBEM_INSERTITEMA
+#undef CBEM_SETIMAGELIST
+#undef CBEM_GETIMAGELIST
+#undef CBEM_GETITEMA
+#undef CBEM_SETITEMA
+#undef CBEM_GETCOMBOCONTROL
+#undef CBEM_GETEDITCONTROL
+#undef CBEM_SETEXSTYLE
+#undef CBEM_GETEXSTYLE
+#undef CBEM_GETEXTENDEDSTYLE
+#undef CBEM_HASEDITCHANGED
+#undef CBEM_SETEXTENDEDSTYLE
+#define CBEM_INSERTITEMA (WM_USER + 0x101)
+#define CBEM_SETIMAGELIST (WM_USER + 0x102)
+#define CBEM_GETIMAGELIST (WM_USER + 0x103)
+#define CBEM_GETITEMA (WM_USER + 0x104)
+#define CBEM_SETITEMA (WM_USER + 0x105)
+#define CBEM_GETCOMBOCONTROL (WM_USER + 0x106)
+#define CBEM_GETEDITCONTROL (WM_USER + 0x107)
+#define CBEM_SETEXSTYLE (WM_USER + 0x108)
+#define CBEM_GETEXSTYLE (WM_USER + 0x109)
+#define CBEM_GETEXTENDEDSTYLE (WM_USER + 0x109)
+#define CBEM_HASEDITCHANGED (WM_USER + 0x10A)
+#define CBEM_SETEXTENDEDSTYLE (WM_USER + 0x10E)
 #define HOTKEY_CLASS "AfxHotKey16"
 #define WC_IPADDRESS "AfxIPAddress16"
 #define WC_PAGESCROLLER "AfxPager16"

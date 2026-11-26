@@ -38,6 +38,9 @@ BOOL AFXAPI _AfxW16RegisterTipClass();
 // Windows (win16misc.cpp) for the AFX_WNDCOMMCTL_ flags in fReg. Gives
 // the flags of the classes that are there.
 LONG AFXAPI _AfxW16RegisterMiscClasses(LONG fReg);
+// Registers the extended combo box class of 16-bit Windows
+// (win16cbex.cpp). Gives TRUE when the class is there.
+BOOL AFXAPI _AfxW16RegisterComboExClass();
 #endif
 
 // Idle updates for in-place frames, which are not under the main window
