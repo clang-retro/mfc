@@ -19,6 +19,13 @@ The library has `WinMain`. It reads the command line, as Windows does:
 On the classic Mac OS, there is no command line. No argument runs the
 screen saver, because the user opens the application to see it.
 
+A screen saver with its own command-line code (as the SDK samples have)
+reads `GetCommandLine`. When the Finder opens a program that has the
+dialog `DLG_SCRNSAVECONFIGURE` (2003), the layer gives it the command
+line `/S`, as the Windows shell does when it opens a `.scr` file. With
+the Option key held down, it gives `/C`, which shows the settings
+dialog.
+
 The library loads the strings of the program (`IDS_DESCRIPTION` into
 `szName`, and the `ids...` strings) and registers the window class
 `WindowsScreenSaverClass`, with `ScreenSaverProc` as its window
