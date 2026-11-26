@@ -46,6 +46,20 @@ STDLIB = -nostdinc++ -isystem $(MACSDK_LIB)/include/c++/15.2.0/$(CLASSIC_TRIPLE)
 CLASSIC_FLAGS = $(if $(findstring m68k,$(TARGET)),-mcmodel=large) -femulated-tls \
   -fexceptions -frtti -ffunction-sections -fdata-sections -D_GNU_SOURCE
 endif
+# 32-bit DOS (make TARGET=i386-pc-msdos BIN=/path/to/clang-dos/bin) also
+# builds over the portable layer, with the i386-msdos sysroot of
+# clang-retro/dos-sdk (picolibc with cooperative threads, and libc++).
+# port/compat/dos has the POSIX headers and port/src/compat_dos.cpp the
+# functions that DOS does not have. The DOS backend shows the windows on
+# a VESA screen. There are no shared libraries, no network and no other
+# programs to talk to. See docs/dos.md.
+ifneq ($(filter i386-pc-msdos i486-pc-msdos i586-pc-msdos i686-pc-msdos,$(TARGET)),)
+PORTABLE = 1
+DOS32 = 1
+CXXFLAGS ?= -O2
+STDLIB = -isystem port/compat/dos
+DOS32_FLAGS = -ffunction-sections -fdata-sections -D_GNU_SOURCE
+endif
 # Mac OS X 10.4 and 10.5 (make TARGET=powerpc-apple-macosx10.4
 # SDK=/path/to/MacOSX10.4u.sdk LIBCXX=/path/to/libcxx-macosx) build over
 # the portable layer with the Cocoa backend, against Apple's SDK and a
@@ -113,15 +127,16 @@ ifneq ($(MACOS_CLASSIC),1)
 PORT_OBJS += $(patsubst port/src/%.mm,$(OUT)/port/%.mm.o,$(wildcard port/src/*.mm))
 endif
 endif
-ifeq ($(MACOS_CLASSIC),1)
-# The classic Mac OS has no services and no window system that these
-# files use. mac-sdk's C library has the sockets (over MacTCP) that
-# Winsock, WinInet, CAsyncSocket and the internet classes use.
+ifneq ($(MACOS_CLASSIC)$(DOS32),)
+# The classic Mac OS and DOS have no services and no window system that
+# these files use. mac-sdk's C library has the sockets (over MacTCP) that
+# Winsock, WinInet, CAsyncSocket and the internet classes use; on DOS
+# they fail (compat_dos.cpp).
 CLASSIC_SKIP = service com_remote com_proxy com_ole \
   backend_x11 backend_wayland backend_cocoa
 PORT_SRCS := $(filter-out $(patsubst %,port/src/%.cpp,$(CLASSIC_SKIP)),$(PORT_SRCS))
 PORT_OBJS = $(patsubst port/src/%.cpp,$(OUT)/port/%.o,$(PORT_SRCS))
-ALL_CXXFLAGS += -Iport/include $(CLASSIC_FLAGS)
+ALL_CXXFLAGS += -Iport/include $(CLASSIC_FLAGS) $(DOS32_FLAGS)
 else
 ALL_CXXFLAGS += -Iport/include -fPIC
 endif
@@ -160,7 +175,7 @@ SOFTGL_OBJS = $(patsubst port/softgl/%.c,$(OUT)/softgl/%.o,$(SOFTGL_SRCS) $(SOFT
 PORT_OBJS += $(SOFTGL_OBJS)
 SOFTGL_CFLAGS = $(TARGET_FLAGS) $(CXXFLAGS) -DSGL_LAYER_FLUSH -Iport/softgl/include \
   $(if $(MACOS_CLASSIC),$(if $(findstring m68k,$(TARGET)),-mcmodel=large) -ffunction-sections -fdata-sections \
-  -isystem $(MACSDK_LIB)/include -I$(MACSDK)/include,-fPIC)
+  -isystem $(MACSDK_LIB)/include -I$(MACSDK)/include,$(if $(DOS32),$(DOS32_FLAGS) -isystem port/compat/dos,-fPIC))
 ALL_CXXFLAGS += -Iport/softgl/include
 endif
 endif
@@ -237,7 +252,7 @@ ifeq ($(WIN16),1)
 STATIC_LIBS = $(OUT)/libmfc.a
 SHARED_LIBS =
 endif
-ifeq ($(MACOS_CLASSIC),1)
+ifneq ($(MACOS_CLASSIC)$(DOS32),)
 STATIC_LIBS = $(OUT)/libmfc.a $(OUT)/libmfcu.a $(PORT_LIB) $(SCRNSAVE_LIBS)
 SHARED_LIBS =
 endif
@@ -371,11 +386,11 @@ ifeq ($(WIN16),1)
 	cp include/win16/*.h $(DEST)/include/mfc/win16/
 	cp port/include/*.h $(DEST)/include/mfc/winport/
 	cp $(OUT)/libmfc.a $(DEST)/lib/
-else ifeq ($(MACOS_CLASSIC),1)
+else ifneq ($(MACOS_CLASSIC)$(DOS32),)
 	mkdir -p $(DEST)/include/libmfc/winport $(DEST)/include/libmfc/compat $(DEST)/lib
 	cp include/*.h include/*.rc include/*.cpp $(DEST)/include/libmfc/
 	cp port/include/*.h $(DEST)/include/libmfc/winport/
-	cp -R port/compat/macos/. $(DEST)/include/libmfc/compat/
+	cp -R port/compat/$(if $(DOS32),dos,macos)/. $(DEST)/include/libmfc/compat/
 	cp $(STATIC_LIBS) $(DEST)/lib/
 else ifeq ($(PORTABLE),1)
 	mkdir -p $(DEST)/include/libmfc/winport $(DEST)/lib/libmfc-shared $(DEST)/lib/pkgconfig \
@@ -401,7 +416,9 @@ else
 endif
 
 check: all
-ifeq ($(MACOS_CLASSIC),1)
+ifeq ($(DOS32),1)
+	BIN=$(BIN) OUT=$(OUT) sh tests/run-dos-tests.sh
+else ifeq ($(MACOS_CLASSIC),1)
 	BIN=$(BIN) MACSDK=$(MACSDK) TARGET=$(TARGET) OUT=$(OUT) sh tests/run-macos-tests.sh
 else ifeq ($(WIN16),1)
 	BIN=$(BIN) SYSROOT=$(SYSROOT) OUT=$(OUT) sh tests/run-win16-tests.sh

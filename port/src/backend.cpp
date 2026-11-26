@@ -6,7 +6,10 @@
 // "headless" keeps every window in memory, which suits tests and
 // programs run without a display. Without it macOS uses Cocoa; elsewhere
 // the compositor is used when WAYLAND_DISPLAY names one, then the X
-// display when DISPLAY names one, and headless otherwise. WINPORT_SCREEN=WIDTHxHEIGHT sets the headless screen's size.
+// display when DISPLAY names one, and headless otherwise. On the classic
+// Mac OS the Toolbox shows the windows, and on 32-bit DOS the DOS backend
+// (backend_dos.cpp). WINPORT_SCREEN=WIDTHxHEIGHT sets the headless
+// screen's size, and on DOS the screen mode's.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -56,7 +59,19 @@ struct HeadlessBackend : Backend {
 
 Backend* NewHeadlessBackend() { return new HeadlessBackend; }
 
-#if defined(macintosh)
+#if defined(__MSDOS__) && defined(__i386__)
+// 32-bit DOS: the DOS backend shows the windows on a VESA or VGA screen,
+// unless WINPORT_BACKEND is "headless".
+Backend* GetBackend() {
+  static Backend* b = [] {
+    const char* name = getenv("WINPORT_BACKEND");
+    Backend* b = NULL;
+    if (!name || strcmp(name, "headless") != 0) b = NewDosBackend();
+    return b ? b : NewHeadlessBackend();
+  }();
+  return b;
+}
+#elif defined(macintosh)
 // The classic Mac OS: the Toolbox shows the windows, unless
 // WINPORT_BACKEND is "headless" or the Toolbox cannot.
 Backend* GetBackend() {

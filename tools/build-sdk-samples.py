@@ -18,7 +18,7 @@
 #   LDFLAGS   flags for the link (target, sysroot, linker, C++ library)
 #   MFC_OUT   the directory with libwinport.a and libglaux.a
 #   SYSLIBS   system libraries (default: the Mac OS X frameworks on Mac
-#             OS X, else -ldl -lpthread -lm)
+#             OS X, none on 32-bit DOS, else -ldl -lpthread -lm)
 #   HOST_CXX  a C++ compiler for the host, for res2cpp.py (default: CXX)
 #   MACSDK    clang-retro/mac-sdk, for the classic Mac OS: its
 #             tools/macapp.py links the program (default: ../mac-sdk)
@@ -473,6 +473,8 @@ def build_sample(sample, sdk, out, env, log):
              "--lib", os.path.join(env["MACSDK"], "lib"), "--size", "8192", "--large",
              "--name", os.path.splitext(program)[0], "-o", exe, "--"] + objects + libs + cxxlibs, log, link_env)
         return exe
+    if env["DOS"]:
+        exe = os.path.splitext(exe)[0] + ".exe"
     run([env["CXX"]] + env["LDFLAGS"] + objects + libs + env["SYSLIBS"] + ["-o", exe], log)
     return exe
 
@@ -499,7 +501,10 @@ def environment():
     # systems have the generic implementation in libwinport.a.
     powerpc = "__POWERPC__" in macros or "__powerpc__" in macros
     env["SOFTGL"] = not (macho or (env["CLASSIC"] and powerpc))
-    default_libs = "-framework Cocoa -framework OpenGL -framework GLUT" if macho else "-ldl -lpthread -lm"
+    # 32-bit DOS: the C library has everything, and a program must end in
+    # .exe for DOS to start it.
+    env["DOS"] = "__MSDOS__" in macros and "__i386__" in macros
+    default_libs = "-framework Cocoa -framework OpenGL -framework GLUT" if macho else "" if env["DOS"] else "-ldl -lpthread -lm"
     env["SYSLIBS"] = shlex.split(os.environ.get("SYSLIBS", default_libs))
     env["BIG_ENDIAN"] = macros.get("__BYTE_ORDER__") == "__ORDER_BIG_ENDIAN__"
     env["POINTER_SIZE"] = int(macros.get("__SIZEOF_POINTER__", "4"))

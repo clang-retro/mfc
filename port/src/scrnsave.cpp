@@ -55,7 +55,7 @@ HWND ReadWindow(const char* p) {
 Mode ReadCommandLine(const char* p, HWND* window) {
   *window = NULL;
   while (*p == ' ' || *p == '\t') p++;
-#if defined(macintosh)
+#if defined(macintosh) || defined(__MSDOS__)
   if (!*p) return kSave;
 #endif
   if (*p != '/' && *p != '-') return kConfigure;

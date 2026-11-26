@@ -77,8 +77,8 @@ void FromTicks(LONGLONG t, SYSTEMTIME* st) {
 long OffsetAt(time_t t) {
   struct tm tm;
   localtime_r(&t, &tm);
-#ifdef macintosh
-  // The classic Mac OS C library has no tm_gmtoff: the UTC fields read
+#if defined(macintosh) || defined(__MSDOS__)
+  // The C libraries of the classic Mac OS and DOS have no tm_gmtoff: the UTC fields read
   // as local time give the moment that is the offset earlier.
   struct tm g;
   gmtime_r(&t, &g);

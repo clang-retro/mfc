@@ -26,6 +26,9 @@
 #include <crt_externs.h>
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
+#elif defined(__MSDOS__)
+#include <dos.h>  // __argc and __argv
+#include <link.h>
 #else
 #include <link.h>
 #endif
@@ -96,6 +99,12 @@ std::string ExecutablePath() {
     std::string p = dir;
     if (p.empty() || p.back() != '/') p += '/';
     p.append((const char*)app + 1, app[0] > 31 ? 31 : app[0]);
+    return p;
+#elif defined(__MSDOS__)
+    // DOS gives the program's path after the environment (argv[0]).
+    std::string p = __argc > 0 && __argv[0] ? __argv[0] : "";
+    for (char& c : p)
+      if (c == '\\') c = '/';
     return p;
 #else
     char buf[PATH_MAX];
@@ -783,6 +792,8 @@ std::vector<std::string> Argv() {
   // serial number, which the program does not ask for.
   for (int i = 0; i < argc; i++)
     if (i == 0 || strncmp(argv[i], "-psn_", 5) != 0) v.push_back(argv[i]);
+#elif defined(__MSDOS__)
+  for (int i = 0; i < __argc; i++) v.push_back(__argv[i]);
 #else
   FILE* f = fopen("/proc/self/cmdline", "rb");
   if (f) {
@@ -842,9 +853,12 @@ static bool OptionKeyDown() {
   // kCGEventSourceStateCombinedSessionState and kCGEventFlagMaskAlternate.
   return flags && (flags(0) & 0x00080000) != 0;
 }
+#elif defined(__MSDOS__)
+// Tells if an Alt key is down now (the BIOS keyboard flags at 0x417).
+static bool OptionKeyDown() { return (*(volatile const unsigned char*)0x417 & 0x08) != 0; }
 #endif
 
-#if defined(macintosh) || defined(__APPLE__)
+#if defined(macintosh) || defined(__APPLE__) || defined(__MSDOS__)
 
 // Gives the command line of a program that the Finder opened. The
 // Finder gives no arguments (Mac OS X 10.4 to 10.8 give only -psn_...,
@@ -852,7 +866,8 @@ static bool OptionKeyDown() {
 // it opens a file: a screen saver (a program with the dialog
 // DLG_SCRNSAVECONFIGURE, 2003) gets /S, the shell's "Open" command.
 // With the Option key held down, it gets /C, the shell's "Configure"
-// command.
+// command. A DOS program started without arguments gets the same, with
+// Alt for Option.
 //
 // The program's name in the command line is the name of its file, not
 // the path. Old programs (MULTIPAD) skip their name up to the first space;
@@ -878,9 +893,10 @@ std::string& CommandLine() {
     }
 #if defined(macintosh)
     if (r.empty()) r = FinderCommandLine();
-#elif defined(__APPLE__)
-    // Only the program's own path: it was opened from the Finder (or from
-    // Terminal without arguments).
+#elif defined(__APPLE__) || defined(__MSDOS__)
+    // Only the program's own path: on Mac OS X it was opened from the
+    // Finder (or from Terminal without arguments); on DOS it was started
+    // without arguments.
     if (args.size() <= 1) r = FinderCommandLine();
 #endif
     return r;
