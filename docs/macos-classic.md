@@ -55,8 +55,8 @@ and `CurrentA5` before the program runs.
 
 When the backend starts the Toolbox, it also puts two menus in the Mac
 menu bar. The Apple menu holds the desk accessories (the Apple Menu
-Items). The File menu holds Quit, which does the same as the Finder's
-Quit Application command. The program's own menus stay in its windows.
+Items). The second menu has the program's name and holds Exit, which
+does the same as the Finder's Quit Application command. The program's own menus stay in its windows.
 A program that starts the Toolbox itself makes its own menu bar.
 
 To keep the windows in memory (for tests), set `WINPORT_BACKEND` to

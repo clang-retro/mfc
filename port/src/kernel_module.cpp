@@ -779,7 +779,10 @@ std::vector<std::string> Argv() {
 #ifdef __APPLE__
   int argc = *_NSGetArgc();
   char** argv = *_NSGetArgv();
-  for (int i = 0; i < argc; i++) v.push_back(argv[i]);
+  // The Finder of Mac OS X 10.4 to 10.8 adds -psn_0_12345, the process
+  // serial number, which the program does not ask for.
+  for (int i = 0; i < argc; i++)
+    if (i == 0 || strncmp(argv[i], "-psn_", 5) != 0) v.push_back(argv[i]);
 #else
   FILE* f = fopen("/proc/self/cmdline", "rb");
   if (f) {
@@ -822,13 +825,57 @@ std::string Quote(const std::string& a) {
   return r;
 }
 
+#if defined(macintosh)
+// Tells if the Option key is down now (the low-memory KeyMap at 0x174;
+// the Option key has the key code 0x3A).
+static bool OptionKeyDown() {
+  const unsigned char* keys = (const unsigned char*)0x174;
+  return (keys[0x3A >> 3] & (1 << (0x3A & 7))) != 0;
+}
+#elif defined(__APPLE__)
+// Tells if the Option key is down now. CGEventSourceFlagsState (Mac OS X
+// 10.4 and later) is in Quartz, which AppKit loads; the program does not
+// have to link it, so the function is found when the program runs.
+static bool OptionKeyDown() {
+  typedef uint64_t (*FlagsState)(int32_t);
+  FlagsState flags = (FlagsState)dlsym(RTLD_DEFAULT, "CGEventSourceFlagsState");
+  // kCGEventSourceStateCombinedSessionState and kCGEventFlagMaskAlternate.
+  return flags && (flags(0) & 0x00080000) != 0;
+}
+#endif
+
+#if defined(macintosh) || defined(__APPLE__)
+
+// Gives the command line of a program that the Finder opened. The
+// Finder gives no arguments (Mac OS X 10.4 to 10.8 give only -psn_...,
+// which Argv leaves out), so this does what the Windows shell does when
+// it opens a file: a screen saver (a program with the dialog
+// DLG_SCRNSAVECONFIGURE, 2003) gets /S, the shell's "Open" command.
+// With the Option key held down, it gets /C, the shell's "Configure"
+// command.
+static std::string FinderCommandLine() {
+  std::string r = Quote(ExecutablePath());
+  if (FindResourceA(NULL, MAKEINTRESOURCEA(2003), MAKEINTRESOURCEA(5)))  // RT_DIALOG
+    r += OptionKeyDown() ? " /C" : " /S";
+  return r;
+}
+#endif
+
 std::string& CommandLine() {
   static std::string s = [] {
     std::string r;
-    for (auto& a : Argv()) {
+    std::vector<std::string> args = Argv();
+    for (auto& a : args) {
       if (!r.empty()) r += ' ';
       r += Quote(a);
     }
+#if defined(macintosh)
+    if (r.empty()) r = FinderCommandLine();
+#elif defined(__APPLE__)
+    // Only the program's own path: it was opened from the Finder (or from
+    // Terminal without arguments).
+    if (args.size() <= 1) r = FinderCommandLine();
+#endif
     return r;
   }();
   return s;

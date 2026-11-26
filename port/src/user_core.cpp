@@ -493,14 +493,15 @@ WORD WINAPI GetClassWord(HWND h, int i) { return (WORD)GetClassLongPtrW(h, i); }
 
 namespace {
 
-// Where CW_USEDEFAULT puts the next overlapped window.
+// Where CW_USEDEFAULT puts the next overlapped window: in steps from the
+// top left of the work area, so that the caption is not under the menu
+// bar of macOS.
 POINT NextDefaultPosition() {
   static int n = 0;
-  SIZE s = GetBackend()->ScreenSize();
+  RECT area = GetBackend()->WorkArea();
   int step = GetSystemMetrics(SM_CYCAPTION) + GetSystemMetrics(SM_CYFRAME);
-  POINT p = {step * (n % 8), step * (n % 8)};
+  POINT p = {area.left + step * (n % 8), area.top + step * (n % 8)};
   n++;
-  (void)s;
   return p;
 }
 
@@ -560,9 +561,9 @@ static HWND CreateWindowCore(DWORD exStyle, LPCWSTR className, LPCWSTR windowNam
       if (!(style & WS_POPUP)) y = p.y;
     }
     if (cx == CW_USEDEFAULT) {
-      SIZE s = GetBackend()->ScreenSize();
-      cx = s.cx * 3 / 4;
-      cy = s.cy * 3 / 4;
+      RECT area = GetBackend()->WorkArea();
+      cx = (area.right - area.left) * 3 / 4;
+      cy = (area.bottom - area.top) * 3 / 4;
     }
   } else {
     if (x == CW_USEDEFAULT) x = y = 0;
@@ -1315,8 +1316,7 @@ BOOL WINAPI ShowWindow(HWND h, int cmd) {
           target = MakeRect(0, 0, w->parent->client.right - w->parent->client.left,
                             w->parent->client.bottom - w->parent->client.top);
         } else {
-          SIZE s = GetBackend()->ScreenSize();
-          target = MakeRect(0, 0, s.cx, s.cy);
+          target = GetBackend()->WorkArea();
         }
         RECT in = FrameInsets(w->style, w->exStyle, false);
         target.left -= in.left;
