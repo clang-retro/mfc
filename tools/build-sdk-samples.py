@@ -63,6 +63,10 @@ SAVER_NAMES = {
     "text3d": "3D Text",
 }
 SAVER_BUNDLE_SRC = os.path.join(ROOT, "port", "saver", "saver_bundle.mm")
+# On the classic Mac OS, the screen saver host (port/saver/macos): the
+# control panel and the background engine, and one After Dark module for
+# each screen saver.
+MACOS_SAVER_DIR = os.path.join(ROOT, "port", "saver", "macos")
 COCOA_BACKEND_SRC = os.path.join(ROOT, "port", "src", "backend_cocoa.mm")
 INFO_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -507,9 +511,14 @@ def build_sample(sample, sdk, out, env, log):
         # are objects already.
         cxxlibs = [os.path.join(env["MACSDK"], "lib", "m68k" if cpu == "68k" else "ppc", n) for n in ("libstdc++.a", "libunwind.a")]
         link_env = dict(os.environ, CLANG=env["CC"])
+        # A screen saver has the name that the control panel of the host
+        # shows (for example "3D Pipes").
+        title = SAVER_NAMES.get(name, os.path.splitext(program)[0]) if saver else os.path.splitext(program)[0]
         run([sys.executable, os.path.join(env["MACSDK"], "tools", "macapp.py"), "--cpu", cpu,
              "--lib", os.path.join(env["MACSDK"], "lib"), "--size", "8192", "--large",
-             "--name", os.path.splitext(program)[0], "-o", exe, "--"] + objects + libs + cxxlibs, log, link_env)
+             "--name", title, "-o", exe, "--"] + objects + libs + cxxlibs, log, link_env)
+        if saver:
+            build_ad_module(title, os.path.dirname(exe), env, log)
         return exe
     if env["DOS"]:
         exe = os.path.splitext(exe)[0] + ".exe"
@@ -557,6 +566,53 @@ def build_saver_bundle(name, program, objects, libs, objdir, env, log):
 
 
 # Reads the compilers and flags from the environment.
+# Runs mac-sdk's tools/macapp.py with the arguments args, with the
+# compiler of env, without the C library.
+def macapp(args, env, log):
+    link_env = dict(os.environ, CLANG=env["CC"])
+    run([sys.executable, os.path.join(env["MACSDK"], "tools", "macapp.py"), "--no-libc",
+         "--lib", os.path.join(env["MACSDK"], "lib")] + args, log, link_env)
+
+
+# Adds the resources res, as (type, ID, bytes), to the MacBinary file path.
+def add_resources(path, res, env):
+    sys.path.insert(0, os.path.join(env["MACSDK"], "tools", "link"))
+    import macres
+    name, ftype, creator, data, rsrc = macres.read_macbinary(open(path, "rb").read())
+    resources = macres.read_resource_fork(rsrc) + res
+    with open(path, "wb") as f:
+        f.write(macres.macbinary(name, ftype, creator, data, macres.resource_fork(resources)))
+
+
+# Builds the After Dark module of the screen saver title (out/TITLE.ADgm.bin):
+# a 68k code resource that starts the program from the "Screen Savers"
+# folder (port/saver/macos/ad_module.c).
+def build_ad_module(title, out, env, log):
+    module = os.path.join(out, title + ".ADgm.bin")
+    macapp(["--cpu", "68k", "--code-resource", "ADgm,0", "--type", "ADgm", "--creator", "ADrk",
+            "--name", title, "-o", module, "--", '-DSAVER_NAME="%s"' % title,
+            os.path.join(MACOS_SAVER_DIR, "ad_entry.S"), os.path.join(MACOS_SAVER_DIR, "ad_module.c"),
+            os.path.join(MACOS_SAVER_DIR, "saver_common.c")], env, log)
+    credit = ("Starts %s from the Screen Savers folder." % title).encode("mac_roman")
+    # 'Cals': the messages that the module wants (Initialize, Blank,
+    # DrawFrame and Close). 'STR ' 128: the credit line.
+    add_resources(module, [(b"Cals", 1, b"\x0f"), (b"STR ", 128, bytes([len(credit)]) + credit)], env)
+    return module
+
+
+# Builds the screen saver host of the classic Mac OS, for 68k and PowerPC:
+# the control panel (out/Screen Saver.bin) and the background engine
+# (out/Screen Saver Engine.bin).
+def build_saver_host(out, env, log):
+    common = os.path.join(MACOS_SAVER_DIR, "saver_common.c")
+    macapp(["--type", "APPC", "--creator", "WPsc", "--size", "256", "--name", "Screen Saver",
+            "-o", os.path.join(out, "Screen Saver.bin"), "--",
+            os.path.join(MACOS_SAVER_DIR, "saver_panel.c"), common], env, log)
+    macapp(["--type", "appe", "--creator", "WPse", "--background-only", "--size", "128",
+            "--name", "Screen Saver Engine", "-o", os.path.join(out, "Screen Saver Engine.bin"), "--",
+            os.path.join(MACOS_SAVER_DIR, "saver_engine.c"), common], env, log)
+
+
 def environment():
     bindir = os.environ.get("BIN", "")
     tool = lambda n: os.path.join(bindir, n) if bindir else n
@@ -610,6 +666,13 @@ def main():
             except RuntimeError as e:
                 failed += 1
                 print("FAIL   %s (%s)" % (sample[0], e))
+        if env["CLASSIC"] and any(s[3] and (not only or s[0] in only) for s in SAMPLES):
+            try:
+                build_saver_host(os.path.join(args.out, "bin"), env, log)
+                print("ok     saver host: %s" % os.path.join(args.out, "bin"))
+            except RuntimeError as e:
+                failed += 1
+                print("FAIL   saver host (%s)" % e)
     sys.exit(1 if failed else 0)
 
 

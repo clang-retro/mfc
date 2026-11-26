@@ -141,6 +141,12 @@ For a bundle that also runs on 10.0 to 10.3, build the PowerPC part for
 
 The programs run on Mac OS X 10.4 in QEMU (`qemu-system-ppc -M mac99`).
 
+In QEMU, the WindowServer of Mac OS X 10.0 does not start, because 10.0
+has no display driver for the QEMU display. Command-line programs run.
+A program that uses AppKit stops when AppKit cannot connect to the
+WindowServer. Thus the windows and the `.saver` bundles of 10.0 are not
+tested in QEMU.
+
 ## Mac OS X 10.0 to 10.3
 
 Build for 10.0 to make one PowerPC program for 10.0 to 10.5. Intel Macs
@@ -182,6 +188,14 @@ Link as for 10.4, with these changes:
   namespace: the frameworks do not export the symbols of the frameworks
   and libraries that they use. With a flat namespace, the linker finds
   each symbol in all of the libraries.
+- Add `-Wl,-no_uuid -Wl,-no_function_starts -Wl,-no_data_in_code_info
+  -Wl,-no_version_load_command`. The dyld of 10.0 does not load a bundle
+  that has these load commands ("unknown load command"). Programs start
+  with them, but bundles (for example the `.saver` bundles) do not.
+- Use a clang that writes a symbol table for each Objective-C module
+  (clang-retro/llvm after PR 65). The Objective-C runtime of 10.0 stops
+  the program with a bus error before `main` when an Objective-C file has
+  no class or category.
 
 ### Differences on 10.0 to 10.3
 

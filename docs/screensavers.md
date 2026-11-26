@@ -117,6 +117,68 @@ resources come from the bundle, not from the engine.
 - Each bundle has a different name for its Objective-C classes, because
   System Preferences loads all bundles in one process.
 
+## System screen savers on the classic Mac OS
+
+The classic Mac OS (System 7 to Mac OS 9) has no screen saver host of
+its own. The layer gives one in `port/saver/macos`:
+
+| File | Type | Folder | What it does |
+| --- | --- | --- | --- |
+| Screen Saver Engine | `appe` (faceless background application) | Extensions | Monitors the mouse and the keyboard. After the idle time, starts the selected screen saver. |
+| Screen Saver | `APPC` (control panel) | Control Panels | Selects the screen saver and the idle time, and has a "Test" button. Writes "Screen Saver Preferences" in the Preferences folder. |
+| The screen savers | `APPL` | Screen Savers (in the System Folder) | The `.scr` programs, built for the classic Mac OS. |
+| The After Dark modules | `ADgm` | After Dark Files | Optional. One module for each screen saver, for After Dark. |
+
+`tools/build-sdk-samples.py` makes all of them for the classic Mac OS
+(fat programs and 68k modules). It gives each screen saver the name
+that the control panel shows (for example `3D Pipes`).
+
+### Install
+
+1. Copy "Screen Saver Engine" to the Extensions folder.
+2. Copy "Screen Saver" to the Control Panels folder.
+3. Copy the screen savers to the folder "Screen Savers" in the System
+   Folder. The control panel makes this folder when it does not exist.
+4. Restart the Mac. Open the control panel, then select a screen saver
+   and the idle time.
+
+### How it works
+
+- The engine reads the position of the mouse, the keys and the mouse
+  button every half second. When they do not change for the idle time,
+  it starts the screen saver with `LaunchApplication`. The engine reads
+  the settings again when the control panel changes them.
+- The program gets no arguments. Thus the layer gives it `/S`, and it
+  runs over the whole screen. It stops when the mouse moves, or when the
+  user clicks or presses a key. Then the idle time starts again.
+- An After Dark module is a 68k code resource (`ad_module.c`). At
+  `Initialize`, it starts the screen saver of the same name from the
+  "Screen Savers" folder. At `Close`, it sends the Apple event "quit" to
+  the program if the program did not stop itself. The module does not
+  draw. mac-sdk's `macapp.py --code-resource` links it.
+
+### Tests
+
+`tests/macos-saver` has a small screen saver (`testsaver.c`) and a small
+After Dark host (`adhost.c`). The host calls a module as After Dark
+does, moves the code of the module in memory between two calls, and
+checks that the module starts and stops the screen saver. On Mac OS 9.2.1
+in QEMU:
+
+- The engine and the control panel start with the Mac. The engine
+  starts the screen saver after one minute without input, and the
+  screen saver stops when the mouse moves.
+- `adhost` gives "ADHOST PASSED".
+
+### Limits
+
+- The After Dark modules are not tested with After Dark itself.
+- The control panel cannot open the settings dialog of a screen saver.
+  To change the settings, open the screen saver with the Option key held
+  down.
+- On a locked startup disk (a CD), the control panel cannot save the
+  settings. It shows the error.
+
 ## Limits
 
 - OpenGL screen savers draw through the OpenGL of the system (Mac OS X,
