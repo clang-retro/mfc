@@ -349,6 +349,7 @@ Backend* NewX11Backend();  // NULL when there is no X display
 Backend* NewWaylandBackend();  // NULL when there is no Wayland compositor
 Backend* NewCocoaBackend();  // NULL except on macOS
 Backend* NewMacBackend();  // the Toolbox, on the classic Mac OS only
+Backend* NewDosBackend();  // VESA or VGA, on 32-bit DOS only
 
 }  // namespace winport
 

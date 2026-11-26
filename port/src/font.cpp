@@ -41,6 +41,9 @@
 #include <map>
 #include <memory>
 #include <set>
+#if defined(__MSDOS__)
+#include <dos.h>
+#endif
 
 namespace winport {
 
@@ -307,6 +310,8 @@ void ScanDir(const std::string& dir, int depth, std::set<std::pair<dev_t, ino_t>
   }
 }
 
+// The folders to search for font files. WINPORT_FONTS replaces the list
+// ("builtin" gives no folders); otherwise the folders of the platform.
 std::vector<std::string> FontDirs() {
   std::vector<std::string> dirs;
   const char* env = getenv("WINPORT_FONTS");
@@ -314,8 +319,14 @@ std::vector<std::string> FontDirs() {
     std::string s = env;
     if (s == "builtin") return dirs;
     size_t start = 0;
+#if defined(__MSDOS__)
+    // A DOS path has a drive letter and a colon, so ';' divides the list.
+    const char sep = ';';
+#else
+    const char sep = ':';
+#endif
     while (start <= s.size()) {
-      size_t c = s.find(':', start);
+      size_t c = s.find(sep, start);
       if (c == std::string::npos) c = s.size();
       if (c > start) dirs.push_back(s.substr(start, c - start));
       start = c + 1;
@@ -328,6 +339,17 @@ std::vector<std::string> FontDirs() {
   (void)home;
   std::string fonts;
   if (mactb::FontsFolder(&fonts)) dirs.push_back(fonts);
+#elif defined(__MSDOS__)
+  // The FONTS folder next to the program, then the Fonts folder of a
+  // Windows installation on the same machine.
+  (void)home;
+  if (__argc > 0 && __argv[0]) {
+    std::string exe = __argv[0];
+    size_t slash = exe.find_last_of("\\/:");
+    dirs.push_back((slash == std::string::npos ? std::string(".") : exe.substr(0, slash)) + "/FONTS");
+  }
+  if (const char* windir = getenv("WINDIR")) dirs.push_back(std::string(windir) + "/FONTS");
+  dirs.push_back("C:/WINDOWS/FONTS");
 #elif defined(__APPLE__)
   dirs.push_back("/System/Library/Fonts");
   dirs.push_back("/Library/Fonts");

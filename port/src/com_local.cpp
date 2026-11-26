@@ -1,5 +1,5 @@
 // com_local.cpp - COM between processes for a system where the layer has
-// no other programs to talk to: the classic Mac OS. It takes the place of
+// no other programs to talk to: the classic Mac OS and DOS. It takes the place of
 // com_remote.cpp, com_proxy.cpp and com_ole.cpp there (the Makefile
 // leaves those out). A program's class objects stay its own, no object
 // is a proxy, no window belongs to another program, and the OLE
@@ -7,7 +7,7 @@
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
-#if defined(macintosh)
+#if defined(macintosh) || defined(__MSDOS__)
 #include "com.h"
 
 namespace winport {

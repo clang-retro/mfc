@@ -26,6 +26,7 @@ nav:
   - "What is there": contents.md
   - "Differences from Visual C++": differences.md
   - "16-bit Windows": win16.md
+  - "32-bit DOS": dos.md
   - "Classic Mac OS": macos-classic.md
   - "Mac OS X 10.4 and 10.5": macosx-10.4.md
   - "Screen savers": screensavers.md

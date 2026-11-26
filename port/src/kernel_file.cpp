@@ -869,13 +869,21 @@ DWORD WINAPI GetCurrentDirectoryW(DWORD n, LPWSTR b) { return CopyOut(Widen(Cwd(
 BOOL WINAPI SetCurrentDirectoryA(LPCSTR p) { return Result(chdir(PosixPath(p).c_str())); }
 BOOL WINAPI SetCurrentDirectoryW(LPCWSTR p) { return Result(chdir(PosixPath(p).c_str())); }
 
+// The folder for temporary files: TMPDIR, TMP or TEMP, else /tmp. DOS
+// has no /tmp, so there the current folder is used when TMP and TEMP are
+// not set.
 static std::string TempDir() {
   const char* t = getenv("TMPDIR");
   if (!t || !*t) t = getenv("TMP");
   if (!t || !*t) t = getenv("TEMP");
+#if defined(__MSDOS__)
+  std::string r = t && *t ? std::string(t) : Cwd();
+  if (r.back() != '/' && r.back() != '\\') r += '/';
+#else
   if (!t || !*t) t = "/tmp";
   std::string r(t);
   if (r.back() != '/') r += '/';
+#endif
   return r;
 }
 DWORD WINAPI GetTempPathA(DWORD n, LPSTR b) { return CopyOut(TempDir(), b, n); }

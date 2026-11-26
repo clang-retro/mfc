@@ -403,6 +403,12 @@ large model. OLE controls, the OLE dialogs and the other common controls
 are not there yet. See
 [docs/win16.md](docs/win16.md).
 
+### 32-bit DOS
+
+`make TARGET=i386-pc-msdos BIN=path/to/clang-dos/bin` builds the library
+and the portable layer for 32-bit DOS, with the DOS/32A extender in each
+program. Windows show on a VESA screen. See [docs/dos.md](docs/dos.md).
+
 ### The classic Mac OS
 
 `make TARGET=m68k-apple-macos MACSDK=path/to/mac-sdk` (or

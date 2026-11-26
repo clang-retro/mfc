@@ -86,6 +86,25 @@ The programs are applications in MacBinary (`out/bin/*.scr.bin`). Use
 of the renderer come before the GL headers of mac-sdk, which are for
 Apple OpenGL on PowerPC.
 
+## 32-bit DOS
+
+On 32-bit DOS, the screen savers draw with the generic implementation of
+OpenGL. Each program is one `.exe` with the DOS/32A extender in it. See
+[dos.md](dos.md).
+
+```sh
+make static TARGET=i386-pc-msdos BIN=path/to/clang-dos/bin
+export BIN=path/to/clang-dos/bin MFC_OUT=build/i386-pc-msdos HOST_CXX=clang++
+export CFLAGS="--target=i386-pc-msdos -O2 -ffunction-sections -fdata-sections \
+  -D_GNU_SOURCE -isystem $PWD/port/compat/dos"
+export LDFLAGS="--target=i386-pc-msdos"
+python3 tools/build-sdk-samples.py --sdk path/to/SDK --out out --only 3dfo,flwbox,maze,pipes,text3d
+```
+
+The programs are `out/bin/*.exe`. A screen saver with no arguments
+starts as with `/s`. The 3D text saver needs a TrueType font in a
+`FONTS` folder next to the program.
+
 ## Universal programs for current macOS
 
 A universal program for macOS 11 and later has an Intel (x86_64) part and
