@@ -1,5 +1,6 @@
 // win16cmn.cpp - the common controls that the library draws on 16-bit
-// Windows: CProgressCtrl, CSliderCtrl, CSpinButtonCtrl and CTabCtrl. The
+// Windows: CImageList, CProgressCtrl, CSliderCtrl, CSpinButtonCtrl and
+// CTabCtrl. The
 // frame makes each control, sends it messages and checks the
 // notifications that the frame gets. It prints ALL PASSED when each
 // check holds, because Wine gives the exit code 0 whatever a 16-bit
@@ -44,6 +45,7 @@ public:
 
   /// Makes the controls and runs the checks.
   void RunTests() {
+    TestImageList();
     TestProgress();
     TestSlider();
     TestSpin();
@@ -52,6 +54,44 @@ public:
   }
 
 protected:
+  /// Checks the images of an image list: two images from a bitmap whose
+  /// red pixels are transparent, a draw on a white background, and the
+  /// removal of an image.
+  void TestImageList() {
+    CClientDC dcScreen(this);
+    CDC dc;
+    dc.CreateCompatibleDC(&dcScreen);
+    CBitmap bm;
+    bm.CreateCompatibleBitmap(&dcScreen, 32, 16);
+    CBitmap* pOld = dc.SelectObject(&bm);
+    dc.FillSolidRect(0, 0, 32, 16, RGB(255, 0, 0));  // transparent
+    dc.FillSolidRect(4, 4, 8, 8, RGB(0, 0, 255));    // the first image
+    dc.FillSolidRect(20, 4, 8, 8, RGB(0, 255, 0));   // the second image
+    dc.SelectObject(pOld);
+
+    CImageList il;
+    CHECK(il.Create(16, 16, ILC_COLOR | ILC_MASK, 2, 2));
+    CHECK(il.Add(&bm, RGB(255, 0, 0)) == 0);
+    CHECK(il.GetImageCount() == 2);
+    int cx = 0, cy = 0;
+    CHECK(::ImageList_GetIconSize(il.GetSafeHandle(), &cx, &cy) && cx == 16 && cy == 16);
+
+    CBitmap bmDraw;
+    bmDraw.CreateCompatibleBitmap(&dcScreen, 16, 16);
+    pOld = dc.SelectObject(&bmDraw);
+    dc.FillSolidRect(0, 0, 16, 16, RGB(255, 255, 255));
+    CHECK(il.Draw(&dc, 1, CPoint(0, 0), ILD_TRANSPARENT));
+    CHECK(dc.GetPixel(0, 0) == RGB(255, 255, 255));  // the red pixels are transparent
+    CHECK(dc.GetPixel(8, 8) == RGB(0, 255, 0));
+    dc.SelectObject(pOld);
+
+    CHECK(il.Remove(0));
+    CHECK(il.GetImageCount() == 1);
+    IMAGEINFO info;
+    CHECK(il.GetImageInfo(0, &info) && info.rcImage.right == 16);
+    CHECK(il.DeleteImageList());
+  }
+
   /// Checks the range, the position and the step of the progress bar.
   void TestProgress() {
     CHECK(m_progress.Create(WS_CHILD | WS_VISIBLE, CRect(10, 10, 210, 30), this, IDC_PROGRESS));

@@ -1,6 +1,6 @@
 // win16ctl.cpp - the progress bar, trackbar, up-down and tab control
-// windows for 16-bit Windows, and the members of CProgressCtrl,
-// CSliderCtrl, CSpinButtonCtrl and CTabCtrl that are not inline.
+// windows for 16-bit Windows. cmnctls.cpp has the members of the MFC
+// classes.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -20,43 +20,9 @@
 #include <afxtempl.h>
 
 #include "afximpl.h"
+#include "win16ctl.h"
 
-namespace {
-
-/// Gives the data of a control window, which WM_NCCREATE keeps in the
-/// window extra bytes.
-template <class T>
-T* StateOf(HWND hWnd) {
-  return (T*)::GetWindowLong(hWnd, 0);
-}
-
-/// Makes the data of a control window and keeps it in the window.
-template <class T>
-T* AttachState(HWND hWnd) {
-  T* p = new T;
-  p->hwnd = hWnd;
-  ::SetWindowLong(hWnd, 0, (LONG)p);
-  return p;
-}
-
-/// Removes the data of a control window and deletes it.
-template <class T>
-void DetachState(HWND hWnd, T* p) {
-  ::SetWindowLong(hWnd, 0, 0);
-  delete p;
-}
-
-/// Gives the style of a window.
-DWORD StyleOf(HWND hWnd) { return (DWORD)::GetWindowLong(hWnd, GWL_STYLE); }
-
-/// Gives the smaller of two numbers.
-long MinL(long a, long b) { return a < b ? a : b; }
-
-/// Gives the larger of two numbers.
-long MaxL(long a, long b) { return a > b ? a : b; }
-
-/// Gives n in the range lo to hi.
-long ClampL(long n, long lo, long hi) { return n < lo ? lo : (n > hi ? hi : n); }
+namespace afx16 {
 
 /// Fills a rectangle with a color.
 void FillColor(HDC hdc, const RECT& rc, COLORREF clr) {
@@ -173,6 +139,36 @@ int FontHeight(HWND hWnd, HFONT hFont) {
   ::ReleaseDC(hWnd, hdc);
   return tm.tmHeight;
 }
+
+/// Registers one control class of the module with four bytes of window
+/// data. Gives TRUE when the class is there.
+BOOL RegisterCtlClass(LPCSTR lpszClass, WNDPROC pfn) {
+  WNDCLASS wc;
+  HINSTANCE hInst = AfxGetInstanceHandle();
+  if (::GetClassInfo(hInst, lpszClass, &wc) && wc.lpfnWndProc == pfn) return TRUE;
+  memset(&wc, 0, sizeof(wc));
+  wc.style = CS_DBLCLKS;
+  wc.lpfnWndProc = pfn;
+  wc.cbWndExtra = sizeof(LONG);
+  wc.hInstance = hInst;
+  wc.hCursor = ::LoadCursor(NULL, IDC_ARROW);
+  wc.lpszClassName = lpszClass;
+  return ::RegisterClass(&wc) != 0;
+}
+
+/// Registers a control class with the name of the library and with the
+/// name of comctl32.dll. Only the first must succeed.
+BOOL RegisterCtlClasses(LPCSTR lpszName, LPCSTR lpszComctlName, WNDPROC pfn) {
+  if (!RegisterCtlClass(lpszName, pfn)) return FALSE;
+  RegisterCtlClass(lpszComctlName, pfn);
+  return TRUE;
+}
+
+}  // namespace afx16
+
+namespace {
+
+using namespace afx16;
 
 // =====================================================================
 // The progress bar
@@ -1628,32 +1624,6 @@ LRESULT CALLBACK W16TabProc(HWND hWnd, UINT nMsg, WPARAM wParam, LPARAM lParam) 
 }
 
 // =====================================================================
-// The classes
-
-/// Registers one control class of the module with four bytes of window
-/// data. Gives TRUE when the class is there.
-BOOL RegisterCtlClass(LPCSTR lpszClass, WNDPROC pfn) {
-  WNDCLASS wc;
-  HINSTANCE hInst = AfxGetInstanceHandle();
-  if (::GetClassInfo(hInst, lpszClass, &wc) && wc.lpfnWndProc == pfn) return TRUE;
-  memset(&wc, 0, sizeof(wc));
-  wc.style = CS_DBLCLKS;
-  wc.lpfnWndProc = pfn;
-  wc.cbWndExtra = sizeof(LONG);
-  wc.hInstance = hInst;
-  wc.hCursor = ::LoadCursor(NULL, IDC_ARROW);
-  wc.lpszClassName = lpszClass;
-  return ::RegisterClass(&wc) != 0;
-}
-
-/// Registers a control class with the name of the library and with the
-/// name of comctl32.dll. Only the first must succeed.
-BOOL RegisterCtlClasses(LPCSTR lpszName, LPCSTR lpszComctlName, WNDPROC pfn) {
-  if (!RegisterCtlClass(lpszName, pfn)) return FALSE;
-  RegisterCtlClass(lpszComctlName, pfn);
-  return TRUE;
-}
-
 }  // namespace
 
 /// Registers the control classes of the AFX_WNDCOMMCTL_ flags in fReg
@@ -1675,92 +1645,6 @@ LONG AFXAPI _AfxW16RegisterCtlClasses(LONG fReg) {
       RegisterCtlClasses(WC_TABCONTROL, "SysTabControl32", W16TabProc))
     fDone |= AFX_WNDCOMMCTL_TAB_REG;
   return fDone;
-}
-
-// ---------------------------------------------------------------------
-// The MFC classes
-
-IMPLEMENT_DYNAMIC(CProgressCtrl, CWnd)
-IMPLEMENT_DYNAMIC(CSliderCtrl, CWnd)
-IMPLEMENT_DYNAMIC(CSpinButtonCtrl, CWnd)
-IMPLEMENT_DYNAMIC(CTabCtrl, CWnd)
-
-/// Registers the class of a control and makes its window.
-static BOOL _AfxW16CreateCtl(CWnd* pWnd, LONG fReg, LPCTSTR lpszClass, DWORD dwStyle,
-                             const RECT& rect, CWnd* pParentWnd, UINT nID) {
-  if (!AfxDeferRegisterClass(fReg)) return FALSE;
-  return pWnd->CWnd::CreateEx(0, lpszClass, NULL, dwStyle, rect, pParentWnd, nID);
-}
-
-/// Makes the window of a progress bar.
-BOOL CProgressCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID) {
-  return _AfxW16CreateCtl(this, AFX_WNDCOMMCTL_PROGRESS_REG, PROGRESS_CLASS, dwStyle, rect,
-                          pParentWnd, nID);
-}
-
-/// Makes the window of a trackbar.
-BOOL CSliderCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID) {
-  return _AfxW16CreateCtl(this, AFX_WNDCOMMCTL_BAR_REG, TRACKBAR_CLASS, dwStyle, rect,
-                          pParentWnd, nID);
-}
-
-/// Makes the window of an up-down control.
-BOOL CSpinButtonCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID) {
-  return _AfxW16CreateCtl(this, AFX_WNDCOMMCTL_UPDOWN_REG, UPDOWN_CLASS, dwStyle, rect,
-                          pParentWnd, nID);
-}
-
-/// Makes the window of a tab control.
-BOOL CTabCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID) {
-  return _AfxW16CreateCtl(this, AFX_WNDCOMMCTL_TAB_REG, WC_TABCONTROL, dwStyle, rect,
-                          pParentWnd, nID);
-}
-
-/// Gives NULL: 16-bit Windows has no image lists.
-CImageList* CTabCtrl::GetImageList() const { return NULL; }
-
-/// Gives NULL and does nothing: 16-bit Windows has no image lists.
-CImageList* CTabCtrl::SetImageList(CImageList* pImageList) {
-  (void)pImageList;
-  return NULL;
-}
-
-/// Gives NULL: the tab control has no tooltips on 16-bit Windows.
-CToolTipCtrl* CTabCtrl::GetToolTips() const { return NULL; }
-
-/// Does nothing: the tab control has no tooltips on 16-bit Windows.
-void CTabCtrl::SetToolTips(CToolTipCtrl* pWndTip) { (void)pWndTip; }
-
-/// Adds a tab with a text at the index nItem. Gives the index of the new
-/// tab, or -1.
-LONG CTabCtrl::InsertItem(int nItem, LPCTSTR lpszItem) {
-  TCITEM item;
-  memset(&item, 0, sizeof(item));
-  item.mask = TCIF_TEXT;
-  item.pszText = (LPTSTR)lpszItem;
-  return (LONG)::SendMessage(m_hWnd, TCM_INSERTITEM, nItem, (LPARAM)&item);
-}
-
-/// Adds a tab with a text and an image index at the index nItem. Gives
-/// the index of the new tab, or -1.
-LONG CTabCtrl::InsertItem(int nItem, LPCTSTR lpszItem, int nImage) {
-  TCITEM item;
-  memset(&item, 0, sizeof(item));
-  item.mask = TCIF_TEXT | TCIF_IMAGE;
-  item.pszText = (LPTSTR)lpszItem;
-  item.iImage = nImage;
-  return (LONG)::SendMessage(m_hWnd, TCM_INSERTITEM, nItem, (LPARAM)&item);
-}
-
-/// Does nothing: an owner-drawn tab control overrides it.
-void CTabCtrl::DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct) { (void)lpDrawItemStruct; }
-
-/// Gives WM_DRAWITEM, which the parent reflects, to DrawItem.
-BOOL CTabCtrl::OnChildNotify(UINT message, WPARAM wParam, LPARAM lParam, LRESULT* pResult) {
-  if (message != WM_DRAWITEM) return CWnd::OnChildNotify(message, wParam, lParam, pResult);
-  DrawItem((LPDRAWITEMSTRUCT)lParam);
-  if (pResult != NULL) *pResult = TRUE;
-  return TRUE;
 }
 
 #endif  // _AFX_WIN16

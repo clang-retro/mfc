@@ -509,6 +509,13 @@ void AFXAPI AfxDeleteObject(HGDIOBJ* pObject) {
 }
 
 #ifndef _AFX_WIN16
+/// Loads the rich edit 1.0 DLL. Gives TRUE when it is there.
 BOOL AFXAPI AfxInitRichEdit() { return ::LoadLibraryA("riched32.dll") != NULL; }
+/// Loads the rich edit 2.0 DLL. Gives TRUE when it is there.
 BOOL AFXAPI AfxInitRichEdit2() { return ::LoadLibraryA("riched20.dll") != NULL; }
+#else
+/// Gives FALSE: 16-bit Windows has no rich edit control.
+BOOL AFXAPI AfxInitRichEdit() { return FALSE; }
+/// Gives FALSE: 16-bit Windows has no rich edit control.
+BOOL AFXAPI AfxInitRichEdit2() { return FALSE; }
 #endif
