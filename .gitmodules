@@ -1,0 +1,3 @@
+[submodule "port/softgl"]
+	path = port/softgl
+	url = https://github.com/clang-retro/softgl.git

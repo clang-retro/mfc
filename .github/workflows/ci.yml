@@ -24,6 +24,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       # Wine, Xvfb and the rest come from a cache of their installed files
       # (tools/ci-install.sh), so a run with one skips apt altogether. The key
       # names the package list, the script and the runner image; bump the
@@ -95,6 +97,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       # Wine, Xvfb and the rest come from a cache of their installed files
       # (tools/ci-install.sh), so a run with one skips apt altogether. The key
       # names the package list, the script and the runner image; bump the
@@ -169,6 +173,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       # odbctest's driver manager and SQLite driver.
       - name: Install unixODBC and the SQLite driver
         run: |
@@ -195,6 +201,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       # odbctest's driver manager and SQLite driver; without them it skips.
       - name: Install unixODBC and the SQLite driver
         run: |

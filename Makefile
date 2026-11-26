@@ -144,8 +144,12 @@ endif
 # The systems with no OpenGL of their own (Linux, the classic Mac OS on
 # 68k) have the generic implementation: port/softgl, a software renderer
 # in C, and the SGI reference GLU. Their objects go into libwinport.a, so
-# that a program links with libwinport.a only. See docs/software-opengl.md.
+# that a program links with libwinport.a only. port/softgl is a submodule
+# (clang-retro/softgl). See docs/software-opengl.md.
 ifeq ($(SOFTGL),1)
+ifeq ($(wildcard port/softgl/src/sgl.h),)
+$(error port/softgl is empty. Run: git submodule update --init)
+endif
 SCRNSAVE_LIBS += $(OUT)/libglaux.a
 CC = $(if $(BIN),$(BIN)/,)clang
 SOFTGL_SRCS = $(wildcard port/softgl/src/*.c)
