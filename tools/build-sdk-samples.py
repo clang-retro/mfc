@@ -17,8 +17,11 @@
 #   CXXFLAGS  more flags for C++ (the C++ library's headers)
 #   LDFLAGS   flags for the link (target, sysroot, linker, C++ library)
 #   MFC_OUT   the directory with libwinport.a and libglaux.a
-#   SYSLIBS   system libraries (default: the Mac OS X frameworks)
+#   SYSLIBS   system libraries (default: the Mac OS X frameworks on Mac
+#             OS X, else -ldl -lpthread -lm)
 #   HOST_CXX  a C++ compiler for the host, for res2cpp.py (default: CXX)
+#   MACSDK    clang-retro/mac-sdk, for the classic Mac OS: its
+#             tools/macapp.py links the program (default: ../mac-sdk)
 #
 # Part of clang-retro MFC, an independent implementation of the MFC API.
 # SPDX-License-Identifier: AGPL-3.0-only
@@ -34,6 +37,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PORT_INCLUDE = os.path.join(ROOT, "port", "include")
 RES2CPP = os.path.join(ROOT, "port", "tools", "res2cpp.py")
+# The GL headers of the generic implementation, for the systems that have
+# no OpenGL of their own (all but Mac OS X).
+SOFTGL_INCLUDE = os.path.join(ROOT, "port", "softgl", "include")
 
 # The samples: a name, the path that ends the sample's folder in the SDK
 # (any case), a file that must be in it, whether it is an OpenGL screen
@@ -287,6 +293,8 @@ def compile_all(sources, objdir, includes, defines, env, log):
         cmd = [env["CXX" if cxx else "CC"]] + env["CFLAGS"] + (env["CXXFLAGS"] if cxx else [])
         cmd += ["-w", "-DWIN32", "-D_WIN32", "-DWINVER=0x0400", "-DNDEBUG", "-include", vcrt,
                 "-I", PORT_INCLUDE] + SEH_DEFINES
+        if env["SOFTGL"]:
+            cmd += ["-I", SOFTGL_INCLUDE]
         if not cxx:
             # C written for the first Win32 compilers: handles that are all
             # HANDLE, window procedures declared with UINT and LONG, and
@@ -452,6 +460,19 @@ def build_sample(sample, sdk, out, env, log):
     os.makedirs(os.path.dirname(exe), exist_ok=True)
     libs = [os.path.join(env["MFC_OUT"], "libglaux.a")] if saver else []
     libs.append(os.path.join(env["MFC_OUT"], "libwinport.a"))
+    if env["CLASSIC"]:
+        # The classic Mac OS: an application in MacBinary, linked by
+        # mac-sdk's tools/macapp.py with mac-sdk's libraries.
+        exe += ".bin"
+        cpu = "68k" if "__m68k__" in env["MACROS"] else "ppc"
+        # macapp.py adds the C++ library only for C++ sources, and these
+        # are objects already.
+        cxxlibs = [os.path.join(env["MACSDK"], "lib", "m68k" if cpu == "68k" else "ppc", n) for n in ("libstdc++.a", "libunwind.a")]
+        link_env = dict(os.environ, CLANG=env["CC"])
+        run([sys.executable, os.path.join(env["MACSDK"], "tools", "macapp.py"), "--cpu", cpu,
+             "--lib", os.path.join(env["MACSDK"], "lib"), "--size", "8192", "--large",
+             "--name", os.path.splitext(program)[0], "-o", exe, "--"] + objects + libs + cxxlibs, log, link_env)
+        return exe
     run([env["CXX"]] + env["LDFLAGS"] + objects + libs + env["SYSLIBS"] + ["-o", exe], log)
     return exe
 
@@ -467,10 +488,19 @@ def environment():
         "CXXFLAGS": shlex.split(os.environ.get("CXXFLAGS", "")),
         "LDFLAGS": shlex.split(os.environ.get("LDFLAGS", "")),
         "MFC_OUT": os.environ.get("MFC_OUT", os.path.join(ROOT, "build")),
-        "SYSLIBS": shlex.split(os.environ.get(
-            "SYSLIBS", "-framework Cocoa -framework OpenGL -framework GLUT")),
     }
     macros = target_macros(env)
+    env["MACROS"] = macros
+    macho = "__APPLE__" in macros and "__MACH__" in macros
+    # The classic Mac OS: mac-sdk's tools/macapp.py links the program.
+    env["CLASSIC"] = "macintosh" in macros
+    env["MACSDK"] = os.environ.get("MACSDK", os.path.join(ROOT, "..", "mac-sdk"))
+    # Mac OS X and the classic Mac OS for PowerPC have OpenGL; the other
+    # systems have the generic implementation in libwinport.a.
+    powerpc = "__POWERPC__" in macros or "__powerpc__" in macros
+    env["SOFTGL"] = not (macho or (env["CLASSIC"] and powerpc))
+    default_libs = "-framework Cocoa -framework OpenGL -framework GLUT" if macho else "-ldl -lpthread -lm"
+    env["SYSLIBS"] = shlex.split(os.environ.get("SYSLIBS", default_libs))
     env["BIG_ENDIAN"] = macros.get("__BYTE_ORDER__") == "__ORDER_BIG_ENDIAN__"
     env["POINTER_SIZE"] = int(macros.get("__SIZEOF_POINTER__", "4"))
     return env

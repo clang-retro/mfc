@@ -51,6 +51,20 @@ if [ $NATIVE = 1 ]; then
   CXXFLAGS="--target=$TARGET ${SYSROOT:+--sysroot=$SYSROOT} ${STDLIB--stdlib=libc++} -std=c++17"
   CXXFLAGS="$CXXFLAGS -Wall -Wno-unused-function -Wno-overloaded-virtual -Wno-missing-exception-spec"
   CXXFLAGS="$CXXFLAGS -Iport/include -Iinclude -Itests"
+  # Where the system has no OpenGL, the GL headers of the generic
+  # implementation (port/softgl), which libwinport has.
+  case $TARGET in
+    *apple* | *darwin*) ;;
+    *) CXXFLAGS="$CXXFLAGS -Iport/softgl/include" ;;
+  esac
+  # gltest draws with the generic implementation. On macOS it would need
+  # a CGL renderer, which the virtual machines of CI do not have.
+  if [ -z "${NATIVE_TESTS:-}" ]; then
+    case $TARGET in
+      *apple* | *darwin*) ;;
+      *) TESTS="$TESTS gltest" ;;
+    esac
+  fi
   # What libwinport needs from the system: Cocoa and OpenGL on macOS.
   case $TARGET in
     *apple* | *darwin*) SYSLIBS="-framework Cocoa -framework OpenGL -lpthread" ;;

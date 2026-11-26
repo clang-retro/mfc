@@ -3402,8 +3402,9 @@ static void TestDisplayAndDrawing() {
   CHECK(::GetEnhMetaFilePaletteEntries(hemf, 0, NULL) == 0);
   ::DeleteEnhMetaFile(hemf);
 
-  // No visual styles. OpenGL is only on Mac OS X (over CGL): there it
-  // gives the single-buffered format for this request.
+  // No visual styles. OpenGL is over CGL on Mac OS X and over the
+  // generic implementation (port/softgl) on the other systems: both give
+  // the single-buffered format for this request.
   CHECK(!::IsThemeActive() && !::IsAppThemed());
   CHECK(::OpenThemeData(NULL, L"BUTTON") == NULL);
   CHECK(::GetThemeSysColor(NULL, COLOR_WINDOW) == ::GetSysColor(COLOR_WINDOW));
@@ -3411,12 +3412,7 @@ static void TestDisplayAndDrawing() {
   CHECK(SUCCEEDED(::GetThemeSysFont(NULL, TMT_MENUFONT, &tf)));
   PIXELFORMATDESCRIPTOR pfd = {sizeof pfd, 1, PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL};
   HDC sdc = ::GetDC(NULL);
-#if defined(__APPLE__) && defined(__MACH__)
   CHECK(::ChoosePixelFormat(sdc, &pfd) == 2);
-#else
-  CHECK(::ChoosePixelFormat(sdc, &pfd) == 0 && ::GetLastError() == ERROR_NOT_SUPPORTED);
-  CHECK(::wglCreateContext(sdc) == NULL);
-#endif
   CHECK(::wglMakeCurrent(NULL, NULL));
   ::ReleaseDC(NULL, sdc);
 }

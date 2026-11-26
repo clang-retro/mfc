@@ -19,9 +19,11 @@ case $TARGET in
   m68k*) CPU=68k ;;
   *) CPU=ppc ;;
 esac
-# OpenGL is PowerPC only.
-DEFAULT_TESTS="core memtest sstest"
-[ $CPU = ppc ] && DEFAULT_TESTS="$DEFAULT_TESTS gltest"
+# OpenGL: Apple OpenGL (the simulator's fake) on PowerPC, the generic
+# implementation (port/softgl, in libwinport.a) on 68k.
+DEFAULT_TESTS="core memtest sstest gltest"
+GLINC=
+[ $CPU = 68k ] && GLINC="-I$(pwd)/port/softgl/include"
 TESTS=${MACOS_TESTS:-$DEFAULT_TESTS}
 CLANG=${BIN:+$BIN/}clang
 export CLANG
@@ -62,7 +64,7 @@ for t in $TESTS; do
   if ! python3 "$MACSDK/tools/macapp.py" --cpu $CPU --lib "$MACSDK/lib" --size 8192 \
       -o "$app" -- -Os -femulated-tls -D_GNU_SOURCE -fno-delete-null-pointer-checks \
       "-isystem$here/port/compat/macos" "-I$here/include" "-I$here/port/include" \
-      "-I$here/tests" -Wno-everything $srcs $libs >"$T/$t-build.log" 2>&1; then
+      "-I$here/tests" $GLINC -Wno-everything $srcs $libs >"$T/$t-build.log" 2>&1; then
     echo "FAIL $t (build; see $T/$t-build.log)"
     nfail=$((nfail + 1))
     continue

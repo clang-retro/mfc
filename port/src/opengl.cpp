@@ -8,9 +8,12 @@
 // so the picture goes through the same drawing path as GDI. For a
 // single-buffered format, glFlush and glFinish copy the buffer.
 //
-// On other systems there is no OpenGL here: a DC has no pixel formats to
-// choose from, so ChoosePixelFormat finds none and no rendering context
-// can be made. Each call fails with ERROR_NOT_SUPPORTED.
+// On the other systems the generic implementation draws: the software
+// renderer of port/softgl (opengl_soft.cpp), as GDI Generic does on
+// Windows. Built with WINPORT_NO_SOFTGL, there is no OpenGL there: a DC
+// has no pixel formats to choose from, so ChoosePixelFormat finds none
+// and no rendering context can be made. Each call fails with
+// ERROR_NOT_SUPPORTED.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -23,7 +26,7 @@
 #include <OpenGL/glu.h>
 #include <dlfcn.h>
 #endif
-#ifdef WINPORT_AGL
+#if defined(WINPORT_AGL) || defined(WINPORT_SOFTGL)
 #include <GL/gl.h>
 #include <GL/glu.h>
 #endif

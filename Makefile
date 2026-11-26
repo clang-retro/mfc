@@ -128,13 +128,34 @@ endif
 PORT_LIB = $(OUT)/libwinport.a
 SCRNSAVE_LIBS = $(OUT)/libscrnsave.a $(OUT)/libscrnsavw.a
 # The OpenGL auxiliary library (GL/glaux.h): over GLUT on Mac OS X, and
-# over glaux_solids.h on the classic Mac OS for PowerPC.
+# over glaux_solids.h on the classic Mac OS and with the generic
+# implementation.
 ifneq ($(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
 ifneq ($(MACOS_CLASSIC),1)
 SCRNSAVE_LIBS += $(OUT)/libglaux.a
 else ifneq ($(findstring powerpc,$(TARGET)),)
 SCRNSAVE_LIBS += $(OUT)/libglaux.a
+else
+SOFTGL = 1
 endif
+else
+SOFTGL = 1
+endif
+# The systems with no OpenGL of their own (Linux, the classic Mac OS on
+# 68k) have the generic implementation: port/softgl, a software renderer
+# in C, and the SGI reference GLU. Their objects go into libwinport.a, so
+# that a program links with libwinport.a only. See docs/software-opengl.md.
+ifeq ($(SOFTGL),1)
+SCRNSAVE_LIBS += $(OUT)/libglaux.a
+CC = $(if $(BIN),$(BIN)/,)clang
+SOFTGL_SRCS = $(wildcard port/softgl/src/*.c)
+SOFTGL_GLU_SRCS = $(filter-out %/priorityq-heap.c,$(wildcard port/softgl/glu/libtess/*.c port/softgl/glu/libutil/*.c))
+SOFTGL_OBJS = $(patsubst port/softgl/%.c,$(OUT)/softgl/%.o,$(SOFTGL_SRCS) $(SOFTGL_GLU_SRCS))
+PORT_OBJS += $(SOFTGL_OBJS)
+SOFTGL_CFLAGS = $(TARGET_FLAGS) $(CXXFLAGS) -DSGL_LAYER_FLUSH -Iport/softgl/include \
+  $(if $(MACOS_CLASSIC),$(if $(findstring m68k,$(TARGET)),-mcmodel=large) -ffunction-sections -fdata-sections \
+  -isystem $(MACSDK_LIB)/include -I$(MACSDK)/include,-fPIC)
+ALL_CXXFLAGS += -Iport/softgl/include
 endif
 endif
 # 16-bit Windows (make TARGET=i8086-pc-win16): the core classes in the
@@ -240,6 +261,13 @@ $(OUT)/port/scrnsave-a.o: port/src/scrnsave.cpp $(HDRS)
 $(OUT)/port/scrnsave-u.o: port/src/scrnsave.cpp $(HDRS)
 	@mkdir -p $(dir $@)
 	$(CXX) $(ALL_CXXFLAGS) -DUNICODE -D_UNICODE -Iport/src -c $< -o $@
+
+$(OUT)/softgl/src/%.o: port/softgl/src/%.c port/softgl/src/sgl.h port/softgl/src/dispatch.h
+	@mkdir -p $(dir $@)
+	$(CC) $(SOFTGL_CFLAGS) -std=c99 -Wall -Iport/softgl/src -c $< -o $@
+$(OUT)/softgl/glu/%.o: port/softgl/glu/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(SOFTGL_CFLAGS) -std=gnu99 -w -Iport/softgl/glu/include -c $< -o $@
 
 $(OUT)/port/%.o: port/src/%.cpp $(HDRS)
 	@mkdir -p $(dir $@)
