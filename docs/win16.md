@@ -83,10 +83,28 @@ OLE documents (`afxole.h`):
   objects (`CDocObjectServer`)
 
 16-bit OLE 2 has no OLE dialog DLL. The OLE 2 SDK gave the dialogs as
-sample source (OLE2UI). `src/win16oleui.cpp` gives the verb menu of an
-item (`OleUIAddVerbMenu`) and the update of links. The dialogs of
-`afxodlgs.h` (Insert Object, Paste Special, Links, Change Icon, Convert,
-Busy and Object Properties) compile, but `DoModal` gives `IDABORT`.
+sample source (OLE2UI). `src/win16oleui.cpp` has these functions:
+
+- the verb menu of an item (`OleUIAddVerbMenu`) and the update of links
+  (`OleUIUpdateLinks`)
+- Insert Object (`OleUIInsertObject`). The list has the classes that
+  have an `Insertable` key in the registration database. The dialog
+  makes the object with `OleCreate`, `OleCreateFromFile` or
+  `OleCreateLinkToFile` when the flags tell it to.
+- Paste Special (`OleUIPasteSpecial`). The list has the formats of the
+  caller that the data object has. Without a data object, the dialog
+  uses the data on the clipboard.
+- Links (`OleUIEditLinks`): Update Now, Open Source and Break Link.
+- Server Busy (`OleUIBusy`): Switch To, Retry and Cancel. Switch To
+  activates the first visible window of the busy task.
+
+The dialogs are templates in memory. They do not use the template or
+the resource of the caller. They call the hook of the caller for each
+message. These dialogs are not there: Change Icon, Convert, Change
+Source and Object Properties. Their `DoModal` gives `IDABORT`. "Display
+As Icon" sets the flag, but the dialogs do not make an icon picture
+(`hMetaPict`). The Server Busy dialog does not close itself when the
+call is no longer blocked.
 
 16-bit Windows has no enhanced metafiles. `TYMED_ENHMF` is 0, and
 `CF_ENHMETAFILE` is a format that no 16-bit program gives.
@@ -95,13 +113,15 @@ Wine's 16-bit OLE2.DLL is mostly stubs. Thus the Wine test of the OLE
 document classes is a link check: `tests/win16oledoc.cpp` makes
 containers, servers, drop targets and in-place frames in a function that
 does not run. The part that runs caches data in a `COleDataSource` and
-finds its format with `COleDataObject`. These classes need a real
+finds its format with `COleDataObject`. The OLE dialogs run with a
+hook that closes them. These classes need a real
 16-bit Windows with OLE 2 to run.
 
 ## What is not there
 
 - OLE controls. `CWnd::CreateControlSite` fails (`src/win16ole.cpp`).
-- The OLE dialogs (see "OLE documents").
+- The Change Icon, Convert, Change Source and Object Properties
+  dialogs (see "OLE documents").
 - The common controls. 16-bit Windows does not have `comctl32.dll`.
   The library draws the toolbar and the status bar itself (see "The
   toolbar and the status bar"). `CReBar` and the other classes of
