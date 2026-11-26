@@ -14,7 +14,7 @@ C++ libraries of [clang-retro/mac-sdk](https://github.com/clang-retro/mac-sdk).
 | Window classes | Build. The Toolbox backend shows the top-level windows (see [Windows](#windows)). |
 | Sockets (`CAsyncSocket`, `CSocket`) and WinInet (`CInternetSession`) | Build, over the sockets of mac-sdk's C library (MacTCP). `tests/socktest.cpp` passes on a 68020. `tests/inettest.cpp` passes its HTTP and FTP checks, but it does not finish in the simulator's step limit. HTTPS is not available (no OpenSSL). |
 | OpenGL (`wgl`, `GL/gl.h`, `GL/glu.h`) | Over Apple OpenGL and AGL on PowerPC, and over the generic implementation (a software renderer) on 68k. Passes `tests/gltest.cpp` on both. See [OpenGL](#opengl). |
-| Screen savers (`scrnsave.h`) | Pass `tests/sstest.cpp`. See [screensavers.md](screensavers.md). |
+| Screen savers (`scrnsave.h`) | Pass `tests/sstest.cpp`. A screen saver host (a control panel and a background engine) and After Dark modules start them when the Mac is idle. See [screensavers.md](screensavers.md#system-screen-savers-on-the-classic-mac-os). |
 | COM between programs | Not available. COM in one program works. |
 
 ## Windows

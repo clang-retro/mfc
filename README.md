@@ -426,7 +426,8 @@ OpenGL programs draw through `OpenGL.framework`. See
 [docs/macosx-10.4.md](docs/macosx-10.4.md).
 `tools/build-sdk-samples.py` builds samples of a Win32 SDK, such as
 MULTIPAD and the OpenGL screen savers. The screen savers also become
-`.saver` bundles for System Preferences. See
+`.saver` bundles for System Preferences. On the classic Mac OS, a
+screen saver host and After Dark modules start them. See
 [docs/sdk-samples.md](docs/sdk-samples.md) and
 [docs/screensavers.md](docs/screensavers.md).
 
