@@ -822,6 +822,28 @@ std::string Quote(const std::string& a) {
   return r;
 }
 
+#if defined(macintosh)
+// Tells if the Option key is down now (the low-memory KeyMap at 0x174;
+// the Option key has the key code 0x3A).
+static bool OptionKeyDown() {
+  const unsigned char* keys = (const unsigned char*)0x174;
+  return (keys[0x3A >> 3] & (1 << (0x3A & 7))) != 0;
+}
+
+// Gives the command line of a program that the Finder opened. The
+// Finder gives no arguments, so this does what the Windows shell does
+// when it opens a file: a screen saver (a program with the dialog
+// DLG_SCRNSAVECONFIGURE, 2003) gets /S, the shell's "Open" command.
+// With the Option key held down, it gets /C, the shell's "Configure"
+// command.
+static std::string FinderCommandLine() {
+  std::string r = Quote(ExecutablePath());
+  if (FindResourceA(NULL, MAKEINTRESOURCEA(2003), MAKEINTRESOURCEA(5)))  // RT_DIALOG
+    r += OptionKeyDown() ? " /C" : " /S";
+  return r;
+}
+#endif
+
 std::string& CommandLine() {
   static std::string s = [] {
     std::string r;
@@ -829,6 +851,9 @@ std::string& CommandLine() {
       if (!r.empty()) r += ' ';
       r += Quote(a);
     }
+#if defined(macintosh)
+    if (r.empty()) r = FinderCommandLine();
+#endif
     return r;
   }();
   return s;

@@ -1,16 +1,19 @@
 // glaux.cpp - the part of the Win32 SDK's OpenGL auxiliary library that
 // samples and screen savers use (GL/glaux.h): image loading for textures
 // and simple solids. Windows .bmp files are read with LoadImage, SGI .rgb
-// files here. The solids come from GLU and, on Mac OS X, GLUT.
+// files here. The solids come from GLU and GLUT on Mac OS X, and from
+// glaux_solids.h on the classic Mac OS, which has no GLUT.
 //
-// The library is libglaux.a, made for Mac OS X only. Link it with
-// -framework OpenGL -framework GLUT.
+// The library is libglaux.a, made for Mac OS X and the classic Mac OS on
+// PowerPC. On Mac OS X, link it with -framework OpenGL -framework GLUT.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include <GL/glaux.h>
 
-#if defined(__APPLE__) && defined(__MACH__)
+#if defined(macintosh) && !defined(__MACH__)
+#include "glaux_solids.h"
+#elif defined(__APPLE__) && defined(__MACH__)
 #include <GLUT/glut.h>
 #else
 #include <GL/glut.h>

@@ -127,9 +127,12 @@ ALL_CXXFLAGS += -Iport/include -fPIC
 endif
 PORT_LIB = $(OUT)/libwinport.a
 SCRNSAVE_LIBS = $(OUT)/libscrnsave.a $(OUT)/libscrnsavw.a
-# Mac OS X: the OpenGL auxiliary library (GL/glaux.h), over GLUT.
+# The OpenGL auxiliary library (GL/glaux.h): over GLUT on Mac OS X, and
+# over glaux_solids.h on the classic Mac OS for PowerPC.
 ifneq ($(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
 ifneq ($(MACOS_CLASSIC),1)
+SCRNSAVE_LIBS += $(OUT)/libglaux.a
+else ifneq ($(findstring powerpc,$(TARGET)),)
 SCRNSAVE_LIBS += $(OUT)/libglaux.a
 endif
 endif
