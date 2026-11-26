@@ -28,7 +28,7 @@ nav:
   - "16-bit Windows": win16.md
   - "32-bit DOS": dos.md
   - "Classic Mac OS": macos-classic.md
-  - "Mac OS X 10.4 and 10.5": macosx-10.4.md
+  - "Mac OS X 10.0 to 10.5": macosx-10.4.md
   - "Screen savers": screensavers.md
   - "Software OpenGL": software-opengl.md
   - "Win32 SDK samples": sdk-samples.md

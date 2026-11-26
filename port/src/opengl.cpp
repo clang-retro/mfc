@@ -108,6 +108,9 @@ struct NpixArg<R (*)(A, B, C*)> {
   typedef C type;
 };
 
+// CGL's success, as 0: the Mac OS X 10.0 headers do not name it kCGLNoError.
+const CGLError kNoError = (CGLError)0;
+
 // Makes an off-screen CGL context (see opengl_backend.h).
 Native Make(Native share) {
   CGLPixelFormatAttribute attrs[] = {kCGLPFAOffScreen,
@@ -118,15 +121,15 @@ Native Make(Native share) {
                                      (CGLPixelFormatAttribute)0};
   CGLPixelFormatObj pf = NULL;
   NpixArg<decltype(&CGLChoosePixelFormat)>::type count = 0;
-  if (CGLChoosePixelFormat(attrs, &pf, &count) != kCGLNoError || !pf) {
+  if (CGLChoosePixelFormat(attrs, &pf, &count) != kNoError || !pf) {
     // Without a stencil buffer, for renderers that have none.
     attrs[7] = (CGLPixelFormatAttribute)0;
-    if (CGLChoosePixelFormat(attrs, &pf, &count) != kCGLNoError || !pf) return NULL;
+    if (CGLChoosePixelFormat(attrs, &pf, &count) != kNoError || !pf) return NULL;
   }
   CGLContextObj ctx = NULL;
   CGLError e = CGLCreateContext(pf, (CGLContextObj)share, &ctx);
   CGLDestroyPixelFormat(pf);
-  return e == kCGLNoError ? ctx : NULL;
+  return e == kNoError ? ctx : NULL;
 }
 
 // Destroys a context (see opengl_backend.h).
@@ -136,16 +139,16 @@ void Destroy(Native ctx) {
 }
 
 // Makes ctx current (see opengl_backend.h).
-bool SetCurrent(Native ctx) { return CGLSetCurrentContext((CGLContextObj)ctx) == kCGLNoError; }
+bool SetCurrent(Native ctx) { return CGLSetCurrentContext((CGLContextObj)ctx) == kNoError; }
 
 // Points ctx at a buffer (see opengl_backend.h).
 bool SetBuffer(Native ctx, int w, int h, void* pixels) {
-  return CGLSetOffScreen((CGLContextObj)ctx, w, h, w * 4, pixels) == kCGLNoError;
+  return CGLSetOffScreen((CGLContextObj)ctx, w, h, w * 4, pixels) == kNoError;
 }
 
 // Copies context state (see opengl_backend.h).
 bool Copy(Native from, Native to, unsigned mask) {
-  return CGLCopyContext((CGLContextObj)from, (CGLContextObj)to, mask) == kCGLNoError;
+  return CGLCopyContext((CGLContextObj)from, (CGLContextObj)to, mask) == kNoError;
 }
 
 // Calls the renderer's glFlush or glFinish for the current CGL context

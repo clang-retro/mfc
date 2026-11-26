@@ -1,9 +1,13 @@
-# Mac OS X 10.4 and 10.5 on PowerPC and Intel
+# Mac OS X 10.0 to 10.5 on PowerPC and Intel
 
 The portable layer and the library build for Mac OS X 10.4 (Tiger) and
 10.5 (Leopard) on 32-bit PowerPC Macs and on 32-bit Intel Macs (i386).
 A fat program has both and runs on both. The windows show with the Cocoa
 backend. OpenGL programs draw through `OpenGL.framework`.
+
+The port also builds for Mac OS X 10.0 to 10.3 on PowerPC. A program
+built for 10.0 runs on all versions from 10.0 to 10.5. See
+[Mac OS X 10.0 to 10.3](#mac-os-x-100-to-103).
 
 ## Requirements
 
@@ -119,6 +123,71 @@ For Intel, use `--target=i386-apple-macosx10.4` and the Intel build of
 the library. Then join the programs of `out-ppc/bin` and `out-i386/bin`
 with `lipo`.
 
+For OpenGL screen savers, the script also makes `.saver` bundles (see
+[screensavers.md](screensavers.md)). To make a fat bundle, copy the
+PowerPC bundle and join the two programs in `Contents/MacOS`:
+
+```sh
+cp -R "out-ppc/bin/3D Pipes.saver" .
+powerpc-apple-darwin8-lipo -create "out-ppc/bin/3D Pipes.saver/Contents/MacOS/sspipes" \
+  "out-i386/bin/3D Pipes.saver/Contents/MacOS/sspipes" \
+  -output "3D Pipes.saver/Contents/MacOS/sspipes"
+```
+
+For a bundle that also runs on 10.0 to 10.3, build the PowerPC part for
+10.0 (see below).
+
 ## Test on Tiger
 
 The programs run on Mac OS X 10.4 in QEMU (`qemu-system-ppc -M mac99`).
+
+## Mac OS X 10.0 to 10.3
+
+Build for 10.0 to make one PowerPC program for 10.0 to 10.5. Intel Macs
+have 10.4 or later, so the Intel part of a fat program stays a 10.4
+build.
+
+### Requirements for 10.0
+
+- A 10.0 sysroot: the headers of the Mac OS X 10.0 developer tools and
+  the libraries and frameworks of a 10.0 system. The sysroot must have
+  the private frameworks and all of `/usr/lib`, because the linker reads
+  the libraries that the frameworks use.
+- dos-sdk's `scripts/fix-macosx-10.0-headers.sh` on the sysroot. It
+  fixes headers that clang cannot compile, and it makes the Foundation
+  and AppKit functions `extern "C"`.
+- dos-sdk's `scripts/build-c99-macosx.sh` on the sysroot. It installs
+  `libc99.a` and its headers: the C99 and POSIX functions that 10.0 to
+  10.2 do not have (for example the wide character functions, `dlopen`,
+  recursive mutexes, `localtime_r` and `inet_pton`).
+- libc++ of dos-sdk for 10.0 (`OSX_VERSION=10.0` and `SDK` set to the
+  sysroot). For 10.0 to 10.3, it has threads, wide characters and the
+  monotonic clock. It does not have locales, streams or the file system
+  library.
+
+### Build the library for 10.0
+
+```sh
+make TARGET=powerpc-apple-macosx10.0 BIN=path/to/clang/bin \
+  SDK=path/to/sysroot-10.0 LIBCXX=path/to/libcxx-10.0 static
+```
+
+### Link a program for 10.0
+
+Link as for 10.4, with these changes:
+
+- Use `--target=powerpc-apple-macosx10.0` and the 10.0 sysroot.
+- Add `-lc99` after the libc++ libraries.
+- Add `-lobjc` and `-Wl,-flat_namespace`. Mac OS X 10.0 has no two-level
+  namespace: the frameworks do not export the symbols of the frameworks
+  and libraries that they use. With a flat namespace, the linker finds
+  each symbol in all of the libraries.
+
+### Differences on 10.0 to 10.3
+
+| Part | Difference |
+| --- | --- |
+| Theme file | Before 10.3 there is no `kqueue`. Changes to the theme file show at the next start of the program. |
+| Background programs | Before 10.3 there is no `TransformProcessType`. A program started outside an application bundle stays in the background. |
+| Mouse | 10.0 sends no events for the middle mouse button. |
+| Pictures | Before 10.4, the window pictures use the byte order of PowerPC. |

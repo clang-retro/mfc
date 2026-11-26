@@ -17,7 +17,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <fstream>
+#include <stdio.h>
 #include <string>
 
 namespace {
@@ -40,15 +40,24 @@ std::string Base(const char* var, const char* fallback) {
 // A user folder from ~/.config/user-dirs.dirs (XDG_DOCUMENTS_DIR="$HOME/
 // Documents"), else the usual name under the home folder.
 std::string UserDir(const char* key, const char* fallback) {
-  std::ifstream f(Base("XDG_CONFIG_HOME", ".config") + "/user-dirs.dirs");
-  std::string line, want = std::string(key) + "=";
-  while (std::getline(f, line)) {
+  // stdio, not <fstream>: the libc++ of Mac OS X 10.0 to 10.3 has no streams.
+  FILE* f = fopen((Base("XDG_CONFIG_HOME", ".config") + "/user-dirs.dirs").c_str(), "r");
+  if (!f) return Home() + "/" + fallback;
+  std::string want = std::string(key) + "=";
+  char buf[1024];
+  while (fgets(buf, sizeof buf, f)) {
+    std::string line(buf);
+    while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
     if (line.compare(0, want.size(), want) != 0) continue;
     std::string v = line.substr(want.size());
     if (v.size() >= 2 && v.front() == '"' && v.back() == '"') v = v.substr(1, v.size() - 2);
     if (v.compare(0, 5, "$HOME") == 0) v = Home() + v.substr(5);
-    if (!v.empty() && v[0] == '/') return v;
+    if (!v.empty() && v[0] == '/') {
+      fclose(f);
+      return v;
+    }
   }
+  fclose(f);
   return Home() + "/" + fallback;
 }
 

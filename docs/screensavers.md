@@ -66,6 +66,57 @@ clang++ -std=c++17 -Ipath/to/mfc/port/include saver.cpp saver-res.cpp \
 
 For a Unicode program, use `-DUNICODE -D_UNICODE` and `-lscrnsavw`.
 
+## System screen savers on Mac OS X
+
+On Mac OS X, `tools/build-sdk-samples.py` also makes a `.saver` bundle
+for each OpenGL screen saver of the SDK samples (for example
+`3D Pipes.saver`). The bundle is a module of `ScreenSaver.framework`. The
+screen saver engine and the Screen Saver (Screen Effects) panel of System
+Preferences load it as they load the screen savers of Apple.
+
+To install a screen saver, copy its bundle to one of these folders:
+
+- `/Library/Screen Savers`, for all users.
+- `~/Library/Screen Savers`, for one user.
+
+Then select the screen saver in System Preferences.
+
+The bundles run on Mac OS X 10.0 to 10.5 on PowerPC and on 10.4 and 10.5
+on Intel. See [macosx-10.4.md](macosx-10.4.md) for the build of a fat
+bundle.
+
+### How the bundle works
+
+The principal class of the bundle (`port/saver/saver_bundle.mm`) is a
+subclass of `ScreenSaverView`. The engine owns the process and its event
+loop. Thus the program cannot have its own loop. `port/src/saver_host.cpp`
+does these steps:
+
+1. It runs `WinMain` of the program on a stack of its own (a coroutine),
+   on the main thread.
+2. It gives the program the command line `name.scr /p HWND`. `HWND` is a
+   window that fills the view. The program runs as a preview in it.
+3. The Cocoa backend puts the views of the windows into the
+   `ScreenSaverView`, in place of windows of their own.
+4. For each frame of the engine (`animateOneFrame`), the program runs
+   until it waits for its next message. Then control goes back to the
+   engine.
+5. When the view stops, the program stops at its next wait. When another
+   view starts, the program moves into that view and keeps its state.
+
+`ExitProcess` does not end the process: it stops the program. The
+resources come from the bundle, not from the engine.
+
+### Limits of the bundle
+
+- One screen saver runs in a process. With more than one screen, the
+  screen saver draws on the first screen. The other screens stay black.
+- The settings dialog of the program is not available in System
+  Preferences (`hasConfigureSheet` gives `NO`). Open the `.scr` program
+  with the Option key held down to change the settings.
+- Each bundle has a different name for its Objective-C classes, because
+  System Preferences loads all bundles in one process.
+
 ## Limits
 
 - OpenGL screen savers draw through the OpenGL of the system (Mac OS X,

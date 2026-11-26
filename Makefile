@@ -60,7 +60,7 @@ CXXFLAGS ?= -O2
 STDLIB = -isystem port/compat/dos
 DOS32_FLAGS = -ffunction-sections -fdata-sections -D_GNU_SOURCE
 endif
-# Mac OS X 10.4 and 10.5 (make TARGET=powerpc-apple-macosx10.4
+# Mac OS X 10.0 to 10.5 (make TARGET=powerpc-apple-macosx10.4
 # SDK=/path/to/MacOSX10.4u.sdk LIBCXX=/path/to/libcxx-macosx) build over
 # the portable layer with the Cocoa backend, against Apple's SDK and a
 # libc++ built with threads (dos-sdk's scripts/build-libcxx-macosx.sh, which
@@ -68,8 +68,11 @@ endif
 # versions do not have, and thread_local is emulated. The archives are
 # made with Apple's ar (CCTOOLS, default powerpc-apple-darwin8-), because
 # ld64 cannot read the symbol table that llvm-ar writes for PowerPC. See
-# docs/macosx-10.4.md.
-ifneq ($(filter %-apple-macosx10.4 %-apple-macosx10.5 %-apple-darwin8 %-apple-darwin9,$(TARGET)),)
+# docs/macosx-10.4.md. For 10.0 to 10.3 (TARGET=powerpc-apple-macosx10.0),
+# SDK is a 10.0 sysroot made with dos-sdk's scripts (fix-macosx-10.0-
+# headers.sh, then build-c99-macosx.sh), and programs link with -lc99.
+MACOSX_OLD_TARGETS = $(foreach v,0 1 2 3,%-apple-macosx10.$(v))
+ifneq ($(filter $(MACOSX_OLD_TARGETS) %-apple-macosx10.4 %-apple-macosx10.5 %-apple-darwin8 %-apple-darwin9,$(TARGET)),)
 MACOSX_LEGACY = 1
 SDK ?= /Developer/SDKs/MacOSX10.4u.sdk
 LIBCXX ?= ../libcxx-macosx
@@ -230,7 +233,8 @@ SHARED_LIBS = $(OUT)/mfc.dll $(OUT)/mfcu.dll $(OUT)/libmfcs.a $(OUT)/libmfcus.a
 # static ones' names (libmfc.so, libmfcu.so and libwinport.so, or .dylib),
 # so that -L$(OUT)/shared picks them; libmfcs.a and libmfcus.a are as on
 # Windows. The program's main stays in the program (libmfcs.a for MFC
-# programs), so the layer's crt0 is left out of libwinport.so.
+# programs), so the layer's crt0 is left out of libwinport.so. So is the
+# screen saver host (saver_host.cpp), which calls the program's WinMain.
 ifeq ($(PORTABLE),1)
 STATIC_LIBS += $(PORT_LIB) $(SCRNSAVE_LIBS)
 ifneq ($(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
@@ -321,7 +325,7 @@ $(OUT)/libmfcus.a: $(OBJS_SU)
 	$(AR) rcs $@ $^
 
 ifeq ($(PORTABLE),1)
-$(PORT_SHLIB): $(filter-out $(OUT)/port/crt0.o,$(PORT_OBJS))
+$(PORT_SHLIB): $(filter-out $(OUT)/port/crt0.o $(OUT)/port/saver_host.o,$(PORT_OBJS))
 	@mkdir -p $(dir $@)
 	$(CXX) $(ALL_CXXFLAGS) $(SHLIB_FLAGS) -o $@ $^ $(SHLIB_SYSLIBS) $(DLL_LDFLAGS)
 

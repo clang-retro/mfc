@@ -53,6 +53,44 @@ SAMPLES = [
     ("text3d", "scrsave/text3d", "sstext3d.c", True, "sstext3d.scr"),
 ]
 COMMON = ("scrsave/common", "glscrnsv.cxx")
+# On Mac OS X, each screen saver is also a .saver bundle with these names,
+# which System Preferences shows in its list of screen savers.
+SAVER_NAMES = {
+    "3dfo": "3D Flying Objects",
+    "flwbox": "3D Flower Box",
+    "maze": "3D Maze",
+    "pipes": "3D Pipes",
+    "text3d": "3D Text",
+}
+SAVER_BUNDLE_SRC = os.path.join(ROOT, "port", "saver", "saver_bundle.mm")
+COCOA_BACKEND_SRC = os.path.join(ROOT, "port", "src", "backend_cocoa.mm")
+INFO_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>English</string>
+	<key>CFBundleExecutable</key>
+	<string>{exe}</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.clang-retro.saver.{exe}</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>{name}</string>
+	<key>CFBundlePackageType</key>
+	<string>BNDL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>1.0</string>
+	<key>NSPrincipalClass</key>
+	<string>{cls}</string>
+</dict>
+</plist>
+"""
 
 # Small fixes to single files, as (file, pattern, replacement): code
 # that only the compilers of the time accepted.
@@ -476,7 +514,46 @@ def build_sample(sample, sdk, out, env, log):
     if env["DOS"]:
         exe = os.path.splitext(exe)[0] + ".exe"
     run([env["CXX"]] + env["LDFLAGS"] + objects + libs + env["SYSLIBS"] + ["-o", exe], log)
+    if saver and env["MACHO"]:
+        build_saver_bundle(name, program, objects, libs, objdir, env, log)
     return exe
+
+
+# Builds the .saver bundle of a screen saver for the screen saver engine of
+# Mac OS X (out/bin/NAME.saver), from the objects of the program. The
+# bundle has its own principal class (port/saver/saver_bundle.mm) and its
+# own copy of the AppKit half of the Cocoa backend, with class names that
+# no other screen saver has. Only the principal class is exported.
+# Returns the path of the bundle.
+def build_saver_bundle(name, program, objects, libs, objdir, env, log):
+    stem = os.path.splitext(program)[0]
+    cls = "WinportSaver_" + stem
+    flags = env["CFLAGS"] + env["CXXFLAGS"] + ["-x", "objective-c++", "-fno-objc-arc", "-std=c++17", "-w",
+                                               "-I", os.path.join(ROOT, "port", "src")]
+    shim = os.path.join(objdir, "saver_bundle.o")
+    run([env["CXX"]] + flags + ["-DWINPORT_SAVER_CLASS=" + cls, "-c", SAVER_BUNDLE_SRC, "-o", shim], log)
+    cocoa = os.path.join(objdir, "backend_cocoa.o")
+    run([env["CXX"]] + flags + ["-DWINPORT_OBJC_PREFIX=WinportSS_" + stem, "-c", COCOA_BACKEND_SRC, "-o", cocoa], log)
+    bundle = os.path.join(os.path.dirname(os.path.dirname(objdir)), "bin", SAVER_NAMES.get(name, stem) + ".saver")
+    if os.path.isdir(bundle):
+        shutil.rmtree(bundle)
+    macos = os.path.join(bundle, "Contents", "MacOS")
+    os.makedirs(macos)
+    os.makedirs(os.path.join(bundle, "Contents", "Resources"))
+    # The Objective-C 2 runtime (64-bit) names classes by symbol; the
+    # older runtime (PowerPC and 32-bit Intel) by a marker symbol.
+    if env["POINTER_SIZE"] == 8:
+        exported = ["_OBJC_CLASS_$_" + cls, "_OBJC_METACLASS_$_" + cls]
+    else:
+        exported = [".objc_class_name_" + cls]
+    exports = os.path.join(objdir, "exports.txt")
+    with open(exports, "w") as f:
+        f.write("\n".join(exported) + "\n")
+    run([env["CXX"]] + env["LDFLAGS"] + ["-bundle", "-Wl,-exported_symbols_list," + exports] + objects +
+        [shim, cocoa] + libs + env["SYSLIBS"] + ["-framework", "ScreenSaver", "-o", os.path.join(macos, stem)], log)
+    with open(os.path.join(bundle, "Contents", "Info.plist"), "w") as f:
+        f.write(INFO_PLIST.format(exe=stem, name=SAVER_NAMES.get(name, stem), cls=cls))
+    return bundle
 
 
 # Reads the compilers and flags from the environment.
@@ -494,6 +571,7 @@ def environment():
     macros = target_macros(env)
     env["MACROS"] = macros
     macho = "__APPLE__" in macros and "__MACH__" in macros
+    env["MACHO"] = macho
     # The classic Mac OS: mac-sdk's tools/macapp.py links the program.
     env["CLASSIC"] = "macintosh" in macros
     env["MACSDK"] = os.environ.get("MACSDK", os.path.join(ROOT, "..", "mac-sdk"))
@@ -504,7 +582,7 @@ def environment():
     # 32-bit DOS: the C library has everything, and a program must end in
     # .exe for DOS to start it.
     env["DOS"] = "__MSDOS__" in macros and "__i386__" in macros
-    default_libs = "-framework Cocoa -framework OpenGL -framework GLUT" if macho else "" if env["DOS"] else "-ldl -lpthread -lm"
+    default_libs = "-framework Cocoa -framework OpenGL -framework GLUT -lobjc" if macho else "" if env["DOS"] else "-ldl -lpthread -lm"
     env["SYSLIBS"] = shlex.split(os.environ.get("SYSLIBS", default_libs))
     env["BIG_ENDIAN"] = macros.get("__BYTE_ORDER__") == "__ORDER_BIG_ENDIAN__"
     env["POINTER_SIZE"] = int(macros.get("__SIZEOF_POINTER__", "4"))

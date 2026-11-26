@@ -24,7 +24,10 @@
 #include <vector>
 #if defined(__linux__)
 #include <sys/inotify.h>
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && !(defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) && \
+                               __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 1030)
+// kqueue arrived in Mac OS X 10.3. Before it, the theme file is not watched.
+#define WINPORT_KQUEUE 1
 #include <sys/event.h>
 #endif
 
@@ -485,7 +488,7 @@ void WatchFile() {
       if (ours) FileChanged();
     }
   }).detach();
-#elif defined(__APPLE__)
+#elif defined(WINPORT_KQUEUE)
   int kq = kqueue();
   int dfd = open(dir.c_str(), O_EVTONLY | O_CLOEXEC);
   if (kq < 0 || dfd < 0) {

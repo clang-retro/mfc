@@ -568,6 +568,15 @@ BOOL WINAPI GetModuleHandleExW(DWORD, LPCWSTR, HMODULE*);
 // Calls the DllMain of each library the program links with (the
 // program's startup does).
 void WINAPI _WinportAttachLinkedLibraries(void);
+// Replaces the command line of GetCommandLine (for a program that the
+// layer did not start, such as a screen saver bundle).
+void WINAPI _WinportSetCommandLine(LPCSTR);
+// Sets a function that ExitProcess calls before it ends the process. The
+// function must not return (a screen saver bundle leaves its code there).
+void WINAPI _WinportSetExitHook(void (*)(UINT));
+// Makes a loaded module the program's module, which GetModuleHandle(NULL)
+// gives (a screen saver bundle, whose resources are its own).
+void WINAPI _WinportSetMainModule(HMODULE);
 DWORD WINAPI GetModuleFileNameA(HMODULE, LPSTR, DWORD);
 DWORD WINAPI GetModuleFileNameW(HMODULE, LPWSTR, DWORD);
 HMODULE WINAPI LoadLibraryA(LPCSTR);
