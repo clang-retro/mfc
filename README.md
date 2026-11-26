@@ -401,7 +401,8 @@ classes (`CWinApp`, the frames, MDI, dialogs, the controls, the GDI
 classes, document/view, a drawn toolbar and status bar, OLE automation,
 and OLE containers, servers and drag and drop) for 16-bit Windows, in the
 large model, with the Insert Object, Paste Special, Links and Server Busy
-dialogs. OLE controls and the other common controls are not there yet. See
+dialogs, and the progress, trackbar, up-down and tab controls. OLE
+controls and the other common controls are not there yet. See
 [docs/win16.md](docs/win16.md).
 
 ### 32-bit DOS

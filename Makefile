@@ -197,7 +197,7 @@ SRCS = $(addprefix src/,object.cpp strcore.cpp coll.cpp file.cpp archive.cpp exc
   cmdcom.cpp cmdevent.cpp oleconn.cpp oledisp.cpp olevar.cpp \
   olecli.cpp oledata.cpp oledlgs.cpp oledoc.cpp oledrop.cpp olefact.cpp oleipcli.cpp \
   oleipsvr.cpp olemon.cpp olemsgf.cpp olereg.cpp olestrm.cpp olesvr.cpp oledocob.cpp \
-  win16oleui.cpp fileshrd.cpp tracker.cpp \
+  win16oleui.cpp win16ctl.cpp fileshrd.cpp tracker.cpp \
   wincore.cpp winocc.cpp winutil.cpp app.cpp appmain.cpp cmdtarg.cpp thread.cpp mtcore.cpp \
   frame.cpp winmdi.cpp winmini.cpp winsplit.cpp bars.cpp dockbar.cpp dockcont.cpp dockstat.cpp \
   dlgcore.cpp dlgdata.cpp dlgtmpl.cpp dlgcomm.cpp dlgvista.cpp \

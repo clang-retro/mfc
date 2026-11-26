@@ -21,6 +21,10 @@ void AFXAPI _AfxUnmergeMenus(HMENU hMenuShared, HMENU hMenuSource);
 #ifdef _AFX_WIN16
 // Registers the toolbar and status bar classes of 16-bit Windows (win16bar.cpp).
 BOOL AFXAPI _AfxW16RegisterBarClasses();
+// Registers the progress bar, trackbar, up-down and tab control classes of
+// 16-bit Windows (win16ctl.cpp) for the AFX_WNDCOMMCTL_ flags in fReg.
+// Gives the flags of the classes that are there.
+LONG AFXAPI _AfxW16RegisterCtlClasses(LONG fReg);
 #endif
 
 // Idle updates for in-place frames, which are not under the main window

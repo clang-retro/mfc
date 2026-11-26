@@ -281,6 +281,17 @@ int _AfxW16AcceleratorCount(HACCEL hAccel);
 #define TOOLBARCLASSNAME "AfxToolbar16"
 #define STATUSCLASSNAME "AfxStatusBar16"
 
+// The library also draws the progress bar, the trackbar, the up-down
+// control and the tab control (src/win16ctl.cpp).
+#undef PROGRESS_CLASS
+#undef TRACKBAR_CLASS
+#undef UPDOWN_CLASS
+#undef WC_TABCONTROL
+#define PROGRESS_CLASS "AfxProgress16"
+#define TRACKBAR_CLASS "AfxTrackbar16"
+#define UPDOWN_CLASS "AfxUpDown16"
+#define WC_TABCONTROL "AfxTabControl16"
+
 // GDI.
 DWORD GetObjectType(HGDIOBJ h);
 HPEN ExtCreatePen(DWORD iPenStyle, DWORD cWidth, const LOGBRUSH FAR *plbrush, DWORD cStyle,

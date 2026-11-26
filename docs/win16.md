@@ -122,10 +122,12 @@ hook that closes them. These classes need a real
 - OLE controls. `CWnd::CreateControlSite` fails (`src/win16ole.cpp`).
 - The Change Icon, Convert, Change Source and Object Properties
   dialogs (see "OLE documents").
-- The common controls. 16-bit Windows does not have `comctl32.dll`.
-  The library draws the toolbar and the status bar itself (see "The
-  toolbar and the status bar"). `CReBar` and the other classes of
-  `afxcmn.h` compile, but their windows are not made.
+- Most of the common controls. 16-bit Windows does not have
+  `comctl32.dll`. The library draws the toolbar, the status bar, the
+  progress bar, the trackbar, the up-down control and the tab control
+  itself (see "The toolbar and the status bar" and "The other common
+  controls"). `CListCtrl`, `CTreeCtrl`, `CReBar` and the other classes
+  of `afxcmn.h` compile, but their windows are not made.
 - Tooltips of other windows. Only the toolbar shows tooltips (see "The
   toolbar and the status bar"). `CToolTipCtrl` and
   `CWnd::EnableToolTips` make no window.
@@ -295,6 +297,44 @@ names are not the names of the common controls.
   byte, as in MFC 2.5. `SBPS_DISABLED` is `0x4000`, and `SBPS_STRETCH` is
   `0x8000`.
 
+### The other common controls
+
+`src/win16ctl.cpp` registers four more window classes. `afxwin16u.h`
+sets the class names to the names of the library, as for the toolbar:
+
+| Class | Name | MFC class |
+|---|---|---|
+| progress bar | `AfxProgress16` | `CProgressCtrl` |
+| trackbar | `AfxTrackbar16` | `CSliderCtrl` |
+| up-down control | `AfxUpDown16` | `CSpinButtonCtrl` |
+| tab control | `AfxTabControl16` | `CTabCtrl` |
+
+The file also registers each class with the name of `comctl32.dll`
+(`msctls_progress32`, `msctls_trackbar32`, `msctls_updown32` and
+`SysTabControl32`). Thus a dialog template can use these names.
+
+- The windows do the messages of the common controls in ANSI. They send
+  `WM_HSCROLL` and `WM_VSCROLL` in the 16-bit packing: the code in
+  `wParam`, the position in the low word and the control in the high
+  word of `lParam`. They send `WM_NOTIFY` to the parent.
+- The progress bar draws blocks, or one bar with `PBS_SMOOTH`.
+  `PBS_VERTICAL` and `PBS_MARQUEE` work.
+- The trackbar has the keys, a drag of the thumb, and a click in the
+  channel that pages and repeats. It draws the ticks (`TBS_AUTOTICKS`,
+  `TBM_SETTIC`), the selection (`TBS_ENABLESELRANGE`) and a thumb that
+  points to the ticks. It has no buddy windows and no tooltips.
+- The up-down control has the acceleration (`UDM_SETACCEL`), the buddy
+  (`UDS_AUTOBUDDY`, `UDS_ALIGNRIGHT`, `UDS_ALIGNLEFT`), the number in the
+  buddy (`UDS_SETBUDDYINT`, with a comma between each 3 digits) and the
+  arrow keys of the buddy (`UDS_ARROWKEYS`). The default range is 100 to
+  0, as in `comctl32.dll`.
+- The tab control has one row of tabs, a click and the left and right
+  keys (`TCN_SELCHANGING`, `TCN_SELCHANGE`), `TCS_BUTTONS` and
+  `TCS_FIXEDWIDTH`. It has no images, no tooltips and no
+  `TCS_MULTILINE`.
+- `UDM_GETRANGE32` gets two pointers. A 16-bit `wParam` holds only an
+  offset, so the window uses the segment of `lParam` for it.
+
 ### Handle maps
 
 A 16-bit handle is a near pointer. The handle maps of the library use
@@ -335,6 +375,7 @@ the handle as a word key (`CMapWordToPtr`).
 | `win16doc` | `CSingleDocTemplate`, File New, `OnDraw`, `OnUpdate`, and the command routing to the view and the document |
 | `win16mdi` | `CMultiDocTemplate`, two MDI children, the MDI menus, and `MDIGetActive`, `MDINext` and `MDIActivate` |
 | `win16bar` | `CToolBar` and `CStatusBar`: the button layout, a click, the idle update, the message pane, docking at the left edge, floating, the tooltip of a button, and `ShowControlBar` |
+| `win16cmn` | `CProgressCtrl`, `CSliderCtrl`, `CSpinButtonCtrl` and `CTabCtrl`: the ranges and positions, the keys, the buddy of the up-down control, a click on a tab, and the notifications |
 
 The window tests need an X display. Without one, the script starts
 itself under `xvfb-run`.
