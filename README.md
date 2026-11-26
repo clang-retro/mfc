@@ -1356,9 +1356,10 @@ ATLVERIFY, ATLENSURE and ATLTRY, the trace categories (CTraceCategory,
   ANSI programs too. As with Visual C++, text in their variants is
   VT_BSTRT there (ANSI bytes in the BSTR), so it is converted on the
   way in and out.
-* `llvm-rc` (and `llvm-windres`, which uses it) has no `TOOLBAR`
-  statement yet; write toolbar resources as raw resource type 241, as
-  `tests/sditest.rc` does.
+* The `llvm-rc` of clang-retro (and its `llvm-windres`) compiles the
+  `TOOLBAR` statement. Upstream `llvm-rc` and MinGW's `windres` do not.
+  For these tools, write a toolbar as raw resource type 241, as
+  `tests/sditest.rc` does, so that the test builds with each toolchain.
 * CImage::SetTransparentColor takes an index into the color table for
   an indexed image, as with Visual C++, and an RGB value (a COLORREF)
   for any other image.
