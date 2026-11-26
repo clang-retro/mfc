@@ -44,6 +44,12 @@
 
 namespace winport {
 
+#if defined(macintosh)
+namespace mactb {
+bool FontsFolder(std::string* path);  // macos_toolbox.cpp
+}
+#endif
+
 namespace {
 
 #include "font_builtin.inc"
@@ -216,7 +222,7 @@ int ReadFontFile(const std::string& path, std::vector<FontFile>* out) {
   const char* dot = strrchr(path.c_str(), '.');
   const char* slash = strrchr(path.c_str(), '/');
   bool dfont = dot && (!slash || dot > slash) && !strcasecmp(dot, ".dfont");
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(macintosh)
   // A font suitcase has no extension; its fonts are in the resource fork.
   if (!dfont && (!dot || (slash && dot < slash))) {
     std::string fork = path + "/..namedfork/rsrc";
@@ -263,11 +269,11 @@ int ReadFontFile(const std::string& path, std::vector<FontFile>* out) {
 }
 
 // True for a file that can hold fonts: TrueType and OpenType files, Mac
-// .dfont files, and (on Mac OS X) files without an extension, which can be
-// font suitcases.
+// .dfont files, and (on Mac OS X and the classic Mac OS) files without an
+// extension, which can be font suitcases.
 bool FontExtension(const char* name) {
   const char* dot = strrchr(name, '.');
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(macintosh)
   if (!dot) return true;
 #else
   if (!dot) return false;
@@ -317,7 +323,12 @@ std::vector<std::string> FontDirs() {
     return dirs;
   }
   const char* home = getenv("HOME");
-#ifdef __APPLE__
+#if defined(macintosh)
+  // The Fonts folder in the System Folder (System 7.1 and later).
+  (void)home;
+  std::string fonts;
+  if (mactb::FontsFolder(&fonts)) dirs.push_back(fonts);
+#elif defined(__APPLE__)
   dirs.push_back("/System/Library/Fonts");
   dirs.push_back("/Library/Fonts");
   if (home) dirs.push_back(std::string(home) + "/Library/Fonts");

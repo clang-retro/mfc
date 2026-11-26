@@ -129,6 +129,15 @@ struct MacBackend : Backend {
     return SIZE{w, h};
   }
 
+  // Reads where the pointer is now, from the Event Manager.
+  bool ReadCursor(POINT* p) override {
+    int x, y;
+    mactb::MousePosition(&x, &y);
+    p->x = x;
+    p->y = y;
+    return true;
+  }
+
   // Tells whether a window is a menu, a drop-down or a tooltip, which is
   // shown without becoming the active window.
   static bool IsPopup(Window* w) {

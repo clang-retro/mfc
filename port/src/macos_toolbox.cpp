@@ -16,12 +16,15 @@
 #include <pthread.h>  // sched_yield
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>  // getcwd
 
 // The Toolbox headers have no C++ linkage of their own: on PowerPC the
 // functions are C symbols of InterfaceLib.
 extern "C" {
 #include <Dialogs.h>
 #include <Events.h>
+#include <Files.h>
+#include <Folders.h>
 #include <Fonts.h>
 #include <Gestalt.h>
 #include <LowMem.h>
@@ -229,6 +232,34 @@ bool Start() {
     if (g_directTable) (**g_directTable).ctSeed = 32;
   }
   return true;
+}
+
+bool FontsFolder(std::string* path) {
+  short vol;
+  long dir, attr;
+  // FindFolder came with System 7 (gestaltFindFolderAttr bit 0).
+  if (Gestalt(gestaltFindFolderAttr, &attr) != noErr || !(attr & 1)) return false;
+  if (FindFolder(kOnSystemDisk, kFontFolderType, kDontCreateFolder, &vol, &dir) != noErr) return false;
+  // getcwd gives the POSIX path of the default folder: make the Fonts
+  // folder the default folder for a moment.
+  short oldVol;
+  long oldDir;
+  if (HGetVol(NULL, &oldVol, &oldDir) != noErr) return false;
+  if (HSetVol(NULL, vol, dir) != noErr) return false;
+  char buf[1024];
+  bool ok = getcwd(buf, sizeof buf) != NULL;
+  HSetVol(NULL, oldVol, oldDir);
+  if (ok) *path = buf;
+  return ok;
+}
+
+// Gives where the pointer is now, in the coordinates of MacRect.
+void MousePosition(int* x, int* y) {
+  Point p;
+  GetMouse(&p);
+  LocalToGlobal(&p);
+  *x = p.h;
+  *y = p.v - g_menuBar;
 }
 
 void ScreenSize(int* width, int* height) {

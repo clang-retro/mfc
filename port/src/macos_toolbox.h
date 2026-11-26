@@ -13,6 +13,8 @@
 
 #include <stdint.h>
 
+#include <string>
+
 namespace winport {
 namespace mactb {
 
@@ -33,6 +35,12 @@ enum { kMove, kDown, kUp };
 bool Start();
 // The screen below the menu bar.
 void ScreenSize(int* width, int* height);
+// Gives the POSIX path of the Fonts folder in the System Folder, or
+// false when the system has none (before System 7.1).
+bool FontsFolder(std::string* path);
+// Where the pointer is now, from the top-left corner of the screen below
+// the menu bar (y is less than 0 in the menu bar).
+void MousePosition(int* x, int* y);
 // A window with no frame of its own (the layer draws the frame), hidden.
 // owner comes back in the On functions.
 void* Create(void* owner, int x, int y, int width, int height);

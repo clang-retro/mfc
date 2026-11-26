@@ -59,6 +59,12 @@ Items). The second menu has the program's name and holds Exit, which
 does the same as the Finder's Quit Application command. The program's own menus stay in its windows.
 A program that starts the Toolbox itself makes its own menu bar.
 
+The layer reads the TrueType fonts in the Fonts folder of the System
+Folder (System 7.1 and later), from the `sfnt` resources of the font
+suitcases. Thus `GetGlyphOutline` and `wglUseFontOutlines` work. Before
+System 7.1, and for bitmap-only fonts, the layer uses its built-in
+bitmap font.
+
 To keep the windows in memory (for tests), set `WINPORT_BACKEND` to
 `headless`. The backend also uses the headless backend when the
 Toolbox cannot start.
