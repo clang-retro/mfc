@@ -124,10 +124,11 @@ hook that closes them. These classes need a real
   dialogs (see "OLE documents").
 - Most of the common controls. 16-bit Windows does not have
   `comctl32.dll`. The library draws the toolbar, the status bar, the
-  progress bar, the trackbar, the up-down control and the tab control
-  itself (see "The toolbar and the status bar" and "The other common
-  controls"). `CListCtrl`, `CTreeCtrl`, `CReBar` and the other classes
-  of `afxcmn.h` compile, but their windows are not made.
+  progress bar, the trackbar, the up-down control, the tab control, the
+  header control and the list view itself (see "The toolbar and the
+  status bar" and "The other common controls"). `CTreeCtrl`, `CReBar`
+  and the other classes of `afxcmn.h` compile, but their windows are not
+  made.
 - Tooltips of other windows. Only the toolbar shows tooltips (see "The
   toolbar and the status bar"). `CToolTipCtrl` and
   `CWnd::EnableToolTips` make no window.
@@ -299,8 +300,9 @@ names are not the names of the common controls.
 
 ### The other common controls
 
-`src/win16ctl.cpp` registers four more window classes. `afxwin16u.h`
-sets the class names to the names of the library, as for the toolbar:
+`src/win16ctl.cpp` and `src/win16lv.cpp` register six more window
+classes. `afxwin16u.h` sets the class names to the names of the
+library, as for the toolbar:
 
 | Class | Name | MFC class |
 |---|---|---|
@@ -308,10 +310,12 @@ sets the class names to the names of the library, as for the toolbar:
 | trackbar | `AfxTrackbar16` | `CSliderCtrl` |
 | up-down control | `AfxUpDown16` | `CSpinButtonCtrl` |
 | tab control | `AfxTabControl16` | `CTabCtrl` |
+| header control | `AfxHeader16` | `CHeaderCtrl` |
+| list view | `AfxListView16` | `CListCtrl` |
 
-The file also registers each class with the name of `comctl32.dll`
-(`msctls_progress32`, `msctls_trackbar32`, `msctls_updown32` and
-`SysTabControl32`). Thus a dialog template can use these names.
+The files also register each class with the name of `comctl32.dll`
+(`msctls_progress32`, `msctls_trackbar32`, `msctls_updown32`,
+`SysTabControl32`, `SysHeader32` and `SysListView32`). Thus a dialog template can use these names.
 
 - The windows do the messages of the common controls in ANSI. They send
   `WM_HSCROLL` and `WM_VSCROLL` in the 16-bit packing: the code in
@@ -332,6 +336,19 @@ The file also registers each class with the name of `comctl32.dll`
   keys (`TCN_SELCHANGING`, `TCN_SELCHANGE`), `TCS_BUTTONS` and
   `TCS_FIXEDWIDTH`. It has no images, no tooltips and no
   `TCS_MULTILINE`.
+- The header control has the drag of a divider (`HDN_BEGINTRACK`,
+  `HDN_TRACK`, `HDN_ENDTRACK`), the click of a button (`HDS_BUTTONS`),
+  `HDM_LAYOUT`, the order of the items, the sort arrows, owner draw and
+  an image list. It has no filters and no drag of an item.
+- The list view has the four views, virtual lists (`LVS_OWNERDATA`),
+  the text and image callbacks (`LVN_GETDISPINFO`), label editing,
+  check boxes, full row selection, grid lines, custom draw, sorting
+  (`LVM_SORTITEMS`, `LVM_SORTITEMSEX`), `LVM_FINDITEM`, and the keys and
+  the mouse of `comctl32.dll`. The report view uses a header control.
+  The icon views always arrange the items in rows. The list view has no
+  groups, no tiles, no work areas and no tooltips.
+- `LVM_SORTITEMS` gives `lParamSort` in `wParam`. A 16-bit `wParam` holds
+  only 16 bits, so the comparison function gets only the low word.
 - `UDM_GETRANGE32` gets two pointers. A 16-bit `wParam` holds only an
   offset, so the window uses the segment of `lParam` for it.
 
@@ -375,7 +392,7 @@ the handle as a word key (`CMapWordToPtr`).
 | `win16doc` | `CSingleDocTemplate`, File New, `OnDraw`, `OnUpdate`, and the command routing to the view and the document |
 | `win16mdi` | `CMultiDocTemplate`, two MDI children, the MDI menus, and `MDIGetActive`, `MDINext` and `MDIActivate` |
 | `win16bar` | `CToolBar` and `CStatusBar`: the button layout, a click, the idle update, the message pane, docking at the left edge, floating, the tooltip of a button, and `ShowControlBar` |
-| `win16cmn` | `CProgressCtrl`, `CSliderCtrl`, `CSpinButtonCtrl` and `CTabCtrl`: the ranges and positions, the keys, the buddy of the up-down control, a click on a tab, and the notifications |
+| `win16cmn` | `CImageList`, `CProgressCtrl`, `CSliderCtrl`, `CSpinButtonCtrl`, `CTabCtrl` and `CListCtrl`: the images and masks, the ranges and positions, the keys, the buddy of the up-down control, a click on a tab, the columns, items, find and sort of a report view, and the notifications |
 
 The window tests need an X display. Without one, the script starts
 itself under `xvfb-run`.

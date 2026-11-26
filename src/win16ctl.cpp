@@ -1644,6 +1644,8 @@ LONG AFXAPI _AfxW16RegisterCtlClasses(LONG fReg) {
   if ((fReg & AFX_WNDCOMMCTL_TAB_REG) &&
       RegisterCtlClasses(WC_TABCONTROL, "SysTabControl32", W16TabProc))
     fDone |= AFX_WNDCOMMCTL_TAB_REG;
+  if ((fReg & AFX_WNDCOMMCTL_LISTVIEW_REG) && _AfxW16RegisterListClasses())
+    fDone |= AFX_WNDCOMMCTL_LISTVIEW_REG;
   return fDone;
 }
 

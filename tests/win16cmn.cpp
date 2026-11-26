@@ -1,7 +1,6 @@
 // win16cmn.cpp - the common controls that the library draws on 16-bit
 // Windows: CImageList, CProgressCtrl, CSliderCtrl, CSpinButtonCtrl and
-// CTabCtrl. The
-// frame makes each control, sends it messages and checks the
+// CTabCtrl, CHeaderCtrl and CListCtrl. The frame makes each control, sends it messages and checks the
 // notifications that the frame gets. It prints ALL PASSED when each
 // check holds, because Wine gives the exit code 0 whatever a 16-bit
 // program returns.
@@ -20,7 +19,7 @@ static BOOL g_bDone = FALSE;  // the test ran to the end
     }                                                        \
   } while (0)
 
-enum { IDC_PROGRESS = 100, IDC_SLIDER, IDC_BUDDY, IDC_SPIN, IDC_TAB };
+enum { IDC_PROGRESS = 100, IDC_SLIDER, IDC_BUDDY, IDC_SPIN, IDC_TAB, IDC_LIST };
 
 class CMainFrame : public CFrameWnd {
 public:
@@ -29,6 +28,7 @@ public:
   CEdit m_buddy;
   CSpinButtonCtrl m_spin;
   CTabCtrl m_tab;
+  CListCtrl m_list;
   UINT m_nLastHScroll;    // the code of the last WM_HSCROLL from the slider
   int m_nLastHScrollPos;  // its position
   int m_nVScrolls;        // the WM_VSCROLL messages from the up-down control
@@ -37,11 +37,13 @@ public:
   int m_nSelChanging;     // the TCN_SELCHANGING notifications
   int m_nSelChange;       // the TCN_SELCHANGE notifications
   BOOL m_bRefuseTab;      // TCN_SELCHANGING refuses the change
+  int m_nItemChanged;     // the LVN_ITEMCHANGED notifications
 
   /// Starts with no notifications.
   CMainFrame()
       : m_nLastHScroll(0xFFFF), m_nLastHScrollPos(-1), m_nVScrolls(0), m_nDeltaPos(0),
-        m_nLastDelta(0), m_nSelChanging(0), m_nSelChange(0), m_bRefuseTab(FALSE) {}
+        m_nLastDelta(0), m_nSelChanging(0), m_nSelChange(0), m_bRefuseTab(FALSE),
+        m_nItemChanged(0) {}
 
   /// Makes the controls and runs the checks.
   void RunTests() {
@@ -50,6 +52,7 @@ public:
     TestSlider();
     TestSpin();
     TestTab();
+    TestListView();
     g_bDone = TRUE;
   }
 
@@ -232,6 +235,75 @@ protected:
     m_tab.UpdateWindow();
   }
 
+  /// Compares two items by their item data, from the largest to the
+  /// smallest.
+  static int CALLBACK CompareDown(LPARAM l1, LPARAM l2, LPARAM lSort) {
+    (void)lSort;
+    return l1 < l2 ? 1 : l1 > l2 ? -1 : 0;
+  }
+
+  /// Checks a report view: the columns in its header, the items and their
+  /// subitems, a find, a sort, a selection by a click and the
+  /// LVN_ITEMCHANGED notification.
+  void TestListView() {
+    CHECK(m_list.Create(WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SHOWSELALWAYS,
+                        CRect(10, 160, 410, 300), this, IDC_LIST));
+    CHECK(m_list.InsertColumn(0, "Name", LVCFMT_LEFT, 120) == 0);
+    CHECK(m_list.InsertColumn(1, "Size", LVCFMT_RIGHT, 80, 1) == 1);
+    CHeaderCtrl* pHeader = m_list.GetHeaderCtrl();
+    CHECK(pHeader != NULL && pHeader->GetItemCount() == 2);
+    CHECK(m_list.GetColumnWidth(0) == 120);
+    CHECK(m_list.SetColumnWidth(1, 90) && m_list.GetColumnWidth(1) == 90);
+
+    static const char* const names[] = {"alpha", "beta", "gamma"};
+    for (int i = 0; i < 3; i++) {
+      CHECK(m_list.InsertItem(i, names[i]) == i);
+      char szSize[8];
+      sprintf(szSize, "%d", (i + 1) * 10);
+      CHECK(m_list.SetItemText(i, 1, szSize));
+      CHECK(m_list.SetItemData(i, (DWORD_PTR)(i + 1)));
+    }
+    CHECK(m_list.GetItemCount() == 3);
+    CHECK(m_list.GetItemText(1, 0) == "beta");
+    CHECK(m_list.GetItemText(2, 1) == "30");
+
+    LVFINDINFO find;
+    memset(&find, 0, sizeof(find));
+    find.flags = LVFI_STRING;
+    find.psz = "gamma";
+    CHECK(m_list.FindItem(&find) == 2);
+    find.flags = LVFI_PARTIAL | LVFI_STRING;
+    find.psz = "be";
+    CHECK(m_list.FindItem(&find) == 1);
+
+    // Sort by the item data, from the largest to the smallest.
+    CHECK(m_list.SortItems(CompareDown, 0));
+    CHECK(m_list.GetItemText(0, 0) == "gamma");
+    CHECK(m_list.GetItemText(2, 0) == "alpha");
+    CHECK(m_list.GetItemText(0, 1) == "30");
+
+    // A click on the second item selects it.
+    int nChanged = m_nItemChanged;
+    CRect rcItem;
+    CHECK(m_list.GetItemRect(1, &rcItem, LVIR_LABEL));
+    LPARAM lClick = MAKELPARAM(rcItem.left + 4, rcItem.CenterPoint().y);
+    m_list.SendMessage(WM_LBUTTONDOWN, MK_LBUTTON, lClick);
+    m_list.SendMessage(WM_LBUTTONUP, 0, lClick);
+    CHECK(m_list.GetSelectedCount() == 1);
+    CHECK(m_list.GetNextItem(-1, LVNI_SELECTED) == 1);
+    CHECK(m_nItemChanged > nChanged);
+
+    CHECK(m_list.SetItemState(0, LVIS_SELECTED, LVIS_SELECTED));
+    CHECK(m_list.GetSelectedCount() == 2);
+    CHECK(m_list.DeleteItem(0));
+    CHECK(m_list.GetItemCount() == 2);
+    CHECK(m_list.GetSelectedCount() == 1);
+    CHECK(m_list.DeleteAllItems());
+    CHECK(m_list.GetItemCount() == 0);
+    CHECK(m_list.DeleteColumn(1) && pHeader->GetItemCount() == 1);
+    m_list.UpdateWindow();
+  }
+
   /// Keeps the code and the position of the scroll messages of the
   /// slider.
   afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar) {
@@ -270,6 +342,13 @@ protected:
     *pResult = 0;
   }
 
+  /// Counts LVN_ITEMCHANGED.
+  afx_msg void OnItemChanged(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nItemChanged++;
+    *pResult = 0;
+  }
+
   DECLARE_MESSAGE_MAP()
 };
 
@@ -279,6 +358,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
   ON_NOTIFY(UDN_DELTAPOS, IDC_SPIN, OnDeltaPos)
   ON_NOTIFY(TCN_SELCHANGING, IDC_TAB, OnSelChanging)
   ON_NOTIFY(TCN_SELCHANGE, IDC_TAB, OnSelChange)
+  ON_NOTIFY(LVN_ITEMCHANGED, IDC_LIST, OnItemChanged)
 END_MESSAGE_MAP()
 
 class CTestApp : public CWinApp {

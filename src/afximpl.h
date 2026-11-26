@@ -25,6 +25,9 @@ BOOL AFXAPI _AfxW16RegisterBarClasses();
 // 16-bit Windows (win16ctl.cpp) for the AFX_WNDCOMMCTL_ flags in fReg.
 // Gives the flags of the classes that are there.
 LONG AFXAPI _AfxW16RegisterCtlClasses(LONG fReg);
+// Registers the header control and list view classes of 16-bit Windows
+// (win16lv.cpp). Gives TRUE when both classes are there.
+BOOL AFXAPI _AfxW16RegisterListClasses();
 #endif
 
 // Idle updates for in-place frames, which are not under the main window

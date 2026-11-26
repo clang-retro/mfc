@@ -292,6 +292,13 @@ int _AfxW16AcceleratorCount(HACCEL hAccel);
 #define UPDOWN_CLASS "AfxUpDown16"
 #define WC_TABCONTROL "AfxTabControl16"
 
+// The library also draws the header control and the list view
+// (src/win16lv.cpp).
+#undef WC_HEADER
+#undef WC_LISTVIEW
+#define WC_HEADER "AfxHeader16"
+#define WC_LISTVIEW "AfxListView16"
+
 // GDI.
 DWORD GetObjectType(HGDIOBJ h);
 HPEN ExtCreatePen(DWORD iPenStyle, DWORD cWidth, const LOGBRUSH FAR *plbrush, DWORD cStyle,
