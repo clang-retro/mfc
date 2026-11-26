@@ -144,13 +144,19 @@ endif
 # The systems with no OpenGL of their own (Linux, the classic Mac OS on
 # 68k) have the generic implementation: port/softgl, a software renderer
 # in C, and the SGI reference GLU. Their objects go into libwinport.a, so
-# that a program links with libwinport.a only. See docs/software-opengl.md.
+# that a program links with libwinport.a only. port/softgl is a submodule
+# (clang-retro/softgl). See docs/software-opengl.md.
 ifeq ($(SOFTGL),1)
+ifeq ($(wildcard port/softgl/src/sgl.h),)
+$(error port/softgl is empty. Run: git submodule update --init)
+endif
 SCRNSAVE_LIBS += $(OUT)/libglaux.a
 CC = $(if $(BIN),$(BIN)/,)clang
 SOFTGL_SRCS = $(wildcard port/softgl/src/*.c)
 SOFTGL_GLU_SRCS = $(filter-out %/priorityq-heap.c,$(wildcard port/softgl/glu/libtess/*.c port/softgl/glu/libutil/*.c))
-SOFTGL_OBJS = $(patsubst port/softgl/%.c,$(OUT)/softgl/%.o,$(SOFTGL_SRCS) $(SOFTGL_GLU_SRCS))
+SOFTGL_NURBS_SRCS = $(wildcard port/softgl/glu/libnurbs/*/*.cc)
+SOFTGL_OBJS = $(patsubst port/softgl/%.c,$(OUT)/softgl/%.o,$(SOFTGL_SRCS) $(SOFTGL_GLU_SRCS)) \
+  $(patsubst port/softgl/%.cc,$(OUT)/softgl/%.o,$(SOFTGL_NURBS_SRCS))
 PORT_OBJS += $(SOFTGL_OBJS)
 SOFTGL_CFLAGS = $(TARGET_FLAGS) $(CXXFLAGS) -DSGL_LAYER_FLUSH -Iport/softgl/include \
   $(if $(MACOS_CLASSIC),$(if $(findstring m68k,$(TARGET)),-mcmodel=large) -ffunction-sections -fdata-sections \
@@ -268,6 +274,12 @@ $(OUT)/softgl/src/%.o: port/softgl/src/%.c port/softgl/src/sgl.h port/softgl/src
 $(OUT)/softgl/glu/%.o: port/softgl/glu/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(SOFTGL_CFLAGS) -std=gnu99 -w -Iport/softgl/glu/include -c $< -o $@
+# The NURBS of GLU are C++ (the SGI reference code).
+$(OUT)/softgl/glu/%.o: port/softgl/glu/%.cc
+	@mkdir -p $(dir $@)
+	$(CXX) $(SOFTGL_CFLAGS) -w -fno-exceptions -fno-rtti -DNDEBUG -DLIBRARYBUILD \
+	  -Iport/softgl/glu/include -Iport/softgl/glu/libnurbs/internals \
+	  -Iport/softgl/glu/libnurbs/interface -Iport/softgl/glu/libnurbs/nurbtess -c $< -o $@
 
 $(OUT)/port/%.o: port/src/%.cpp $(HDRS)
 	@mkdir -p $(dir $@)
