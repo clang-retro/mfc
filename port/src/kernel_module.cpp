@@ -853,8 +853,15 @@ static bool OptionKeyDown() {
 // DLG_SCRNSAVECONFIGURE, 2003) gets /S, the shell's "Open" command.
 // With the Option key held down, it gets /C, the shell's "Configure"
 // command.
+//
+// The program's name in the command line is the name of its file, not
+// the path. Old programs (MULTIPAD) skip their name up to the first space;
+// a path such as "HD/Desktop Folder/MultiPad" has spaces that the name
+// often does not have.
 static std::string FinderCommandLine() {
-  std::string r = Quote(ExecutablePath());
+  std::string path = ExecutablePath();
+  size_t slash = path.find_last_of('/');
+  std::string r = Quote(slash == std::string::npos ? path : path.substr(slash + 1));
   if (FindResourceA(NULL, MAKEINTRESOURCEA(2003), MAKEINTRESOURCEA(5)))  // RT_DIALOG
     r += OptionKeyDown() ? " /C" : " /S";
   return r;

@@ -8,6 +8,13 @@
 // are a 32-bit direct PixMap for Color QuickDraw. Without 32-bit Color
 // QuickDraw, they become a 1-bit BitMap first.
 //
+// The program's screen is the whole Mac screen. The menu bar is outside
+// the work area, as the taskbar of Windows is. While a window of the
+// program covers the whole screen (a screen saver, a full-screen game),
+// the layer hides the menu bar and the Control Strip, and shows them
+// again when no window covers the screen, when the program goes to the
+// background, and when it ends.
+//
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #if defined(macintosh)
@@ -21,6 +28,7 @@
 // The Toolbox headers have no C++ linkage of their own: on PowerPC the
 // functions are C symbols of InterfaceLib.
 extern "C" {
+#include <ControlStrip.h>
 #include <Dialogs.h>
 #include <Events.h>
 #include <Files.h>
@@ -49,6 +57,9 @@ Point g_mouse = {-1, -1}; // the mouse's last global position
 unsigned g_mods;          // the modifiers of the last event
 CTabHandle g_directTable; // the colour table a direct PixMap needs
 MenuHandle g_appleMenu;    // the Apple menu, when this backend made it
+RgnHandle g_hiddenBar;     // the menu bar's area while it is hidden
+bool g_hidStrip;           // the layer hid the Control Strip
+bool g_background;         // the program is in the background
 
 // Gives the backend's owner of a window, or NULL for another one (a
 // desk accessory's).
@@ -61,11 +72,86 @@ void* OwnerOf(WindowPtr w) {
 Rect MacRect(int x, int y, int width, int height) {
   Rect r;
   r.left = (short)x;
-  r.top = (short)(y + g_menuBar);
+  r.top = (short)y;
   r.right = (short)(x + width);
-  r.bottom = (short)(y + g_menuBar + height);
+  r.bottom = (short)(y + height);
   return r;
 }
+
+// Tells if the Control Strip is there (Gestalt 'sdev', bit 0).
+bool HasControlStrip() {
+  long attr;
+  return Gestalt(gestaltControlStripAttr, &attr) == noErr && (attr & (1L << gestaltControlStripExists));
+}
+
+// Makes the windows and the desktop in rgn draw again, with their visible
+// areas computed again.
+void Repaint(RgnHandle rgn) {
+  WindowPeek front = LMGetWindowList();
+  PaintBehind(front, rgn);
+  CalcVisBehind(front, rgn);
+}
+
+// Hides the menu bar and the Control Strip. The menu bar's area becomes
+// part of the desktop (the gray region), and the windows over it draw
+// there.
+void HideBars() {
+  if (!g_hiddenBar && g_menuBar > 0) {
+    g_hiddenBar = NewRgn();
+    if (g_hiddenBar) {
+      Rect bar = g_screen;
+      bar.bottom = (short)(bar.top + g_menuBar);
+      RectRgn(g_hiddenBar, &bar);
+      LMSetMBarHeight(0);
+      UnionRgn(GetGrayRgn(), g_hiddenBar, GetGrayRgn());
+      Repaint(g_hiddenBar);
+    }
+  }
+  if (!g_hidStrip && HasControlStrip() && SBIsControlStripVisible()) {
+    SBShowHideControlStrip(false);
+    g_hidStrip = true;
+  }
+}
+
+// Shows the menu bar and the Control Strip again, if HideBars hid them.
+void ShowBars() {
+  if (g_hiddenBar) {
+    LMSetMBarHeight((short)g_menuBar);
+    DiffRgn(GetGrayRgn(), g_hiddenBar, GetGrayRgn());
+    CalcVisBehind(LMGetWindowList(), g_hiddenBar);
+    DisposeRgn(g_hiddenBar);
+    g_hiddenBar = NULL;
+    DrawMenuBar();
+  }
+  if (g_hidStrip) {
+    SBShowHideControlStrip(true);
+    g_hidStrip = false;
+  }
+}
+
+// Tells if a window of the program is visible and covers the whole
+// screen.
+bool CoversScreen(WindowPeek w) {
+  if (!w->visible || !OwnerOf((WindowPtr)w) || !w->strucRgn) return false;
+  Rect r = (**w->strucRgn).rgnBBox;
+  return r.left <= g_screen.left && r.top <= g_screen.top && r.right >= g_screen.right &&
+         r.bottom >= g_screen.bottom;
+}
+
+// Hides the bars while a window of the program covers the screen and the
+// program is in the foreground, and shows them otherwise.
+void UpdateBars() {
+  bool cover = false;
+  if (!g_background)
+    for (WindowPeek w = LMGetWindowList(); w && !cover; w = w->nextWindow) cover = CoversScreen(w);
+  if (cover)
+    HideBars();
+  else
+    ShowBars();
+}
+
+// Shows the bars again when the program ends.
+void ShowBarsAtExit() { ShowBars(); }
 
 // Converts a run of 0x00RRGGBB pixels to 1-bit black and white (1 is
 // black), with an ordered dither, into a BitMap row.
@@ -184,6 +270,14 @@ void Handle(EventRecord& ev) {
     case activateEvt:
       if (void* owner = OwnerOf((WindowPtr)ev.message)) OnActivate(owner, (ev.modifiers & 1) != 0);
       break;
+    case osEvt:
+      // A suspend or resume event: the bars are the Finder's while the
+      // program is in the background.
+      if (((unsigned long)ev.message >> 24) == suspendResumeMessage) {
+        g_background = (ev.message & resumeFlag) == 0;
+        UpdateBars();
+      }
+      break;
     case kHighLevelEvent:
       // The Finder's Quit Application (System 7): ask the program to quit.
       if (ev.message == 'aevt' && *(long*)&ev.where == 'quit') OnQuit();
@@ -226,6 +320,7 @@ bool Start() {
   g_screen = (**GetGrayRgn()).rgnBBox;
   g_menuBar = LMGetMBarHeight();
   g_screen.top = 0;
+  atexit(ShowBarsAtExit);
   if (g_color) {
     // A direct PixMap's table is not read, but CopyBits wants one.
     g_directTable = (CTabHandle)NewHandleClear(sizeof(ColorTable));
@@ -259,10 +354,17 @@ void MousePosition(int* x, int* y) {
   GetMouse(&p);
   LocalToGlobal(&p);
   *x = p.h;
-  *y = p.v - g_menuBar;
+  *y = p.v;
 }
 
 void ScreenSize(int* width, int* height) {
+  *width = g_screen.right - g_screen.left;
+  *height = g_screen.bottom - g_screen.top;
+}
+
+void WorkArea(int* x, int* y, int* width, int* height) {
+  *x = 0;
+  *y = g_menuBar;
   *width = g_screen.right - g_screen.left;
   *height = g_screen.bottom - g_screen.top - g_menuBar;
 }
@@ -278,15 +380,18 @@ void Show(void* win, bool show, bool behind) {
   WindowPtr w = (WindowPtr)win;
   if (!show) {
     HideWindow(w);
+    UpdateBars();
     return;
   }
   ShowWindow(w);
   if (!behind) SelectWindow(w);
+  UpdateBars();
 }
 
 void Destroy(void* win) {
   if (g_tracking == (WindowPtr)win) g_tracking = NULL;
   DisposeWindow((WindowPtr)win);
+  UpdateBars();
 }
 
 void SetFrame(void* win, int x, int y, int width, int height) {
@@ -294,6 +399,7 @@ void SetFrame(void* win, int x, int y, int width, int height) {
   Rect r = MacRect(x, y, width, height);
   MoveWindow(w, r.left, r.top, false);
   SizeWindow(w, (short)width, (short)height, true);
+  UpdateBars();
 }
 
 void SetTitle(void* win, const char* macRoman) {

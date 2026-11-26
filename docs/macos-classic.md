@@ -59,6 +59,19 @@ Items). The second menu has the program's name and holds Exit, which
 does the same as the Finder's Quit Application command. The program's own menus stay in its windows.
 A program that starts the Toolbox itself makes its own menu bar.
 
+The program's screen (`SM_CXSCREEN`, `SM_CYSCREEN`) is the whole Mac
+screen. The work area (`SPI_GETWORKAREA`) is the screen below the menu
+bar, as on Windows it is the screen without the taskbar. Maximized
+windows and new windows go in the work area. While a visible window
+covers the whole screen, for example a screen saver, the backend hides
+the menu bar and the Control Strip. It shows them again when no window
+covers the screen, when the program goes to the background (a suspend
+event), and when the program ends.
+
+A program that the Finder opens gets the name of its file as its
+command line, not the path. Old programs skip their name up to the
+first space, and the folder names in a path often have spaces.
+
 The layer reads the TrueType fonts in the Fonts folder of the System
 Folder (System 7.1 and later), from the `sfnt` resources of the font
 suitcases. Thus `GetGlyphOutline` and `wglUseFontOutlines` work. Before

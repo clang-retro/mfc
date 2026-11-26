@@ -33,13 +33,15 @@ enum { kMove, kDown, kUp };
 // Starts the Toolbox if the program has not, and tells whether the
 // backend can show windows here (Color QuickDraw or not).
 bool Start();
-// The screen below the menu bar.
+// The whole screen, with the menu bar.
 void ScreenSize(int* width, int* height);
+// The part of the screen that windows can use: the screen below the menu
+// bar.
+void WorkArea(int* x, int* y, int* width, int* height);
 // Gives the POSIX path of the Fonts folder in the System Folder, or
 // false when the system has none (before System 7.1).
 bool FontsFolder(std::string* path);
-// Where the pointer is now, from the top-left corner of the screen below
-// the menu bar (y is less than 0 in the menu bar).
+// Where the pointer is now, from the top-left corner of the screen.
 void MousePosition(int* x, int* y);
 // A window with no frame of its own (the layer draws the frame), hidden.
 // owner comes back in the On functions.

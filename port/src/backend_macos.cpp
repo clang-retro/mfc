@@ -122,11 +122,18 @@ struct MacBackend : Backend {
   // Gives the backend's name.
   const char* Name() override { return "macos"; }
 
-  // Gives the size of the screen below the menu bar.
+  // Gives the size of the whole screen, with the menu bar.
   SIZE ScreenSize() override {
     int w, h;
     mactb::ScreenSize(&w, &h);
     return SIZE{w, h};
+  }
+
+  // Gives the screen below the menu bar.
+  RECT WorkArea() override {
+    int x, y, w, h;
+    mactb::WorkArea(&x, &y, &w, &h);
+    return RECT{x, y, x + w, y + h};
   }
 
   // Reads where the pointer is now, from the Event Manager.
