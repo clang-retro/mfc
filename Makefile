@@ -233,7 +233,8 @@ SHARED_LIBS = $(OUT)/mfc.dll $(OUT)/mfcu.dll $(OUT)/libmfcs.a $(OUT)/libmfcus.a
 # static ones' names (libmfc.so, libmfcu.so and libwinport.so, or .dylib),
 # so that -L$(OUT)/shared picks them; libmfcs.a and libmfcus.a are as on
 # Windows. The program's main stays in the program (libmfcs.a for MFC
-# programs), so the layer's crt0 is left out of libwinport.so.
+# programs), so the layer's crt0 is left out of libwinport.so. So is the
+# screen saver host (saver_host.cpp), which calls the program's WinMain.
 ifeq ($(PORTABLE),1)
 STATIC_LIBS += $(PORT_LIB) $(SCRNSAVE_LIBS)
 ifneq ($(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
@@ -324,7 +325,7 @@ $(OUT)/libmfcus.a: $(OBJS_SU)
 	$(AR) rcs $@ $^
 
 ifeq ($(PORTABLE),1)
-$(PORT_SHLIB): $(filter-out $(OUT)/port/crt0.o,$(PORT_OBJS))
+$(PORT_SHLIB): $(filter-out $(OUT)/port/crt0.o $(OUT)/port/saver_host.o,$(PORT_OBJS))
 	@mkdir -p $(dir $@)
 	$(CXX) $(ALL_CXXFLAGS) $(SHLIB_FLAGS) -o $@ $^ $(SHLIB_SYSLIBS) $(DLL_LDFLAGS)
 
