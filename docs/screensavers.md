@@ -55,8 +55,10 @@ For a Unicode program, use `-DUNICODE -D_UNICODE` and `-lscrnsavw`.
 
 ## Limits
 
-- OpenGL screen savers do not run: the `wgl` functions fail, because the
-  layer has no OpenGL.
+- OpenGL screen savers draw through the OpenGL of the system (Mac OS X,
+  and the classic Mac OS on PowerPC) or through the generic
+  implementation (Linux, and the classic Mac OS on 68k). See
+  [software-opengl.md](software-opengl.md).
 - There are no passwords (`ScreenSaverChangePassword` does nothing, and
   `SCRM_VERIFYPW` is not sent).
 

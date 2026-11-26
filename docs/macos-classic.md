@@ -13,7 +13,7 @@ C++ libraries of [clang-retro/mac-sdk](https://github.com/clang-retro/mac-sdk).
 | Threads (`CWinThread`, the synchronization objects) | Builds, over mac-sdk's cooperative threads |
 | Window classes | Build. The Toolbox backend shows the top-level windows (see [Windows](#windows)). |
 | Sockets (`CAsyncSocket`, `CSocket`) and WinInet (`CInternetSession`) | Build, over the sockets of mac-sdk's C library (MacTCP). `tests/socktest.cpp` passes on a 68020. `tests/inettest.cpp` passes its HTTP and FTP checks, but it does not finish in the simulator's step limit. HTTPS is not available (no OpenSSL). |
-| OpenGL (`wgl`, `GL/gl.h`, `GL/glu.h`) | PowerPC only, over Apple OpenGL and AGL. Passes `tests/gltest.cpp` with the simulator's fake OpenGL. See [OpenGL](#opengl). |
+| OpenGL (`wgl`, `GL/gl.h`, `GL/glu.h`) | Over Apple OpenGL and AGL on PowerPC, and over the generic implementation (a software renderer) on 68k. Passes `tests/gltest.cpp` on both. See [OpenGL](#opengl). |
 | Screen savers (`scrnsave.h`) | Pass `tests/sstest.cpp`. See [screensavers.md](screensavers.md). |
 | COM between programs | Not available. COM in one program works. |
 
@@ -122,8 +122,8 @@ programs have about 2 MB of code.
 
 `make check TARGET=m68k-apple-macos MACSDK=...` (or the PowerPC target)
 runs `tests/run-macos-tests.sh`. The script builds `tests/core.cpp`,
-`tests/memtest.cpp` and `tests/sstest.cpp`, and `tests/gltest.cpp` on
-PowerPC (set `MACOS_TESTS` for others, for example `wintest`) into applications and runs
+`tests/memtest.cpp`, `tests/sstest.cpp` and `tests/gltest.cpp` (set
+`MACOS_TESTS` for others, for example `wintest`) into applications and runs
 them in mac-sdk's simulators: `tools/sim68k.py` as a 68000 and a 68020,
 or `tools/simppc.py`. The simulators need the Python module `unicorn`.
 Without it, the script only builds the tests.
@@ -148,11 +148,16 @@ single-buffered format, copy the buffer into the window with GDI.
   with the Code Fragment Manager (`FindSymbol`).
 - Apple OpenGL is a weak import. On a Mac without it, the program
   starts and `wglCreateContext` fails with `ERROR_NOT_SUPPORTED`.
-- There is no OpenGL on 68k. The `wgl` functions fail there, and a
-  program that calls `gl` functions does not link.
 - The test runs in the simulator over a fake OpenGL that clears the
   buffer but does not draw. On a real Mac, the program draws with
   Apple's software renderer or the graphics card.
+
+On 68k, Apple OpenGL is not available. The `wgl` functions use the
+generic implementation (`port/softgl`), a software renderer for OpenGL
+1.1 that is in `libwinport.a`. It operates on a 68000 without a
+floating-point unit. Compile with `-Iport/softgl/include` after
+`-Iport/include`. `tests/gltest.cpp` draws a triangle with it in the
+68000 and 68020 simulators. See [software-opengl.md](software-opengl.md).
 
 ## Limits
 

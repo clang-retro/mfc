@@ -3,9 +3,13 @@
 // in memory: 32-bit pixels, 0xAARRGGBB in the machine's byte order, top
 // row first. opengl.cpp copies the buffer to the window.
 //
-// Backends: CGL on Mac OS X (in opengl.cpp, WINPORT_CGL) and AGL on the
-// classic Mac OS for PowerPC (opengl_agl.cpp, WINPORT_AGL). Without one,
-// WINPORT_GL is not defined and the wgl functions fail.
+// Backends, as the installable client drivers (ICDs) of Windows: CGL on
+// Mac OS X (in opengl.cpp, WINPORT_CGL) and AGL on the classic Mac OS for
+// PowerPC (opengl_agl.cpp, WINPORT_AGL). On the other systems (Linux, the
+// classic Mac OS on 68k) the backend is the generic implementation, a
+// software renderer, as GDI Generic is on Windows (opengl_soft.cpp over
+// port/softgl, WINPORT_SOFTGL). Define WINPORT_NO_SOFTGL to leave it out:
+// then WINPORT_GL is not defined there and the wgl functions fail.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -16,8 +20,10 @@
 #define WINPORT_CGL 1
 #elif defined(macintosh) && (defined(__POWERPC__) || defined(__powerpc__))
 #define WINPORT_AGL 1
+#elif !defined(WINPORT_NO_SOFTGL)
+#define WINPORT_SOFTGL 1
 #endif
-#if defined(WINPORT_CGL) || defined(WINPORT_AGL)
+#if defined(WINPORT_CGL) || defined(WINPORT_AGL) || defined(WINPORT_SOFTGL)
 #define WINPORT_GL 1
 #endif
 

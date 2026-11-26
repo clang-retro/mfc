@@ -301,8 +301,10 @@ symbolic links need none. `SHBrowseForFolder` shows a tree of the
 folders below its root and answers the `BFFM_` messages. There are no
 visual styles: the controls draw the classic look, as Windows does with
 styles turned off, so `OpenThemeData` opens nothing and `IsThemeActive`
-is false. There is one monitor, the screen. There is no OpenGL: no
-pixel format can be chosen and `wglCreateContext` fails.
+is false. There is one monitor, the screen. OpenGL programs draw through
+the OpenGL framework on macOS, and elsewhere through the generic
+implementation, a software renderer for OpenGL 1.1 in `libwinport.a`
+(see [docs/software-opengl.md](docs/software-opengl.md)).
 
 Layered windows show with their transparency: `SetLayeredWindowAttributes`
 with a color key and a constant alpha, and `UpdateLayeredWindow` (and
@@ -506,7 +508,7 @@ try.
   on Linux and macOS, the monitor, layered windows, PrintWindow, scroll
   bar and cursor information, flat scroll bars, GradientFill, shadowed
   text, glyph indices and fractional widths, a metafile's description,
-  themes and OpenGL (both absent), DECIMAL conversions and comparison,
+  themes (absent) and the OpenGL pixel formats, DECIMAL conversions and comparison,
   and the shell namespace (ID lists, shell folders and their items) with
   SHBrowseForFolder driven through its callback, on the console.
 * `disptest`: the automation helpers in `afxdisp.h` (COleDateTime and

@@ -33,7 +33,8 @@ That code has its own `WinMain` and does not use `libscrnsave.a`.
    | `CXXFLAGS` | More flags for C++: the headers of the C++ library. |
    | `LDFLAGS` | The flags for the link: the target, the linker and the C++ library. |
    | `MFC_OUT` | The directory with `libwinport.a` and `libglaux.a`. |
-   | `SYSLIBS` | The system libraries. The default is `-framework Cocoa -framework OpenGL -framework GLUT`. |
+   | `SYSLIBS` | The system libraries. The default is `-framework Cocoa -framework OpenGL -framework GLUT` for Mac OS X, and `-ldl -lpthread -lm` for the other systems. |
+   | `MACSDK` | clang-retro/mac-sdk, for the classic Mac OS. Its `tools/macapp.py` links the programs. The default is `../mac-sdk`. |
    | `HOST_CXX` | A C++ compiler for the host. `res2cpp.py` uses it to read the macros of the layer. The default is `CXX`. |
 
 3. Run the script:
@@ -50,6 +51,40 @@ The programs go into `out/bin`. The log of the commands goes into
 
 For Mac OS X 10.4 on PowerPC, see [macosx-10.4.md](macosx-10.4.md) for
 the values of the variables.
+
+## Linux and the classic Mac OS on 68k
+
+On Linux and on the 68k Mac, the screen savers draw with the generic
+implementation of OpenGL, a software renderer in `libwinport.a`. See
+[software-opengl.md](software-opengl.md). The script adds the headers
+of the renderer (`port/softgl/include`) itself.
+
+For Linux:
+
+```sh
+make static TARGET=x86_64-linux-gnu STDLIB= AR=ar
+CFLAGS="--target=x86_64-linux-gnu" MFC_OUT=build/x86_64-linux-gnu \
+  python3 tools/build-sdk-samples.py --sdk path/to/SDK --out out
+```
+
+For the classic Mac OS on 68k (`MS` is the folder of mac-sdk):
+
+```sh
+make static TARGET=m68k-apple-macos BIN=path/to/llvm/bin MACSDK=$MS
+L=$MS/lib
+export BIN=path/to/llvm/bin MACSDK=$MS MFC_OUT=build/m68k-apple-macos HOST_CXX=clang++
+export CFLAGS="--target=m68k-apple-macos -Os -mcmodel=large -femulated-tls \
+  -ffunction-sections -fdata-sections -D_GNU_SOURCE -isystem $PWD/port/compat/macos \
+  -isystem $L/include -isystem $MS/include"
+export CXXFLAGS="-nostdinc++ -isystem $L/include/c++/15.2.0/m68k-apple-macos \
+  -isystem $L/include/c++/15.2.0 -fexceptions -frtti"
+python3 tools/build-sdk-samples.py --sdk path/to/SDK --out out --only 3dfo,flwbox,maze,pipes,text3d
+```
+
+The programs are applications in MacBinary (`out/bin/*.scr.bin`). Use
+`-isystem`, not `-I`, for the headers of mac-sdk. Then the GL headers
+of the renderer come before the GL headers of mac-sdk, which are for
+Apple OpenGL on PowerPC.
 
 ## Universal programs for current macOS
 

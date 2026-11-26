@@ -35,7 +35,7 @@ esac
 # WTL's headers, for wtltest (tools/fetch-wtl.sh puts them here).
 WTL_INCLUDE=${WTL_INCLUDE:-build/wtl/include}
 if [ $NATIVE = 1 ]; then
-  TESTS=${NATIVE_TESTS:-"core memtest wintest disptest isapitest dlgtest sditest mditest cmntest splittest docktest dbtest odbctest rvtest socktest occtest dlltest inettest oletest iptest docobtest linktest bindtest richtest richsrvtest autotest srvtest atlwintest atltest conntest ctltest wltest dragtest daotest dvtest htmltest atlctltest atlutiltest cdlgtest vistatest iotest audiotest wtltest sstest"}
+  TESTS=${NATIVE_TESTS:-"core memtest wintest disptest isapitest dlgtest sditest mditest cmntest splittest docktest dbtest odbctest rvtest socktest occtest dlltest inettest oletest iptest docobtest linktest bindtest richtest richsrvtest autotest srvtest atlwintest atltest conntest ctltest wltest dragtest daotest dvtest htmltest atlctltest atlutiltest cdlgtest vistatest iotest audiotest wtltest sstest gltest"}
   T=$OUT/tests
   mkdir -p "$T/a" "$T/u"
   python3 tests/gen-toolbar-bmp.py "$T/toolbar.bmp" 6 || exit 1
@@ -51,6 +51,12 @@ if [ $NATIVE = 1 ]; then
   CXXFLAGS="--target=$TARGET ${SYSROOT:+--sysroot=$SYSROOT} ${STDLIB--stdlib=libc++} -std=c++17"
   CXXFLAGS="$CXXFLAGS -Wall -Wno-unused-function -Wno-overloaded-virtual -Wno-missing-exception-spec"
   CXXFLAGS="$CXXFLAGS -Iport/include -Iinclude -Itests"
+  # Where the system has no OpenGL, the GL headers of the generic
+  # implementation (port/softgl), which libwinport has.
+  case $TARGET in
+    *apple* | *darwin*) ;;
+    *) CXXFLAGS="$CXXFLAGS -Iport/softgl/include" ;;
+  esac
   # What libwinport needs from the system: Cocoa and OpenGL on macOS.
   case $TARGET in
     *apple* | *darwin*) SYSLIBS="-framework Cocoa -framework OpenGL -lpthread" ;;

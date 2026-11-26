@@ -4,7 +4,9 @@
 //
 // tests/run-macos-tests.sh runs it on the classic Mac OS for PowerPC,
 // over the PowerPC simulator's fake OpenGL (mac-sdk tools/fakegl.py),
-// which clears the off-screen buffer. Where there is no OpenGL backend,
+// which clears the off-screen buffer. On Linux and the classic Mac OS for
+// 68k it runs over the generic implementation (port/softgl), which also
+// draws a triangle. Where there is no OpenGL backend,
 // ChoosePixelFormat fails with ERROR_NOT_SUPPORTED and the test passes.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
@@ -12,6 +14,7 @@
 #include <windows.h>
 #include <GL/gl.h>
 #include <stdio.h>
+#include <string.h>
 
 static int g_failures = 0;
 #define CHECK(cond)                                          \
@@ -87,8 +90,35 @@ int main() {
   CHECK(GetPixel(dc, 1, 1) == RGB(255, 0, 0));
   CHECK(GetPixel(dc, kW - 2, kH - 2) == RGB(255, 0, 0));
 
-  // An extension function, found by its name.
-  CHECK(wglGetProcAddress("glActiveTextureARB") != NULL);
+  // The extension functions, found by their names: those of the
+  // extensions that GL_EXTENSIONS names.
+  const char* ext = (const char*)glGetString(GL_EXTENSIONS);
+  CHECK(ext != NULL);
+  if (ext && strstr(ext, "GL_ARB_multitexture")) CHECK(wglGetProcAddress("glActiveTextureARB") != NULL);
+  if (ext && strstr(ext, "GL_WIN_swap_hint")) CHECK(wglGetProcAddress("glAddSwapHintRectWIN") != NULL);
+  if (ext && strstr(ext, "GL_EXT_paletted_texture")) CHECK(wglGetProcAddress("glColorTableEXT") != NULL);
+  CHECK(wglGetProcAddress("glNoSuchFunctionXYZ") == NULL);
+
+  // The generic implementation (port/softgl) draws: a green triangle on
+  // the left half, behind which the red clear stays on the right.
+  const char* renderer = (const char*)glGetString(GL_RENDERER);
+  if (renderer && strstr(renderer, "Generic")) {
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, kW, 0, kH, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glColor3f(0.0f, 1.0f, 0.0f);
+    glBegin(GL_TRIANGLES);
+    glVertex2i(0, 0);
+    glVertex2i(kW / 2, 0);
+    glVertex2i(0, kH);
+    glEnd();
+    CHECK(SwapBuffers(dc));
+    CHECK(GetPixel(dc, 2, kH - 3) == RGB(0, 255, 0));
+    CHECK(GetPixel(dc, kW - 2, 1) == RGB(255, 0, 0));
+    CHECK(glGetError() == GL_NO_ERROR);
+  }
 
   CHECK(wglMakeCurrent(NULL, NULL));
   CHECK(wglGetCurrentContext() == NULL);
