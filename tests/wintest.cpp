@@ -4084,6 +4084,59 @@ static std::string ReadText(const char* path) {
   return t;
 }
 
+// The classic look: the checker of a scroll bar's trough, a list box's
+// scroll bar that shows again when the items no longer fit, and the
+// pointed thumb of a trackbar.
+static void TestClassicLook() {
+  HWND w = ::CreateWindowW(L"STATIC", L"classic", WS_OVERLAPPEDWINDOW, 0, 0, 300, 200, NULL, NULL, NULL, NULL);
+  HDC screen = ::GetDC(NULL);
+  HDC mem = ::CreateCompatibleDC(screen);
+  HBITMAP bm = ::CreateCompatibleBitmap(screen, 200, 60);
+  HGDIOBJ old = ::SelectObject(mem, bm);
+
+  // With the standard colors, the trough is a checker of face and
+  // highlight.
+  HBRUSH trough = (HBRUSH)::DefWindowProcW(w, WM_CTLCOLORSCROLLBAR, (WPARAM)mem, (LPARAM)w);
+  RECT r = {0, 0, 8, 8};
+  ::FillRect(mem, &r, trough);
+  COLORREF face = ::GetSysColor(COLOR_3DFACE) & 0xFFFFFF, hilite = ::GetSysColor(COLOR_3DHILIGHT) & 0xFFFFFF;
+  CHECK((PixelAt(mem, 0, 0) == face && PixelAt(mem, 1, 0) == hilite) ||
+        (PixelAt(mem, 0, 0) == hilite && PixelAt(mem, 1, 0) == face));
+  CHECK(PixelAt(mem, 0, 0) == PixelAt(mem, 1, 1));
+
+  // A list box made empty hides its bar, and shows it again.
+  HWND list = ::CreateWindowW(L"LISTBOX", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL, 0, 0, 100, 60, w, NULL, NULL, NULL);
+  CHECK(!(::GetWindowLongW(list, GWL_STYLE) & WS_VSCROLL));
+  for (int i = 0; i < 20; i++) ::SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)L"item");
+  CHECK(::GetWindowLongW(list, GWL_STYLE) & WS_VSCROLL);
+  ::SendMessageW(list, LB_RESETCONTENT, 0, 0);
+  CHECK(!(::GetWindowLongW(list, GWL_STYLE) & WS_VSCROLL));
+  ::SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)L"one");
+  for (int i = 0; i < 20; i++) ::SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)L"item");
+  CHECK(::GetWindowLongW(list, GWL_STYLE) & WS_VSCROLL);
+
+  // A trackbar's thumb points down to its ticks: the bottom corners of
+  // its rectangle are background, and the point is dark.
+  HWND track = ::CreateWindowW(TRACKBAR_CLASSW, L"", WS_CHILD | WS_VISIBLE | TBS_AUTOTICKS, 0, 0, 200, 40, w,
+                               NULL, NULL, NULL);
+  RECT th = {};
+  ::SendMessageW(track, TBM_GETTHUMBRECT, 0, (LPARAM)&th);
+  RECT all = {0, 0, 200, 60};
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  ::SendMessageW(track, WM_PRINTCLIENT, (WPARAM)mem, PRF_CLIENT);
+  COLORREF dark = ::GetSysColor(COLOR_3DDKSHADOW) & 0xFFFFFF;
+  CHECK(PixelAt(mem, th.left, th.bottom - 1) != dark);
+  CHECK(PixelAt(mem, th.right - 1, th.bottom - 1) != dark);
+  CHECK(PixelAt(mem, (th.left + th.right - 1) / 2, th.bottom - 1) == dark);
+  CHECK(PixelAt(mem, th.left, th.top) == hilite);
+
+  ::SelectObject(mem, old);
+  ::DeleteObject(bm);
+  ::DeleteDC(mem);
+  ::ReleaseDC(NULL, screen);
+  ::DestroyWindow(w);
+}
+
 // The system colors: from HKCU\Control Panel\Colors when a program
 // starts, in the registry file as a person writes them; SetSysColors for
 // the session; and captions shaded from one color to another.
@@ -4334,6 +4387,7 @@ int main() {
 #ifdef _WINPORT
   TestCaptionIcon();
   TestTheme();
+  TestClassicLook();
 #endif
   TestCWnd();
 #ifdef _WINPORT

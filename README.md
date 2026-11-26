@@ -300,8 +300,9 @@ rename what is in them. There are no shortcuts (`SFGAO_LINK`), since
 symbolic links need none. `SHBrowseForFolder` shows a tree of the
 folders below its root and answers the `BFFM_` messages. There are no
 visual styles: the controls draw the classic look, as Windows does with
-styles turned off, so `OpenThemeData` opens nothing and `IsThemeActive`
-is false. There is one monitor, the screen. OpenGL programs draw through
+styles turned off (scroll bar troughs in a checker, trackbar thumbs with
+a point, tabs with cut corners), so `OpenThemeData` opens nothing and
+`IsThemeActive` is false. There is one monitor, the screen. OpenGL programs draw through
 the OpenGL framework on macOS, and elsewhere through the generic
 implementation, a software renderer for OpenGL 1.1 in `libwinport.a`
 (see [docs/software-opengl.md](docs/software-opengl.md)).
@@ -517,7 +518,9 @@ try.
   on Linux and macOS, the monitor, layered windows, PrintWindow, scroll
   bar and cursor information, flat scroll bars, GradientFill, shadowed
   text, glyph indices and fractional widths, a metafile's description,
-  themes (absent) and the OpenGL pixel formats, DECIMAL conversions and comparison,
+  themes (absent), the classic look (the checker of a scroll bar's
+  trough, a list box's scroll bar shown again, a trackbar's pointed
+  thumb) and the OpenGL pixel formats, DECIMAL conversions and comparison,
   and the shell namespace (ID lists, shell folders and their items) with
   SHBrowseForFolder driven through its callback, on the console.
 * `disptest`: the automation helpers in `afxdisp.h` (COleDateTime and
@@ -1376,9 +1379,8 @@ ATLVERIFY, ATLENSURE and ATLTRY, the trace categories (CTraceCategory,
 
 OLE 2 for Win16 (the core and window classes and the control bars
 are there, see [docs/win16.md](docs/win16.md)), and finishing the
-portable layer (see Linux and
-macOS above), with controls drawn in the classic style, so that MFC
-programs build and look the same on macOS and Linux.
+portable layer (see Linux and macOS above), so that MFC programs build
+and look the same on macOS and Linux.
 
 ## Layout
 

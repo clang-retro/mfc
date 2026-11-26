@@ -235,7 +235,10 @@ RECT SysMenuRect(Window* w);
 // Scroll bars, for windows' own and the ScrollBar control: drawing one
 // at r, and a click on one at r (in w's window coordinates), which sends
 // WM_HSCROLL or WM_VSCROLL to notify with ctl as lParam.
-void PaintScrollBar(HDC dc, const RECT& r, bool vertical, const ScrollBar* sb);
+// The trough's brush is trough, or with NULL the one DefWindowProc gives
+// for WM_CTLCOLORSCROLLBAR (ScrollTroughBrush).
+HBRUSH ScrollTroughBrush(HDC dc);
+void PaintScrollBar(HDC dc, const RECT& r, bool vertical, const ScrollBar* sb, HBRUSH trough = NULL);
 void ClickScrollBar(Window* w, ScrollBar* sb, RECT r, bool vertical, POINT screen, HWND notify, HWND ctl);
 
 // Menus (user_menu.cpp): the menu window's class, drawing the menu bar,
