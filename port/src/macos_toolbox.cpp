@@ -60,6 +60,8 @@ MenuHandle g_appleMenu;    // the Apple menu, when this backend made it
 RgnHandle g_hiddenBar;     // the menu bar's area while it is hidden
 bool g_hidStrip;           // the layer hid the Control Strip
 bool g_background;         // the program is in the background
+bool g_noPointer;          // the program hides the pointer
+bool g_pointerHidden;      // the layer called HideCursor
 
 // Gives the backend's owner of a window, or NULL for another one (a
 // desk accessory's).
@@ -150,8 +152,25 @@ void UpdateBars() {
     ShowBars();
 }
 
-// Shows the bars again when the program ends.
-void ShowBarsAtExit() { ShowBars(); }
+// Hides the pointer while the program wants it hidden and is in the
+// foreground, and shows it otherwise. HideCursor and ShowCursor nest, so
+// the layer calls each once for each change.
+void UpdatePointer() {
+  bool hide = g_noPointer && !g_background;
+  if (hide == g_pointerHidden) return;
+  if (hide)
+    HideCursor();
+  else
+    ShowCursor();
+  g_pointerHidden = hide;
+}
+
+// Shows the bars and the pointer again when the program ends.
+void ShowBarsAtExit() {
+  ShowBars();
+  g_noPointer = false;
+  UpdatePointer();
+}
 
 // Converts a run of 0x00RRGGBB pixels to 1-bit black and white (1 is
 // black), with an ordered dither, into a BitMap row.
@@ -276,6 +295,7 @@ void Handle(EventRecord& ev) {
       if (((unsigned long)ev.message >> 24) == suspendResumeMessage) {
         g_background = (ev.message & resumeFlag) == 0;
         UpdateBars();
+        UpdatePointer();
       }
       break;
     case kHighLevelEvent:
@@ -355,6 +375,11 @@ void MousePosition(int* x, int* y) {
   LocalToGlobal(&p);
   *x = p.h;
   *y = p.v;
+}
+
+void ShowPointer(bool show) {
+  g_noPointer = !show;
+  UpdatePointer();
 }
 
 void ScreenSize(int* width, int* height) {

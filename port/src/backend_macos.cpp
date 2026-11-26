@@ -136,6 +136,10 @@ struct MacBackend : Backend {
     return RECT{x, y, x + w, y + h};
   }
 
+  // Shows the pointer for a cursor, or hides it for none (ShowCursor
+  // FALSE or SetCursor NULL). The pointer stays the arrow.
+  void SetCursor(HCURSOR c) override { mactb::ShowPointer(c != NULL); }
+
   // Reads where the pointer is now, from the Event Manager.
   bool ReadCursor(POINT* p) override {
     int x, y;
