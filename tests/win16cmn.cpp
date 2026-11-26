@@ -1,6 +1,6 @@
 // win16cmn.cpp - the common controls that the library draws on 16-bit
 // Windows: CImageList, CProgressCtrl, CSliderCtrl, CSpinButtonCtrl and
-// CTabCtrl, CHeaderCtrl and CListCtrl. The frame makes each control, sends it messages and checks the
+// CTabCtrl, CHeaderCtrl, CListCtrl and CTreeCtrl. The frame makes each control, sends it messages and checks the
 // notifications that the frame gets. It prints ALL PASSED when each
 // check holds, because Wine gives the exit code 0 whatever a 16-bit
 // program returns.
@@ -19,7 +19,7 @@ static BOOL g_bDone = FALSE;  // the test ran to the end
     }                                                        \
   } while (0)
 
-enum { IDC_PROGRESS = 100, IDC_SLIDER, IDC_BUDDY, IDC_SPIN, IDC_TAB, IDC_LIST };
+enum { IDC_PROGRESS = 100, IDC_SLIDER, IDC_BUDDY, IDC_SPIN, IDC_TAB, IDC_LIST, IDC_TREE };
 
 class CMainFrame : public CFrameWnd {
 public:
@@ -29,6 +29,7 @@ public:
   CSpinButtonCtrl m_spin;
   CTabCtrl m_tab;
   CListCtrl m_list;
+  CTreeCtrl m_tree;
   UINT m_nLastHScroll;    // the code of the last WM_HSCROLL from the slider
   int m_nLastHScrollPos;  // its position
   int m_nVScrolls;        // the WM_VSCROLL messages from the up-down control
@@ -38,12 +39,15 @@ public:
   int m_nSelChange;       // the TCN_SELCHANGE notifications
   BOOL m_bRefuseTab;      // TCN_SELCHANGING refuses the change
   int m_nItemChanged;     // the LVN_ITEMCHANGED notifications
+  int m_nExpanding;       // the TVN_ITEMEXPANDING notifications
+  int m_nTreeSelChanged;  // the TVN_SELCHANGED notifications
+  int m_nTreeDeleted;     // the TVN_DELETEITEM notifications
 
   /// Starts with no notifications.
   CMainFrame()
       : m_nLastHScroll(0xFFFF), m_nLastHScrollPos(-1), m_nVScrolls(0), m_nDeltaPos(0),
         m_nLastDelta(0), m_nSelChanging(0), m_nSelChange(0), m_bRefuseTab(FALSE),
-        m_nItemChanged(0) {}
+        m_nItemChanged(0), m_nExpanding(0), m_nTreeSelChanged(0), m_nTreeDeleted(0) {}
 
   /// Makes the controls and runs the checks.
   void RunTests() {
@@ -53,6 +57,7 @@ public:
     TestSpin();
     TestTab();
     TestListView();
+    TestTreeView();
     g_bDone = TRUE;
   }
 
@@ -304,6 +309,91 @@ protected:
     m_list.UpdateWindow();
   }
 
+  /// Checks a tree view: the links of the items, a sorted insert, the
+  /// expansion and its notifications, the selection, the item rectangles,
+  /// a click on a button, a sort and the deletion of a branch.
+  void TestTreeView() {
+    CHECK(m_tree.Create(WS_CHILD | WS_VISIBLE | WS_BORDER | TVS_HASLINES | TVS_HASBUTTONS |
+                            TVS_LINESATROOT | TVS_SHOWSELALWAYS,
+                        CRect(420, 160, 620, 300), this, IDC_TREE));
+    HTREEITEM hFruit = m_tree.InsertItem("Fruit");
+    HTREEITEM hVeg = m_tree.InsertItem("Vegetables");
+    CHECK(hFruit != NULL && hVeg != NULL && hFruit != hVeg);
+    HTREEITEM hPear = m_tree.InsertItem("pear", hFruit);
+    HTREEITEM hApple = m_tree.InsertItem("apple", hFruit, TVI_FIRST);
+    HTREEITEM hFig = m_tree.InsertItem("fig", hFruit, TVI_SORT);  // between apple and pear
+    m_tree.InsertItem("leek", hVeg);
+    CHECK(m_tree.GetCount() == 6);
+    CHECK(m_tree.GetRootItem() == hFruit);
+    CHECK(m_tree.GetNextSiblingItem(hFruit) == hVeg);
+    CHECK(m_tree.GetChildItem(hFruit) == hApple);
+    CHECK(m_tree.GetNextSiblingItem(hApple) == hFig);
+    CHECK(m_tree.GetNextSiblingItem(hFig) == hPear);
+    CHECK(m_tree.GetParentItem(hPear) == hFruit);
+    CHECK(m_tree.GetItemText(hFig) == "fig");
+    CHECK(m_tree.ItemHasChildren(hFruit) && !m_tree.ItemHasChildren(hPear));
+    CHECK(m_tree.SetItemData(hPear, 3) && m_tree.GetItemData(hPear) == 3);
+
+    // A hidden item has no rectangle until its parent is expanded.
+    CRect rc;
+    CHECK(!m_tree.GetItemRect(hApple, &rc, TRUE));
+    CHECK(m_tree.Expand(hFruit, TVE_EXPAND));
+    CHECK(m_nExpanding == 1);
+    CHECK(m_tree.GetItemState(hFruit, TVIS_EXPANDED) & TVIS_EXPANDED);
+    CHECK(m_tree.GetItemRect(hApple, &rc, TRUE));
+    CRect rcFruit;
+    CHECK(m_tree.GetItemRect(hFruit, &rcFruit, TRUE));
+    CHECK(rc.left > rcFruit.left && rc.top > rcFruit.top);
+    CHECK(m_tree.GetNextVisibleItem(hFruit) == hApple);
+    // Another TVM_EXPAND does not notify after the first expansion.
+    CHECK(m_tree.Expand(hFruit, TVE_COLLAPSE) && m_tree.Expand(hFruit, TVE_EXPAND));
+    CHECK(m_nExpanding == 1);
+
+    // The selection.
+    CHECK(m_tree.SelectItem(hFig));
+    CHECK(m_tree.GetSelectedItem() == hFig);
+    CHECK(m_nTreeSelChanged == 1);
+    CHECK(m_tree.GetItemState(hFig, TVIS_SELECTED) & TVIS_SELECTED);
+    UINT flags = 0;
+    CHECK(m_tree.GetItemRect(hFig, &rc, TRUE));
+    CHECK(m_tree.HitTest(rc.CenterPoint(), &flags) == hFig && (flags & TVHT_ONITEMLABEL));
+
+    // A click on the button of the second root item expands it.
+    CHECK(m_tree.GetItemRect(hVeg, &rc, TRUE));
+    CPoint ptButton(rc.left - 3 - (int)m_tree.GetIndent() / 2, rc.CenterPoint().y);
+    CHECK(m_tree.HitTest(ptButton, &flags) == hVeg && (flags & TVHT_ONITEMBUTTON));
+    m_tree.SendMessage(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(ptButton.x, ptButton.y));
+    m_tree.SendMessage(WM_LBUTTONUP, 0, MAKELPARAM(ptButton.x, ptButton.y));
+    CHECK(m_tree.GetItemState(hVeg, TVIS_EXPANDED) & TVIS_EXPANDED);
+    CHECK(m_nExpanding == 2);
+
+    // A collapse moves the selection to the collapsed item.
+    CHECK(m_tree.Expand(hFruit, TVE_COLLAPSE));
+    CHECK(m_tree.GetSelectedItem() == hFruit);
+
+    // A sort by the text, from the largest to the smallest.
+    TVSORTCB sort;
+    sort.hParent = hFruit;
+    sort.lpfnCompare = CompareDown;
+    sort.lParam = 0;
+    m_tree.SetItemData(hApple, 1);
+    m_tree.SetItemData(hFig, 2);
+    CHECK(m_tree.SortChildrenCB(&sort));
+    CHECK(m_tree.GetChildItem(hFruit) == hPear);
+    CHECK(m_tree.SortChildren(hFruit));
+    CHECK(m_tree.GetChildItem(hFruit) == hApple);
+
+    // The deletion of a branch notifies for each item.
+    int nDeleted = m_nTreeDeleted;
+    CHECK(m_tree.DeleteItem(hFruit));
+    CHECK(m_nTreeDeleted - nDeleted == 4);
+    CHECK(m_tree.GetCount() == 2);
+    CHECK(m_tree.GetRootItem() == hVeg);
+    CHECK(m_tree.DeleteAllItems());
+    CHECK(m_tree.GetCount() == 0 && m_tree.GetRootItem() == NULL);
+    m_tree.UpdateWindow();
+  }
+
   /// Keeps the code and the position of the scroll messages of the
   /// slider.
   afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar) {
@@ -349,6 +439,27 @@ protected:
     *pResult = 0;
   }
 
+  /// Counts TVN_ITEMEXPANDING.
+  afx_msg void OnItemExpanding(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nExpanding++;
+    *pResult = 0;
+  }
+
+  /// Counts TVN_SELCHANGED.
+  afx_msg void OnTreeSelChanged(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nTreeSelChanged++;
+    *pResult = 0;
+  }
+
+  /// Counts TVN_DELETEITEM.
+  afx_msg void OnTreeDeleteItem(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nTreeDeleted++;
+    *pResult = 0;
+  }
+
   DECLARE_MESSAGE_MAP()
 };
 
@@ -359,6 +470,9 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
   ON_NOTIFY(TCN_SELCHANGING, IDC_TAB, OnSelChanging)
   ON_NOTIFY(TCN_SELCHANGE, IDC_TAB, OnSelChange)
   ON_NOTIFY(LVN_ITEMCHANGED, IDC_LIST, OnItemChanged)
+  ON_NOTIFY(TVN_ITEMEXPANDING, IDC_TREE, OnItemExpanding)
+  ON_NOTIFY(TVN_SELCHANGED, IDC_TREE, OnTreeSelChanged)
+  ON_NOTIFY(TVN_DELETEITEM, IDC_TREE, OnTreeDeleteItem)
 END_MESSAGE_MAP()
 
 class CTestApp : public CWinApp {

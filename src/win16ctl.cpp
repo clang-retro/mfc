@@ -1646,6 +1646,8 @@ LONG AFXAPI _AfxW16RegisterCtlClasses(LONG fReg) {
     fDone |= AFX_WNDCOMMCTL_TAB_REG;
   if ((fReg & AFX_WNDCOMMCTL_LISTVIEW_REG) && _AfxW16RegisterListClasses())
     fDone |= AFX_WNDCOMMCTL_LISTVIEW_REG;
+  if ((fReg & AFX_WNDCOMMCTL_TREEVIEW_REG) && _AfxW16RegisterTreeClass())
+    fDone |= AFX_WNDCOMMCTL_TREEVIEW_REG;
   return fDone;
 }
 

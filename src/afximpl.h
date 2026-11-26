@@ -28,6 +28,9 @@ LONG AFXAPI _AfxW16RegisterCtlClasses(LONG fReg);
 // Registers the header control and list view classes of 16-bit Windows
 // (win16lv.cpp). Gives TRUE when both classes are there.
 BOOL AFXAPI _AfxW16RegisterListClasses();
+// Registers the tree view class of 16-bit Windows (win16tv.cpp). Gives
+// TRUE when the class is there.
+BOOL AFXAPI _AfxW16RegisterTreeClass();
 #endif
 
 // Idle updates for in-place frames, which are not under the main window

@@ -125,10 +125,10 @@ hook that closes them. These classes need a real
 - Most of the common controls. 16-bit Windows does not have
   `comctl32.dll`. The library draws the toolbar, the status bar, the
   progress bar, the trackbar, the up-down control, the tab control, the
-  header control and the list view itself (see "The toolbar and the
-  status bar" and "The other common controls"). `CTreeCtrl`, `CReBar`
-  and the other classes of `afxcmn.h` compile, but their windows are not
-  made.
+  header control, the list view and the tree view itself (see "The
+  toolbar and the status bar" and "The other common controls").
+  `CReBar` and the other classes of `afxcmn.h` compile, but their
+  windows are not made.
 - Tooltips of other windows. Only the toolbar shows tooltips (see "The
   toolbar and the status bar"). `CToolTipCtrl` and
   `CWnd::EnableToolTips` make no window.
@@ -300,8 +300,8 @@ names are not the names of the common controls.
 
 ### The other common controls
 
-`src/win16ctl.cpp` and `src/win16lv.cpp` register six more window
-classes. `afxwin16u.h` sets the class names to the names of the
+`src/win16ctl.cpp`, `src/win16lv.cpp` and `src/win16tv.cpp` register
+seven more window classes. `afxwin16u.h` sets the class names to the names of the
 library, as for the toolbar:
 
 | Class | Name | MFC class |
@@ -312,10 +312,12 @@ library, as for the toolbar:
 | tab control | `AfxTabControl16` | `CTabCtrl` |
 | header control | `AfxHeader16` | `CHeaderCtrl` |
 | list view | `AfxListView16` | `CListCtrl` |
+| tree view | `AfxTreeView16` | `CTreeCtrl` |
 
 The files also register each class with the name of `comctl32.dll`
 (`msctls_progress32`, `msctls_trackbar32`, `msctls_updown32`,
-`SysTabControl32`, `SysHeader32` and `SysListView32`). Thus a dialog template can use these names.
+`SysTabControl32`, `SysHeader32`, `SysListView32` and
+`SysTreeView32`). Thus a dialog template can use these names.
 
 - The windows do the messages of the common controls in ANSI. They send
   `WM_HSCROLL` and `WM_VSCROLL` in the 16-bit packing: the code in
@@ -347,6 +349,16 @@ The files also register each class with the name of `comctl32.dll`
   the mouse of `comctl32.dll`. The report view uses a header control.
   The icon views always arrange the items in rows. The list view has no
   groups, no tiles, no work areas and no tooltips.
+- The tree view has the lines, the buttons, the check boxes
+  (`TVS_CHECKBOXES`), the normal and state image lists, the text, image
+  and children callbacks (`TVN_GETDISPINFO`), label editing, custom
+  draw, sorting (`TVM_SORTCHILDREN`, `TVM_SORTCHILDRENCB`), the drop
+  highlight, the insert mark, `TVN_BEGINDRAG`, the incremental search,
+  and the keys and the mouse of `comctl32.dll`. It has no tooltips and
+  no hot tracking (`TVS_TRACKSELECT`).
+- An `HTREEITEM` has 16 bits. `TVI_ROOT`, `TVI_FIRST`, `TVI_LAST` and
+  `TVI_SORT` become 0, 1, 2 and 3, so the handles of the items start
+  at 4.
 - `LVM_SORTITEMS` gives `lParamSort` in `wParam`. A 16-bit `wParam` holds
   only 16 bits, so the comparison function gets only the low word.
 - `UDM_GETRANGE32` gets two pointers. A 16-bit `wParam` holds only an
@@ -392,7 +404,7 @@ the handle as a word key (`CMapWordToPtr`).
 | `win16doc` | `CSingleDocTemplate`, File New, `OnDraw`, `OnUpdate`, and the command routing to the view and the document |
 | `win16mdi` | `CMultiDocTemplate`, two MDI children, the MDI menus, and `MDIGetActive`, `MDINext` and `MDIActivate` |
 | `win16bar` | `CToolBar` and `CStatusBar`: the button layout, a click, the idle update, the message pane, docking at the left edge, floating, the tooltip of a button, and `ShowControlBar` |
-| `win16cmn` | `CImageList`, `CProgressCtrl`, `CSliderCtrl`, `CSpinButtonCtrl`, `CTabCtrl` and `CListCtrl`: the images and masks, the ranges and positions, the keys, the buddy of the up-down control, a click on a tab, the columns, items, find and sort of a report view, and the notifications |
+| `win16cmn` | `CImageList`, `CProgressCtrl`, `CSliderCtrl`, `CSpinButtonCtrl`, `CTabCtrl`, `CListCtrl` and `CTreeCtrl`: the images and masks, the ranges and positions, the keys, the buddy of the up-down control, a click on a tab, the columns, items, find and sort of a report view, the links, expansion, selection and sort of a tree, and the notifications |
 
 The window tests need an X display. Without one, the script starts
 itself under `xvfb-run`.
