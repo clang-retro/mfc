@@ -47,6 +47,9 @@ BOOL AFXAPI _AfxW16RegisterDateClasses();
 // Registers the rebar class of 16-bit Windows (win16rebar.cpp). Gives
 // TRUE when the class is there.
 BOOL AFXAPI _AfxW16RegisterReBarClass();
+// Registers the animation class of 16-bit Windows (win16anim.cpp). Gives
+// TRUE when the class is there.
+BOOL AFXAPI _AfxW16RegisterAnimateClass();
 #endif
 
 // Idle updates for in-place frames, which are not under the main window

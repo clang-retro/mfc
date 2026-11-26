@@ -39,6 +39,9 @@ The window classes:
 - the profile functions of `CWinApp`, with the INI file of the program
 - `CToolBar`, `CStatusBar` and `CDialogBar`, with docking, floating and
   the idle update of the buttons and panes
+- all the common controls of `afxcmn.h`, and `CReBar`. 16-bit Windows
+  does not have `comctl32.dll`, so the library draws them itself (see
+  "The other common controls")
 
 OLE automation (`afxdisp.h`):
 
@@ -122,15 +125,6 @@ hook that closes them. These classes need a real
 - OLE controls. `CWnd::CreateControlSite` fails (`src/win16ole.cpp`).
 - The Change Icon, Convert, Change Source and Object Properties
   dialogs (see "OLE documents").
-- Most of the common controls. 16-bit Windows does not have
-  `comctl32.dll`. The library draws the toolbar, the status bar, the
-  progress bar, the trackbar, the up-down control, the tab control, the
-  header control, the list view, the tree view, the tooltip, the hot
-  key, the IP address control, the pager, the link control, the
-  extended combo box, the month calendar, the date and time picker and
-  the rebar itself
-  (see "The toolbar and the status bar" and "The other common
-  controls"). `CAnimateCtrl` compiles, but their windows are not made.
 - `CWnd::EnableToolTips`. It does nothing on any target of the library.
   Use a `CToolTipCtrl` (see "The other common controls").
 - The shell file dialog (`IFileDialog`). `CFileDialog` always shows the
@@ -303,8 +297,8 @@ names are not the names of the common controls.
 
 `src/win16ctl.cpp`, `src/win16lv.cpp`, `src/win16tv.cpp`,
 `src/win16tt.cpp`, `src/win16misc.cpp`, `src/win16cbex.cpp`,
-`src/win16date.cpp` and `src/win16rebar.cpp` register sixteen more
-window classes. `afxwin16u.h` sets the class names to the names of the
+`src/win16date.cpp`, `src/win16rebar.cpp` and `src/win16anim.cpp`
+register seventeen more window classes. `afxwin16u.h` sets the class names to the names of the
 library, as for the toolbar:
 
 | Class | Name | MFC class |
@@ -325,13 +319,14 @@ library, as for the toolbar:
 | month calendar | `AfxMonthCal16` | `CMonthCalCtrl` |
 | date and time picker | `AfxDateTime16` | `CDateTimeCtrl` |
 | rebar | `AfxReBar16` | `CReBarCtrl`, `CReBar` |
+| animation | `AfxAnimate16` | `CAnimateCtrl` |
 
 The files also register each class with the name of `comctl32.dll`
 (`msctls_progress32`, `msctls_trackbar32`, `msctls_updown32`,
 `SysTabControl32`, `SysHeader32`, `SysListView32`, `SysTreeView32`,
 `tooltips_class32`, `msctls_hotkey32`, `SysIPAddress32`, `SysPager`
-`ComboBoxEx32`, `SysMonthCal32`, `SysDateTimePick32` and
-`ReBarWindow32`). `CLinkCtrl` always uses the name `SysLink`. Thus a dialog template can use these names.
+`ComboBoxEx32`, `SysMonthCal32`, `SysDateTimePick32`,
+`ReBarWindow32` and `SysAnimate32`). `CLinkCtrl` always uses the name `SysLink`. Thus a dialog template can use these names.
 
 - The windows do the messages of the common controls in ANSI. They send
   `WM_HSCROLL` and `WM_VSCROLL` in the 16-bit packing: the code in
@@ -433,6 +428,14 @@ The files also register each class with the name of `comctl32.dll`
   `CCS_VERT` works. The rebar shows no tooltips: `RB_SETTOOLTIPS` only
   keeps the window. It has no drop target (`RBS_REGISTERDROP`) and no
   custom draw.
+- The animation control plays the first video stream of an AVI clip
+  from an `AVI` resource or from a file. The frames are uncompressed
+  (1, 4, 8 or 24 bits) or `BI_RLE8`. The control reads each frame from
+  the file when it shows it, so a clip can be larger than 64 KB, but
+  one frame must fit in a segment. 16-bit Windows has no threads, so a
+  timer moves the clip on, as `ACS_TIMER` does. `ACS_CENTER`,
+  `ACS_AUTOPLAY` and `ACS_TRANSPARENT` (for frames of 8 bits or less)
+  work. The parent gets `ACN_START` and `ACN_STOP` in `WM_COMMAND`.
 - The `MCHT_` hit-test codes of `comctl32.dll` use the high word, but
   the `uHit` of `MCHITTESTINFO` is a 16-bit `UINT`. Thus `afxwin16u.h`
   moves `MCHT_TITLE`, `MCHT_CALENDAR` and `MCHT_TODAYLINK` to 0x1000,
@@ -493,7 +496,7 @@ the handle as a word key (`CMapWordToPtr`).
 | `win16doc` | `CSingleDocTemplate`, File New, `OnDraw`, `OnUpdate`, and the command routing to the view and the document |
 | `win16mdi` | `CMultiDocTemplate`, two MDI children, the MDI menus, and `MDIGetActive`, `MDINext` and `MDIActivate` |
 | `win16bar` | `CToolBar` and `CStatusBar`: the button layout, a click, the idle update, the message pane, docking at the left edge, floating, the tooltip of a button, and `ShowControlBar` |
-| `win16cmn` | `CImageList`, `CProgressCtrl`, `CSliderCtrl`, `CSpinButtonCtrl`, `CTabCtrl`, `CListCtrl`, `CTreeCtrl`, `CToolTipCtrl`, `CHotKeyCtrl`, `CIPAddressCtrl`, `CPagerCtrl`, `CLinkCtrl`, `CComboBoxEx`, `CMonthCalCtrl`, `CDateTimeCtrl`, `CReBarCtrl` and `CReBar`: the images and masks, the ranges and positions, the keys, the buddy of the up-down control, a click on a tab, the columns, items, find and sort of a report view, the links, expansion, selection and sort of a tree, the tools, text, hit test, show and pop of a tooltip, a hot key and its rules, the fields and ranges of an IP address, the buttons and position of a pager, the links of a link control, the items of an extended combo box, the selection, today, range and hit test of a month calendar, the format, keys, range and check box of a date and time picker, the bands, rows, hit test, drag and smallest width of a rebar, a `CReBar` in the frame, and the notifications |
+| `win16cmn` | `CImageList`, `CProgressCtrl`, `CSliderCtrl`, `CSpinButtonCtrl`, `CTabCtrl`, `CListCtrl`, `CTreeCtrl`, `CToolTipCtrl`, `CHotKeyCtrl`, `CIPAddressCtrl`, `CPagerCtrl`, `CLinkCtrl`, `CComboBoxEx`, `CMonthCalCtrl`, `CDateTimeCtrl`, `CReBarCtrl`, `CReBar` and `CAnimateCtrl`: the images and masks, the ranges and positions, the keys, the buddy of the up-down control, a click on a tab, the columns, items, find and sort of a report view, the links, expansion, selection and sort of a tree, the tools, text, hit test, show and pop of a tooltip, a hot key and its rules, the fields and ranges of an IP address, the buttons and position of a pager, the links of a link control, the items of an extended combo box, the selection, today, range and hit test of a month calendar, the format, keys, range and check box of a date and time picker, the bands, rows, hit test, drag and smallest width of a rebar, a `CReBar` in the frame, the frames of an RLE8 clip, play and stop of an animation, and the notifications |
 
 The window tests need an X display. Without one, the script starts
 itself under `xvfb-run`.

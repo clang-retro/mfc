@@ -315,6 +315,8 @@ int _AfxW16AcceleratorCount(HACCEL hAccel);
 #define DATETIMEPICK_CLASS "AfxDateTime16"
 #undef REBARCLASSNAME
 #define REBARCLASSNAME "AfxReBar16"
+#undef ANIMATE_CLASS
+#define ANIMATE_CLASS "AfxAnimate16"
 
 // The CB_ messages of 16-bit Windows are WM_USER + 0 to WM_USER + 24, the
 // numbers of the CBEM_ messages of comctl32.dll. The extended combo box

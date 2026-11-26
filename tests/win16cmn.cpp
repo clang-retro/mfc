@@ -2,7 +2,7 @@
 // Windows: CImageList, CProgressCtrl, CSliderCtrl, CSpinButtonCtrl and
 // CTabCtrl, CHeaderCtrl, CListCtrl, CTreeCtrl, CToolTipCtrl, CHotKeyCtrl,
 // CIPAddressCtrl, CPagerCtrl, CLinkCtrl, CComboBoxEx, CMonthCalCtrl,
-// CDateTimeCtrl, CReBarCtrl and CReBar. The frame makes each control, sends it messages and
+// CDateTimeCtrl, CReBarCtrl, CReBar and CAnimateCtrl. The frame makes each control, sends it messages and
 // checks the notifications that the frame gets. It prints ALL PASSED when each
 // check holds, because Wine gives the exit code 0 whatever a 16-bit
 // program returns.
@@ -24,7 +24,8 @@ static BOOL g_bDone = FALSE;  // the test ran to the end
 
 enum { IDC_PROGRESS = 100, IDC_SLIDER, IDC_BUDDY, IDC_SPIN, IDC_TAB, IDC_LIST, IDC_TREE, IDC_HOTKEY, IDC_IPADDR, IDC_PAGER,
        IDC_PAGERCHILD, IDC_LINK, IDC_COMBOEX, IDC_MONTHCAL,
-       IDC_DATETIME, IDC_REBAR, IDC_RBEDIT1, IDC_RBEDIT2, IDC_RBEDIT3, IDC_RBEDIT4, IDT_RECT = 500 };
+       IDC_DATETIME, IDC_REBAR, IDC_RBEDIT1, IDC_RBEDIT2, IDC_RBEDIT3, IDC_RBEDIT4, IDC_ANIMATE,
+       IDT_RECT = 500 };
 
 class CMainFrame : public CFrameWnd {
 public:
@@ -46,6 +47,7 @@ public:
   CReBarCtrl m_rebar;
   CEdit m_rbEdit1, m_rbEdit2, m_rbEdit3, m_rbEdit4;
   CReBar m_wndReBar;
+  CAnimateCtrl m_anim;
   UINT m_nLastHScroll;    // the code of the last WM_HSCROLL from the slider
   int m_nLastHScrollPos;  // its position
   int m_nVScrolls;        // the WM_VSCROLL messages from the up-down control
@@ -74,6 +76,8 @@ public:
   int m_nRbDeleted;       // the RBN_DELETEDBAND notifications
   int m_nRbBeginDrag;     // the RBN_BEGINDRAG notifications
   int m_nRbEndDrag;       // the RBN_ENDDRAG notifications
+  int m_nAnStart;         // the ACN_START notifications
+  int m_nAnStop;          // the ACN_STOP notifications
 
   /// Starts with no notifications.
   CMainFrame()
@@ -83,7 +87,7 @@ public:
         m_nTipText(0), m_nTipShow(0), m_nTipPop(0), m_nHotKeyChange(0), m_nFieldChanged(0),
         m_nCalcSize(0), m_nLinkClick(0), m_iLastLink(-1), m_nCbInserted(0), m_nCbDeleted(0),
         m_nCalSelChange(0), m_nDtChange(0), m_nRbHeight(0), m_nRbDeleted(0),
-        m_nRbBeginDrag(0), m_nRbEndDrag(0) {}
+        m_nRbBeginDrag(0), m_nRbEndDrag(0), m_nAnStart(0), m_nAnStop(0) {}
 
   /// Makes the controls and runs the checks.
   void RunTests() {
@@ -103,6 +107,7 @@ public:
     TestMonthCal();
     TestDateTime();
     TestReBar();
+    TestAnimate();
     g_bDone = TRUE;
   }
 
@@ -831,6 +836,147 @@ protected:
     m_wndReBar.UpdateWindow();
   }
 
+  /// Writes a DWORD to a buffer in little-endian order and moves the
+  /// pointer on.
+  static void PutDword(BYTE*& p, DWORD dw) {
+    for (int i = 0; i < 4; i++) *p++ = (BYTE)(dw >> (8 * i));
+  }
+
+  /// Writes a four-character code to a buffer and moves the pointer on.
+  static void PutFcc(BYTE*& p, const char* psz) {
+    for (int i = 0; i < 4; i++) *p++ = (BYTE)psz[i];
+  }
+
+  /// Writes a small AVI clip to a file: 4 by 2 pixels, 8-bit BI_RLE8,
+  /// with four colors and three frames. Frame 0 is red on the bottom row,
+  /// and green and blue on the top row. Frame 1 changes the top-left
+  /// pixel to white. Frame 2 is an empty chunk, the same as frame 1.
+  static BOOL WriteClip(LPCSTR lpszPath) {
+    static const BYTE frame0[] = {4, 0, 0, 0, 2, 1, 2, 2, 0, 1};
+    static const BYTE frame1[] = {0, 0, 1, 3, 0, 1};
+    BYTE buf[400];
+    BYTE* p = buf;
+    PutFcc(p, "RIFF");
+    BYTE* pRiffSize = p;
+    PutDword(p, 0);
+    PutFcc(p, "AVI ");
+    PutFcc(p, "LIST");
+    PutDword(p, 4 + 8 + 56 + 8 + 4 + 8 + 56 + 8 + 56);
+    PutFcc(p, "hdrl");
+    PutFcc(p, "avih");
+    PutDword(p, 56);
+    static const DWORD avih[14] = {100000, 0, 0, 0x10, 3, 0, 1, 0, 4, 2, 0, 0, 0, 0};
+    for (int i = 0; i < 14; i++) PutDword(p, avih[i]);
+    PutFcc(p, "LIST");
+    PutDword(p, 4 + 8 + 56 + 8 + 56);
+    PutFcc(p, "strl");
+    PutFcc(p, "strh");
+    PutDword(p, 56);
+    PutFcc(p, "vids");
+    PutFcc(p, "mrle");
+    static const DWORD strh[10] = {0, 0, 0, 1, 10, 0, 3, 0, 0xFFFFFFFFUL, 0};
+    for (int i = 0; i < 10; i++) PutDword(p, strh[i]);
+    PutDword(p, 0);           // rcFrame: left, top
+    PutDword(p, 0x00020004);  // rcFrame: right 4, bottom 2
+    PutFcc(p, "strf");
+    PutDword(p, 56);
+    PutDword(p, 40);
+    PutDword(p, 4);
+    PutDword(p, 2);
+    PutDword(p, 0x00080001);  // 1 plane, 8 bits
+    PutDword(p, BI_RLE8);
+    PutDword(p, 0);
+    PutDword(p, 0);
+    PutDword(p, 0);
+    PutDword(p, 4);
+    PutDword(p, 0);
+    PutDword(p, 0x00FF0000);  // red (RGBQUAD: blue, green, red)
+    PutDword(p, 0x0000FF00);  // green
+    PutDword(p, 0x000000FF);  // blue
+    PutDword(p, 0x00FFFFFF);  // white
+    PutFcc(p, "LIST");
+    PutDword(p, 4 + 8 + sizeof(frame0) + 8 + sizeof(frame1) + 8);
+    BYTE* pMovi = p + 4;
+    PutFcc(p, "movi");
+    DWORD off0 = (DWORD)(p - (pMovi - 4));
+    PutFcc(p, "00dc");
+    PutDword(p, sizeof(frame0));
+    memcpy(p, frame0, sizeof(frame0));
+    p += sizeof(frame0);
+    DWORD off1 = (DWORD)(p - (pMovi - 4));
+    PutFcc(p, "00dc");
+    PutDword(p, sizeof(frame1));
+    memcpy(p, frame1, sizeof(frame1));
+    p += sizeof(frame1);
+    DWORD off2 = (DWORD)(p - (pMovi - 4));
+    PutFcc(p, "00dc");
+    PutDword(p, 0);
+    PutFcc(p, "idx1");
+    PutDword(p, 48);
+    PutFcc(p, "00dc");
+    PutDword(p, 0x10);
+    PutDword(p, off0);
+    PutDword(p, sizeof(frame0));
+    PutFcc(p, "00dc");
+    PutDword(p, 0);
+    PutDword(p, off1);
+    PutDword(p, sizeof(frame1));
+    PutFcc(p, "00dc");
+    PutDword(p, 0);
+    PutDword(p, off2);
+    PutDword(p, 0);
+    BYTE* pEnd = p;
+    p = pRiffSize;
+    PutDword(p, (DWORD)(pEnd - buf - 8));
+    HFILE hFile = ::_lcreat(lpszPath, 0);
+    if (hFile == HFILE_ERROR) return FALSE;
+    UINT cb = (UINT)(pEnd - buf);
+    BOOL bOk = ::_lwrite(hFile, buf, cb) == cb;
+    ::_lclose(hFile);
+    return bOk;
+  }
+
+  /// Checks the animation control: a file that is not there, a clip from
+  /// a file, the size of the window, the frames (by their pixels), a
+  /// play with ACN_START and ACN_STOP, a range that is not in the clip,
+  /// and the close.
+  void TestAnimate() {
+    CHECK(m_anim.Create(WS_CHILD | WS_VISIBLE, CRect(430, 10, 470, 40), this, IDC_ANIMATE));
+    CHECK(!m_anim.Open("NOCLIP.AVI"));
+    CHECK(WriteClip("W16CMN.AVI"));
+    CHECK(m_anim.Open("W16CMN.AVI"));
+    CRect rc;
+    m_anim.GetClientRect(&rc);
+    CHECK(rc.Width() == 4 && rc.Height() == 2);  // the size of a frame
+    m_anim.UpdateWindow();
+    CClientDC dc(&m_anim);
+    CHECK(dc.GetPixel(0, 0) == RGB(0, 255, 0));    // top left: green
+    CHECK(dc.GetPixel(3, 0) == RGB(0, 0, 255));    // top right: blue
+    CHECK(dc.GetPixel(1, 1) == RGB(255, 0, 0));    // bottom: red
+    CHECK(m_anim.Seek(1));
+    CHECK(dc.GetPixel(0, 0) == RGB(255, 255, 255));  // frame 1 changes the top left
+    CHECK(dc.GetPixel(3, 0) == RGB(0, 0, 255));
+    CHECK(m_anim.Seek(2));                           // an empty chunk
+    CHECK(dc.GetPixel(0, 0) == RGB(255, 255, 255));
+    CHECK(m_anim.Seek(0));                           // back to the key frame
+    CHECK(dc.GetPixel(0, 0) == RGB(0, 255, 0));
+    CHECK(m_nAnStart == 0);  // a seek does not play
+    CHECK(m_anim.Play(0, (UINT)-1, (UINT)-1));
+    CHECK(m_nAnStart == 1 && m_anim.SendMessage(ACM_ISPLAYING, 0, 0));
+    CHECK(m_anim.Stop());
+    CHECK(m_nAnStop == 1 && !m_anim.SendMessage(ACM_ISPLAYING, 0, 0));
+    CHECK(!m_anim.Play(0, 5, 1));  // there are only three frames
+    CHECK(m_anim.Close());
+    OFSTRUCT of;
+    ::OpenFile("W16CMN.AVI", &of, OF_DELETE);
+  }
+
+  /// Counts ACN_START.
+  afx_msg void OnAnimStart() { m_nAnStart++; }
+
+  /// Counts ACN_STOP.
+  afx_msg void OnAnimStop() { m_nAnStop++; }
+
   /// Keeps the code and the position of the scroll messages of the
   /// slider.
   afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar) {
@@ -1029,6 +1175,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
   ON_NOTIFY(RBN_DELETEDBAND, IDC_REBAR, OnRbDeletedBand)
   ON_NOTIFY(RBN_BEGINDRAG, IDC_REBAR, OnRbBeginDrag)
   ON_NOTIFY(RBN_ENDDRAG, IDC_REBAR, OnRbEndDrag)
+  ON_CONTROL(ACN_START, IDC_ANIMATE, OnAnimStart)
+  ON_CONTROL(ACN_STOP, IDC_ANIMATE, OnAnimStop)
 END_MESSAGE_MAP()
 
 class CTestApp : public CWinApp {
