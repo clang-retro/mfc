@@ -41,6 +41,9 @@ void WorkArea(int* x, int* y, int* width, int* height);
 // Gives the POSIX path of the Fonts folder in the System Folder, or
 // false when the system has none (before System 7.1).
 bool FontsFolder(std::string* path);
+// Shows or hides the pointer (the Win32 cursor NULL). A hidden pointer
+// shows again while the program is in the background, and at exit.
+void ShowPointer(bool show);
 // Where the pointer is now, from the top-left corner of the screen.
 void MousePosition(int* x, int* y);
 // A window with no frame of its own (the layer draws the frame), hidden.

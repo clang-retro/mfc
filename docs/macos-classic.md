@@ -68,6 +68,10 @@ the menu bar and the Control Strip. It shows them again when no window
 covers the screen, when the program goes to the background (a suspend
 event), and when the program ends.
 
+`ShowCursor(FALSE)` and `SetCursor(NULL)` hide the Mac pointer
+(`HideCursor`). The pointer shows again while the program is in the
+background and when the program ends. The pointer is always the arrow.
+
 A program that the Finder opens gets the name of its file as its
 command line, not the path. Old programs skip their name up to the
 first space, and the folder names in a path often have spaces.
