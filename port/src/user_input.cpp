@@ -596,6 +596,10 @@ int WINAPI GetKeyNameTextA(LONG lp, LPSTR buf, int max) {
 
 BOOL WINAPI GetCursorPos(LPPOINT p) {
   if (!p) return FALSE;
+  // Before the first mouse input, the last one is not where the pointer is.
+  POINT now;
+  if (Backend* b = GetBackend())
+    if (b->ReadCursor(&now)) CursorPos() = now;
   *p = CursorPos();
   return TRUE;
 }

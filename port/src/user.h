@@ -325,6 +325,9 @@ struct Backend {
   virtual bool BeginMoveSize(Window* /*w*/, LRESULT /*hit*/) { return false; }
   // The pointer's shape over the program's windows; NULL hides it.
   virtual void SetCursor(HCURSOR /*c*/) {}
+  // Reads where the pointer is now, in screen coordinates. Gives false
+  // when the backend cannot; then the last mouse input gives it.
+  virtual bool ReadCursor(POINT* /*p*/) { return false; }
   // The system's clipboard. ClipboardForeign says whether another
   // program holds it, with a number that changes when it puts something
   // new there; ClipboardFetch gets its text. ClipboardOwn takes it for

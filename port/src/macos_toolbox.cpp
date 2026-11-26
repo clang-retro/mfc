@@ -231,6 +231,15 @@ bool Start() {
   return true;
 }
 
+// Gives where the pointer is now, in the coordinates of MacRect.
+void MousePosition(int* x, int* y) {
+  Point p;
+  GetMouse(&p);
+  LocalToGlobal(&p);
+  *x = p.h;
+  *y = p.v - g_menuBar;
+}
+
 void ScreenSize(int* width, int* height) {
   *width = g_screen.right - g_screen.left;
   *height = g_screen.bottom - g_screen.top - g_menuBar;
