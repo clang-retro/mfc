@@ -1,13 +1,14 @@
 // win16cmn.cpp - the common controls that the library draws on 16-bit
 // Windows: CImageList, CProgressCtrl, CSliderCtrl, CSpinButtonCtrl and
 // CTabCtrl, CHeaderCtrl, CListCtrl, CTreeCtrl, CToolTipCtrl, CHotKeyCtrl,
-// CIPAddressCtrl, CPagerCtrl, CLinkCtrl, CComboBoxEx, CMonthCalCtrl and
-// CDateTimeCtrl. The frame makes each control, sends it messages and
+// CIPAddressCtrl, CPagerCtrl, CLinkCtrl, CComboBoxEx, CMonthCalCtrl,
+// CDateTimeCtrl, CReBarCtrl and CReBar. The frame makes each control, sends it messages and
 // checks the notifications that the frame gets. It prints ALL PASSED when each
 // check holds, because Wine gives the exit code 0 whatever a 16-bit
 // program returns.
 #include <afxwin.h>
 #include <afxcmn.h>
+#include <afxext.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -23,7 +24,7 @@ static BOOL g_bDone = FALSE;  // the test ran to the end
 
 enum { IDC_PROGRESS = 100, IDC_SLIDER, IDC_BUDDY, IDC_SPIN, IDC_TAB, IDC_LIST, IDC_TREE, IDC_HOTKEY, IDC_IPADDR, IDC_PAGER,
        IDC_PAGERCHILD, IDC_LINK, IDC_COMBOEX, IDC_MONTHCAL,
-       IDC_DATETIME, IDT_RECT = 500 };
+       IDC_DATETIME, IDC_REBAR, IDC_RBEDIT1, IDC_RBEDIT2, IDC_RBEDIT3, IDC_RBEDIT4, IDT_RECT = 500 };
 
 class CMainFrame : public CFrameWnd {
 public:
@@ -42,6 +43,9 @@ public:
   CComboBoxEx m_comboEx;
   CMonthCalCtrl m_cal;
   CDateTimeCtrl m_dtp;
+  CReBarCtrl m_rebar;
+  CEdit m_rbEdit1, m_rbEdit2, m_rbEdit3, m_rbEdit4;
+  CReBar m_wndReBar;
   UINT m_nLastHScroll;    // the code of the last WM_HSCROLL from the slider
   int m_nLastHScrollPos;  // its position
   int m_nVScrolls;        // the WM_VSCROLL messages from the up-down control
@@ -66,6 +70,10 @@ public:
   int m_nCbDeleted;       // the CBEN_DELETEITEM notifications
   int m_nCalSelChange;    // the MCN_SELCHANGE notifications
   int m_nDtChange;        // the DTN_DATETIMECHANGE notifications
+  int m_nRbHeight;        // the RBN_HEIGHTCHANGE notifications
+  int m_nRbDeleted;       // the RBN_DELETEDBAND notifications
+  int m_nRbBeginDrag;     // the RBN_BEGINDRAG notifications
+  int m_nRbEndDrag;       // the RBN_ENDDRAG notifications
 
   /// Starts with no notifications.
   CMainFrame()
@@ -74,7 +82,8 @@ public:
         m_nItemChanged(0), m_nExpanding(0), m_nTreeSelChanged(0), m_nTreeDeleted(0),
         m_nTipText(0), m_nTipShow(0), m_nTipPop(0), m_nHotKeyChange(0), m_nFieldChanged(0),
         m_nCalcSize(0), m_nLinkClick(0), m_iLastLink(-1), m_nCbInserted(0), m_nCbDeleted(0),
-        m_nCalSelChange(0), m_nDtChange(0) {}
+        m_nCalSelChange(0), m_nDtChange(0), m_nRbHeight(0), m_nRbDeleted(0),
+        m_nRbBeginDrag(0), m_nRbEndDrag(0) {}
 
   /// Makes the controls and runs the checks.
   void RunTests() {
@@ -93,6 +102,7 @@ public:
     TestComboBoxEx();
     TestMonthCal();
     TestDateTime();
+    TestReBar();
     g_bDone = TRUE;
   }
 
@@ -722,6 +732,105 @@ protected:
     m_dtp.UpdateWindow();
   }
 
+  /// Adds a band with an edit control to the rebar.
+  BOOL AddRbBand(CEdit& edit, UINT nID, LPCSTR lpszText, UINT fStyle, UINT cxMin, UINT cx,
+                 LPARAM lParam) {
+    if (!edit.Create(WS_CHILD | WS_BORDER | ES_AUTOHSCROLL, CRect(0, 0, 10, 10), &m_rebar, nID))
+      return FALSE;
+    REBARBANDINFO rbbi;
+    memset(&rbbi, 0, sizeof(rbbi));
+    rbbi.cbSize = sizeof(rbbi);
+    rbbi.fMask = RBBIM_STYLE | RBBIM_CHILD | RBBIM_CHILDSIZE | RBBIM_SIZE | RBBIM_ID | RBBIM_LPARAM;
+    if (lpszText != NULL) {
+      rbbi.fMask |= RBBIM_TEXT;
+      rbbi.lpText = (LPSTR)lpszText;
+    }
+    rbbi.fStyle = fStyle;
+    rbbi.hwndChild = edit.m_hWnd;
+    rbbi.cxMinChild = cxMin;
+    rbbi.cyMinChild = 20;
+    rbbi.cx = cx;
+    rbbi.wID = nID;
+    rbbi.lParam = lParam;
+    return m_rebar.InsertBand((UINT)-1, &rbbi);
+  }
+
+  /// Checks the rebar: the bands and their information, the rows, the
+  /// layout along a row, the hit test, a hidden band, the removal of a
+  /// band, the smallest width of a band and a drag. Then checks a CReBar
+  /// in the frame.
+  void TestReBar() {
+    CHECK(m_rebar.Create(WS_CHILD | WS_VISIBLE | RBS_BANDBORDERS | RBS_VARHEIGHT | CCS_NODIVIDER |
+                             CCS_NORESIZE | CCS_NOPARENTALIGN,
+                         CRect(10, 480, 410, 540), this, IDC_REBAR));
+    CHECK(AddRbBand(m_rbEdit1, IDC_RBEDIT1, "Name", RBBS_GRIPPERALWAYS | RBBS_CHILDEDGE, 50, 150, 0));
+    CHECK(AddRbBand(m_rbEdit2, IDC_RBEDIT2, NULL, 0, 60, 100, 77));
+    CHECK(m_nRbHeight >= 1);
+    CHECK(m_rebar.GetBandCount() == 2);
+    CHECK(m_rebar.GetRowCount() == 1);
+    CHECK(m_rebar.IDToIndex(IDC_RBEDIT2) == 1);
+    char szText[16];
+    REBARBANDINFO rbbi;
+    memset(&rbbi, 0, sizeof(rbbi));
+    rbbi.cbSize = sizeof(rbbi);
+    rbbi.fMask = RBBIM_TEXT | RBBIM_LPARAM | RBBIM_ID;
+    rbbi.lpText = szText;
+    rbbi.cch = sizeof(szText);
+    CHECK(m_rebar.GetBandInfo(0, &rbbi) && strcmp(szText, "Name") == 0 && rbbi.wID == IDC_RBEDIT1);
+    rbbi.fMask = RBBIM_LPARAM;
+    CHECK(m_rebar.GetBandInfo(1, &rbbi) && rbbi.lParam == 77);
+    // The last band goes to the end of the row.
+    CRect rc0, rc1;
+    CHECK(m_rebar.GetRect(0, &rc0) && m_rebar.GetRect(1, &rc1));
+    CHECK(rc0.left == 0 && rc0.right == 150 && rc1.left == 150 && rc1.right == 400);
+    // The child is in its band, after the header.
+    CRect rcChild;
+    m_rbEdit1.GetWindowRect(&rcChild);
+    m_rebar.ScreenToClient(&rcChild);
+    CHECK(rcChild.left > rc0.left && rcChild.right <= rc0.right && rcChild.Height() == 20);
+    CHECK(m_rbEdit1.IsWindowVisible());
+    RBHITTESTINFO hit;
+    memset(&hit, 0, sizeof(hit));
+    hit.pt.x = rc0.left + 3;
+    hit.pt.y = rc0.top + rc0.Height() / 2;
+    CHECK(m_rebar.HitTest(&hit) == 0 && hit.flags == RBHT_GRABBER);
+    hit.pt.x = rcChild.left + 2;
+    CHECK(m_rebar.HitTest(&hit) == 0 && hit.flags == RBHT_CLIENT);
+    // A band with RBBS_BREAK starts a second row.
+    int nHeight = m_nRbHeight;
+    CHECK(AddRbBand(m_rbEdit3, IDC_RBEDIT3, "Find", RBBS_BREAK, 80, 200, 0));
+    CHECK(m_rebar.GetRowCount() == 2 && m_nRbHeight == nHeight + 1);
+    CHECK(m_rebar.ShowBand(2, FALSE) && m_rebar.GetRowCount() == 1);
+    CHECK(!m_rbEdit3.IsWindowVisible());
+    CHECK(m_rebar.DeleteBand(2) && m_nRbDeleted == 1 && m_rebar.GetBandCount() == 2);
+    // The smallest width of band 1 gives its space to band 0.
+    m_rebar.MinimizeBand(1);
+    CHECK(m_rebar.GetRect(0, &rc0) && m_rebar.GetRect(1, &rc1));
+    CHECK(rc0.right > 150 && rc1.right == 400 && rc1.Width() < 100);
+    // A drag of the left edge of band 1 to the left.
+    int xOld = rc1.left;
+    CPoint pt(rc1.left + 2, rc1.top + 2);
+    m_rebar.ClientToScreen(&pt);
+    m_rebar.BeginDrag(1, MAKELONG(pt.x, pt.y));
+    CHECK(m_nRbBeginDrag == 1);
+    pt.x -= 40;
+    m_rebar.DragMove(MAKELONG(pt.x, pt.y));
+    m_rebar.EndDrag();
+    CHECK(m_nRbEndDrag == 1);
+    CHECK(m_rebar.GetRect(1, &rc1) && rc1.left == xOld - 40 && rc1.right == 400);
+    m_rebar.UpdateWindow();
+
+    // CReBar puts its control bar at the top of the frame.
+    CHECK(m_wndReBar.Create(this));
+    CHECK(m_rbEdit4.Create(WS_CHILD | WS_BORDER, CRect(0, 0, 120, 22), &m_wndReBar, IDC_RBEDIT4));
+    CHECK(m_wndReBar.AddBar(&m_rbEdit4, "Go"));
+    CHECK(m_wndReBar.GetReBarCtrl().GetBandCount() == 1);
+    CSize size = m_wndReBar.CalcFixedLayout(TRUE, TRUE);
+    CHECK(size.cy >= 22);
+    RecalcLayout();
+    m_wndReBar.UpdateWindow();
+  }
+
   /// Keeps the code and the position of the scroll messages of the
   /// slider.
   afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar) {
@@ -864,6 +973,34 @@ protected:
     *pResult = 0;
   }
 
+  /// Counts RBN_HEIGHTCHANGE.
+  afx_msg void OnRbHeightChange(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nRbHeight++;
+    *pResult = 0;
+  }
+
+  /// Counts RBN_DELETEDBAND.
+  afx_msg void OnRbDeletedBand(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nRbDeleted++;
+    *pResult = 0;
+  }
+
+  /// Counts RBN_BEGINDRAG, and lets the drag start.
+  afx_msg void OnRbBeginDrag(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nRbBeginDrag++;
+    *pResult = 0;
+  }
+
+  /// Counts RBN_ENDDRAG.
+  afx_msg void OnRbEndDrag(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nRbEndDrag++;
+    *pResult = 0;
+  }
+
   DECLARE_MESSAGE_MAP()
 };
 
@@ -888,6 +1025,10 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
   ON_NOTIFY(CBEN_DELETEITEM, IDC_COMBOEX, OnCbDeleteItem)
   ON_NOTIFY(MCN_SELCHANGE, IDC_MONTHCAL, OnCalSelChange)
   ON_NOTIFY(DTN_DATETIMECHANGE, IDC_DATETIME, OnDtChange)
+  ON_NOTIFY(RBN_HEIGHTCHANGE, IDC_REBAR, OnRbHeightChange)
+  ON_NOTIFY(RBN_DELETEDBAND, IDC_REBAR, OnRbDeletedBand)
+  ON_NOTIFY(RBN_BEGINDRAG, IDC_REBAR, OnRbBeginDrag)
+  ON_NOTIFY(RBN_ENDDRAG, IDC_REBAR, OnRbEndDrag)
 END_MESSAGE_MAP()
 
 class CTestApp : public CWinApp {

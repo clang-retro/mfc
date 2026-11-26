@@ -1659,6 +1659,8 @@ LONG AFXAPI _AfxW16RegisterCtlClasses(LONG fReg) {
     fDone |= AFX_WNDCOMMCTL_USEREX_REG;
   if ((fReg & AFX_WNDCOMMCTL_DATE_REG) && _AfxW16RegisterDateClasses())
     fDone |= AFX_WNDCOMMCTL_DATE_REG;
+  if ((fReg & AFX_WNDCOMMCTL_COOL_REG) && _AfxW16RegisterReBarClass())
+    fDone |= AFX_WNDCOMMCTL_COOL_REG;
   return fDone;
 }
 

@@ -44,6 +44,9 @@ BOOL AFXAPI _AfxW16RegisterComboExClass();
 // Registers the month calendar class and the date and time picker class
 // of 16-bit Windows (win16date.cpp). Gives TRUE when both are there.
 BOOL AFXAPI _AfxW16RegisterDateClasses();
+// Registers the rebar class of 16-bit Windows (win16rebar.cpp). Gives
+// TRUE when the class is there.
+BOOL AFXAPI _AfxW16RegisterReBarClass();
 #endif
 
 // Idle updates for in-place frames, which are not under the main window
