@@ -26,6 +26,8 @@ namespace cocoa {
 struct Win;
 bool Start();
 void ScreenSize(int* width, int* height);
+// The screen without the menu bar and the Dock.
+void WorkArea(int* x, int* y, int* width, int* height);
 Win* Create(void* owner, int x, int y, int width, int height, bool popup);
 void Destroy(Win* w);
 enum { kHide, kShow, kShowKey };

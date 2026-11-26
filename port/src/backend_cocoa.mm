@@ -59,7 +59,7 @@ using namespace winport::cocoa;
 }
 @end
 
-// Activation, and quitting from the application menu or the Dock.
+// Activation, and Exit in the application menu or Quit in the Dock.
 @interface WinportDelegate : NSObject
 @end
 
@@ -202,7 +202,8 @@ void MakeMenu() {
   NSMenu* app = [[NSMenu alloc] initWithTitle:name];
   [app addItemWithTitle:[@"Hide " stringByAppendingString:name] action:@selector(hide:) keyEquivalent:@"h"];
   [app addItem:[NSMenuItem separatorItem]];
-  NSMenuItem* quit = (NSMenuItem*)[app addItemWithTitle:[@"Quit " stringByAppendingString:name]
+  // Exit, as Windows names it; it closes the active window as Alt+F4 does.
+  NSMenuItem* quit = (NSMenuItem*)[app addItemWithTitle:@"Exit"
                                     action:@selector(quit:)
                              keyEquivalent:@"q"];
   [quit setTarget:g_delegate];
@@ -253,6 +254,18 @@ bool Start() {
 void ScreenSize(int* width, int* height) {
   NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
   NSRect f = MainScreen();
+  *width = (int)f.size.width;
+  *height = (int)f.size.height;
+  [pool release];
+}
+
+void WorkArea(int* x, int* y, int* width, int* height) {
+  NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+  NSArray* screens = [NSScreen screens];
+  NSRect full = MainScreen();
+  NSRect f = [screens count] ? [(NSScreen*)[screens objectAtIndex:0] visibleFrame] : full;
+  *x = (int)f.origin.x;
+  *y = (int)(full.size.height - f.origin.y - f.size.height);
   *width = (int)f.size.width;
   *height = (int)f.size.height;
   [pool release];
