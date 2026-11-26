@@ -287,6 +287,72 @@ std::vector<int> TicPositions(Track* t) {
   return out;
 }
 
+// The corners of a pointed thumb in th, clockwise from the top left
+// corner. The point is toward the ticks: down (or right, when vertical),
+// or up (left) when toStart. inset moves each side in by that many
+// pixels, for the inner line.
+std::vector<POINT> PointedThumbShape(RECT th, bool vertical, bool toStart, int inset) {
+  int l = th.left + inset, t = th.top + inset, r = th.right - 1 - inset, b = th.bottom - 1 - inset;
+  if (!vertical) {
+    int mid = (l + r) / 2, d = mid - l;
+    if (toStart) return {{mid, t}, {r, t + d}, {r, b}, {l, b}, {l, t + d}};
+    return {{l, t}, {r, t}, {r, b - d}, {mid, b}, {l, b - d}};
+  }
+  int mid = (t + b) / 2, d = mid - t;
+  if (toStart) return {{l + d, t}, {r, t}, {r, b}, {l + d, b}, {l, mid}};
+  return {{l, t}, {r - d, t}, {r, mid}, {r - d, b}, {l, b}};
+}
+
+// Draws the outline of a thumb shape in the classic style: the top and
+// left sides in light, the bottom and right sides in dark. Of the two
+// sides of the point, the left one (the top one, when vertical) is light.
+void DrawThumbOutline(HDC dc, const std::vector<POINT>& pts, bool vertical, COLORREF light, COLORREF dark) {
+  HPEN lp = CreatePen(PS_SOLID, 1, light), dp = CreatePen(PS_SOLID, 1, dark);
+  HGDIOBJ old = SelectObject(dc, lp);
+  size_t n = pts.size();
+  // The light sides first; then the dark ones, each with its last pixel.
+  for (int pass = 0; pass < 2; pass++) {
+    for (size_t i = 0; i < n; i++) {
+      POINT a = pts[i], b = pts[(i + 1) % n];
+      int nx = b.y - a.y, ny = -(b.x - a.x);  // the outward normal
+      bool isLight = vertical ? (ny < 0 || (ny == 0 && nx < 0)) : (nx < 0 || (nx == 0 && ny < 0));
+      if (isLight != (pass == 0)) continue;
+      SelectObject(dc, isLight ? lp : dp);
+      MoveToEx(dc, a.x, a.y, NULL);
+      LineTo(dc, b.x, b.y);
+      if (!isLight) SetPixel(dc, b.x, b.y, dark);
+    }
+  }
+  SelectObject(dc, old);
+  DeleteObject(lp);
+  DeleteObject(dp);
+}
+
+// Returns the brush for the face of a trackbar's thumb. A thumb that is
+// dragged or disabled has the checker of a scroll bar's trough, as in
+// the classic style; ScrollTroughBrush sets the colors of dc for it.
+HBRUSH ThumbFaceBrush(HDC dc, bool checker) {
+  return checker ? ScrollTroughBrush(dc) : GetSysColorBrush(COLOR_BTNFACE);
+}
+
+// Draws the thumb of a trackbar without TBS_BOTH in the classic style:
+// a raised button with a point toward the ticks. checker gives the face
+// of a thumb that is dragged or disabled.
+void DrawPointedThumb(HDC dc, RECT th, bool vertical, bool toStart, bool checker) {
+  std::vector<POINT> outer = PointedThumbShape(th, vertical, toStart, 0);
+  HBRUSH face = ThumbFaceBrush(dc, checker);
+  HGDIOBJ ob = SelectObject(dc, face), op = SelectObject(dc, GetStockObject(NULL_PEN));
+  // A null pen leaves the right and bottom pixels out: the outline
+  // covers them.
+  Polygon(dc, outer.data(), (int)outer.size());
+  SelectObject(dc, ob);
+  SelectObject(dc, op);
+  DrawThumbOutline(dc, outer, vertical, GetSysColor(COLOR_3DHILIGHT), GetSysColor(COLOR_3DDKSHADOW));
+  DrawThumbOutline(dc, PointedThumbShape(th, vertical, toStart, 1), vertical, GetSysColor(COLOR_3DLIGHT),
+                   GetSysColor(COLOR_3DSHADOW));
+}
+
+// Draws a trackbar: the channel, the selection, the ticks and the thumb.
 void PaintTrack(Track* t, HDC dc) {
   RECT c;
   GetClientRect(t->hwnd, &c);
@@ -321,8 +387,13 @@ void PaintTrack(Track* t, HDC dc) {
     }
   }
   if (!(style & TBS_NOTHUMB)) {
-    DrawEdge(dc, &th, EDGE_RAISED, BF_RECT | BF_SOFT | BF_ADJUST);
-    FillRect(dc, &th, GetSysColorBrush(t->dragging ? COLOR_3DLIGHT : COLOR_BTNFACE));
+    bool checker = t->dragging || (style & WS_DISABLED);
+    if (style & TBS_BOTH) {
+      FillRect(dc, &th, ThumbFaceBrush(dc, checker));
+      DrawEdge(dc, &th, EDGE_RAISED, BF_RECT | BF_SOFT);
+    } else {
+      DrawPointedThumb(dc, th, v, (style & TBS_TOP) != 0, checker);
+    }
   }
   if (t->focus && !(GetWindowLongW(t->hwnd, GWL_STYLE) & WS_DISABLED)) {
     RECT f = c;
@@ -1483,11 +1554,34 @@ RECT TabBody(Tabs* t) {
   return c;
 }
 
+// Cuts the two outer corners of a tab r, as in the classic style: the
+// corner pixels take the background bg, and one pixel on the diagonal
+// joins the side to the top (or bottom) line.
+void CutTabCorners(HDC dc, RECT r, bool bottom, HBRUSH bg) {
+  if (r.right - r.left < 4 || r.bottom - r.top < 4) return;
+  int y0 = bottom ? r.bottom - 1 : r.top, y1 = bottom ? r.bottom - 2 : r.top + 1;
+  int l = r.left, rr = r.right - 1;
+  auto px = [&](int x, int y, HBRUSH br) {
+    RECT p = {x, y, x + 1, y + 1};
+    FillRect(dc, &p, br);
+  };
+  px(l, y0, bg);
+  px(l + 1, y0, bg);
+  px(l, y1, bg);
+  px(rr, y0, bg);
+  px(rr - 1, y0, bg);
+  px(rr, y1, bg);
+  px(l + 1, y1, GetSysColorBrush(COLOR_3DHILIGHT));
+  px(rr - 1, y1, GetSysColorBrush(COLOR_3DDKSHADOW));
+}
+
+// Draws a tab control: the body, the tabs and the scroll arrows.
 void PaintTabs(Tabs* t, HDC dc) {
   if (!t->laidOut) LayoutTabs(t);
   RECT c;
   GetClientRect(t->hwnd, &c);
-  FillRect(dc, &c, ParentBrush(t->hwnd, dc));
+  HBRUSH bg = ParentBrush(t->hwnd, dc);
+  FillRect(dc, &c, bg);
   HGDIOBJ old = SelectObject(dc, t->font ? t->font : ControlFont());
   SetBkMode(dc, TRANSPARENT);
   bool buttons = Buttons(t);
@@ -1518,6 +1612,7 @@ void PaintTabs(Tabs* t, HDC dc) {
       FillRect(dc, &fill, GetSysColorBrush(COLOR_BTNFACE));
       UINT sides = BF_LEFT | BF_RIGHT | (Bottom(t) ? BF_BOTTOM : BF_TOP) | BF_SOFT;
       DrawEdge(dc, &r, EDGE_RAISED, sides);
+      CutTabCorners(dc, r, Bottom(t), bg);
       if (sel) {
         // Joins the body: no line between them.
         RECT gap = Bottom(t) ? RECT{r.left + 1, r.top - 2, r.right - 1, r.top} : RECT{r.left + 1, r.bottom, r.right - 1, r.bottom + 2};

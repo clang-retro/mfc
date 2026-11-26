@@ -893,8 +893,25 @@ BOOL AFXAPI AfxDeferRegisterClass(LONG fToRegister) {
   }
 #ifdef _AFX_WIN16
   // The library draws the toolbar and the status bar itself.
-  if ((fToRegister & AFX_WNDCOMMCTL_BAR_REG) && _AfxW16RegisterBarClasses())
-    fRegisteredClasses |= AFX_WNDCOMMCTL_BAR_REG;
+  // It also draws the progress bar, the trackbar (with the bars), the
+  // up-down control, the tab control, the header, the list view, the
+  // tree view, the hot key, the IP address control, the pager, the link
+  // control, the extended combo box, the month calendar, the date and
+  // time picker, the rebar and the animation control. Thus it draws all
+  // the common controls.
+  if (fToRegister & (AFX_WNDCOMMCTL_PROGRESS_REG | AFX_WNDCOMMCTL_BAR_REG |
+                     AFX_WNDCOMMCTL_UPDOWN_REG | AFX_WNDCOMMCTL_TAB_REG |
+                     AFX_WNDCOMMCTL_LISTVIEW_REG | AFX_WNDCOMMCTL_TREEVIEW_REG |
+                     AFX_WNDCOMMCTL_HOTKEY_REG | AFX_WNDCOMMCTL_INTERNET_REG |
+                     AFX_WNDCOMMCTL_PAGER_REG | AFX_WNDCOMMCTL_LINK_REG |
+                     AFX_WNDCOMMCTL_USEREX_REG | AFX_WNDCOMMCTL_DATE_REG |
+                     AFX_WNDCOMMCTL_COOL_REG | AFX_WNDCOMMCTL_ANIMATE_REG)) {
+    LONG fCtls = _AfxW16RegisterCtlClasses(fToRegister);
+    if ((fToRegister & AFX_WNDCOMMCTL_BAR_REG) && !(fCtls & AFX_WNDCOMMCTL_BAR_REG))
+      fRegisteredClasses &= ~AFX_WNDCOMMCTL_BAR_REG;
+    else
+      fRegisteredClasses |= fCtls;
+  }
 #endif
 
   AfxLockGlobals(0);

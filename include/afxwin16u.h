@@ -281,6 +281,92 @@ int _AfxW16AcceleratorCount(HACCEL hAccel);
 #define TOOLBARCLASSNAME "AfxToolbar16"
 #define STATUSCLASSNAME "AfxStatusBar16"
 
+// The library also draws the progress bar, the trackbar, the up-down
+// control and the tab control (src/win16ctl.cpp).
+#undef PROGRESS_CLASS
+#undef TRACKBAR_CLASS
+#undef UPDOWN_CLASS
+#undef WC_TABCONTROL
+#define PROGRESS_CLASS "AfxProgress16"
+#define TRACKBAR_CLASS "AfxTrackbar16"
+#define UPDOWN_CLASS "AfxUpDown16"
+#define WC_TABCONTROL "AfxTabControl16"
+
+// The library also draws the header control and the list view
+// (src/win16lv.cpp), the tree view (src/win16tv.cpp) and the tooltip
+// (src/win16tt.cpp), and the hot key, the IP address control and the
+// pager (src/win16misc.cpp).
+#undef TOOLTIPS_CLASS
+#undef HOTKEY_CLASS
+#undef WC_IPADDRESS
+#undef WC_PAGESCROLLER
+#undef WC_HEADER
+#undef WC_LISTVIEW
+#undef WC_TREEVIEW
+#define WC_HEADER "AfxHeader16"
+#define WC_LISTVIEW "AfxListView16"
+#define WC_TREEVIEW "AfxTreeView16"
+#define TOOLTIPS_CLASS "AfxToolTip16"
+#undef WC_COMBOBOXEX
+#define WC_COMBOBOXEX "AfxComboBoxEx16"
+#undef MONTHCAL_CLASS
+#undef DATETIMEPICK_CLASS
+#define MONTHCAL_CLASS "AfxMonthCal16"
+#define DATETIMEPICK_CLASS "AfxDateTime16"
+#undef REBARCLASSNAME
+#define REBARCLASSNAME "AfxReBar16"
+#undef ANIMATE_CLASS
+#define ANIMATE_CLASS "AfxAnimate16"
+
+// The CB_ messages of 16-bit Windows are WM_USER + 0 to WM_USER + 24, the
+// numbers of the CBEM_ messages of comctl32.dll. The extended combo box
+// gives the CB_ messages to its combo box, so its own messages move to
+// WM_USER + 0x101 and above (src/win16cbex.cpp). CBEM_DELETEITEM stays
+// CB_DELETESTRING.
+#undef CBEM_INSERTITEMA
+#undef CBEM_SETIMAGELIST
+#undef CBEM_GETIMAGELIST
+#undef CBEM_GETITEMA
+#undef CBEM_SETITEMA
+#undef CBEM_GETCOMBOCONTROL
+#undef CBEM_GETEDITCONTROL
+#undef CBEM_SETEXSTYLE
+#undef CBEM_GETEXSTYLE
+#undef CBEM_GETEXTENDEDSTYLE
+#undef CBEM_HASEDITCHANGED
+#undef CBEM_SETEXTENDEDSTYLE
+#define CBEM_INSERTITEMA (WM_USER + 0x101)
+#define CBEM_SETIMAGELIST (WM_USER + 0x102)
+#define CBEM_GETIMAGELIST (WM_USER + 0x103)
+#define CBEM_GETITEMA (WM_USER + 0x104)
+#define CBEM_SETITEMA (WM_USER + 0x105)
+#define CBEM_GETCOMBOCONTROL (WM_USER + 0x106)
+#define CBEM_GETEDITCONTROL (WM_USER + 0x107)
+#define CBEM_SETEXSTYLE (WM_USER + 0x108)
+#define CBEM_GETEXSTYLE (WM_USER + 0x109)
+#define CBEM_GETEXTENDEDSTYLE (WM_USER + 0x109)
+#define CBEM_HASEDITCHANGED (WM_USER + 0x10A)
+#define CBEM_SETEXTENDEDSTYLE (WM_USER + 0x10E)
+#define HOTKEY_CLASS "AfxHotKey16"
+#define WC_IPADDRESS "AfxIPAddress16"
+#define WC_PAGESCROLLER "AfxPager16"
+
+// The MCHT_ hit-test codes of comctl32.dll use the high word. MCHITTESTINFO
+// keeps the code in a UINT, which has 16 bits on 16-bit Windows. Thus the
+// flags move to the high byte of the low word: MCHT_TITLE, MCHT_CALENDAR and
+// MCHT_TODAYLINK are 0x1000, 0x2000 and 0x3000, and MCHT_NEXT and MCHT_PREV
+// are 0x0100 and 0x0200. The other codes use these flags and do not change.
+#undef MCHT_TITLE
+#undef MCHT_CALENDAR
+#undef MCHT_TODAYLINK
+#undef MCHT_NEXT
+#undef MCHT_PREV
+#define MCHT_TITLE 0x1000
+#define MCHT_CALENDAR 0x2000
+#define MCHT_TODAYLINK 0x3000
+#define MCHT_NEXT 0x0100
+#define MCHT_PREV 0x0200
+
 // GDI.
 DWORD GetObjectType(HGDIOBJ h);
 HPEN ExtCreatePen(DWORD iPenStyle, DWORD cWidth, const LOGBRUSH FAR *plbrush, DWORD cStyle,

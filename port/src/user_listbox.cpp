@@ -48,6 +48,10 @@ struct List {
   std::vector<int> tabs;
   LCID locale = 0;
   int nodataCount = 0;
+  // WS_VSCROLL and WS_HSCROLL as the list was made with: a bar that
+  // SetScrollInfo hid takes its style bit away, but shows again when
+  // the items no longer fit, as on Windows.
+  DWORD bars = 0;
 
   DWORD Style() const { return (DWORD)GetWindowLongW(hwnd, GWL_STYLE); }
   bool OwnerDraw() const { return (Style() & (LBS_OWNERDRAWFIXED | LBS_OWNERDRAWVARIABLE)) != 0; }
@@ -121,7 +125,7 @@ int ItemAt(List* l, POINT p, bool* outside = NULL) {
 
 void UpdateScroll(List* l) {
   DWORD s = l->Style();
-  if (s & WS_VSCROLL) {
+  if (l->bars & WS_VSCROLL) {
     SCROLLINFO si = {sizeof si, SIF_RANGE | SIF_PAGE | SIF_POS};
     if (s & LBS_DISABLENOSCROLL) si.fMask |= SIF_DISABLENOSCROLL;
     si.nMin = 0;
@@ -130,7 +134,7 @@ void UpdateScroll(List* l) {
     si.nPos = l->top;
     SetScrollInfo(l->hwnd, SB_VERT, &si, TRUE);
   }
-  if ((s & WS_HSCROLL) && l->extent) {
+  if ((l->bars & WS_HSCROLL) && l->extent) {
     RECT rc;
     GetClientRect(l->hwnd, &rc);
     SCROLLINFO si = {sizeof si, SIF_RANGE | SIF_PAGE | SIF_POS};
@@ -515,6 +519,7 @@ LRESULT CALLBACK ListProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       SetWindowLongPtrW(h, 0, (LONG_PTR)l);
       CREATESTRUCTW* cs = (CREATESTRUCTW*)lp;
       if (cs->style & LBS_COMBOBOX) l->combo = (HWND)cs->lpCreateParams;
+      l->bars = (DWORD)cs->style & (WS_VSCROLL | WS_HSCROLL);
       HDC dc = CreateCompatibleDC(NULL);
       HGDIOBJ old = SelectObject(dc, GetStockObject(SYSTEM_FONT));
       TEXTMETRICW tm;

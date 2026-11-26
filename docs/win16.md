@@ -39,6 +39,9 @@ The window classes:
 - the profile functions of `CWinApp`, with the INI file of the program
 - `CToolBar`, `CStatusBar` and `CDialogBar`, with docking, floating and
   the idle update of the buttons and panes
+- all the common controls of `afxcmn.h`, and `CReBar`. 16-bit Windows
+  does not have `comctl32.dll`, so the library draws them itself (see
+  "The other common controls")
 
 OLE automation (`afxdisp.h`):
 
@@ -83,10 +86,28 @@ OLE documents (`afxole.h`):
   objects (`CDocObjectServer`)
 
 16-bit OLE 2 has no OLE dialog DLL. The OLE 2 SDK gave the dialogs as
-sample source (OLE2UI). `src/win16oleui.cpp` gives the verb menu of an
-item (`OleUIAddVerbMenu`) and the update of links. The dialogs of
-`afxodlgs.h` (Insert Object, Paste Special, Links, Change Icon, Convert,
-Busy and Object Properties) compile, but `DoModal` gives `IDABORT`.
+sample source (OLE2UI). `src/win16oleui.cpp` has these functions:
+
+- the verb menu of an item (`OleUIAddVerbMenu`) and the update of links
+  (`OleUIUpdateLinks`)
+- Insert Object (`OleUIInsertObject`). The list has the classes that
+  have an `Insertable` key in the registration database. The dialog
+  makes the object with `OleCreate`, `OleCreateFromFile` or
+  `OleCreateLinkToFile` when the flags tell it to.
+- Paste Special (`OleUIPasteSpecial`). The list has the formats of the
+  caller that the data object has. Without a data object, the dialog
+  uses the data on the clipboard.
+- Links (`OleUIEditLinks`): Update Now, Open Source and Break Link.
+- Server Busy (`OleUIBusy`): Switch To, Retry and Cancel. Switch To
+  activates the first visible window of the busy task.
+
+The dialogs are templates in memory. They do not use the template or
+the resource of the caller. They call the hook of the caller for each
+message. These dialogs are not there: Change Icon, Convert, Change
+Source and Object Properties. Their `DoModal` gives `IDABORT`. "Display
+As Icon" sets the flag, but the dialogs do not make an icon picture
+(`hMetaPict`). The Server Busy dialog does not close itself when the
+call is no longer blocked.
 
 16-bit Windows has no enhanced metafiles. `TYMED_ENHMF` is 0, and
 `CF_ENHMETAFILE` is a format that no 16-bit program gives.
@@ -95,19 +116,17 @@ Wine's 16-bit OLE2.DLL is mostly stubs. Thus the Wine test of the OLE
 document classes is a link check: `tests/win16oledoc.cpp` makes
 containers, servers, drop targets and in-place frames in a function that
 does not run. The part that runs caches data in a `COleDataSource` and
-finds its format with `COleDataObject`. These classes need a real
+finds its format with `COleDataObject`. The OLE dialogs run with a
+hook that closes them. These classes need a real
 16-bit Windows with OLE 2 to run.
 
 ## What is not there
 
 - OLE controls. `CWnd::CreateControlSite` fails (`src/win16ole.cpp`).
-- The OLE dialogs (see "OLE documents").
-- The common controls. 16-bit Windows does not have `comctl32.dll`.
-  The library draws the toolbar and the status bar itself (see "The
-  toolbar and the status bar"). `CReBar` and the other classes of
-  `afxcmn.h` compile, but their windows are not made.
-- Tooltips. A toolbar with `CBRS_TOOLTIPS` shows no tooltip.
-  `CBRS_FLYBY` works: the status bar shows the prompt of the button.
+- The Change Icon, Convert, Change Source and Object Properties
+  dialogs (see "OLE documents").
+- `CWnd::EnableToolTips`. It does nothing on any target of the library.
+  Use a `CToolTipCtrl` (see "The other common controls").
 - The shell file dialog (`IFileDialog`). `CFileDialog` always shows the
   classic dialog.
 - Threads. `CWinThread::CreateThread` fails with `ERROR_NOT_SUPPORTED`.
@@ -238,7 +257,7 @@ A 16-bit task has one thread.
 ### The toolbar and the status bar
 
 `src/win16bar.cpp` registers two window classes, `AfxToolbar16` and
-`AfxStatusBar16`. `afxwin16u.h` sets `TOOLBARCLASSNAME` and
+`AfxStatusBar16`, and the class of the toolbar's tooltips. `afxwin16u.h` sets `TOOLBARCLASSNAME` and
 `STATUSCLASSNAME` to these names. Wine can also have the 32-bit classes
 of `comctl32.dll`, which do not read the 16-bit structures. Thus the
 names are not the names of the common controls.
@@ -255,6 +274,15 @@ names are not the names of the common controls.
   toolbar, in the 16-bit packing.
 - The toolbar keeps the text of a button (`SetButtonText`), but it does
   not draw it.
+- 16-bit Windows has no tooltip control of its own. A toolbar with
+  `CBRS_TOOLTIPS` (`TBSTYLE_TOOLTIPS`) shows the tip of a button itself.
+  When the mouse stays on a button for half a second, the toolbar sends
+  `TTN_NEEDTEXTA` to its owner, and shows the text below the mouse in a
+  window of the class `AfxW16ToolTip`. `CFrameWnd` gives the part of the
+  command's string after the newline. A timer finds when the mouse
+  leaves the button, because 16-bit Windows does not tell the window.
+  `CBRS_FLYBY` also works: the status bar shows the prompt of the
+  button.
 - A status bar pane has a sunken edge, a raised edge (`SBPS_POPOUT`) or
   no edge (`SBPS_NOBORDERS`). An owner-drawn pane sends `WM_DRAWITEM`
   to the parent.
@@ -264,6 +292,169 @@ names are not the names of the common controls.
   `TBSTYLE_` bits in its low byte and the `TBSTATE_` bits in its high
   byte, as in MFC 2.5. `SBPS_DISABLED` is `0x4000`, and `SBPS_STRETCH` is
   `0x8000`.
+
+### The other common controls
+
+`src/win16ctl.cpp`, `src/win16lv.cpp`, `src/win16tv.cpp`,
+`src/win16tt.cpp`, `src/win16misc.cpp`, `src/win16cbex.cpp`,
+`src/win16date.cpp`, `src/win16rebar.cpp` and `src/win16anim.cpp`
+register seventeen more window classes. `afxwin16u.h` sets the class names to the names of the
+library, as for the toolbar:
+
+| Class | Name | MFC class |
+|---|---|---|
+| progress bar | `AfxProgress16` | `CProgressCtrl` |
+| trackbar | `AfxTrackbar16` | `CSliderCtrl` |
+| up-down control | `AfxUpDown16` | `CSpinButtonCtrl` |
+| tab control | `AfxTabControl16` | `CTabCtrl` |
+| header control | `AfxHeader16` | `CHeaderCtrl` |
+| list view | `AfxListView16` | `CListCtrl` |
+| tree view | `AfxTreeView16` | `CTreeCtrl` |
+| tooltip | `AfxToolTip16` | `CToolTipCtrl` |
+| hot key | `AfxHotKey16` | `CHotKeyCtrl` |
+| IP address | `AfxIPAddress16` | `CIPAddressCtrl` |
+| pager | `AfxPager16` | `CPagerCtrl` |
+| link | `SysLink` | `CLinkCtrl` |
+| extended combo box | `AfxComboBoxEx16` | `CComboBoxEx` |
+| month calendar | `AfxMonthCal16` | `CMonthCalCtrl` |
+| date and time picker | `AfxDateTime16` | `CDateTimeCtrl` |
+| rebar | `AfxReBar16` | `CReBarCtrl`, `CReBar` |
+| animation | `AfxAnimate16` | `CAnimateCtrl` |
+
+The files also register each class with the name of `comctl32.dll`
+(`msctls_progress32`, `msctls_trackbar32`, `msctls_updown32`,
+`SysTabControl32`, `SysHeader32`, `SysListView32`, `SysTreeView32`,
+`tooltips_class32`, `msctls_hotkey32`, `SysIPAddress32`, `SysPager`
+`ComboBoxEx32`, `SysMonthCal32`, `SysDateTimePick32`,
+`ReBarWindow32` and `SysAnimate32`). `CLinkCtrl` always uses the name `SysLink`. Thus a dialog template can use these names.
+
+- The windows do the messages of the common controls in ANSI. They send
+  `WM_HSCROLL` and `WM_VSCROLL` in the 16-bit packing: the code in
+  `wParam`, the position in the low word and the control in the high
+  word of `lParam`. They send `WM_NOTIFY` to the parent.
+- The progress bar draws blocks, or one bar with `PBS_SMOOTH`.
+  `PBS_VERTICAL` and `PBS_MARQUEE` work.
+- The trackbar has the keys, a drag of the thumb, and a click in the
+  channel that pages and repeats. It draws the ticks (`TBS_AUTOTICKS`,
+  `TBM_SETTIC`), the selection (`TBS_ENABLESELRANGE`) and a thumb that
+  points to the ticks. It has no buddy windows and no tooltips.
+- The up-down control has the acceleration (`UDM_SETACCEL`), the buddy
+  (`UDS_AUTOBUDDY`, `UDS_ALIGNRIGHT`, `UDS_ALIGNLEFT`), the number in the
+  buddy (`UDS_SETBUDDYINT`, with a comma between each 3 digits) and the
+  arrow keys of the buddy (`UDS_ARROWKEYS`). The default range is 100 to
+  0, as in `comctl32.dll`.
+- The tab control has one row of tabs, a click and the left and right
+  keys (`TCN_SELCHANGING`, `TCN_SELCHANGE`), `TCS_BUTTONS` and
+  `TCS_FIXEDWIDTH`. It has no images, no tooltips and no
+  `TCS_MULTILINE`.
+- The header control has the drag of a divider (`HDN_BEGINTRACK`,
+  `HDN_TRACK`, `HDN_ENDTRACK`), the click of a button (`HDS_BUTTONS`),
+  `HDM_LAYOUT`, the order of the items, the sort arrows, owner draw and
+  an image list. It has no filters and no drag of an item.
+- The list view has the four views, virtual lists (`LVS_OWNERDATA`),
+  the text and image callbacks (`LVN_GETDISPINFO`), label editing,
+  check boxes, full row selection, grid lines, custom draw, sorting
+  (`LVM_SORTITEMS`, `LVM_SORTITEMSEX`), `LVM_FINDITEM`, and the keys and
+  the mouse of `comctl32.dll`. The report view uses a header control.
+  The icon views always arrange the items in rows. The list view has no
+  groups, no tiles, no work areas and no tooltips.
+- The tree view has the lines, the buttons, the check boxes
+  (`TVS_CHECKBOXES`), the normal and state image lists, the text, image
+  and children callbacks (`TVN_GETDISPINFO`), label editing, custom
+  draw, sorting (`TVM_SORTCHILDREN`, `TVM_SORTCHILDRENCB`), the drop
+  highlight, the insert mark, `TVN_BEGINDRAG`, the incremental search,
+  and the keys and the mouse of `comctl32.dll`. It has no tooltips and
+  no hot tracking (`TVS_TRACKSELECT`).
+- The tooltip has window tools (`TTF_IDISHWND`) and rectangle tools,
+  `TTM_RELAYEVENT` and `TTF_SUBCLASS`, the text callback
+  (`TTN_GETDISPINFO`), string resources, `TTN_SHOW` and `TTN_POP`,
+  tracking tips (`TTF_TRACK`), `TTF_CENTERTIP`, a title, the delay
+  times, the colors, the margins and word wrap (`TTM_SETMAXTIPWIDTH`).
+  16-bit Windows has no `WM_MOUSELEAVE`, so a timer finds the mouse when
+  it leaves a tool. There are no balloon tips. A 16-bit `wParam` cannot
+  hold a `COLORREF`, so `TTM_SETTIPBKCOLOR` and `TTM_SETTIPTEXTCOLOR`
+  take the color from `lParam` when `lParam` is not 0.
+- The hot key control shows the modifiers and the name of the key
+  (`GetKeyNameText`), and sends `EN_CHANGE`. `HKM_SETRULES` works.
+  Backspace, Delete, Esc and Space with no modifier clear the key.
+- The IP address control has four edit controls. Three digits, a dot
+  or a space go to the next field, and the arrow keys and Backspace
+  cross the fields. A field that loses the focus sends
+  `IPN_FIELDCHANGED` and goes into its range (`IPM_SETRANGE`).
+- The pager asks the parent for the size of the child
+  (`PGN_CALCSIZE`). Its buttons show only when the child can scroll in
+  that direction. A pressed button repeats `PGN_SCROLL`. The
+  notifications of the child go to the parent of the pager.
+- The link control reads the `<a href="..." id="...">` markup, breaks
+  the lines at spaces, and sends `NM_CLICK` (or `NM_RETURN` with
+  `LWS_IGNORERETURN`) with an `NMLINK`. The links are blue, and purple
+  when visited. The IDs and URLs of an `LITEM` are Unicode: the window
+  changes each character to one byte. 16-bit Windows has no hand
+  cursor, so the cursor stays an arrow.
+- The extended combo box holds an owner-drawn combo box and draws the
+  indent, the image and the text of each item. It sends
+  `CBEN_INSERTITEM`, `CBEN_DELETEITEM`, `CBEN_GETDISPINFO`,
+  `CBEN_BEGINEDIT` and `CBEN_ENDEDIT`, and gives the `CB_` messages to
+  the combo box. The edit control of `CBS_DROPDOWN` shows no image.
+- The month calendar shows as many months as its size holds. It has
+  the arrows and the scroll of the months (`MCM_SETMONTHDELTA`), the
+  keys, a drag of the selection (`MCS_MULTISELECT`), the range, today
+  (`MCS_NOTODAY`, `MCS_NOTODAYCIRCLE`), the week numbers
+  (`MCS_WEEKNUMBERS`), the bold days (`MCS_DAYSTATE`,
+  `MCN_GETDAYSTATE`) and the colors. It sends `MCN_SELCHANGE` and
+  `MCN_SELECT`. A click on the month or the year in the title does not
+  open a menu.
+- The date and time picker reads its formats from the `[intl]` section
+  of `WIN.INI` (`sShortDate`, `sLongDate`, `sTime`, `iTime`, `iTLZero`,
+  `s1159` and `s2359`). `DTM_SETFORMAT` sets a custom format, with the
+  callback fields (`DTN_FORMAT`, `DTN_FORMATQUERY` and
+  `DTN_WMKEYDOWN`). It has the keys, typed digits, the up-down button
+  (`DTS_UPDOWN`), the drop-down calendar, the check box
+  (`DTS_SHOWNONE`) and the edit control of `DTS_APPCANPARSE`
+  (`DTN_USERSTRING`). It sends `DTN_DATETIMECHANGE`, `DTN_DROPDOWN` and
+  `DTN_CLOSEUP`. `WM_GETTEXT` gives the text that the picker shows.
+- The rebar puts its bands in rows. A band starts a new row with
+  `RBBS_BREAK`, or when the row does not have the space for it. The
+  last band of a row gets the space that is left. A band has a gripper,
+  an image from the image list of `RB_SETBARINFO`, a text, a background
+  bitmap or color, and a chevron (`RBBS_USECHEVRON`,
+  `RBN_CHEVRONPUSHED`). The user drags a gripper to change the width of
+  a band or to move it to another row (`RBN_BEGINDRAG`, `RBN_ENDDRAG`,
+  `RBN_LAYOUTCHANGED`). A click on a gripper, or a double-click with
+  `RBS_DBLCLKTOGGLE`, makes the band as large or as small as it can be.
+  The rebar sends `RBN_HEIGHTCHANGE`, `RBN_CHILDSIZE`,
+  `RBN_DELETINGBAND`, `RBN_DELETEDBAND` and `RBN_AUTOSIZE`, and gives
+  the notifications and commands of the child windows to its parent.
+  `CCS_VERT` works. The rebar shows no tooltips: `RB_SETTOOLTIPS` only
+  keeps the window. It has no drop target (`RBS_REGISTERDROP`) and no
+  custom draw.
+- The animation control plays the first video stream of an AVI clip
+  from an `AVI` resource or from a file. The frames are uncompressed
+  (1, 4, 8 or 24 bits) or `BI_RLE8`. The control reads each frame from
+  the file when it shows it, so a clip can be larger than 64 KB, but
+  one frame must fit in a segment. 16-bit Windows has no threads, so a
+  timer moves the clip on, as `ACS_TIMER` does. `ACS_CENTER`,
+  `ACS_AUTOPLAY` and `ACS_TRANSPARENT` (for frames of 8 bits or less)
+  work. The parent gets `ACN_START` and `ACN_STOP` in `WM_COMMAND`.
+- The `MCHT_` hit-test codes of `comctl32.dll` use the high word, but
+  the `uHit` of `MCHITTESTINFO` is a 16-bit `UINT`. Thus `afxwin16u.h`
+  moves `MCHT_TITLE`, `MCHT_CALENDAR` and `MCHT_TODAYLINK` to 0x1000,
+  0x2000 and 0x3000, and `MCHT_NEXT` and `MCHT_PREV` to 0x0100 and
+  0x0200. Code that uses the names of the codes works.
+- The `CB_` messages of 16-bit Windows are `WM_USER` + 0 to `WM_USER` +
+  24: the numbers of the `CBEM_` messages of `comctl32.dll`. Thus
+  `afxwin16u.h` moves the `CBEM_` messages to `WM_USER` + 0x101 and
+  above. `CBEM_DELETEITEM` stays `CB_DELETESTRING`. Code that sends a
+  `CBEM_` message by its number, not by its name, does not work.
+- The toolbar does not use this tooltip. It shows its own tips (see
+  "The toolbar and the status bar").
+- An `HTREEITEM` has 16 bits. `TVI_ROOT`, `TVI_FIRST`, `TVI_LAST` and
+  `TVI_SORT` become 0, 1, 2 and 3, so the handles of the items start
+  at 4.
+- `LVM_SORTITEMS` gives `lParamSort` in `wParam`. A 16-bit `wParam` holds
+  only 16 bits, so the comparison function gets only the low word.
+- `UDM_GETRANGE32` gets two pointers. A 16-bit `wParam` holds only an
+  offset, so the window uses the segment of `lParam` for it.
 
 ### Handle maps
 
@@ -304,7 +495,8 @@ the handle as a word key (`CMapWordToPtr`).
 | `win16wnd` | `CWinApp`, `CFrameWnd`, a menu command, a button notification, `WM_CTLCOLOR`, a modal `CDialog` with DDX, and the INI profile |
 | `win16doc` | `CSingleDocTemplate`, File New, `OnDraw`, `OnUpdate`, and the command routing to the view and the document |
 | `win16mdi` | `CMultiDocTemplate`, two MDI children, the MDI menus, and `MDIGetActive`, `MDINext` and `MDIActivate` |
-| `win16bar` | `CToolBar` and `CStatusBar`: the button layout, a click, the idle update, the message pane, docking at the left edge, floating, and `ShowControlBar` |
+| `win16bar` | `CToolBar` and `CStatusBar`: the button layout, a click, the idle update, the message pane, docking at the left edge, floating, the tooltip of a button, and `ShowControlBar` |
+| `win16cmn` | `CImageList`, `CProgressCtrl`, `CSliderCtrl`, `CSpinButtonCtrl`, `CTabCtrl`, `CListCtrl`, `CTreeCtrl`, `CToolTipCtrl`, `CHotKeyCtrl`, `CIPAddressCtrl`, `CPagerCtrl`, `CLinkCtrl`, `CComboBoxEx`, `CMonthCalCtrl`, `CDateTimeCtrl`, `CReBarCtrl`, `CReBar` and `CAnimateCtrl`: the images and masks, the ranges and positions, the keys, the buddy of the up-down control, a click on a tab, the columns, items, find and sort of a report view, the links, expansion, selection and sort of a tree, the tools, text, hit test, show and pop of a tooltip, a hot key and its rules, the fields and ranges of an IP address, the buttons and position of a pager, the links of a link control, the items of an extended combo box, the selection, today, range and hit test of a month calendar, the format, keys, range and check box of a date and time picker, the bands, rows, hit test, drag and smallest width of a rebar, a `CReBar` in the frame, the frames of an RLE8 clip, play and stop of an animation, and the notifications |
 
 The window tests need an X display. Without one, the script starts
 itself under `xvfb-run`.

@@ -36,6 +36,10 @@ struct W16Bar {
   int iPressed;        // the button under the mouse button, or -1
   BOOL bPressedIn;     // the mouse is on the pressed button
   BOOL bRedraw;        // WM_SETREDRAW
+  HWND hwndTip;        // the tooltip window (TBSTYLE_TOOLTIPS), or NULL
+  int iHot;            // the button under the mouse for the tooltip, or -1
+  int nHoverTicks;     // the timer ticks that the mouse stayed on iHot
+  BOOL bTipShown;      // the tooltip of iHot is on the screen
 };
 
 /// Gives the data of a toolbar or a status bar window.
@@ -236,6 +240,158 @@ LRESULT BarAddStrings(W16Bar* pBar, HINSTANCE hInst, LPARAM lParam) {
   return iFirst;
 }
 
+// ---------------------------------------------------------------------
+// The tooltips of the toolbar
+
+// 16-bit Windows has no tooltip control. A toolbar with TBSTYLE_TOOLTIPS
+// shows the tip of a button itself: when the mouse stays on the button
+// for half a second, it asks the notify window for the text with
+// TTN_NEEDTEXTA (CFrameWnd gives the part of the command's string after
+// the newline), and shows it in a small window below the mouse.
+
+const char kTipClass[] = "AfxW16ToolTip";
+enum { kTipTimer = 1, kTipTick = 100, kTipDelayTicks = 5 };
+
+/// The color of a tooltip. Windows 3.1 has no COLOR_INFOBK: this is the
+/// light yellow of the later systems.
+COLORREF TipBackColor() { return RGB(255, 255, 225); }
+
+/// The font of a tooltip.
+HFONT TipFont() { return (HFONT)::GetStockObject(ANSI_VAR_FONT); }
+
+/// Paints a tooltip window: a black frame and the window text.
+LRESULT CALLBACK W16TipProc(HWND hWnd, UINT nMsg, WPARAM wParam, LPARAM lParam) {
+  switch (nMsg) {
+    case WM_PAINT: {
+      PAINTSTRUCT ps;
+      HDC hdc = ::BeginPaint(hWnd, &ps);
+      RECT rc;
+      ::GetClientRect(hWnd, &rc);
+      HBRUSH hbr = ::CreateSolidBrush(TipBackColor());
+      ::FillRect(hdc, &rc, hbr);
+      ::DeleteObject(hbr);
+      ::FrameRect(hdc, &rc, (HBRUSH)::GetStockObject(BLACK_BRUSH));
+      char sz[128];
+      int n = ::GetWindowText(hWnd, sz, sizeof(sz));
+      HGDIOBJ hOld = ::SelectObject(hdc, TipFont());
+      ::SetBkMode(hdc, TRANSPARENT);
+      ::SetTextColor(hdc, RGB(0, 0, 0));
+      ::InflateRect(&rc, -3, -1);
+      ::DrawText(hdc, sz, n, &rc, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+      ::SelectObject(hdc, hOld);
+      ::EndPaint(hWnd, &ps);
+      return 0;
+    }
+    case WM_MOUSEACTIVATE:
+      return MA_NOACTIVATE;
+    case WM_NCHITTEST:
+      return HTTRANSPARENT;
+  }
+  return ::DefWindowProc(hWnd, nMsg, wParam, lParam);
+}
+
+/// Hides the tooltip of the bar.
+void TipHide(W16Bar* pBar) {
+  if (pBar->bTipShown && pBar->hwndTip != NULL) ::ShowWindow(pBar->hwndTip, SW_HIDE);
+  pBar->bTipShown = FALSE;
+}
+
+/// Stops following the mouse: hides the tip and stops the timer.
+void TipStop(W16Bar* pBar) {
+  TipHide(pBar);
+  if (pBar->iHot >= 0) ::KillTimer(pBar->hwnd, kTipTimer);
+  pBar->iHot = -1;
+  pBar->nHoverTicks = 0;
+}
+
+/// Asks the notify window for the text of the button i. Gives FALSE when
+/// the button has no text.
+BOOL TipText(W16Bar* pBar, int i, char* psz, int cch) {
+  TOOLTIPTEXTA ttt;
+  memset(&ttt, 0, sizeof(ttt));
+  ttt.hdr.hwndFrom = pBar->hwndTip;
+  ttt.hdr.idFrom = (UINT_PTR)pBar->buttons[i].idCommand;
+  ttt.hdr.code = TTN_NEEDTEXTA;
+  ttt.lpszText = ttt.szText;
+  HWND hwndTarget = pBar->hwndNotify != NULL ? pBar->hwndNotify : ::GetParent(pBar->hwnd);
+  if (hwndTarget == NULL) return FALSE;
+  ::SendMessage(hwndTarget, WM_NOTIFY, (WPARAM)ttt.hdr.idFrom, (LPARAM)(LPNMHDR)&ttt);
+  if (ttt.lpszText != NULL && HIWORD((DWORD)ttt.lpszText) == 0) {
+    // A string resource of ttt.hinst.
+    if (::LoadString(ttt.hinst, LOWORD((DWORD)ttt.lpszText), psz, cch) <= 0) return FALSE;
+  } else if (ttt.lpszText != NULL) {
+    lstrcpyn(psz, ttt.lpszText, cch);
+  } else {
+    return FALSE;
+  }
+  return psz[0] != 0;
+}
+
+/// Shows the tooltip of the button i below the mouse, inside the screen.
+void TipShow(W16Bar* pBar, int i) {
+  // The window comes first: the notification names it.
+  if (pBar->hwndTip == NULL) {
+    pBar->hwndTip = ::CreateWindowEx(WS_EX_TOPMOST, kTipClass, "", WS_POPUP, 0, 0, 0, 0,
+                                      pBar->hwnd, NULL, AfxGetInstanceHandle(), NULL);
+    if (pBar->hwndTip == NULL) return;
+  }
+  char sz[128];
+  if (!TipText(pBar, i, sz, sizeof(sz))) return;
+  ::SetWindowText(pBar->hwndTip, sz);
+  HDC hdc = ::GetDC(pBar->hwndTip);
+  HGDIOBJ hOld = ::SelectObject(hdc, TipFont());
+  RECT rcText = {0, 0, 0, 0};
+  ::DrawText(hdc, sz, -1, &rcText, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+  ::SelectObject(hdc, hOld);
+  ::ReleaseDC(pBar->hwndTip, hdc);
+  int cx = rcText.right + 8, cy = rcText.bottom + 4;
+  POINT pt;
+  ::GetCursorPos(&pt);
+  int x = pt.x, y = pt.y + 20;
+  int cxScreen = ::GetSystemMetrics(SM_CXSCREEN), cyScreen = ::GetSystemMetrics(SM_CYSCREEN);
+  if (x + cx > cxScreen) x = cxScreen - cx;
+  if (x < 0) x = 0;
+  if (y + cy > cyScreen) y = pt.y - cy - 2;
+  ::SetWindowPos(pBar->hwndTip, HWND_TOPMOST, x, y, cx, cy, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+  ::UpdateWindow(pBar->hwndTip);
+  pBar->bTipShown = TRUE;
+}
+
+/// Follows the mouse on the bar: a new button under the mouse starts the
+/// delay of its tooltip.
+void TipMouseMove(W16Bar* pBar, POINT pt) {
+  if (!(::GetWindowLong(pBar->hwnd, GWL_STYLE) & TBSTYLE_TOOLTIPS)) return;
+  int i = BarHitTest(pBar, pt);
+  if (i >= 0 && (pBar->buttons[i].fsStyle & TBSTYLE_SEP)) i = -1;
+  if (i == pBar->iHot) return;
+  // From one button to the next, a tip that was on the screen comes
+  // again without the delay.
+  BOOL bWasShown = pBar->bTipShown;
+  TipStop(pBar);
+  if (i < 0) return;
+  pBar->iHot = i;
+  pBar->nHoverTicks = bWasShown ? kTipDelayTicks - 1 : 0;
+  ::SetTimer(pBar->hwnd, kTipTimer, kTipTick, NULL);
+}
+
+/// A tick of the tooltip timer: 16-bit Windows tells a window nothing
+/// when the mouse leaves it, so the bar looks where the mouse is.
+void TipTick(W16Bar* pBar) {
+  if (pBar->iHot < 0) return;
+  POINT pt;
+  ::GetCursorPos(&pt);
+  if (::WindowFromPoint(pt) != pBar->hwnd) {
+    TipStop(pBar);
+    return;
+  }
+  ::ScreenToClient(pBar->hwnd, &pt);
+  if (BarHitTest(pBar, pt) != pBar->iHot) {
+    TipStop(pBar);
+    return;
+  }
+  if (!pBar->bTipShown && ++pBar->nHoverTicks >= kTipDelayTicks) TipShow(pBar, pBar->iHot);
+}
+
 /// Does the messages of the toolbar window.
 LRESULT BarMessage(W16Bar* pBar, HWND hWnd, UINT nMsg, WPARAM wParam, LPARAM lParam) {
   switch (nMsg) {
@@ -365,6 +521,7 @@ LRESULT BarMessage(W16Bar* pBar, HWND hWnd, UINT nMsg, WPARAM wParam, LPARAM lPa
     }
     case WM_LBUTTONDOWN:
     case WM_LBUTTONDBLCLK: {
+      TipStop(pBar);
       POINT pt = {(short)LOWORD(lParam), (short)HIWORD(lParam)};
       int i = BarHitTest(pBar, pt);
       if (i < 0 || !(pBar->buttons[i].fsState & TBSTATE_ENABLED)) return 0;
@@ -375,8 +532,11 @@ LRESULT BarMessage(W16Bar* pBar, HWND hWnd, UINT nMsg, WPARAM wParam, LPARAM lPa
       return 0;
     }
     case WM_MOUSEMOVE: {
-      if (pBar->iPressed < 0) return 0;
       POINT pt = {(short)LOWORD(lParam), (short)HIWORD(lParam)};
+      if (pBar->iPressed < 0) {
+        TipMouseMove(pBar, pt);
+        return 0;
+      }
       BOOL bIn = ::PtInRect(&pBar->rects[pBar->iPressed], pt);
       if (bIn != pBar->bPressedIn) {
         pBar->bPressedIn = bIn;
@@ -396,6 +556,17 @@ LRESULT BarMessage(W16Bar* pBar, HWND hWnd, UINT nMsg, WPARAM wParam, LPARAM lPa
       if (bClick) BarClick(pBar, i);
       return 0;
     }
+    case WM_TIMER:
+      if (wParam == kTipTimer) {
+        TipTick(pBar);
+        return 0;
+      }
+      break;
+    case WM_DESTROY:
+      TipStop(pBar);
+      if (pBar->hwndTip != NULL) ::DestroyWindow(pBar->hwndTip);
+      pBar->hwndTip = NULL;
+      break;
   }
   return ::DefWindowProc(hWnd, nMsg, wParam, lParam);
 }
@@ -416,6 +587,10 @@ LRESULT CALLBACK W16BarProc(HWND hWnd, UINT nMsg, WPARAM wParam, LPARAM lParam) 
     pBar->iPressed = -1;
     pBar->bPressedIn = FALSE;
     pBar->bRedraw = TRUE;
+    pBar->hwndTip = NULL;
+    pBar->iHot = -1;
+    pBar->nHoverTicks = 0;
+    pBar->bTipShown = FALSE;
     ::SetWindowLong(hWnd, 0, (LONG)pBar);
   } else if (nMsg == WM_NCDESTROY) {
     ::SetWindowLong(hWnd, 0, 0);
@@ -691,11 +866,12 @@ BOOL RegisterBarClass(LPCSTR lpszClass, WNDPROC pfn) {
 
 }  // namespace
 
-/// Registers the toolbar and status bar classes that CToolBar and
-/// CStatusBar make on 16-bit Windows. Gives TRUE when both are there.
+/// Registers the toolbar, status bar and tooltip classes that CToolBar
+/// and CStatusBar make on 16-bit Windows. Gives TRUE when all are there.
 BOOL AFXAPI _AfxW16RegisterBarClasses() {
   return RegisterBarClass(TOOLBARCLASSNAME, W16BarProc) &&
-         RegisterBarClass(STATUSCLASSNAME, W16StatusProc);
+         RegisterBarClass(STATUSCLASSNAME, W16StatusProc) &&
+         RegisterBarClass(kTipClass, W16TipProc);
 }
 
 #endif  // _AFX_WIN16

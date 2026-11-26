@@ -5,7 +5,9 @@
 #include "afximpl.h"
 #include <afxcmn.h>
 #include <objidl.h>
+#ifndef _AFX_WIN16  // 16-bit Windows has no shell objects
 #include <shlobj.h>
+#endif
 
 IMPLEMENT_DYNCREATE(CImageList, CObject)
 IMPLEMENT_DYNAMIC(CToolBarCtrl, CWnd)
@@ -307,6 +309,12 @@ BOOL CImageList::Create(CImageList* pImageList) {
 }
 
 // A minimal IStream over a CArchive, for ImageList_Read and _Write.
+// The 16-bit IStream reads and writes through huge pointers.
+#ifdef _AFX_WIN16
+#define AFX_STREAM_PTR HUGEP
+#else
+#define AFX_STREAM_PTR
+#endif
 namespace {
 class CArchiveStream : public IStream {
 public:
@@ -320,7 +328,7 @@ public:
   }
   STDMETHOD_(ULONG, AddRef)() override { return 1; }
   STDMETHOD_(ULONG, Release)() override { return 1; }
-  STDMETHOD(Read)(void* pv, ULONG cb, ULONG* pcbRead) override {
+  STDMETHOD(Read)(void AFX_STREAM_PTR* pv, ULONG cb, ULONG* pcbRead) override {
     ULONG n = 0;
     try {
       n = m_pArchive->Read(pv, cb);
@@ -331,7 +339,7 @@ public:
     if (pcbRead != NULL) *pcbRead = n;
     return n == cb ? S_OK : S_FALSE;
   }
-  STDMETHOD(Write)(const void* pv, ULONG cb, ULONG* pcbWritten) override {
+  STDMETHOD(Write)(const void AFX_STREAM_PTR* pv, ULONG cb, ULONG* pcbWritten) override {
     try {
       m_pArchive->Write(pv, cb);
     } catch (CException* e) {
@@ -905,8 +913,11 @@ BOOL CNetAddressCtrl::CreateEx(DWORD dwExStyle, DWORD dwStyle, const RECT& rect,
   // shell32 registers the class on Vista and later; find it at run time so
   // the program still loads on older Windows.
   typedef BOOL(WINAPI * PFNINIT)(void);
-#ifdef _WINPORT
+#if defined(_WINPORT)
   PFNINIT pfnInit = ::InitNetworkAddressControl;  // the layer's own
+#elif defined(_AFX_WIN16)
+  // 16-bit Windows has no network address control.
+  PFNINIT pfnInit = NULL;
 #else
   HMODULE hShell = ::GetModuleHandle(_T("shell32.dll"));
   if (hShell == NULL) hShell = ::LoadLibrary(_T("shell32.dll"));

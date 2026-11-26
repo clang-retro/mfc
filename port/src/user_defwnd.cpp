@@ -120,11 +120,9 @@ void ThumbOf(const SCROLLINFO& si, int trough, int* pos, int* len) {
   *len = l;
 }
 
-void DrawArrowBox(HDC dc, RECT r, int dir, bool enabled) {
-  DrawEdge(dc, &r, EDGE_RAISED, BF_RECT | BF_MIDDLE);
-  // A small triangle pointing dir: 0 up, 1 down, 2 left, 3 right.
-  int cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
-  HBRUSH br = GetSysColorBrush(enabled ? COLOR_BTNTEXT : COLOR_GRAYTEXT);
+// Draws the triangle of an arrow box with its center at (cx, cy): dir
+// is 0 up, 1 down, 2 left or 3 right.
+void DrawArrowGlyph(HDC dc, int cx, int cy, int dir, HBRUSH br) {
   for (int i = 0; i < 4; i++) {
     RECT line;
     switch (dir) {
@@ -137,11 +135,46 @@ void DrawArrowBox(HDC dc, RECT r, int dir, bool enabled) {
   }
 }
 
+// Draws an arrow box of a scroll bar. A disabled arrow is embossed, as
+// in the classic style: a highlight copy one pixel down and to the
+// right, and the shadow color over it.
+void DrawArrowBox(HDC dc, RECT r, int dir, bool enabled) {
+  DrawEdge(dc, &r, EDGE_RAISED, BF_RECT | BF_MIDDLE);
+  int cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+  if (enabled) {
+    DrawArrowGlyph(dc, cx, cy, dir, GetSysColorBrush(COLOR_BTNTEXT));
+    return;
+  }
+  DrawArrowGlyph(dc, cx + 1, cy + 1, dir, GetSysColorBrush(COLOR_3DHILIGHT));
+  DrawArrowGlyph(dc, cx, cy, dir, GetSysColorBrush(COLOR_3DSHADOW));
+}
+
 }  // namespace
 
 namespace winport {
 
-void PaintScrollBar(HDC dc, const RECT& r, bool vertical, const ScrollBar* sb) {
+// Returns the brush for the trough of a scroll bar, as DefWindowProc
+// gives it for WM_CTLCOLORSCROLLBAR, and sets the text and background
+// colors of dc for it. When the highlight color is the window color (as
+// in the standard colors), the trough is a fine checker of the face and
+// highlight colors, as in the classic style; else it is COLOR_SCROLLBAR.
+HBRUSH ScrollTroughBrush(HDC dc) {
+  SetTextColor(dc, GetSysColor(COLOR_3DFACE));
+  SetBkColor(dc, GetSysColor(COLOR_3DHILIGHT));
+  if (GetSysColor(COLOR_3DHILIGHT) != GetSysColor(COLOR_WINDOW)) return GetSysColorBrush(COLOR_SCROLLBAR);
+  static HBRUSH checker;
+  if (!checker) {
+    static const WORD pat[8] = {0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA};
+    HBITMAP bm = CreateBitmap(8, 8, 1, 1, pat);
+    checker = CreatePatternBrush(bm);
+    DeleteObject(bm);
+  }
+  return checker;
+}
+
+// Draws a scroll bar at r. trough is the brush for its trough, with the
+// colors of dc set for it; NULL takes the one of ScrollTroughBrush.
+void PaintScrollBar(HDC dc, const RECT& r, bool vertical, const ScrollBar* sb, HBRUSH trough_brush) {
   if (RectEmpty(r)) return;
   int a = vertical ? r.right - r.left : r.bottom - r.top;  // arrow box size
   int length = vertical ? r.bottom - r.top : r.right - r.left;
@@ -149,8 +182,11 @@ void PaintScrollBar(HDC dc, const RECT& r, bool vertical, const ScrollBar* sb) {
   RECT first = vertical ? MakeRect(r.left, r.top, r.right, r.top + a) : MakeRect(r.left, r.top, r.left + a, r.bottom);
   RECT last = vertical ? MakeRect(r.left, r.bottom - a, r.right, r.bottom) : MakeRect(r.right - a, r.top, r.right, r.bottom);
   RECT trough = vertical ? MakeRect(r.left, first.bottom, r.right, last.top) : MakeRect(first.right, r.top, last.left, r.bottom);
-  // The trough is a fine checker of face and highlight.
-  FillRect(dc, &trough, GetSysColorBrush(COLOR_SCROLLBAR));
+  COLORREF text = GetTextColor(dc), back = GetBkColor(dc);
+  if (!trough_brush) trough_brush = ScrollTroughBrush(dc);
+  FillRect(dc, &trough, trough_brush);
+  SetTextColor(dc, text);
+  SetBkColor(dc, back);
   DrawArrowBox(dc, first, vertical ? 0 : 2, sb->enabled);
   DrawArrowBox(dc, last, vertical ? 1 : 3, sb->enabled);
   int tl = vertical ? trough.bottom - trough.top : trough.right - trough.left;
@@ -805,11 +841,7 @@ static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
     case WM_CTLCOLORSTATIC: {
       HDC dc = (HDC)wp;
       bool window = msg == WM_CTLCOLOREDIT || msg == WM_CTLCOLORLISTBOX;
-      if (msg == WM_CTLCOLORSCROLLBAR) {
-        SetTextColor(dc, GetSysColor(COLOR_BTNFACE));
-        SetBkColor(dc, GetSysColor(COLOR_3DHILIGHT));
-        return (LRESULT)GetSysColorBrush(COLOR_SCROLLBAR);
-      }
+      if (msg == WM_CTLCOLORSCROLLBAR) return (LRESULT)ScrollTroughBrush(dc);
       SetTextColor(dc, GetSysColor(window ? COLOR_WINDOWTEXT : COLOR_BTNTEXT));
       SetBkColor(dc, GetSysColor(window ? COLOR_WINDOW : COLOR_BTNFACE));
       return (LRESULT)GetSysColorBrush(window ? COLOR_WINDOW : COLOR_BTNFACE);

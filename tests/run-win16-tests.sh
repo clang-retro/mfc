@@ -12,9 +12,13 @@
 #   win16doc  document/view with CSingleDocTemplate
 #   win16mdi  document/view with CMultiDocTemplate (win16doc.cpp)
 #   win16bar  CToolBar, CStatusBar, docking and floating
+#   win16cmn  CImageList, CProgressCtrl, CSliderCtrl, CSpinButtonCtrl, CTabCtrl
+#             CListCtrl, CTreeCtrl, CToolTipCtrl, CHotKeyCtrl, CIPAddressCtrl,
+#             CPagerCtrl, CLinkCtrl, CComboBoxEx, CMonthCalCtrl,
+#             CDateTimeCtrl, CReBarCtrl, CReBar and CAnimateCtrl
 #   win16auto dispatch maps, IDispatch and connection points
-#   win16oledoc  OLE data transfer; containers, servers and drag and drop
-#             are linked, not run
+#   win16oledoc  OLE data transfer and the OLE dialogs; containers, servers
+#             and drag and drop are linked, not run
 set -u
 : "${BIN:?set BIN}" "${SYSROOT:?set SYSROOT}"
 OUT=${OUT:-build/i8086-pc-win16}
@@ -75,6 +79,7 @@ test1 win16wnd tests/win16wnd.cpp "$T/win16wnd.res"
 test1 win16doc tests/win16doc.cpp "$T/win16doc.res"
 test1 win16mdi tests/win16doc.cpp "$T/win16doc.res" -DTEST_MDI
 test1 win16bar tests/win16bar.cpp "$T/win16bar.res"
+test1 win16cmn tests/win16cmn.cpp
 test1 win16auto tests/win16auto.cpp
 test1 win16oledoc tests/win16oledoc.cpp
 

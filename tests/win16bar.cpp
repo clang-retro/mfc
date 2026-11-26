@@ -69,7 +69,7 @@ protected:
   /// Makes the toolbar and the status bar, and starts the timer.
   afx_msg int OnCreate(LPCREATESTRUCT lpcs) {
     if (CFrameWnd::OnCreate(lpcs) == -1) return -1;
-    CHECK(m_wndToolBar.Create(this, WS_CHILD | WS_VISIBLE | CBRS_TOP | CBRS_FLYBY));
+    CHECK(m_wndToolBar.Create(this, WS_CHILD | WS_VISIBLE | CBRS_TOP | CBRS_FLYBY | CBRS_TOOLTIPS));
     CHECK(m_wndToolBar.SetButtons(s_buttons, 5));
     CHECK(m_wndToolBar.SetBitmap(MakeImages(4)));
     CHECK(m_wndStatusBar.Create(this));
@@ -204,6 +204,26 @@ protected:
         break;
       }
       case 5: {
+        // The tooltip: with the mouse on a button, five ticks of the
+        // bar's timer show the part of the string after the newline.
+        CPoint pt = ButtonCenter(ID_BAR_TWO);
+        m_wndToolBar.ClientToScreen(&pt);
+        ::SetCursorPos(pt.x, pt.y);
+        m_wndToolBar.ScreenToClient(&pt);
+        m_wndToolBar.SendMessage(WM_MOUSEMOVE, 0, MAKELONG(pt.x, pt.y));
+        for (int i = 0; i < 5; i++) m_wndToolBar.SendMessage(WM_TIMER, 1, 0);
+        HWND hwndTip = ::FindWindow("AfxW16ToolTip", NULL);
+        CHECK(hwndTip != NULL && ::IsWindowVisible(hwndTip));
+        char sz[32] = "";
+        if (hwndTip != NULL) ::GetWindowText(hwndTip, sz, sizeof(sz));
+        CHECK(lstrcmp(sz, "Second") == 0);
+        // A click hides it.
+        m_wndToolBar.SendMessage(WM_LBUTTONDOWN, MK_LBUTTON, MAKELONG(pt.x, pt.y));
+        m_wndToolBar.SendMessage(WM_LBUTTONUP, 0, MAKELONG(pt.x, pt.y));
+        CHECK(hwndTip == NULL || !::IsWindowVisible(hwndTip));
+        break;
+      }
+      case 6: {
         // ShowControlBar hides the status bar.
         ShowControlBar(&m_wndStatusBar, FALSE, FALSE);
         CHECK(!m_wndStatusBar.IsWindowVisible());

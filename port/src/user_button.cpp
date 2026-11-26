@@ -1204,6 +1204,8 @@ LRESULT CALLBACK ScrollProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       s = NewState<ScrollState>(h);
       s->bar.info.nMax = 0;
       s->bar.info.nPage = 0;
+      // A scroll bar made disabled draws as one from the start.
+      s->bar.enabled = !(((CREATESTRUCTW*)lp)->style & WS_DISABLED);
       break;
     case WM_NCDESTROY:
       FreeState<ScrollState>(h);
@@ -1219,8 +1221,12 @@ LRESULT CALLBACK ScrollProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       DWORD style = GetWindowLongW(h, GWL_STYLE);
       if (style & (SBS_SIZEBOX | SBS_SIZEGRIP))
         DrawFrameControl(dc, &rc, DFC_SCROLL, DFCS_SCROLLSIZEGRIP);
-      else
-        PaintScrollBar(dc, rc, Vertical(h), &s->bar);
+      else {
+        // The parent gives the trough's brush, as on Windows.
+        HWND parent = GetParent(h);
+        HBRUSH br = parent ? (HBRUSH)SendMessageW(parent, WM_CTLCOLORSCROLLBAR, (WPARAM)dc, (LPARAM)h) : NULL;
+        PaintScrollBar(dc, rc, Vertical(h), &s->bar, br);
+      }
       if (!wp) EndPaint(h, &ps);
       return 0;
     }

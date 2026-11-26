@@ -21,6 +21,35 @@ void AFXAPI _AfxUnmergeMenus(HMENU hMenuShared, HMENU hMenuSource);
 #ifdef _AFX_WIN16
 // Registers the toolbar and status bar classes of 16-bit Windows (win16bar.cpp).
 BOOL AFXAPI _AfxW16RegisterBarClasses();
+// Registers the progress bar, trackbar, up-down and tab control classes of
+// 16-bit Windows (win16ctl.cpp) for the AFX_WNDCOMMCTL_ flags in fReg.
+// Gives the flags of the classes that are there.
+LONG AFXAPI _AfxW16RegisterCtlClasses(LONG fReg);
+// Registers the header control and list view classes of 16-bit Windows
+// (win16lv.cpp). Gives TRUE when both classes are there.
+BOOL AFXAPI _AfxW16RegisterListClasses();
+// Registers the tree view class of 16-bit Windows (win16tv.cpp). Gives
+// TRUE when the class is there.
+BOOL AFXAPI _AfxW16RegisterTreeClass();
+// Registers the tooltip class of 16-bit Windows (win16tt.cpp). Gives TRUE
+// when the class is there.
+BOOL AFXAPI _AfxW16RegisterTipClass();
+// Registers the hot key, IP address, pager and link classes of 16-bit
+// Windows (win16misc.cpp) for the AFX_WNDCOMMCTL_ flags in fReg. Gives
+// the flags of the classes that are there.
+LONG AFXAPI _AfxW16RegisterMiscClasses(LONG fReg);
+// Registers the extended combo box class of 16-bit Windows
+// (win16cbex.cpp). Gives TRUE when the class is there.
+BOOL AFXAPI _AfxW16RegisterComboExClass();
+// Registers the month calendar class and the date and time picker class
+// of 16-bit Windows (win16date.cpp). Gives TRUE when both are there.
+BOOL AFXAPI _AfxW16RegisterDateClasses();
+// Registers the rebar class of 16-bit Windows (win16rebar.cpp). Gives
+// TRUE when the class is there.
+BOOL AFXAPI _AfxW16RegisterReBarClass();
+// Registers the animation class of 16-bit Windows (win16anim.cpp). Gives
+// TRUE when the class is there.
+BOOL AFXAPI _AfxW16RegisterAnimateClass();
 #endif
 
 // Idle updates for in-place frames, which are not under the main window

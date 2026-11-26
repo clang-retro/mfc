@@ -9,6 +9,16 @@
 #include <oleidl.h>
 #include <ocidl.h>
 
+// The 16-bit build takes the OLE headers of the win16-sdk, which do not
+// include the windef.h that defines this.
+#ifndef __WINPORT_EXTERN_C
+#ifdef __cplusplus
+#define __WINPORT_EXTERN_C extern "C"
+#else
+#define __WINPORT_EXTERN_C extern
+#endif
+#endif
+
 #ifdef __cplusplus
 interface IBinding;
 #else
