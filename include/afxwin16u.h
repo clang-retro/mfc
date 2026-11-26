@@ -293,13 +293,16 @@ int _AfxW16AcceleratorCount(HACCEL hAccel);
 #define WC_TABCONTROL "AfxTabControl16"
 
 // The library also draws the header control and the list view
-// (src/win16lv.cpp) and the tree view (src/win16tv.cpp).
+// (src/win16lv.cpp), the tree view (src/win16tv.cpp) and the tooltip
+// (src/win16tt.cpp).
+#undef TOOLTIPS_CLASS
 #undef WC_HEADER
 #undef WC_LISTVIEW
 #undef WC_TREEVIEW
 #define WC_HEADER "AfxHeader16"
 #define WC_LISTVIEW "AfxListView16"
 #define WC_TREEVIEW "AfxTreeView16"
+#define TOOLTIPS_CLASS "AfxToolTip16"
 
 // GDI.
 DWORD GetObjectType(HGDIOBJ h);

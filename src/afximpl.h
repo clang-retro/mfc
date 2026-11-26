@@ -31,6 +31,9 @@ BOOL AFXAPI _AfxW16RegisterListClasses();
 // Registers the tree view class of 16-bit Windows (win16tv.cpp). Gives
 // TRUE when the class is there.
 BOOL AFXAPI _AfxW16RegisterTreeClass();
+// Registers the tooltip class of 16-bit Windows (win16tt.cpp). Gives TRUE
+// when the class is there.
+BOOL AFXAPI _AfxW16RegisterTipClass();
 #endif
 
 // Idle updates for in-place frames, which are not under the main window

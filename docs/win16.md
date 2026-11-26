@@ -129,9 +129,8 @@ hook that closes them. These classes need a real
   toolbar and the status bar" and "The other common controls").
   `CReBar` and the other classes of `afxcmn.h` compile, but their
   windows are not made.
-- Tooltips of other windows. Only the toolbar shows tooltips (see "The
-  toolbar and the status bar"). `CToolTipCtrl` and
-  `CWnd::EnableToolTips` make no window.
+- `CWnd::EnableToolTips`. It does nothing on any target of the library.
+  Use a `CToolTipCtrl` (see "The other common controls").
 - The shell file dialog (`IFileDialog`). `CFileDialog` always shows the
   classic dialog.
 - Threads. `CWinThread::CreateThread` fails with `ERROR_NOT_SUPPORTED`.
@@ -279,7 +278,7 @@ names are not the names of the common controls.
   toolbar, in the 16-bit packing.
 - The toolbar keeps the text of a button (`SetButtonText`), but it does
   not draw it.
-- 16-bit Windows has no tooltip control. A toolbar with
+- 16-bit Windows has no tooltip control of its own. A toolbar with
   `CBRS_TOOLTIPS` (`TBSTYLE_TOOLTIPS`) shows the tip of a button itself.
   When the mouse stays on a button for half a second, the toolbar sends
   `TTN_NEEDTEXTA` to its owner, and shows the text below the mouse in a
@@ -300,8 +299,8 @@ names are not the names of the common controls.
 
 ### The other common controls
 
-`src/win16ctl.cpp`, `src/win16lv.cpp` and `src/win16tv.cpp` register
-seven more window classes. `afxwin16u.h` sets the class names to the names of the
+`src/win16ctl.cpp`, `src/win16lv.cpp`, `src/win16tv.cpp` and
+`src/win16tt.cpp` register eight more window classes. `afxwin16u.h` sets the class names to the names of the
 library, as for the toolbar:
 
 | Class | Name | MFC class |
@@ -313,11 +312,12 @@ library, as for the toolbar:
 | header control | `AfxHeader16` | `CHeaderCtrl` |
 | list view | `AfxListView16` | `CListCtrl` |
 | tree view | `AfxTreeView16` | `CTreeCtrl` |
+| tooltip | `AfxToolTip16` | `CToolTipCtrl` |
 
 The files also register each class with the name of `comctl32.dll`
 (`msctls_progress32`, `msctls_trackbar32`, `msctls_updown32`,
-`SysTabControl32`, `SysHeader32`, `SysListView32` and
-`SysTreeView32`). Thus a dialog template can use these names.
+`SysTabControl32`, `SysHeader32`, `SysListView32`, `SysTreeView32`
+and `tooltips_class32`). Thus a dialog template can use these names.
 
 - The windows do the messages of the common controls in ANSI. They send
   `WM_HSCROLL` and `WM_VSCROLL` in the 16-bit packing: the code in
@@ -356,6 +356,17 @@ The files also register each class with the name of `comctl32.dll`
   highlight, the insert mark, `TVN_BEGINDRAG`, the incremental search,
   and the keys and the mouse of `comctl32.dll`. It has no tooltips and
   no hot tracking (`TVS_TRACKSELECT`).
+- The tooltip has window tools (`TTF_IDISHWND`) and rectangle tools,
+  `TTM_RELAYEVENT` and `TTF_SUBCLASS`, the text callback
+  (`TTN_GETDISPINFO`), string resources, `TTN_SHOW` and `TTN_POP`,
+  tracking tips (`TTF_TRACK`), `TTF_CENTERTIP`, a title, the delay
+  times, the colors, the margins and word wrap (`TTM_SETMAXTIPWIDTH`).
+  16-bit Windows has no `WM_MOUSELEAVE`, so a timer finds the mouse when
+  it leaves a tool. There are no balloon tips. A 16-bit `wParam` cannot
+  hold a `COLORREF`, so `TTM_SETTIPBKCOLOR` and `TTM_SETTIPTEXTCOLOR`
+  take the color from `lParam` when `lParam` is not 0.
+- The toolbar does not use this tooltip. It shows its own tips (see
+  "The toolbar and the status bar").
 - An `HTREEITEM` has 16 bits. `TVI_ROOT`, `TVI_FIRST`, `TVI_LAST` and
   `TVI_SORT` become 0, 1, 2 and 3, so the handles of the items start
   at 4.
@@ -404,7 +415,7 @@ the handle as a word key (`CMapWordToPtr`).
 | `win16doc` | `CSingleDocTemplate`, File New, `OnDraw`, `OnUpdate`, and the command routing to the view and the document |
 | `win16mdi` | `CMultiDocTemplate`, two MDI children, the MDI menus, and `MDIGetActive`, `MDINext` and `MDIActivate` |
 | `win16bar` | `CToolBar` and `CStatusBar`: the button layout, a click, the idle update, the message pane, docking at the left edge, floating, the tooltip of a button, and `ShowControlBar` |
-| `win16cmn` | `CImageList`, `CProgressCtrl`, `CSliderCtrl`, `CSpinButtonCtrl`, `CTabCtrl`, `CListCtrl` and `CTreeCtrl`: the images and masks, the ranges and positions, the keys, the buddy of the up-down control, a click on a tab, the columns, items, find and sort of a report view, the links, expansion, selection and sort of a tree, and the notifications |
+| `win16cmn` | `CImageList`, `CProgressCtrl`, `CSliderCtrl`, `CSpinButtonCtrl`, `CTabCtrl`, `CListCtrl`, `CTreeCtrl` and `CToolTipCtrl`: the images and masks, the ranges and positions, the keys, the buddy of the up-down control, a click on a tab, the columns, items, find and sort of a report view, the links, expansion, selection and sort of a tree, the tools, text, hit test, show and pop of a tooltip, and the notifications |
 
 The window tests need an X display. Without one, the script starts
 itself under `xvfb-run`.

@@ -1,6 +1,7 @@
 // win16cmn.cpp - the common controls that the library draws on 16-bit
 // Windows: CImageList, CProgressCtrl, CSliderCtrl, CSpinButtonCtrl and
-// CTabCtrl, CHeaderCtrl, CListCtrl and CTreeCtrl. The frame makes each control, sends it messages and checks the
+// CTabCtrl, CHeaderCtrl, CListCtrl, CTreeCtrl and CToolTipCtrl. The frame
+// makes each control, sends it messages and checks the
 // notifications that the frame gets. It prints ALL PASSED when each
 // check holds, because Wine gives the exit code 0 whatever a 16-bit
 // program returns.
@@ -19,7 +20,7 @@ static BOOL g_bDone = FALSE;  // the test ran to the end
     }                                                        \
   } while (0)
 
-enum { IDC_PROGRESS = 100, IDC_SLIDER, IDC_BUDDY, IDC_SPIN, IDC_TAB, IDC_LIST, IDC_TREE };
+enum { IDC_PROGRESS = 100, IDC_SLIDER, IDC_BUDDY, IDC_SPIN, IDC_TAB, IDC_LIST, IDC_TREE, IDT_RECT = 500 };
 
 class CMainFrame : public CFrameWnd {
 public:
@@ -30,6 +31,7 @@ public:
   CTabCtrl m_tab;
   CListCtrl m_list;
   CTreeCtrl m_tree;
+  CToolTipCtrl m_tip;
   UINT m_nLastHScroll;    // the code of the last WM_HSCROLL from the slider
   int m_nLastHScrollPos;  // its position
   int m_nVScrolls;        // the WM_VSCROLL messages from the up-down control
@@ -42,12 +44,16 @@ public:
   int m_nExpanding;       // the TVN_ITEMEXPANDING notifications
   int m_nTreeSelChanged;  // the TVN_SELCHANGED notifications
   int m_nTreeDeleted;     // the TVN_DELETEITEM notifications
+  int m_nTipText;         // the TTN_NEEDTEXT notifications of IDT_RECT
+  int m_nTipShow;         // the TTN_SHOW notifications of IDT_RECT
+  int m_nTipPop;          // the TTN_POP notifications of IDT_RECT
 
   /// Starts with no notifications.
   CMainFrame()
       : m_nLastHScroll(0xFFFF), m_nLastHScrollPos(-1), m_nVScrolls(0), m_nDeltaPos(0),
         m_nLastDelta(0), m_nSelChanging(0), m_nSelChange(0), m_bRefuseTab(FALSE),
-        m_nItemChanged(0), m_nExpanding(0), m_nTreeSelChanged(0), m_nTreeDeleted(0) {}
+        m_nItemChanged(0), m_nExpanding(0), m_nTreeSelChanged(0), m_nTreeDeleted(0),
+        m_nTipText(0), m_nTipShow(0), m_nTipPop(0) {}
 
   /// Makes the controls and runs the checks.
   void RunTests() {
@@ -58,6 +64,7 @@ public:
     TestTab();
     TestListView();
     TestTreeView();
+    TestToolTip();
     g_bDone = TRUE;
   }
 
@@ -394,6 +401,65 @@ protected:
     m_tree.UpdateWindow();
   }
 
+  /// Checks a tooltip: a window tool and a rectangle tool with a text
+  /// callback, the text, a hit test, a relayed mouse move, the show and
+  /// the pop, and the deletion of a tool.
+  void TestToolTip() {
+    CHECK(m_tip.Create(this, TTS_ALWAYSTIP));
+    CHECK(m_tip.AddTool(&m_progress, "Progress"));
+    CRect rcTool(0, 0, 8, 8);
+    CHECK(m_tip.AddTool(this, LPSTR_TEXTCALLBACK, &rcTool, IDT_RECT));
+    CHECK(m_tip.GetToolCount() == 2);
+
+    char szText[80];
+    TOOLINFO ti;
+    m_tip.FillInToolInfo(ti, &m_progress, 0);
+    ti.lpszText = szText;
+    CHECK(m_tip.SendMessage(TTM_GETTEXT, sizeof(szText), (LPARAM)&ti) == 8);
+    CHECK(strcmp(szText, "Progress") == 0);
+    m_tip.UpdateTipText("Done", &m_progress);
+    ti.lpszText = szText;
+    m_tip.SendMessage(TTM_GETTEXT, sizeof(szText), (LPARAM)&ti);
+    CHECK(strcmp(szText, "Done") == 0);
+
+    // The callback gives the text of the rectangle tool.
+    m_tip.FillInToolInfo(ti, this, IDT_RECT);
+    ti.lpszText = szText;
+    m_tip.SendMessage(TTM_GETTEXT, sizeof(szText), (LPARAM)&ti);
+    CHECK(strcmp(szText, "Corner") == 0 && m_nTipText == 1);
+
+    TTHITTESTINFO hit;
+    memset(&hit, 0, sizeof(hit));
+    hit.hwnd = m_hWnd;
+    hit.pt = CPoint(4, 4);
+    hit.ti.cbSize = TTTOOLINFO_V1_SIZE;
+    CHECK(m_tip.SendMessage(TTM_HITTEST, 0, (LPARAM)&hit));
+    CHECK(hit.ti.uId == IDT_RECT);
+    hit.pt = CPoint(20, 20);
+    CHECK(!m_tip.SendMessage(TTM_HITTEST, 0, (LPARAM)&hit));
+
+    // A relayed move makes the tool hot; TTM_POPUP shows it now.
+    MSG msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.hwnd = m_hWnd;
+    msg.message = WM_MOUSEMOVE;
+    msg.lParam = MAKELPARAM(4, 4);
+    m_tip.RelayEvent(&msg);
+    m_tip.SendMessage(TTM_POPUP, 0, 0);
+    CHECK(m_tip.IsWindowVisible());
+    CHECK(m_nTipShow == 1);
+    m_tip.FillInToolInfo(ti, this, 0);
+    CHECK(m_tip.SendMessage(TTM_GETCURRENTTOOL, 0, (LPARAM)&ti) && ti.uId == IDT_RECT);
+    m_tip.Pop();
+    CHECK(!m_tip.IsWindowVisible());
+    CHECK(m_nTipPop == 1);
+
+    m_tip.DelTool(this, IDT_RECT);
+    CHECK(m_tip.GetToolCount() == 1);
+    CHECK(m_tip.SetMaxTipWidth(100) == -1);
+    m_tip.DestroyWindow();
+  }
+
   /// Keeps the code and the position of the scroll messages of the
   /// slider.
   afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar) {
@@ -460,6 +526,29 @@ protected:
     *pResult = 0;
   }
 
+  /// Gives the text of the rectangle tool of the tooltip.
+  afx_msg void OnTipNeedText(NMHDR* pNMHDR, LRESULT* pResult) {
+    NMTTDISPINFO* pInfo = (NMTTDISPINFO*)pNMHDR;
+    lstrcpy(pInfo->szText, "Corner");
+    pInfo->lpszText = pInfo->szText;
+    m_nTipText++;
+    *pResult = 0;
+  }
+
+  /// Counts TTN_SHOW of the rectangle tool.
+  afx_msg void OnTipShow(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nTipShow++;
+    *pResult = 0;
+  }
+
+  /// Counts TTN_POP of the rectangle tool.
+  afx_msg void OnTipPop(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nTipPop++;
+    *pResult = 0;
+  }
+
   DECLARE_MESSAGE_MAP()
 };
 
@@ -473,6 +562,9 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
   ON_NOTIFY(TVN_ITEMEXPANDING, IDC_TREE, OnItemExpanding)
   ON_NOTIFY(TVN_SELCHANGED, IDC_TREE, OnTreeSelChanged)
   ON_NOTIFY(TVN_DELETEITEM, IDC_TREE, OnTreeDeleteItem)
+  ON_NOTIFY(TTN_NEEDTEXT, IDT_RECT, OnTipNeedText)
+  ON_NOTIFY(TTN_SHOW, IDT_RECT, OnTipShow)
+  ON_NOTIFY(TTN_POP, IDT_RECT, OnTipPop)
 END_MESSAGE_MAP()
 
 class CTestApp : public CWinApp {
