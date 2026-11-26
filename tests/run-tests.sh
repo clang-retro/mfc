@@ -35,7 +35,7 @@ esac
 # WTL's headers, for wtltest (tools/fetch-wtl.sh puts them here).
 WTL_INCLUDE=${WTL_INCLUDE:-build/wtl/include}
 if [ $NATIVE = 1 ]; then
-  TESTS=${NATIVE_TESTS:-"core memtest wintest disptest isapitest dlgtest sditest mditest cmntest splittest docktest dbtest odbctest rvtest socktest occtest dlltest inettest oletest iptest docobtest linktest bindtest richtest richsrvtest autotest srvtest atlwintest atltest conntest ctltest wltest dragtest daotest dvtest htmltest atlctltest atlutiltest cdlgtest vistatest iotest audiotest wtltest sstest gltest"}
+  TESTS=${NATIVE_TESTS:-"core memtest wintest disptest isapitest dlgtest sditest mditest cmntest splittest docktest dbtest odbctest rvtest socktest occtest dlltest inettest oletest iptest docobtest linktest bindtest richtest richsrvtest autotest srvtest atlwintest atltest conntest ctltest wltest dragtest daotest dvtest htmltest atlctltest atlutiltest cdlgtest vistatest iotest audiotest wtltest sstest"}
   T=$OUT/tests
   mkdir -p "$T/a" "$T/u"
   python3 tests/gen-toolbar-bmp.py "$T/toolbar.bmp" 6 || exit 1
@@ -57,6 +57,14 @@ if [ $NATIVE = 1 ]; then
     *apple* | *darwin*) ;;
     *) CXXFLAGS="$CXXFLAGS -Iport/softgl/include" ;;
   esac
+  # gltest draws with the generic implementation. On macOS it would need
+  # a CGL renderer, which the virtual machines of CI do not have.
+  if [ -z "${NATIVE_TESTS:-}" ]; then
+    case $TARGET in
+      *apple* | *darwin*) ;;
+      *) TESTS="$TESTS gltest" ;;
+    esac
+  fi
   # What libwinport needs from the system: Cocoa and OpenGL on macOS.
   case $TARGET in
     *apple* | *darwin*) SYSLIBS="-framework Cocoa -framework OpenGL -lpthread" ;;
