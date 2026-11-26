@@ -28,6 +28,7 @@ extern "C" {
 #include <MacWindows.h>
 #include <Menus.h>
 #include <Quickdraw.h>
+#include <SegLoad.h>
 #include <TextEdit.h>
 }
 
@@ -102,21 +103,25 @@ void Modifiers(unsigned now) {
   }
 }
 
-enum { kAppleMenu = 128, kFileMenu = 129, kQuitItem = 1 };
+enum { kAppleMenu = 128, kFileMenu = 129, kExitItem = 1 };
 
-// Puts the Apple menu (with the desk accessories) and a File menu with
-// Quit in the Mac menu bar. The program's own menus stay in its windows.
+// Puts the Apple menu (with the desk accessories) and a menu with the
+// program's name and Exit in the Mac menu bar. The program's own menus
+// stay in its windows.
 void MakeMenuBar() {
   static const unsigned char apple[] = {1, 0x14};  // the Apple symbol
   static const unsigned char file[] = {4, 'F', 'i', 'l', 'e'};
-  static const unsigned char quit[] = {4, 'Q', 'u', 'i', 't'};
+  static const unsigned char exitItem[] = {4, 'E', 'x', 'i', 't'};
+  // The program's name (CurApName), or "File" if it is not there.
+  const unsigned char* name = LMGetCurApName();
+  if (name[0] == 0 || name[0] > 31) name = file;
   g_appleMenu = NewMenu(kAppleMenu, apple);
   if (g_appleMenu) {
     AppendResMenu(g_appleMenu, 'DRVR');
     InsertMenu(g_appleMenu, 0);
   }
-  if (MenuHandle m = NewMenu(kFileMenu, file)) {
-    AppendMenu(m, quit);
+  if (MenuHandle m = NewMenu(kFileMenu, name)) {
+    AppendMenu(m, exitItem);
     InsertMenu(m, 0);
   }
   DrawMenuBar();
@@ -130,7 +135,7 @@ void Choose(long choice) {
     Str255 name;
     GetMenuItemText(g_appleMenu, item, name);
     OpenDeskAcc(name);
-  } else if (menu == kFileMenu && item == kQuitItem) {
+  } else if (menu == kFileMenu && item == kExitItem) {
     OnQuit();
   }
   HiliteMenu(0);
