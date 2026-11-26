@@ -304,6 +304,12 @@ struct Backend {
   virtual ~Backend() {}
   virtual const char* Name() = 0;
   virtual SIZE ScreenSize() = 0;
+  // The part of the screen that windows can use: on macOS, the screen
+  // without the menu bar and the Dock. The default is the whole screen.
+  virtual RECT WorkArea() {
+    SIZE s = ScreenSize();
+    return RECT{0, 0, s.cx, s.cy};
+  }
   virtual void Show(Window* /*w*/, bool /*show*/) {}
   virtual void Destroy(Window* /*w*/) {}
   virtual void Moved(Window* /*w*/) {}  // position or size

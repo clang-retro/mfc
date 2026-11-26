@@ -100,6 +100,12 @@ struct CocoaBackend : Backend {
     return SIZE{w, h};
   }
 
+  RECT WorkArea() override {
+    int x, y, w, h;
+    cocoa::WorkArea(&x, &y, &w, &h);
+    return RECT{x, y, x + w, y + h};
+  }
+
   // Menus, drop-downs and tooltips float; windows with a caption, or
   // shown in the Dock, are ordinary windows.
   static bool IsPopup(Window* w) {

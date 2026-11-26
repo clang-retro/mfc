@@ -799,7 +799,7 @@ BOOL WINAPI SystemParametersInfoW(UINT action, UINT uiParam, PVOID pv, UINT winI
     }
     case SPI_GETWORKAREA:
       if (pv == NULL) return FALSE;
-      SetRect((LPRECT)pv, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+      *(LPRECT)pv = GetBackend()->WorkArea();
       return TRUE;
     case SPI_GETWHEELSCROLLLINES:
       if (pv == NULL) return FALSE;
