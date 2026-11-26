@@ -41,6 +41,9 @@ LONG AFXAPI _AfxW16RegisterMiscClasses(LONG fReg);
 // Registers the extended combo box class of 16-bit Windows
 // (win16cbex.cpp). Gives TRUE when the class is there.
 BOOL AFXAPI _AfxW16RegisterComboExClass();
+// Registers the month calendar class and the date and time picker class
+// of 16-bit Windows (win16date.cpp). Gives TRUE when both are there.
+BOOL AFXAPI _AfxW16RegisterDateClasses();
 #endif
 
 // Idle updates for in-place frames, which are not under the main window

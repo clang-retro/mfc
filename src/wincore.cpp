@@ -896,13 +896,14 @@ BOOL AFXAPI AfxDeferRegisterClass(LONG fToRegister) {
   // It also draws the progress bar, the trackbar (with the bars), the
   // up-down control, the tab control, the header, the list view, the
   // tree view, the hot key, the IP address control, the pager, the link
-  // control and the extended combo box.
+  // control, the extended combo box, the month calendar and the date and
+  // time picker.
   if (fToRegister & (AFX_WNDCOMMCTL_PROGRESS_REG | AFX_WNDCOMMCTL_BAR_REG |
                      AFX_WNDCOMMCTL_UPDOWN_REG | AFX_WNDCOMMCTL_TAB_REG |
                      AFX_WNDCOMMCTL_LISTVIEW_REG | AFX_WNDCOMMCTL_TREEVIEW_REG |
                      AFX_WNDCOMMCTL_HOTKEY_REG | AFX_WNDCOMMCTL_INTERNET_REG |
                      AFX_WNDCOMMCTL_PAGER_REG | AFX_WNDCOMMCTL_LINK_REG |
-                     AFX_WNDCOMMCTL_USEREX_REG)) {
+                     AFX_WNDCOMMCTL_USEREX_REG | AFX_WNDCOMMCTL_DATE_REG)) {
     LONG fCtls = _AfxW16RegisterCtlClasses(fToRegister);
     if ((fToRegister & AFX_WNDCOMMCTL_BAR_REG) && !(fCtls & AFX_WNDCOMMCTL_BAR_REG))
       fRegisteredClasses &= ~AFX_WNDCOMMCTL_BAR_REG;

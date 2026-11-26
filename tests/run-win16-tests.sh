@@ -14,7 +14,8 @@
 #   win16bar  CToolBar, CStatusBar, docking and floating
 #   win16cmn  CImageList, CProgressCtrl, CSliderCtrl, CSpinButtonCtrl, CTabCtrl
 #             CListCtrl, CTreeCtrl, CToolTipCtrl, CHotKeyCtrl, CIPAddressCtrl,
-#             CPagerCtrl, CLinkCtrl and CComboBoxEx
+#             CPagerCtrl, CLinkCtrl, CComboBoxEx, CMonthCalCtrl and
+#             CDateTimeCtrl
 #   win16auto dispatch maps, IDispatch and connection points
 #   win16oledoc  OLE data transfer and the OLE dialogs; containers, servers
 #             and drag and drop are linked, not run

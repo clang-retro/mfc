@@ -1,8 +1,9 @@
 // win16cmn.cpp - the common controls that the library draws on 16-bit
 // Windows: CImageList, CProgressCtrl, CSliderCtrl, CSpinButtonCtrl and
 // CTabCtrl, CHeaderCtrl, CListCtrl, CTreeCtrl, CToolTipCtrl, CHotKeyCtrl,
-// CIPAddressCtrl, CPagerCtrl, CLinkCtrl and CComboBoxEx. The frame makes each control, sends it messages and checks the
-// notifications that the frame gets. It prints ALL PASSED when each
+// CIPAddressCtrl, CPagerCtrl, CLinkCtrl, CComboBoxEx, CMonthCalCtrl and
+// CDateTimeCtrl. The frame makes each control, sends it messages and
+// checks the notifications that the frame gets. It prints ALL PASSED when each
 // check holds, because Wine gives the exit code 0 whatever a 16-bit
 // program returns.
 #include <afxwin.h>
@@ -21,7 +22,8 @@ static BOOL g_bDone = FALSE;  // the test ran to the end
   } while (0)
 
 enum { IDC_PROGRESS = 100, IDC_SLIDER, IDC_BUDDY, IDC_SPIN, IDC_TAB, IDC_LIST, IDC_TREE, IDC_HOTKEY, IDC_IPADDR, IDC_PAGER,
-       IDC_PAGERCHILD, IDC_LINK, IDC_COMBOEX, IDT_RECT = 500 };
+       IDC_PAGERCHILD, IDC_LINK, IDC_COMBOEX, IDC_MONTHCAL,
+       IDC_DATETIME, IDT_RECT = 500 };
 
 class CMainFrame : public CFrameWnd {
 public:
@@ -38,6 +40,8 @@ public:
   CPagerCtrl m_pager;
   CLinkCtrl m_link;
   CComboBoxEx m_comboEx;
+  CMonthCalCtrl m_cal;
+  CDateTimeCtrl m_dtp;
   UINT m_nLastHScroll;    // the code of the last WM_HSCROLL from the slider
   int m_nLastHScrollPos;  // its position
   int m_nVScrolls;        // the WM_VSCROLL messages from the up-down control
@@ -60,6 +64,8 @@ public:
   int m_iLastLink;        // the link of the last NM_CLICK
   int m_nCbInserted;      // the CBEN_INSERTITEM notifications
   int m_nCbDeleted;       // the CBEN_DELETEITEM notifications
+  int m_nCalSelChange;    // the MCN_SELCHANGE notifications
+  int m_nDtChange;        // the DTN_DATETIMECHANGE notifications
 
   /// Starts with no notifications.
   CMainFrame()
@@ -67,7 +73,8 @@ public:
         m_nLastDelta(0), m_nSelChanging(0), m_nSelChange(0), m_bRefuseTab(FALSE),
         m_nItemChanged(0), m_nExpanding(0), m_nTreeSelChanged(0), m_nTreeDeleted(0),
         m_nTipText(0), m_nTipShow(0), m_nTipPop(0), m_nHotKeyChange(0), m_nFieldChanged(0),
-        m_nCalcSize(0), m_nLinkClick(0), m_iLastLink(-1), m_nCbInserted(0), m_nCbDeleted(0) {}
+        m_nCalcSize(0), m_nLinkClick(0), m_iLastLink(-1), m_nCbInserted(0), m_nCbDeleted(0),
+        m_nCalSelChange(0), m_nDtChange(0) {}
 
   /// Makes the controls and runs the checks.
   void RunTests() {
@@ -84,6 +91,8 @@ public:
     TestPager();
     TestLink();
     TestComboBoxEx();
+    TestMonthCal();
+    TestDateTime();
     g_bDone = TRUE;
   }
 
@@ -624,6 +633,95 @@ protected:
     m_comboEx.UpdateWindow();
   }
 
+  /// Gives a SYSTEMTIME for a date and a time.
+  static SYSTEMTIME MakeTime(int nYear, int nMonth, int nDay, int nHour = 0, int nMinute = 0) {
+    SYSTEMTIME st;
+    memset(&st, 0, sizeof(st));
+    st.wYear = (WORD)nYear;
+    st.wMonth = (WORD)nMonth;
+    st.wDay = (WORD)nDay;
+    st.wHour = (WORD)nHour;
+    st.wMinute = (WORD)nMinute;
+    return st;
+  }
+
+  /// Checks the month calendar: the selection, today, the range, the
+  /// first day of the week, the size, and the hit test of a date and of
+  /// the title.
+  void TestMonthCal() {
+    CHECK(m_cal.Create(WS_CHILD | WS_VISIBLE | MCS_WEEKNUMBERS, CRect(460, 310, 700, 470), this,
+                       IDC_MONTHCAL));
+    SYSTEMTIME st = MakeTime(1999, 12, 31);
+    CHECK(m_cal.SetCurSel(&st));
+    SYSTEMTIME stGot;
+    CHECK(m_cal.GetCurSel(&stGot) && stGot.wYear == 1999 && stGot.wMonth == 12 && stGot.wDay == 31);
+    CHECK(stGot.wDayOfWeek == 5);  // a Friday
+    st = MakeTime(2000, 2, 30);
+    CHECK(!m_cal.SetCurSel(&st));  // not a date
+    st = MakeTime(2000, 1, 1);
+    m_cal.SendMessage(MCM_SETTODAY, 0, (LPARAM)&st);
+    CHECK(m_cal.SendMessage(MCM_GETTODAY, 0, (LPARAM)&stGot) && stGot.wYear == 2000 &&
+          stGot.wDay == 1);
+    SYSTEMTIME range[2];
+    range[0] = MakeTime(1999, 12, 1);
+    range[1] = MakeTime(2000, 1, 31);
+    CHECK(m_cal.SendMessage(MCM_SETRANGE, GDTR_MIN | GDTR_MAX, (LPARAM)range));
+    st = MakeTime(2000, 2, 1);
+    CHECK(!m_cal.SetCurSel(&st));  // out of the range
+    CHECK(m_cal.SendMessage(MCM_GETRANGE, 0, (LPARAM)range) == (GDTR_MIN | GDTR_MAX));
+    m_cal.SendMessage(MCM_SETFIRSTDAYOFWEEK, 0, 0);
+    CHECK(LOWORD(m_cal.SendMessage(MCM_GETFIRSTDAYOFWEEK, 0, 0)) == 0);
+    CRect rcMin;
+    CHECK(m_cal.GetMinReqRect(&rcMin) && rcMin.Width() > 0 && rcMin.Height() > 0);
+    MCHITTESTINFO hit;
+    memset(&hit, 0, sizeof(hit));
+    hit.cbSize = sizeof(hit);
+    hit.pt.x = rcMin.Width() / 2;
+    hit.pt.y = 4;
+    UINT uHit = (UINT)m_cal.SendMessage(MCM_HITTEST, 0, (LPARAM)&hit);
+    CHECK((uHit & MCHT_TITLE) == MCHT_TITLE && uHit == hit.uHit);
+    hit.pt.y = rcMin.Height() / 2;
+    uHit = (UINT)m_cal.SendMessage(MCM_HITTEST, 0, (LPARAM)&hit);
+    CHECK((uHit & MCHT_CALENDAR) == MCHT_CALENDAR);
+    m_cal.UpdateWindow();
+  }
+
+  /// Checks the date and time picker: the time, its text in a custom
+  /// format, the range, DTS_SHOWNONE, and the arrow and digit keys.
+  void TestDateTime() {
+    CHECK(m_dtp.Create(WS_CHILD | WS_VISIBLE | WS_TABSTOP | DTS_SHOWNONE, CRect(10, 380, 200, 404),
+                       this, IDC_DATETIME));
+    SYSTEMTIME st = MakeTime(2001, 3, 9, 14, 5);
+    CHECK(m_dtp.SetTime(&st));
+    CHECK(m_nDtChange == 0);  // DTM_SETSYSTEMTIME sends no notification
+    SYSTEMTIME stGot;
+    CHECK(m_dtp.GetTime(&stGot) == GDT_VALID && stGot.wYear == 2001 && stGot.wDay == 9 &&
+          stGot.wHour == 14 && stGot.wMinute == 5);
+    CHECK(m_dtp.SetFormat("yyyy'-'MM'-'dd HH':'mm"));
+    char szText[40];
+    m_dtp.GetWindowText(szText, sizeof(szText));
+    CHECK(strcmp(szText, "2001-03-09 14:05") == 0);
+    m_dtp.SetFocus();
+    m_dtp.SendMessage(WM_KEYDOWN, VK_HOME, 0);  // the first field, the year
+    m_dtp.SendMessage(WM_KEYDOWN, VK_UP, 0);
+    CHECK(m_nDtChange == 1);
+    CHECK(m_dtp.GetTime(&stGot) == GDT_VALID && stGot.wYear == 2002);
+    m_dtp.SendMessage(WM_KEYDOWN, VK_RIGHT, 0);  // the month
+    m_dtp.SendMessage(WM_CHAR, '1', 0);
+    m_dtp.SendMessage(WM_CHAR, '2', 0);
+    CHECK(m_dtp.GetTime(&stGot) == GDT_VALID && stGot.wMonth == 12);
+    SYSTEMTIME range[2];
+    range[0] = MakeTime(2002, 1, 1);
+    range[1] = MakeTime(2002, 6, 30);
+    CHECK(m_dtp.SetRange(GDTR_MIN | GDTR_MAX, range));
+    CHECK(m_dtp.GetTime(&stGot) == GDT_VALID && stGot.wMonth == 6 && stGot.wDay == 30);
+    CHECK(m_dtp.GetRange(range) == (GDTR_MIN | GDTR_MAX) && range[1].wMonth == 6);
+    CHECK(m_dtp.SetTime(NULL));  // DTS_SHOWNONE clears the check box
+    CHECK(m_dtp.GetTime(&stGot) == GDT_NONE);
+    CHECK(m_dtp.GetWindowTextLength() == 0);
+    m_dtp.UpdateWindow();
+  }
+
   /// Keeps the code and the position of the scroll messages of the
   /// slider.
   afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar) {
@@ -752,6 +850,20 @@ protected:
     *pResult = 0;
   }
 
+  /// Counts MCN_SELCHANGE.
+  afx_msg void OnCalSelChange(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nCalSelChange++;
+    *pResult = 0;
+  }
+
+  /// Counts DTN_DATETIMECHANGE.
+  afx_msg void OnDtChange(NMHDR* pNMHDR, LRESULT* pResult) {
+    (void)pNMHDR;
+    m_nDtChange++;
+    *pResult = 0;
+  }
+
   DECLARE_MESSAGE_MAP()
 };
 
@@ -774,6 +886,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
   ON_NOTIFY(NM_CLICK, IDC_LINK, OnLinkClick)
   ON_NOTIFY(CBEN_INSERTITEM, IDC_COMBOEX, OnCbInsertItem)
   ON_NOTIFY(CBEN_DELETEITEM, IDC_COMBOEX, OnCbDeleteItem)
+  ON_NOTIFY(MCN_SELCHANGE, IDC_MONTHCAL, OnCalSelChange)
+  ON_NOTIFY(DTN_DATETIMECHANGE, IDC_DATETIME, OnDtChange)
 END_MESSAGE_MAP()
 
 class CTestApp : public CWinApp {

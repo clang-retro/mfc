@@ -309,6 +309,10 @@ int _AfxW16AcceleratorCount(HACCEL hAccel);
 #define TOOLTIPS_CLASS "AfxToolTip16"
 #undef WC_COMBOBOXEX
 #define WC_COMBOBOXEX "AfxComboBoxEx16"
+#undef MONTHCAL_CLASS
+#undef DATETIMEPICK_CLASS
+#define MONTHCAL_CLASS "AfxMonthCal16"
+#define DATETIMEPICK_CLASS "AfxDateTime16"
 
 // The CB_ messages of 16-bit Windows are WM_USER + 0 to WM_USER + 24, the
 // numbers of the CBEM_ messages of comctl32.dll. The extended combo box
@@ -342,6 +346,22 @@ int _AfxW16AcceleratorCount(HACCEL hAccel);
 #define HOTKEY_CLASS "AfxHotKey16"
 #define WC_IPADDRESS "AfxIPAddress16"
 #define WC_PAGESCROLLER "AfxPager16"
+
+// The MCHT_ hit-test codes of comctl32.dll use the high word. MCHITTESTINFO
+// keeps the code in a UINT, which has 16 bits on 16-bit Windows. Thus the
+// flags move to the high byte of the low word: MCHT_TITLE, MCHT_CALENDAR and
+// MCHT_TODAYLINK are 0x1000, 0x2000 and 0x3000, and MCHT_NEXT and MCHT_PREV
+// are 0x0100 and 0x0200. The other codes use these flags and do not change.
+#undef MCHT_TITLE
+#undef MCHT_CALENDAR
+#undef MCHT_TODAYLINK
+#undef MCHT_NEXT
+#undef MCHT_PREV
+#define MCHT_TITLE 0x1000
+#define MCHT_CALENDAR 0x2000
+#define MCHT_TODAYLINK 0x3000
+#define MCHT_NEXT 0x0100
+#define MCHT_PREV 0x0200
 
 // GDI.
 DWORD GetObjectType(HGDIOBJ h);
