@@ -21,6 +21,18 @@
 
 #include "cocoa.h"
 
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED < 1020 && !defined(GNUSTEP)
+// The Mac OS X 10.0 and 10.1 headers do not declare this function, but
+// CoreGraphics has it.
+enum { kCGInterpolationNone = 1 };
+extern "C" void CGContextSetInterpolationQuality(CGContextRef c, int quality);
+#endif
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED < 1010 && !defined(GNUSTEP)
+// The events of the other mouse buttons arrived in 10.1, with these
+// numbers. Mac OS X 10.0 sends none of them.
+enum { NSOtherMouseDown = 25, NSOtherMouseUp = 26, NSOtherMouseDragged = 27 };
+#endif
+
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
 // Mac OS X 10.4's headers have neither of these.
@@ -43,6 +55,17 @@ typedef float CGFloat;
 
 using namespace winport::cocoa;
 
+// A screen saver bundle compiles this file again with its own
+// WINPORT_OBJC_PREFIX. Objective-C classes share one name space in a
+// process, and System Preferences loads more than one screen saver.
+#ifdef WINPORT_OBJC_PREFIX
+#define WINPORT_JOIN2(a, b) a##b
+#define WINPORT_JOIN(a, b) WINPORT_JOIN2(a, b)
+#define WinportWindow WINPORT_JOIN(WINPORT_OBJC_PREFIX, Window)
+#define WinportView WINPORT_JOIN(WINPORT_OBJC_PREFIX, View)
+#define WinportDelegate WINPORT_JOIN(WINPORT_OBJC_PREFIX, Delegate)
+#endif
+
 // A borderless window that can still take the keyboard, unless it is a
 // popup.
 @interface WinportWindow : NSWindow {
@@ -63,9 +86,12 @@ using namespace winport::cocoa;
 @interface WinportDelegate : NSObject
 @end
 
+// A hosted window (SetHost) has no NSWindow: window is nil, and the
+// view is a subview of the host view.
 struct winport::cocoa::Win {
   WinportWindow* window;
   WinportView* view;
+  bool hosted;
 };
 
 namespace {
@@ -74,6 +100,11 @@ WinportDelegate* g_delegate;
 std::vector<Win*> g_wins;
 WinportWindow* g_grab;  // where the pressed buttons went down
 unsigned g_buttons;
+// A screen saver bundle (SetHost): g_yield gives control back to the
+// host, and g_host is the view the windows are in (nil while the screen
+// saver has no view).
+NSView* g_host;
+void (*g_yield)(long);
 
 // The screen with the menu bar, whose top left is the origin.
 NSRect MainScreen() {
@@ -125,7 +156,7 @@ void Mouse(NSEvent* e) {
     case NSRightMouseUp: kind = kUp; button = 1; break;
     case NSOtherMouseDown:
     case NSOtherMouseUp:
-      if ([e buttonNumber] != 2) return;
+      if ((long)[e buttonNumber] != 2) return;  // (long: the 10.0 headers do not declare it)
       kind = [e type] == NSOtherMouseDown ? kDown : kUp;
       button = 2;
       break;
@@ -223,7 +254,10 @@ void MakeMenu() {
 namespace winport {
 namespace cocoa {
 
+// Start: makes the program a foreground application with a menu bar.
+// In a host (SetHost), the application is the host's: it does nothing.
 bool Start() {
+  if (g_yield) return true;
   NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
   [NSApplication sharedApplication];
   // A program run outside an application bundle becomes a foreground
@@ -236,7 +270,10 @@ bool Start() {
     [call setArgument:&regular atIndex:2];
     [call invokeWithTarget:NSApp];
   }
-#if !defined(GNUSTEP) && (!defined(MAC_OS_X_VERSION_10_6) || MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_6)
+#if !defined(GNUSTEP) && (!defined(MAC_OS_X_VERSION_10_6) || MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_6) && \
+    MAC_OS_X_VERSION_MAX_ALLOWED >= 1030
+  // (TransformProcessType arrived in 10.3. Before it, such a program stays
+  // in the background.)
   else {
     ProcessSerialNumber psn = {0, kCurrentProcess};
     TransformProcessType(&psn, kProcessTransformToForegroundApplication);
@@ -271,9 +308,24 @@ void WorkArea(int* x, int* y, int* width, int* height) {
   [pool release];
 }
 
+// Create: makes the NSWindow and the view of a top-level window, or
+// only a view in the host view (SetHost).
 Win* Create(void* owner, int x, int y, int width, int height, bool popup) {
   NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
   Win* w = new Win;
+  if (g_yield) {
+    NSRect r = g_host ? [g_host bounds] : NSMakeRect(0, 0, width, height);
+    WinportView* view = [[WinportView alloc] initWithFrame:r];
+    view->owner = owner;
+    [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+    w->window = nil;
+    w->view = view;
+    w->hosted = true;
+    g_wins.push_back(w);
+    [pool release];
+    return w;
+  }
+  w->hosted = false;
   WinportWindow* win = [[WinportWindow alloc] initWithContentRect:ToCocoa(x, y, width, height)
                                                         styleMask:0 /* borderless */
                                                           backing:NSBackingStoreBuffered
@@ -305,8 +357,9 @@ void Destroy(Win* w) {
     g_grab = nil;
     g_buttons = 0;
   }
-  w->window->owner = NULL;
+  if (w->window) w->window->owner = NULL;
   w->view->owner = NULL;
+  if (w->hosted) [w->view removeFromSuperview];
   [w->window setDelegate:nil];
   [w->window orderOut:nil];
   [w->window close];
@@ -323,13 +376,25 @@ void Destroy(Win* w) {
 
 void Show(Win* w, int how) {
   NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+  if (w->hosted) {
+    // NSView has setHidden: only from 10.3, so a hidden view leaves the host.
+    if (how == kHide) [w->view removeFromSuperview];
+    else if (g_host && [w->view superview] != g_host) {
+      [w->view setFrame:[g_host bounds]];
+      [g_host addSubview:w->view];
+    }
+    [pool release];
+    return;
+  }
   if (how == kHide) [w->window orderOut:nil];
   else if (how == kShow || w->window->popup) [w->window orderFront:nil];
   else [w->window makeKeyAndOrderFront:nil];
   [pool release];
 }
 
+// SetFrame: moves an NSWindow. A hosted view keeps the size of the host.
 void SetFrame(Win* w, int x, int y, int width, int height) {
+  if (w->hosted) return;
   NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
   [w->window setFrame:ToCocoa(x, y, width, height) display:NO];
   [pool release];
@@ -385,7 +450,9 @@ static NSImage* ImageOf(const uint32_t* argb, int width, int height) {
   return img;
 }
 
+// SetCursor: sets the pointer. In a host, the pointer is the host's.
 void SetCursor(bool hidden, int systemId, const uint32_t* argb, int width, int height, int hotX, int hotY) {
+  if (g_yield) return;
   static bool g_hidden;
   static NSCursor* g_own;  // the program's own cursor, kept while shown
   NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
@@ -421,7 +488,9 @@ void SetCursor(bool hidden, int systemId, const uint32_t* argb, int width, int h
   [pool release];
 }
 
+// SetAppIcon: sets the icon of the application, unless it is a host's.
 void SetAppIcon(const uint32_t* argb, int width, int height) {
+  if (g_yield) return;
   if (!argb || width <= 0 || height <= 0) return;
   NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
   NSImage* img = ImageOf(argb, width, height);
@@ -462,7 +531,13 @@ long SetPasteboardText(const std::u16string& text) {
   return count;
 }
 
+// Wait: takes the events for up to timeout ms. In a host, the events are
+// the host's: a wait gives control back to it.
 void Wait(long timeout) {
+  if (g_yield) {
+    g_yield(timeout);
+    return;
+  }
   NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
   for (size_t i = 0; i < g_wins.size(); i++) [g_wins[i]->window displayIfNeeded];
   NSDate* until = timeout < 0 ? [NSDate distantFuture] : [NSDate dateWithTimeIntervalSinceNow:timeout / 1000.0];
@@ -477,7 +552,9 @@ void Wait(long timeout) {
   [pool release];
 }
 
+// Wake: ends a Wait. A host calls the program again each frame.
 void Wake() {
+  if (g_yield) return;
   NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
   NSEvent* e = [NSEvent otherEventWithType:NSApplicationDefined
                                   location:NSMakePoint(0, 0)
@@ -489,6 +566,29 @@ void Wake() {
                                      data1:0
                                      data2:0];
   [NSApp postEvent:e atStart:NO];
+  [pool release];
+}
+
+// SetHost: puts the top-level windows made from now on in the view host.
+void SetHost(void* host, void (*yield)(long)) {
+  g_host = (NSView*)host;
+  g_yield = yield;
+}
+
+// MoveHosted: moves the hosted views into the view host, or out of all
+// views when host is NULL.
+void MoveHosted(void* host) {
+  NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+  for (size_t i = 0; i < g_wins.size(); i++) {
+    Win* w = g_wins[i];
+    if (!w->hosted) continue;
+    [w->view removeFromSuperview];
+    if (host) {
+      [w->view setFrame:[(NSView*)host bounds]];
+      [(NSView*)host addSubview:w->view];
+    }
+  }
+  g_host = (NSView*)host;
   [pool release];
 }
 
@@ -555,8 +655,14 @@ void Wake() {
     CGColorSpaceRef rgb = CGColorSpaceCreateDeviceRGB();
     CGDataProviderRef data = CGDataProviderCreateWithData(NULL, pixels, (size_t)width * height * 4, NULL);
     // 0x00RRGGBB in the machine's byte order, or premultiplied ARGB.
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED < 1040 && !defined(GNUSTEP)
+    // Before 10.4 there is no byte order flag: the order is the machine's
+    // on PowerPC, which these headers are for.
+    CGImageAlphaInfo info = alpha ? kCGImageAlphaPremultipliedFirst : kCGImageAlphaNoneSkipFirst;
+#else
     CGBitmapInfo info = (CGBitmapInfo)(alpha ? kCGImageAlphaPremultipliedFirst : kCGImageAlphaNoneSkipFirst) |
                         (CGBitmapInfo)kCGBitmapByteOrder32Host;
+#endif
     CGImageRef img = CGImageCreate(width, height, 8, 32, width * 4, rgb, info, data, NULL, false,
                                    kCGRenderingIntentDefault);
     CGFloat h = [self bounds].size.height;

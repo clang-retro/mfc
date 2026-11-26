@@ -53,6 +53,15 @@ long SetPasteboardText(const std::u16string& text);
 // until Wake.
 void Wait(long timeout);
 void Wake();
+// A screen saver bundle (saver_host.cpp): the views of the top-level
+// windows go into host (an NSView) in place of windows of their own, and
+// Wait calls yield, which gives control back to the program that owns
+// the process. The application and its events are the host's. Call it
+// before the first window is made.
+void SetHost(void* host, void (*yield)(long timeout));
+// Moves the views of the top-level windows into another host view, at
+// its size, or out of all views when host is NULL.
+void MoveHosted(void* host);
 
 // Called on the window manager's side (backend_cocoa.cpp), with the
 // owner given to Create.

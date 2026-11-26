@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #ifndef WINPORT_MACOSX_MACHO_GETSECT_H
 #define WINPORT_MACOSX_MACHO_GETSECT_H
+#include <stdint.h>
 // The 10.4 header has no C++ linkage block.
 #ifdef __cplusplus
 extern "C" {

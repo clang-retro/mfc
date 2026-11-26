@@ -27,7 +27,14 @@
 
 #undef sysconf
 
+#if defined(__APPLE__) && !defined(macintosh)
+// A bundle or a library cannot use environ, which only the program's
+// startup code has: the C library gives it with _NSGetEnviron.
+#include <crt_externs.h>
+#define environ (*_NSGetEnviron())
+#else
 extern "C" char** environ;
+#endif
 
 extern "C" {
 
@@ -121,8 +128,12 @@ int futimens(int fd, const struct timespec times[2]) {
 }
 
 /// sysconf, which also counts the processors (with sysctl hw.ncpu) for
-/// _SC_NPROCESSORS_ONLN and _SC_NPROCESSORS_CONF.
+/// _SC_NPROCESSORS_ONLN and _SC_NPROCESSORS_CONF, and gives the page size
+/// (with getpagesize) for _SC_PAGESIZE before 10.2.
 long winport_sysconf(int name) {
+#if _SC_PAGESIZE == 0x7f02
+  if (name == _SC_PAGESIZE) return getpagesize();
+#endif
   if (name == _SC_NPROCESSORS_ONLN || name == _SC_NPROCESSORS_CONF) {
     int mib[2] = {CTL_HW, HW_NCPU}, n = 1;
     size_t len = sizeof n;

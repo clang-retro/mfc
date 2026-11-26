@@ -16,7 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <fstream>
+#include <stdio.h>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -84,9 +84,14 @@ bool LoadFile(const std::string& name, Sound* s) {
   std::string p = name;
   for (char& c : p)
     if (c == '\\') c = '/';
-  std::ifstream f(p, std::ios::binary);
+  // stdio, not <fstream>: the libc++ of Mac OS X 10.0 to 10.3 has no streams.
+  FILE* f = fopen(p.c_str(), "rb");
   if (!f) return false;
-  s->bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+  s->bytes.clear();
+  char buf[4096];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof buf, f)) > 0) s->bytes.insert(s->bytes.end(), buf, buf + n);
+  fclose(f);
   return true;
 }
 

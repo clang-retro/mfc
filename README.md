@@ -416,16 +416,19 @@ program. Windows show on a VESA screen. See [docs/dos.md](docs/dos.md).
 layer for System 7 to Mac OS 9, with the C and C++ libraries of
 clang-retro/mac-sdk. The Toolbox shows the windows. See [docs/macos-classic.md](docs/macos-classic.md).
 
-### Mac OS X 10.4 and 10.5
+### Mac OS X 10.0 to 10.5
 
 `make TARGET=powerpc-apple-macosx10.4 SDK=path/to/MacOSX10.4u.sdk
 LIBCXX=path/to/libcxx-macosx static` builds the library and the portable
-layer for PowerPC Macs with Tiger or Leopard. Cocoa shows the windows, and
+layer for PowerPC Macs with Tiger or Leopard. `TARGET=powerpc-apple-macosx10.0`
+with a 10.0 sysroot builds for Mac OS X 10.0 and later. Cocoa shows the windows, and
 OpenGL programs draw through `OpenGL.framework`. See
 [docs/macosx-10.4.md](docs/macosx-10.4.md).
 `tools/build-sdk-samples.py` builds samples of a Win32 SDK, such as
-MULTIPAD and the OpenGL screen savers. See
-[docs/sdk-samples.md](docs/sdk-samples.md).
+MULTIPAD and the OpenGL screen savers. The screen savers also become
+`.saver` bundles for System Preferences. See
+[docs/sdk-samples.md](docs/sdk-samples.md) and
+[docs/screensavers.md](docs/screensavers.md).
 
 ### The shared library
 

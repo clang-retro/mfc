@@ -698,7 +698,15 @@ bool Match(const char* mask, const char* name) {
   if (strcmp(mask, "*.*") == 0 || strcmp(mask, "*") == 0) return true;
   std::string m(mask);
   if (m.size() >= 2 && m.compare(m.size() - 2, 2, ".*") == 0 && strchr(name, '.') == NULL) m.erase(m.size() - 2);
+#ifdef FNM_CASEFOLD
   return fnmatch(m.c_str(), name, FNM_CASEFOLD | FNM_PERIOD * 0) == 0;
+#else
+  // Mac OS X before 10.2: fnmatch has no FNM_CASEFOLD, so both go to lower case.
+  std::string n(name);
+  for (char& c : m) c = (char)tolower((unsigned char)c);
+  for (char& c : n) c = (char)tolower((unsigned char)c);
+  return fnmatch(m.c_str(), n.c_str(), 0) == 0;
+#endif
 }
 
 struct Entry {

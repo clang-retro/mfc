@@ -315,13 +315,13 @@ __WINPORT_INLINE int getsockname(SOCKET s, struct sockaddr* name, int* namelen) 
 }
 __WINPORT_INLINE int getsockopt(SOCKET s, int level, int optname, char* optval, int* optlen) {
   socklen_t n = (socklen_t)*optlen;
-  int r = ::getsockopt((int)s, level, optname, optval, &n);
+  int r = ::getsockopt((int)s, level, optname, (void*)optval, &n);
   *optlen = (int)n;
   return r;
 }
 __WINPORT_INLINE int recvfrom(SOCKET s, char* buf, size_t len, int flags, struct sockaddr* from, int* fromlen) {
   socklen_t n = fromlen != NULL ? (socklen_t)*fromlen : 0;
-  int r = (int)::recvfrom((int)s, buf, (size_t)len, flags, from, fromlen != NULL ? &n : NULL);
+  int r = (int)::recvfrom((int)s, (void*)buf, (size_t)len, flags, from, fromlen != NULL ? &n : NULL);
   if (fromlen != NULL) *fromlen = (int)n;
   _WinportSocketCalled(s, FD_READ, r);
   return r;

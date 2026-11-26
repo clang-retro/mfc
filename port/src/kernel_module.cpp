@@ -37,7 +37,14 @@
 #include <string>
 #include <vector>
 
+#if defined(__APPLE__) && !defined(macintosh)
+// A bundle or a library cannot use environ, which only the program's
+// startup code has: the C library gives it with _NSGetEnviron.
+#include <crt_externs.h>
+#define environ (*_NSGetEnviron())
+#else
 extern char** environ;
+#endif
 extern "C" void _WinportAddResources(const void* anchor, const void* data, size_t size);
 
 using namespace winport;
@@ -117,7 +124,13 @@ std::string ExecutablePath() {
   return path;
 }
 
+// The module that stands for the program when _WinportSetMainModule
+// names one (a screen saver bundle, whose process is the host's).
+Module* g_mainOverride;
+
+// MainModule: the program's module, which GetModuleHandle(NULL) gives.
 Module* MainModule() {
+  if (g_mainOverride) return g_mainOverride;
   static Module* m = [] {
     Module* p = new Module;
     p->dl = dlopen(NULL, RTLD_NOW);
@@ -189,7 +202,13 @@ std::vector<ResourceRecord>& Pending() {
   static auto* v = new std::vector<ResourceRecord>;
   return *v;
 }
+// OnAddImage takes the resources of an image that dyld loads. (Before
+// 10.2, dyld's callback takes a non-const header and an unsigned slide.)
+#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) && __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 1020
+void OnAddImage(struct mach_header* mh, unsigned long) {
+#else
 void OnAddImage(const struct mach_header* mh, intptr_t) {
+#endif
   unsigned long size = 0;
 #ifdef __LP64__
   uint8_t* p = getsectiondata((const struct mach_header_64*)mh, "__DATA", "__winport_res", &size);
@@ -354,6 +373,14 @@ extern "C" void _WinportAddResources(const void* anchor, const void* data, size_
 }
 
 extern "C" {
+
+// _WinportSetMainModule: makes a loaded module (such as a bundle) the
+// program's module, which GetModuleHandle(NULL) and GetModuleFileName
+// give.
+void WINAPI _WinportSetMainModule(HMODULE h) {
+  Module* m = ToModule(h);
+  if (m && !m->system) g_mainOverride = m;
+}
 
 HMODULE WINAPI GetModuleHandleA(LPCSTR name) {
   if (!name) return (HMODULE)MainModule();
@@ -1013,10 +1040,21 @@ extern "C" {
 
 LPSTR WINAPI GetCommandLineA(void) { return (LPSTR)CommandLine().c_str(); }
 
+// GetCommandLineW: the wide copy is made again when the command line
+// changes (_WinportSetCommandLine).
 LPWSTR WINAPI GetCommandLineW(void) {
-  static std::wstring w = Widen(CommandLine().c_str());
+  static std::string from;
+  static std::wstring w;
+  if (w.empty() || from != CommandLine()) {
+    from = CommandLine();
+    w = Widen(from.c_str());
+  }
   return (LPWSTR)w.c_str();
 }
+
+// _WinportSetCommandLine: replaces the command line that
+// GetCommandLineA and GetCommandLineW give.
+void WINAPI _WinportSetCommandLine(LPCSTR line) { CommandLine() = line ? line : ""; }
 
 void WINAPI GetStartupInfoA(LPSTARTUPINFOA si) {
   memset(si, 0, sizeof(*si));
@@ -1192,7 +1230,18 @@ BOOL WINAPI GetExitCodeProcess(HANDLE h, LPDWORD code) {
   return TRUE;
 }
 
-void WINAPI ExitProcess(UINT code) { exit((int)code); }
+static void (*g_exitHook)(UINT);
+
+// _WinportSetExitHook: sets the function that ExitProcess calls before
+// it ends the process. A screen saver bundle uses it, because the
+// process belongs to the host. The function does not return.
+void WINAPI _WinportSetExitHook(void (*hook)(UINT)) { g_exitHook = hook; }
+
+// ExitProcess: calls the exit hook if there is one, then ends the process.
+void WINAPI ExitProcess(UINT code) {
+  if (g_exitHook) g_exitHook(code);
+  exit((int)code);
+}
 
 }  // extern "C"
 
