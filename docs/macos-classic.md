@@ -47,6 +47,18 @@ The backend gives the input to the program as Windows does:
 The event loop calls `WaitNextEvent` with a sleep of one tick, and then
 lets the other threads run.
 
+The backend starts the Toolbox (`InitGraf` to `InitCursor`) before it
+shows the first window. A program that starts the Toolbox itself sets
+`winport_mac_toolbox_started` (an `extern "C" int`) to 1 first. The
+backend cannot find this from low memory: the Finder sets `MBarHeight`
+and `CurrentA5` before the program runs.
+
+When the backend starts the Toolbox, it also puts two menus in the Mac
+menu bar. The Apple menu holds the desk accessories (the Apple Menu
+Items). The File menu holds Quit, which does the same as the Finder's
+Quit Application command. The program's own menus stay in its windows.
+A program that starts the Toolbox itself makes its own menu bar.
+
 To keep the windows in memory (for tests), set `WINPORT_BACKEND` to
 `headless`. The backend also uses the headless backend when the
 Toolbox cannot start.

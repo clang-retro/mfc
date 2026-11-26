@@ -44,6 +44,7 @@ WindowPtr g_tracking;     // the window the mouse went down in
 Point g_mouse = {-1, -1}; // the mouse's last global position
 unsigned g_mods;          // the modifiers of the last event
 CTabHandle g_directTable; // the colour table a direct PixMap needs
+MenuHandle g_appleMenu;    // the Apple menu, when this backend made it
 
 // Gives the backend's owner of a window, or NULL for another one (a
 // desk accessory's).
@@ -101,6 +102,40 @@ void Modifiers(unsigned now) {
   }
 }
 
+enum { kAppleMenu = 128, kFileMenu = 129, kQuitItem = 1 };
+
+// Puts the Apple menu (with the desk accessories) and a File menu with
+// Quit in the Mac menu bar. The program's own menus stay in its windows.
+void MakeMenuBar() {
+  static const unsigned char apple[] = {1, 0x14};  // the Apple symbol
+  static const unsigned char file[] = {4, 'F', 'i', 'l', 'e'};
+  static const unsigned char quit[] = {4, 'Q', 'u', 'i', 't'};
+  g_appleMenu = NewMenu(kAppleMenu, apple);
+  if (g_appleMenu) {
+    AppendResMenu(g_appleMenu, 'DRVR');
+    InsertMenu(g_appleMenu, 0);
+  }
+  if (MenuHandle m = NewMenu(kFileMenu, file)) {
+    AppendMenu(m, quit);
+    InsertMenu(m, 0);
+  }
+  DrawMenuBar();
+}
+
+// Does what the user chose in the Mac menu bar (MenuSelect's result).
+void Choose(long choice) {
+  short menu = (short)(choice >> 16);
+  short item = (short)(choice & 0xFFFF);
+  if (menu == kAppleMenu && g_appleMenu) {
+    Str255 name;
+    GetMenuItemText(g_appleMenu, item, name);
+    OpenDeskAcc(name);
+  } else if (menu == kFileMenu && item == kQuitItem) {
+    OnQuit();
+  }
+  HiliteMenu(0);
+}
+
 // Handles one event.
 void Handle(EventRecord& ev) {
   WindowPtr w = NULL;
@@ -111,8 +146,7 @@ void Handle(EventRecord& ev) {
       if (part == inSysWindow) {
         SystemClick(&ev, w);
       } else if (part == inMenuBar) {
-        MenuSelect(ev.where);
-        HiliteMenu(0);
+        Choose(MenuSelect(ev.where));
       } else if (OwnerOf(w)) {
         g_tracking = w;
         g_mouse = ev.where;
@@ -150,11 +184,24 @@ void Handle(EventRecord& ev) {
 }
 
 }  // namespace
+}  // namespace mactb
+}  // namespace winport
+
+// Set to a value other than 0 by a program that starts the Toolbox
+// (InitGraf to InitCursor) itself, before the layer shows a window.
+extern "C" {
+int winport_mac_toolbox_started = 0;
+}
+
+namespace winport {
+namespace mactb {
 
 bool Start() {
-  // A program that set up the Toolbox itself has a current port.
+  // The low memory (MBarHeight, CurrentA5) does not tell if this program
+  // started the Toolbox: the Finder sets them before the program runs.
   GrafPtr port = NULL;
-  if (LMGetMBarHeight() <= 0 || !*(GrafPtr**)0x904) {
+  if (!winport_mac_toolbox_started) {
+    winport_mac_toolbox_started = 1;
     InitGraf(&g_qd.thePort);
     InitFonts();
     FlushEvents(everyEvent, 0);
@@ -163,6 +210,7 @@ bool Start() {
     TEInit();
     InitDialogs(NULL);
     InitCursor();
+    MakeMenuBar();
   }
   GetPort(&port);
   long qd = 0;
