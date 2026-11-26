@@ -26,6 +26,12 @@ line `/S`, as the Windows shell does when it opens a `.scr` file. With
 the Option key held down, it gives `/C`, which shows the settings
 dialog.
 
+Mac OS X does the same: when the program has no arguments (as when you
+open it in the Finder), the layer gives it `/S`, or `/C` with the Option
+key held down. The `-psn_...` argument that the Finder of Mac OS X 10.4
+to 10.8 adds is not part of the command line. To see the settings from
+Terminal, give `/c`.
+
 The library loads the strings of the program (`IDS_DESCRIPTION` into
 `szName`, and the `ids...` strings) and registers the window class
 `WindowsScreenSaverClass`, with `ScreenSaverProc` as its window
