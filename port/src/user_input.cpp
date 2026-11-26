@@ -20,6 +20,9 @@ HWND g_capture = NULL;  // the window with the mouse, whichever thread owns it
 BYTE g_asyncKeys[256];  // 0x80 down, 0x01 pressed since the last GetAsyncKeyState
 HCURSOR g_cursor = NULL;
 int g_cursorShown = 0;
+// The cursor that the backend shows. At the start it shows the system
+// pointer, which is not a cursor of the program and is not NULL.
+HCURSOR g_backendCursor = (HCURSOR)~(UINT_PTR)0;
 RECT g_clipCursor = {0, 0, 0, 0};
 UINT g_doubleClickTime = 500;
 
@@ -610,17 +613,33 @@ BOOL WINAPI SetCursorPos(int x, int y) {
   return TRUE;
 }
 
+// Gives the backend the cursor to show: the current cursor, or NULL
+// (no pointer) when the display count is below 0. The backend gets a
+// call only when this cursor changes. Thus the first SetCursor(NULL)
+// hides the system pointer, as on Windows.
+static void ApplyCursor() {
+  HCURSOR want = g_cursorShown >= 0 ? g_cursor : NULL;
+  if (want == g_backendCursor) return;
+  g_backendCursor = want;
+  GetBackend()->SetCursor(want);
+}
+
+// Sets the cursor and gives the previous one.
 HCURSOR WINAPI SetCursor(HCURSOR c) {
   HCURSOR old = g_cursor;
   g_cursor = c;
-  if (c != old) GetBackend()->SetCursor(g_cursorShown >= 0 ? c : NULL);
+  ApplyCursor();
   return old;
 }
+
+// Gives the current cursor.
 HCURSOR WINAPI GetCursor(void) { return g_cursor; }
+
+// Adds 1 to or subtracts 1 from the display count, and gives the new
+// count. The cursor shows only when the count is 0 or more.
 int WINAPI ShowCursor(BOOL show) {
   int n = show ? ++g_cursorShown : --g_cursorShown;
-  if (n == 0 && show) GetBackend()->SetCursor(g_cursor);
-  if (n == -1 && !show) GetBackend()->SetCursor(NULL);
+  ApplyCursor();
   return n;
 }
 
