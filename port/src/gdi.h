@@ -350,7 +350,7 @@ void MetaDCFreed(DCObj* dc);
 
 // The display's size and depth.
 SIZE ScreenSize();
-const int kLogPixels = 96;
+
 
 }  // namespace winport
 

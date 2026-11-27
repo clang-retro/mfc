@@ -105,6 +105,11 @@ unsigned g_buttons;
 // saver has no view).
 NSView* g_host;
 void (*g_yield)(long);
+// The program's pixels to a point (SetUnits).
+double g_units = 1;
+
+int Px(CGFloat points) { return (int)floor(points * g_units + 0.5); }
+CGFloat Pt(int pixels) { return (CGFloat)(pixels / g_units); }
 
 // The screen with the menu bar, whose top left is the origin.
 NSRect MainScreen() {
@@ -116,7 +121,7 @@ NSRect MainScreen() {
 NSRect ToCocoa(int x, int y, int width, int height) {
   if (width < 1) width = 1;
   if (height < 1) height = 1;
-  return NSMakeRect(x, MainScreen().size.height - y - height, width, height);
+  return NSMakeRect(Pt(x), MainScreen().size.height - Pt(y + height), Pt(width), Pt(height));
 }
 
 unsigned Mods(NSUInteger flags) {
@@ -146,7 +151,7 @@ WinportWindow* WindowAt(NSPoint p) {
 // Hands a mouse event on; returns whether AppKit should not see it.
 void Mouse(NSEvent* e) {
   NSPoint at = [NSEvent mouseLocation];
-  int x = (int)floor(at.x), y = (int)floor(MainScreen().size.height - at.y);
+  int x = (int)floor(at.x * g_units), y = (int)floor((MainScreen().size.height - at.y) * g_units);
   unsigned mods = Mods([e modifierFlags]);
   int kind = kMove, button = 0;
   switch ([e type]) {
@@ -288,11 +293,38 @@ bool Start() {
   return true;
 }
 
+// The screen's backingScaleFactor (Mac OS X 10.7), else its
+// userSpaceScaleFactor (10.4), else 1.
+double DesktopScale() {
+  if (g_yield) return 1;
+  NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+  double scale = 1;
+  NSArray* screens = [NSScreen screens];
+  NSScreen* screen = [screens count] ? (NSScreen*)[screens objectAtIndex:0] : nil;
+  SEL sel = NULL;
+  if ([screen respondsToSelector:@selector(backingScaleFactor)]) sel = @selector(backingScaleFactor);
+  else if ([screen respondsToSelector:@selector(userSpaceScaleFactor)]) sel = @selector(userSpaceScaleFactor);
+  if (sel) {
+    NSInvocation* call = [NSInvocation invocationWithMethodSignature:[screen methodSignatureForSelector:sel]];
+    [call setSelector:sel];
+    [call invokeWithTarget:screen];
+    CGFloat v = 1;
+    [call getReturnValue:&v];
+    if (v >= 1 && v <= 8) scale = v;
+  }
+  [pool release];
+  return scale;
+}
+
+void SetUnits(double unitsPerPoint) {
+  if (unitsPerPoint >= 1) g_units = unitsPerPoint;
+}
+
 void ScreenSize(int* width, int* height) {
   NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
   NSRect f = MainScreen();
-  *width = (int)f.size.width;
-  *height = (int)f.size.height;
+  *width = Px(f.size.width);
+  *height = Px(f.size.height);
   [pool release];
 }
 
@@ -301,10 +333,10 @@ void WorkArea(int* x, int* y, int* width, int* height) {
   NSArray* screens = [NSScreen screens];
   NSRect full = MainScreen();
   NSRect f = [screens count] ? [(NSScreen*)[screens objectAtIndex:0] visibleFrame] : full;
-  *x = (int)f.origin.x;
-  *y = (int)(full.size.height - f.origin.y - f.size.height);
-  *width = (int)f.size.width;
-  *height = (int)f.size.height;
+  *x = Px(f.origin.x);
+  *y = Px(full.size.height - f.origin.y - f.size.height);
+  *width = Px(f.size.width);
+  *height = Px(f.size.height);
   [pool release];
 }
 
@@ -314,7 +346,7 @@ Win* Create(void* owner, int x, int y, int width, int height, bool popup) {
   NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
   Win* w = new Win;
   if (g_yield) {
-    NSRect r = g_host ? [g_host bounds] : NSMakeRect(0, 0, width, height);
+    NSRect r = g_host ? [g_host bounds] : NSMakeRect(0, 0, Pt(width), Pt(height));
     WinportView* view = [[WinportView alloc] initWithFrame:r];
     view->owner = owner;
     [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
@@ -420,7 +452,7 @@ void SetTranslucent(Win* w, bool translucent, bool clickThrough) {
 
 void Invalidate(Win* w, int x, int y, int width, int height) {
   CGFloat h = [w->view bounds].size.height;
-  [w->view setNeedsDisplayInRect:NSMakeRect(x, h - y - height, width, height)];
+  [w->view setNeedsDisplayInRect:NSMakeRect(Pt(x), h - Pt(y + height), Pt(width), Pt(height))];
 }
 
 // An image of a picture: ARGB, not premultiplied, top row first.
@@ -444,7 +476,8 @@ static NSImage* ImageOf(const uint32_t* argb, int width, int height) {
     out[i * 4 + 2] = (unsigned char)((px & 0xFF) * a / 255);
     out[i * 4 + 3] = (unsigned char)a;
   }
-  NSImage* img = [[NSImage alloc] initWithSize:NSMakeSize(width, height)];
+  // In points: a picture in the program's pixels shows at its size there.
+  NSImage* img = [[NSImage alloc] initWithSize:NSMakeSize(Pt(width), Pt(height))];
   [img addRepresentation:rep];
   [rep release];
   return img;
@@ -479,7 +512,7 @@ void SetCursor(bool hidden, int systemId, const uint32_t* argb, int width, int h
   if (!c && argb && width > 0 && height > 0) {
     NSImage* img = ImageOf(argb, width, height);
     [g_own release];
-    g_own = [[NSCursor alloc] initWithImage:img hotSpot:NSMakePoint(hotX, hotY)];
+    g_own = [[NSCursor alloc] initWithImage:img hotSpot:NSMakePoint(Pt(hotX), Pt(hotY))];
     [img release];
     c = g_own;
   }
@@ -620,8 +653,8 @@ void MoveHosted(void* host) {
   NSWindow* win = [self window];
   if (!win) return NO;
   NSPoint at = [win convertBaseToScreen:[info draggingLocation]];
-  *x = (int)floor(at.x);
-  *y = (int)floor(MainScreen().size.height - at.y);
+  *x = (int)floor(at.x * g_units);
+  *y = (int)floor((MainScreen().size.height - at.y) * g_units);
   return YES;
 }
 - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info {
@@ -675,9 +708,11 @@ void MoveHosted(void* host) {
 #else
     // Before 10.5 there is no copy blend mode: clearing the area first
     // gives the same result for a premultiplied picture.
-    if (alpha) CGContextClearRect(ctx, CGRectMake(0, h - height, width, height));
+    if (alpha) CGContextClearRect(ctx, CGRectMake(0, h - Pt(height), Pt(width), Pt(height)));
 #endif
-    CGContextDrawImage(ctx, CGRectMake(0, h - height, width, height), img);
+    // The pixels fill their size in points: on a Retina display, a
+    // DPI-aware program's pixels are the display's own.
+    CGContextDrawImage(ctx, CGRectMake(0, h - Pt(height), Pt(width), Pt(height)), img);
     CGContextRestoreGState(ctx);
     CGImageRelease(img);
     CGDataProviderRelease(data);

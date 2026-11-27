@@ -1120,15 +1120,15 @@ class DefaultHandler final : public IOleObject,
     } else if (cf == CF_DIB && m.hGlobal) {
       BITMAPINFOHEADER* bh = (BITMAPINFOHEADER*)GlobalLock(m.hGlobal);
       if (bh) {
-        s.cx = MulDiv(bh->biWidth, 2540, 96);
-        s.cy = MulDiv(bh->biHeight < 0 ? -bh->biHeight : bh->biHeight, 2540, 96);
+        s.cx = MulDiv(bh->biWidth, 2540, winport::SystemDpi());
+        s.cy = MulDiv(bh->biHeight < 0 ? -bh->biHeight : bh->biHeight, 2540, winport::SystemDpi());
         GlobalUnlock(m.hGlobal);
       }
     } else if (cf == CF_BITMAP && m.hBitmap) {
       BITMAP b;
       if (GetObjectW(m.hBitmap, sizeof b, &b)) {
-        s.cx = MulDiv(b.bmWidth, 2540, 96);
-        s.cy = MulDiv(b.bmHeight, 2540, 96);
+        s.cx = MulDiv(b.bmWidth, 2540, winport::SystemDpi());
+        s.cy = MulDiv(b.bmHeight, 2540, winport::SystemDpi());
       }
     }
     return s;
@@ -1605,8 +1605,8 @@ HGLOBAL IconPicture(HICON icon, const std::wstring& label) {
   }
   METAFILEPICT* p = (METAFILEPICT*)GlobalLock(g);
   p->mm = MM_ANISOTROPIC;
-  p->xExt = MulDiv(w, 2540, 96);
-  p->yExt = MulDiv(h, 2540, 96);
+  p->xExt = MulDiv(w, 2540, winport::SystemDpi());
+  p->yExt = MulDiv(h, 2540, winport::SystemDpi());
   p->hMF = mf;
   GlobalUnlock(g);
   return g;

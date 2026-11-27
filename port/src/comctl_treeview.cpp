@@ -815,15 +815,18 @@ void DottedH(HDC dc, int x0, int x1, int y, COLORREF c) {
 }
 
 void DrawButton(Tree* t, HDC dc, int cx, int cy, bool open) {
-  RECT b = {cx - 4, cy - 4, cx + 5, cy + 5};
+  int k = GlyphScale();
+  RECT b = {cx - 4 * k, cy - 4 * k, cx + 5 * k, cy + 5 * k};
   FillSolid(dc, b, BkColor(t));
   HBRUSH frame = CreateSolidBrush(GetSysColor(COLOR_GRAYTEXT));
-  FrameRect(dc, &b, frame);
+  for (int i = 0; i < k; i++) {
+    RECT f = {b.left + i, b.top + i, b.right - i, b.bottom - i};
+    FrameRect(dc, &f, frame);
+  }
   DeleteObject(frame);
   COLORREF ink = GetSysColor(COLOR_WINDOWTEXT);
-  for (int x = cx - 2; x <= cx + 2; x++) SetPixel(dc, x, cy, ink);
-  if (!open)
-    for (int y = cy - 2; y <= cy + 2; y++) SetPixel(dc, cx, y, ink);
+  FillSolid(dc, RECT{cx - 2 * k, cy, cx + 3 * k, cy + k}, ink);
+  if (!open) FillSolid(dc, RECT{cx, cy - 2 * k, cx + k, cy + 3 * k}, ink);
 }
 
 void PaintRow(Tree* t, HDC dc, int row, bool focused, UINT cdFlags) {
@@ -876,9 +879,10 @@ void PaintRow(Tree* t, HDC dc, int row, bool focused, UINT cdFlags) {
       ImageList_Draw(t->state, stateIndex - 1, dc, r.state.left, r.state.top + (r.state.bottom - r.state.top - s.cy) / 2,
                      ILD_TRANSPARENT);
     } else {
-      RECT b = {r.state.left + 1, r.state.top + (r.state.bottom - r.state.top - 13) / 2, 0, 0};
-      b.right = b.left + 13;
-      b.bottom = b.top + 13;
+      int side = GetSystemMetrics(SM_CXMENUCHECK);
+      RECT b = {r.state.left + 1, r.state.top + (r.state.bottom - r.state.top - side) / 2, 0, 0};
+      b.right = b.left + side;
+      b.bottom = b.top + side;
       DrawFrameControl(dc, &b, DFC_BUTTON, DFCS_BUTTONCHECK | (stateIndex == 2 ? DFCS_CHECKED : 0));
     }
   }

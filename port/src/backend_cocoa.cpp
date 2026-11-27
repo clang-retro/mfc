@@ -92,15 +92,28 @@ WPARAM Keys(unsigned mods) {
 }
 
 struct CocoaBackend : Backend {
+  bool unitsSet = false;
+
   const char* Name() override { return "cocoa"; }
+  double DesktopScale() override { return cocoa::DesktopScale(); }
+
+  // A DPI-aware program's pixels are the display's: there are
+  // backingScaleFactor of them to a point. AppKit scales up the others.
+  void Units() {
+    if (unitsSet) return;
+    unitsSet = true;
+    cocoa::SetUnits(DpiAware() ? DesktopScale() : 1);
+  }
 
   SIZE ScreenSize() override {
+    Units();
     int w, h;
     cocoa::ScreenSize(&w, &h);
     return SIZE{w, h};
   }
 
   RECT WorkArea() override {
+    Units();
     int x, y, w, h;
     cocoa::WorkArea(&x, &y, &w, &h);
     return RECT{x, y, x + w, y + h};
@@ -127,6 +140,7 @@ struct CocoaBackend : Backend {
       n->w = w;
       n->popup = IsPopup(w);
       RECT r = w->rect;
+      Units();
       g_natives.insert(n);
       n->win = cocoa::Create(n, r.left, r.top, r.right - r.left, r.bottom - r.top, n->popup);
       w->native = n;

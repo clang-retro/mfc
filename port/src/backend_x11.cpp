@@ -46,7 +46,7 @@ namespace {
   F(XCreateFontCursor) F(XRaiseWindow) F(XSetInputFocus) F(XWarpPointer) F(XGetWindowAttributes)               \
   F(XTranslateCoordinates) F(XSync) F(XFreeCursor) F(XSetSelectionOwner) F(XGetSelectionOwner)          \
   F(XConvertSelection) F(XGetWindowProperty) F(XFree) F(XDeleteProperty) F(XSendEvent) F(XCheckTypedWindowEvent) F(XCheckTypedEvent) \
-  F(XMatchVisualInfo) F(XCreateColormap)
+  F(XMatchVisualInfo) F(XCreateColormap) F(XResourceManagerString)
 
 struct XLib {
 #define F(name) decltype(&::name) name = nullptr;
@@ -304,6 +304,26 @@ struct X11Backend : Backend {
   }
 
   const char* Name() override { return "x11"; }
+
+  // The desktop's scale: its Xft.dpi resource over 96, which desktops set
+  // for their scaling, or else GDK_SCALE.
+  double DesktopScale() override {
+    if (dpy) {
+      const char* res = x.XResourceManagerString(dpy);
+      for (const char* p = res; p && *p;) {
+        const char* end = strchr(p, '\n');
+        if (!strncmp(p, "Xft.dpi:", 8)) {
+          double dpi = atof(p + 8);
+          if (dpi >= 96 && dpi <= 960) return dpi / 96;
+          break;
+        }
+        p = end ? end + 1 : NULL;
+      }
+    }
+    const char* gdk = getenv("GDK_SCALE");
+    int k = gdk ? atoi(gdk) : 0;
+    return k >= 1 && k <= 10 ? k : 1;
+  }
 
   SIZE ScreenSize() override {
     if (!dpy) return SIZE{1024, 768};

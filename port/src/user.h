@@ -307,6 +307,10 @@ struct Backend {
   virtual ~Backend() {}
   virtual const char* Name() = 0;
   virtual SIZE ScreenSize() = 0;
+  // How much the desktop scales what it shows: 2 on a Retina display or
+  // a Wayland output of scale 2, Xft.dpi / 96 on X11. A DPI-aware
+  // program draws at this many times 96 dots per inch.
+  virtual double DesktopScale() { return 1; }
   // The part of the screen that windows can use: on macOS, the screen
   // without the menu bar and the Dock. The default is the whole screen.
   virtual RECT WorkArea() {

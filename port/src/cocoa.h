@@ -5,7 +5,9 @@
 // the other's.
 //
 // Coordinates are Windows' screen coordinates: from the top left of the
-// screen with the menu bar, growing down.
+// screen with the menu bar, growing down, in the program's pixels, of
+// which there are SetUnits to a point (2 for a DPI-aware program on a
+// Retina display, 1 otherwise).
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -25,6 +27,9 @@ namespace cocoa {
 // the other side by its owner, an opaque pointer.
 struct Win;
 bool Start();
+// The main screen's pixels to a point (backingScaleFactor), 1 in a host.
+double DesktopScale();
+void SetUnits(double unitsPerPoint);
 void ScreenSize(int* width, int* height);
 // The screen without the menu bar and the Dock.
 void WorkArea(int* x, int* y, int* width, int* height);

@@ -303,7 +303,7 @@ static_assert(sizeof(kColorNames) / sizeof(kColorNames[0]) == sizeof(kClassicCol
 // The classic fonts: 8-point MS Sans Serif, bold in captions.
 LOGFONTW ClassicFont(bool bold) {
   LOGFONTW lf = {};
-  lf.lfHeight = -11;
+  lf.lfHeight = -MulDiv(8, SystemDpi(), 72);
   lf.lfWeight = bold ? FW_BOLD : FW_NORMAL;
   lf.lfCharSet = DEFAULT_CHARSET;
   lf.lfPitchAndFamily = VARIABLE_PITCH | FF_SWISS;
@@ -316,11 +316,12 @@ struct Theme {
   BOOL gradient = FALSE;
   // The frame's sizes, in pixels, as NONCLIENTMETRICS has them: the
   // caption buttons' and the menu bar's height one less than the bar's.
+  // They grow with the screen's DPI, as on Windows.
   int border = 1;  // to which the frame's 3-pixel edge adds
-  int captionWidth = 18, captionHeight = 18;
-  int smCaptionWidth = 14, smCaptionHeight = 14;
-  int menuWidth = 18, menuHeight = 18;
-  int scrollWidth = 16, scrollHeight = 16;
+  int captionWidth = Scale96(18), captionHeight = Scale96(18);
+  int smCaptionWidth = Scale96(14), smCaptionHeight = Scale96(14);
+  int menuWidth = Scale96(18), menuHeight = Scale96(18);
+  int scrollWidth = Scale96(16), scrollHeight = Scale96(16);
   LOGFONTW captionFont = ClassicFont(true), smCaptionFont = ClassicFont(true), menuFont = ClassicFont(false),
            statusFont = ClassicFont(false), messageFont = ClassicFont(false), iconFont = ClassicFont(false);
   Theme() { memcpy(colors, kClassicColors, sizeof colors); }
@@ -337,7 +338,8 @@ std::wstring RegText(HKEY k, const wchar_t* name, DWORD* type, std::vector<BYTE>
   return std::wstring((const WCHAR*)buf);
 }
 
-// A size: pixels, or negative twips.
+// A size: pixels at 96 dots per inch, or negative twips (as Windows
+// writes it), at the screen's DPI.
 void ReadSize(HKEY k, const wchar_t* name, int* out) {
   DWORD type;
   std::vector<BYTE> raw;
@@ -346,8 +348,8 @@ void ReadSize(HKEY k, const wchar_t* name, int* out) {
   if (type == REG_SZ && !t.empty()) v = wcstol(t.c_str(), NULL, 10);
   else if (type == REG_DWORD && raw.size() == 4) v = (long)*(const int32_t*)raw.data();
   else return;
-  if (v < 0) v = (-v + 7) / 15;
-  if (v >= 0 && v <= 200) *out = (int)v;
+  if (v < -3000 || v > 200) return;
+  *out = v < 0 ? MulDiv((int)-v, SystemDpi(), 1440) : Scale96((int)v);
 }
 
 // A font: "face,points[,bold][,italic]", or a Windows LOGFONTW (its
@@ -387,7 +389,7 @@ void ReadFont(HKEY k, const wchar_t* name, LOGFONTW* out) {
   for (size_t i = 1; i < parts.size(); i++) {
     if (_wcsicmp(parts[i].c_str(), L"bold") == 0) lf.lfWeight = FW_BOLD;
     else if (_wcsicmp(parts[i].c_str(), L"italic") == 0) lf.lfItalic = TRUE;
-    else if (int pt = (int)wcstol(parts[i].c_str(), NULL, 10)) lf.lfHeight = -(pt * 96 + 36) / 72;
+    else if (int pt = (int)wcstol(parts[i].c_str(), NULL, 10)) lf.lfHeight = -MulDiv(pt, SystemDpi(), 72);
   }
   *out = lf;
 }
@@ -587,7 +589,7 @@ void WriteMetrics(const Theme& t) {
                {L"SmCaptionHeight", t.smCaptionHeight}, {L"MenuWidth", t.menuWidth},
                {L"MenuHeight", t.menuHeight},       {L"ScrollWidth", t.scrollWidth},
                {L"ScrollHeight", t.scrollHeight}};
-  for (auto& s : sizes) SetText(k, s.name, Number(-15 * s.value));
+  for (auto& s : sizes) SetText(k, s.name, Number(-MulDiv(s.value, 1440, SystemDpi())));
   const struct {
     const wchar_t* name;
     const LOGFONTW* font;
@@ -597,7 +599,7 @@ void WriteMetrics(const Theme& t) {
   for (auto& f : fonts) {
     int h = f.font->lfHeight < 0 ? -f.font->lfHeight : f.font->lfHeight;
     std::wstring v = f.font->lfFaceName;
-    v += L"," + Number((h * 72 + 48) / 96);
+    v += L"," + Number(MulDiv(h, 72, SystemDpi()));
     if (f.font->lfWeight >= FW_BOLD) v += L",bold";
     if (f.font->lfItalic) v += L",italic";
     SetText(k, f.name, v);
@@ -697,23 +699,23 @@ int WINAPI GetSystemMetrics(int index) {
     case SM_CXBORDER: case SM_CYBORDER: return 1;
     case SM_CXDLGFRAME: case SM_CYDLGFRAME: return 3;
     case SM_CXFRAME: case SM_CYFRAME: return frame;
-    case SM_CXICON: case SM_CYICON: case SM_CXCURSOR: case SM_CYCURSOR: return 32;
-    case SM_CXSMICON: case SM_CYSMICON: return 16;
+    case SM_CXICON: case SM_CYICON: case SM_CXCURSOR: case SM_CYCURSOR: return Scale96(32);
+    case SM_CXSMICON: case SM_CYSMICON: return Scale96(16);
     case SM_CYMENU: return t.menuHeight + 1;
     case SM_CXMENUSIZE: return t.menuWidth;
     case SM_CYMENUSIZE: return t.menuHeight;
-    case SM_CXMIN: case SM_CXMINTRACK: return 112;
+    case SM_CXMIN: case SM_CXMINTRACK: return Scale96(112);
     case SM_CYMIN: case SM_CYMINTRACK: return t.captionHeight + 1 + 2 * frame;
     case SM_CXSIZE: return t.captionWidth;
     case SM_CYSIZE: return t.captionHeight;
     case SM_CXSMSIZE: return t.smCaptionWidth;
     case SM_CYSMSIZE: return t.smCaptionHeight;
     case SM_CYSMCAPTION: return t.smCaptionHeight + 1;
-    case SM_CXDOUBLECLK: case SM_CYDOUBLECLK: return 4;
-    case SM_CXICONSPACING: case SM_CYICONSPACING: return 75;
-    case SM_CXDRAG: case SM_CYDRAG: return 4;
+    case SM_CXDOUBLECLK: case SM_CYDOUBLECLK: return Scale96(4);
+    case SM_CXICONSPACING: case SM_CYICONSPACING: return Scale96(75);
+    case SM_CXDRAG: case SM_CYDRAG: return Scale96(4);
     case SM_CXEDGE: case SM_CYEDGE: return 2;
-    case SM_CXMENUCHECK: case SM_CYMENUCHECK: return 13;
+    case SM_CXMENUCHECK: case SM_CYMENUCHECK: return Scale96(13);
     case SM_CMOUSEBUTTONS: return 3;
     case SM_MOUSEPRESENT: case SM_MOUSEWHEELPRESENT: return 1;
     case SM_CMONITORS: return 1;

@@ -550,7 +550,7 @@ static HWND CreateDialogCore(HINSTANCE inst, const void* tmpl, HWND owner, DLGPR
     } else {
       std::wstring face = t.face;
       if ((t.style & DS_SHELLFONT) == DS_SHELLFONT || face == L"MS Shell Dlg") face = L"MS Shell Dlg";
-      int height = -MulDiv(t.pointSize, kLogPixels, 72);
+      int height = -MulDiv(t.pointSize, SystemDpi(), 72);
       font = CreateFontW(height, 0, 0, 0, t.weight, t.italic, 0, 0, t.charset, 0, 0, 0, 0, face.c_str());
     }
   }
