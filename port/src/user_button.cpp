@@ -573,7 +573,7 @@ void PaintButton(HWND h, HDC dc) {
   // Check boxes and radio buttons: a box beside the text.
   HBRUSH br = CtlColor(h, dc, WM_CTLCOLORSTATIC);
   FillRect(dc, &rc, br ? br : GetSysColorBrush(COLOR_BTNFACE));
-  const int box = 13;
+  const int box = GetSystemMetrics(SM_CXMENUCHECK);  // 13 at 96 DPI
   RECT b, text = rc;
   bool right = (style & BS_LEFTTEXT) != 0;
   int top;
@@ -584,10 +584,10 @@ void PaintButton(HWND h, HDC dc) {
   }
   if (right) {
     b = MakeRect(rc.right - box, top, rc.right, top + box);
-    text.right = b.left - 4;
+    text.right = b.left - Scale96(4);
   } else {
     b = MakeRect(rc.left, top, rc.left + box, top + box);
-    text.left = b.right + 4;
+    text.left = b.right + Scale96(4);
   }
   UINT state = IsRadio(type) ? DFCS_BUTTONRADIO : DFCS_BUTTONCHECK;
   if (s->check == BST_CHECKED) state |= DFCS_CHECKED;

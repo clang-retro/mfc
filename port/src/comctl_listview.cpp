@@ -1219,9 +1219,10 @@ UINT DrawStage(ListView* lv, HDC dc, DWORD stage, int item, int sub, const RECT&
 }
 
 void DrawCheck(HDC dc, const RECT& r, bool checked) {
-  RECT b = {r.left + (r.right - r.left - 13) / 2, r.top + (r.bottom - r.top - 13) / 2, 0, 0};
-  b.right = b.left + 13;
-  b.bottom = b.top + 13;
+  int side = GetSystemMetrics(SM_CXMENUCHECK);
+  RECT b = {r.left + (r.right - r.left - side) / 2, r.top + (r.bottom - r.top - side) / 2, 0, 0};
+  b.right = b.left + side;
+  b.bottom = b.top + side;
   DrawFrameControl(dc, &b, DFC_BUTTON, DFCS_BUTTONCHECK | (checked ? DFCS_CHECKED : 0));
 }
 

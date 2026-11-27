@@ -120,16 +120,66 @@ void ThumbOf(const SCROLLINFO& si, int trough, int* pos, int* len) {
   *len = l;
 }
 
+// A rectangle of a glyph drawn as pixel art around (cx, cy), its
+// offsets in the glyph's pixels, each GlyphScale() pixels wide.
+RECT GlyphRect(int cx, int cy, int l, int t, int r, int b) {
+  int k = GlyphScale();
+  return MakeRect(cx + l * k, cy + t * k, cx + r * k, cy + b * k);
+}
+
+// A glyph's outline of a rectangle, its lines a glyph pixel wide.
+void GlyphFrame(HDC dc, const RECT& o, HBRUSH br) {
+  int k = GlyphScale();
+  RECT s[4] = {MakeRect(o.left, o.top, o.right, o.top + k), MakeRect(o.left, o.bottom - k, o.right, o.bottom),
+               MakeRect(o.left, o.top, o.left + k, o.bottom), MakeRect(o.right - k, o.top, o.right, o.bottom)};
+  for (RECT& e : s) FillRect(dc, &e, br);
+}
+
+// The caption buttons' glyphs: 0 close, 1 maximize, 2 restore, 3
+// minimize.
+void DrawCaptionGlyph(HDC dc, int cx, int cy, int glyph, HBRUSH br) {
+  switch (glyph) {
+    case 0:  // close: an X
+      for (int i = -3; i <= 3; i++) {
+        RECT a = GlyphRect(cx, cy, i - 1, i, i + 1, i + 1);
+        RECT b = GlyphRect(cx, cy, -i - 1, i, -i + 1, i + 1);
+        FillRect(dc, &a, br);
+        FillRect(dc, &b, br);
+      }
+      break;
+    case 1: {  // maximize: a box
+      RECT o = GlyphRect(cx, cy, -4, -4, 5, 4);
+      GlyphFrame(dc, o, br);
+      RECT t = GlyphRect(cx, cy, -4, -3, 5, -2);
+      FillRect(dc, &t, br);
+      break;
+    }
+    case 2: {  // restore: two boxes
+      RECT a = GlyphRect(cx, cy, -2, -5, 5, 1);
+      RECT b = GlyphRect(cx, cy, -5, -2, 2, 4);
+      GlyphFrame(dc, a, br);
+      FillRect(dc, &b, GetSysColorBrush(COLOR_BTNFACE));
+      GlyphFrame(dc, b, br);
+      break;
+    }
+    default: {  // minimize: a bar
+      RECT a = GlyphRect(cx, cy, -4, 2, 3, 4);
+      FillRect(dc, &a, br);
+      break;
+    }
+  }
+}
+
 // Draws the triangle of an arrow box with its center at (cx, cy): dir
 // is 0 up, 1 down, 2 left or 3 right.
 void DrawArrowGlyph(HDC dc, int cx, int cy, int dir, HBRUSH br) {
   for (int i = 0; i < 4; i++) {
     RECT line;
     switch (dir) {
-      case 0: line = MakeRect(cx - i, cy - 2 + i, cx + i + 1, cy - 1 + i); break;
-      case 1: line = MakeRect(cx - 3 + i, cy - 1 + i, cx + 4 - i, cy + i); break;
-      case 2: line = MakeRect(cx - 2 + i, cy - i, cx - 1 + i, cy + i + 1); break;
-      default: line = MakeRect(cx - 1 + i, cy - 3 + i, cx + i, cy + 4 - i); break;
+      case 0: line = GlyphRect(cx, cy, -i, -2 + i, i + 1, -1 + i); break;
+      case 1: line = GlyphRect(cx, cy, -3 + i, -1 + i, 4 - i, i); break;
+      case 2: line = GlyphRect(cx, cy, -2 + i, -i, -1 + i, i + 1); break;
+      default: line = GlyphRect(cx, cy, -1 + i, -3 + i, i, 4 - i); break;
     }
     FillRect(dc, &line, br);
   }
@@ -145,7 +195,7 @@ void DrawArrowBox(HDC dc, RECT r, int dir, bool enabled) {
     DrawArrowGlyph(dc, cx, cy, dir, GetSysColorBrush(COLOR_BTNTEXT));
     return;
   }
-  DrawArrowGlyph(dc, cx + 1, cy + 1, dir, GetSysColorBrush(COLOR_3DHILIGHT));
+  DrawArrowGlyph(dc, cx + GlyphScale(), cy + GlyphScale(), dir, GetSysColorBrush(COLOR_3DHILIGHT));
   DrawArrowGlyph(dc, cx, cy, dir, GetSysColorBrush(COLOR_3DSHADOW));
 }
 
@@ -380,36 +430,7 @@ void DrawCaptionBox(HDC dc, const RECT& r, int glyph) {
   DrawEdge(dc, &box, EDGE_RAISED, BF_RECT | BF_MIDDLE);
   HBRUSH br = GetSysColorBrush(COLOR_BTNTEXT);
   int cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
-  switch (glyph) {
-    case 0:  // close: an X
-      for (int i = -3; i <= 3; i++) {
-        RECT a = MakeRect(cx + i - 1, cy + i, cx + i + 1, cy + i + 1);
-        RECT b = MakeRect(cx - i - 1, cy + i, cx - i + 1, cy + i + 1);
-        FillRect(dc, &a, br);
-        FillRect(dc, &b, br);
-      }
-      break;
-    case 1: {  // maximize: a box
-      RECT o = MakeRect(cx - 4, cy - 4, cx + 5, cy + 4);
-      FrameRect(dc, &o, br);
-      RECT t = MakeRect(o.left, o.top + 1, o.right, o.top + 2);
-      FillRect(dc, &t, br);
-      break;
-    }
-    case 2: {  // restore: two boxes
-      RECT a = MakeRect(cx - 2, cy - 5, cx + 5, cy + 1);
-      RECT b = MakeRect(cx - 5, cy - 2, cx + 2, cy + 4);
-      FrameRect(dc, &a, br);
-      FillRect(dc, &b, GetSysColorBrush(COLOR_BTNFACE));
-      FrameRect(dc, &b, br);
-      break;
-    }
-    default: {  // minimize: a bar
-      RECT a = MakeRect(cx - 4, cy + 2, cx + 3, cy + 4);
-      FillRect(dc, &a, br);
-      break;
-    }
-  }
+  DrawCaptionGlyph(dc, cx, cy, glyph, br);
 }
 
 }  // namespace
@@ -1031,8 +1052,9 @@ namespace {
 
 // Draws a glyph given as rows of pixels, centered in a box.
 void DrawRows(HDC dc, const RECT& box, const char* const* rows, int n, COLORREF color) {
+  int k = GlyphScale();
   int w = (int)strlen(rows[0]);
-  int x0 = (box.left + box.right - w) / 2, y0 = (box.top + box.bottom - n) / 2;
+  int x0 = (box.left + box.right - w * k) / 2, y0 = (box.top + box.bottom - n * k) / 2;
   HBRUSH br = CreateSolidBrush(color);
   for (int y = 0; y < n; y++)
     for (int x = 0; x < w;) {
@@ -1042,7 +1064,7 @@ void DrawRows(HDC dc, const RECT& box, const char* const* rows, int n, COLORREF 
       }
       int e = x;
       while (e < w && rows[y][e] == 'X') e++;
-      RECT r = MakeRect(x0 + x, y0 + y, x0 + e, y0 + y + 1);
+      RECT r = MakeRect(x0 + x * k, y0 + y * k, x0 + e * k, y0 + (y + 1) * k);
       FillRect(dc, &r, br);
       x = e;
     }
@@ -1186,31 +1208,8 @@ BOOL WINAPI DrawFrameControl(HDC dc, LPRECT rc, UINT type, UINT state) {
         DrawRows(dc, box, q, 7, c);
       } else {
         // The caption buttons' glyphs, drawn the way the frame draws them.
-        int mode = glyph;
         HBRUSH br = CreateSolidBrush(c);
-        int cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
-        if (mode == 0) {
-          for (int i = -3; i <= 3; i++) {
-            RECT a = MakeRect(cx + i - 1, cy + i, cx + i + 1, cy + i + 1);
-            RECT b = MakeRect(cx - i - 1, cy + i, cx - i + 1, cy + i + 1);
-            FillRect(dc, &a, br);
-            FillRect(dc, &b, br);
-          }
-        } else if (mode == 1) {
-          RECT o = MakeRect(cx - 4, cy - 4, cx + 5, cy + 4);
-          FrameRect(dc, &o, br);
-          RECT t = MakeRect(o.left, o.top + 1, o.right, o.top + 2);
-          FillRect(dc, &t, br);
-        } else if (mode == 2) {
-          RECT a = MakeRect(cx - 2, cy - 5, cx + 5, cy + 1);
-          RECT b = MakeRect(cx - 5, cy - 2, cx + 2, cy + 4);
-          FrameRect(dc, &a, br);
-          FillRect(dc, &b, GetSysColorBrush(COLOR_BTNFACE));
-          FrameRect(dc, &b, br);
-        } else {
-          RECT a = MakeRect(cx - 4, cy + 2, cx + 3, cy + 4);
-          FillRect(dc, &a, br);
-        }
+        DrawCaptionGlyph(dc, (box.left + box.right) / 2, (box.top + box.bottom) / 2, glyph, br);
         DeleteObject(br);
       }
       return TRUE;
@@ -1237,17 +1236,7 @@ BOOL WINAPI DrawFrameControl(HDC dc, LPRECT rc, UINT type, UINT state) {
       if (state & DFCS_PUSHED) OffsetRect(&r, 1, 1);
       int dir = kind == DFCS_SCROLLUP ? 0 : kind == DFCS_SCROLLLEFT ? 2 : kind == DFCS_SCROLLRIGHT ? 3 : 1;
       HBRUSH br = GetSysColorBrush((state & DFCS_INACTIVE) ? COLOR_GRAYTEXT : COLOR_BTNTEXT);
-      int cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
-      for (int i = 0; i < 4; i++) {
-        RECT line;
-        switch (dir) {
-          case 0: line = MakeRect(cx - i, cy - 2 + i, cx + i + 1, cy - 1 + i); break;
-          case 1: line = MakeRect(cx - 3 + i, cy - 1 + i, cx + 4 - i, cy + i); break;
-          case 2: line = MakeRect(cx - 2 + i, cy - i, cx - 1 + i, cy + i + 1); break;
-          default: line = MakeRect(cx - 1 + i, cy - 3 + i, cx + i, cy + 4 - i); break;
-        }
-        FillRect(dc, &line, br);
-      }
+      DrawArrowGlyph(dc, (r.left + r.right) / 2, (r.top + r.bottom) / 2, dir, br);
       return TRUE;
     }
     case DFC_MENU:

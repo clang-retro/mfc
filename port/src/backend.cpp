@@ -29,7 +29,10 @@ struct HeadlessBackend : Backend {
   std::condition_variable cv;
   bool woken = false;
   SIZE size = {1024, 768};
+  double scale = 1;
 
+  // WINPORT_SCREEN gives the screen's size ("1920x1080"), and
+  // WINPORT_SCALE the desktop's scale ("2", "1.5"), for tests.
   HeadlessBackend() {
     const char* s = getenv("WINPORT_SCREEN");
     int w, h;
@@ -37,9 +40,13 @@ struct HeadlessBackend : Backend {
       size.cx = w;
       size.cy = h;
     }
+    const char* k = getenv("WINPORT_SCALE");
+    double v;
+    if (k && sscanf(k, "%lf", &v) == 1 && v >= 1 && v <= 10) scale = v;
   }
   const char* Name() override { return "headless"; }
   SIZE ScreenSize() override { return size; }
+  double DesktopScale() override { return scale; }
   void Wait(DWORD timeout) override {
     std::unique_lock<std::mutex> g(lock);
     if (timeout == INFINITE)

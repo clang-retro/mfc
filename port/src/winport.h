@@ -14,6 +14,23 @@
 
 namespace winport {
 
+// The screen's dots per inch, as a screen DC's LOGPIXELSX gives it: 96
+// for a program that is not DPI aware, otherwise the desktop's scale
+// (or HKEY_CURRENT_USER\Control Panel\Desktop's LogPixels). Fixed for
+// the process the first time it is asked, as on Windows.
+int SystemDpi();
+// Whether the program draws at the screen's resolution: false for one
+// the backend scales up from 96 dots per inch.
+bool DpiAware();
+// v pixels at 96 dots per inch, at the screen's.
+inline int Scale96(int v) { return MulDiv(v, SystemDpi(), 96); }
+// How many pixels wide each pixel of a glyph drawn as pixel art is (a
+// check mark, an arrow, a caption button's): 1 up to 143 DPI.
+inline int GlyphScale() {
+  int k = (SystemDpi() + 48) / 96;
+  return k < 1 ? 1 : k;
+}
+
 // Errors: the thread's last error, and errno in Win32 terms.
 DWORD ErrorFromErrno(int e);
 inline void SetErrorFromErrno() { SetLastError(ErrorFromErrno(errno)); }
