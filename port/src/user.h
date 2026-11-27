@@ -14,9 +14,12 @@
 #include "winport.h"
 #include "region.h"
 
+#include <ole2.h>
+
 #include <condition_variable>
 #include <deque>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -139,6 +142,53 @@ HWND DropTarget(POINT screen);
 bool DropFiles(POINT screen, const std::vector<std::wstring>& paths);
 // The local files of a text/uri-list, as paths.
 std::vector<std::wstring> PathsFromUris(const std::string& list);
+// The text/uri-list of paths, each as a file: URI.
+std::string UrisFromPaths(const std::vector<std::wstring>& paths);
+
+// Drags between this program and others (dragdrop_desktop.cpp). What
+// another program drags over a window goes to the drop target under it
+// (RegisterDragDrop) as a data object of files and text, or as
+// WM_DROPFILES to a window that takes files.
+//
+// The backend describes the drag with a DesktopOffer: the kinds it
+// carries and how to fetch them, and where the answers go. A drag this
+// program started that comes back to its windows through the desktop
+// (Wayland, macOS) carries its own data object instead.
+struct DesktopOffer {
+  virtual ~DesktopOffer() {}
+  bool files = false;  // a list of file URIs
+  bool text = false;   // text, UTF-8
+  IDataObject* local = NULL;
+  // Fetches the files' URI list or the text, waiting for the other
+  // program; called on the thread of the window under the drag.
+  virtual bool Fetch(bool /*files*/, std::string* /*bytes*/) { return false; }
+  // The effect the window under the drag would have, and the drop's.
+  virtual void Answer(DWORD /*effect*/) {}
+  virtual void Finished(DWORD /*effect*/) {}
+};
+typedef std::shared_ptr<DesktopOffer> DesktopOfferPtr;
+// The backend's calls, from any thread: the drag is over top at a
+// screen point (the first time is its entry), has left the program's
+// windows, or is dropped. keys are MK_ flags; allowed is the
+// DROPEFFECT_ flags the source allows. They are handled on top's
+// thread, which then answers through Answer and Finished.
+void DesktopDragOver(Window* top, const DesktopOfferPtr& offer, POINT screen, DWORD keys, DWORD allowed);
+void DesktopDragLeave(Window* top, const DesktopOfferPtr& offer);
+void DesktopDrop(Window* top, const DesktopOfferPtr& offer, POINT screen, DWORD keys, DWORD allowed);
+// The same handled at once on the calling thread, giving the effect.
+DWORD DesktopDragOverNow(const DesktopOfferPtr& offer, POINT screen, DWORD keys, DWORD allowed);
+void DesktopDragLeaveNow(const DesktopOfferPtr& offer);
+DWORD DesktopDropNow(const DesktopOfferPtr& offer, POINT screen, DWORD keys, DWORD allowed);
+// The message that carries them to the window's thread.
+bool IsDesktopDrag(UINT msg);
+void DeliverDesktopDrag(LPARAM id);
+// The drop target at a screen point (dragdrop.cpp): the window there, or
+// the nearest of its parents that registered one.
+IDropTarget* OleDropTargetAt(POINT screen, HWND* where);
+// What a data object of this program's carries for other programs: its
+// files (CF_HDROP) and its text (CF_UNICODETEXT or CF_TEXT).
+bool DataFiles(IDataObject* data, std::vector<std::wstring>* paths);
+bool DataText(IDataObject* data, std::wstring* text);
 
 // Classes
 Class* FindClass(const wchar_t* name, HINSTANCE inst);
@@ -368,6 +418,20 @@ struct Backend {
   // candidates go has changed (see ImeCursorRect).
   virtual void ImeReset(Window* /*top*/) {}
   virtual void ImeCursorMoved(Window* /*top*/) {}
+  // A drag this program started (DoDragDrop), at a screen point.
+  // DragOut gives kDragOurs when the program's own windows are there,
+  // and kDragOther when another program's is, with the effect that
+  // program would take (DROPEFFECT_NONE for one that takes no drops),
+  // which DragOutDrop then drops on or DragOutLeave leaves. A desktop
+  // that runs drags itself (Wayland, macOS) takes over the rest of the
+  // drag instead, giving kDragDone and the effect it ended with.
+  enum { kDragOurs, kDragOther, kDragDone };
+  virtual int DragOut(IDataObject* /*data*/, IDropSource* /*source*/, DWORD /*ok*/, DWORD /*keys*/, POINT /*screen*/,
+                      DWORD* /*effect*/) {
+    return kDragOurs;
+  }
+  virtual DWORD DragOutDrop() { return DROPEFFECT_NONE; }
+  virtual void DragOutLeave() {}
   // Waits up to timeout ms for input, handing what comes to the input
   // functions above; returns early when WakeBackend is called. Called
   // without the lock.

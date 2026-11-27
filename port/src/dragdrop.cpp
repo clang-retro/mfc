@@ -1,10 +1,11 @@
-// dragdrop.cpp - OLE drag and drop within the program: the drop targets
-// windows register (RegisterDragDrop, RevokeDragDrop), and the drag loop
-// (DoDragDrop) that follows the cursor from target to target.
+// dragdrop.cpp - OLE drag and drop: the drop targets windows register
+// (RegisterDragDrop, RevokeDragDrop), and the drag loop (DoDragDrop) that
+// follows the cursor from target to target, handing the drag to the
+// backend where another program's window is under it.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
-#include "winport.h"
+#include "user.h"
 
 #include <ole2.h>
 
@@ -42,6 +43,8 @@ DWORD KeyState() {
 
 }  // namespace
 
+IDropTarget* winport::OleDropTargetAt(POINT pt, HWND* where) { return TargetAt(pt, where); }
+
 extern "C" {
 
 HRESULT WINAPI RegisterDragDrop(HWND hwnd, LPDROPTARGET target) {
@@ -66,6 +69,8 @@ HRESULT WINAPI DoDragDrop(LPDATAOBJECT data, LPDROPSOURCE source, DWORD ok, LPDW
   *effect = DROPEFFECT_NONE;
   IDropTarget* cur = NULL;
   HWND curWnd = NULL;
+  bool out = false;  // over another program's window
+  winport::Backend* backend = winport::GetBackend();
   HRESULT hr;
   for (;;) {
     // The program goes on running while the drag does.
@@ -90,6 +95,15 @@ HRESULT WINAPI DoDragDrop(LPDATAOBJECT data, LPDROPSOURCE source, DWORD ok, LPDW
     GetCursorPos(&pt);
     POINTL ptl = {pt.x, pt.y};
     if (hr != S_OK) {
+      if (out) {
+        // Another program's window takes the drop, or not.
+        if (hr == DRAGDROP_S_DROP) {
+          *effect = backend->DragOutDrop() & ok;
+          return *effect != DROPEFFECT_NONE ? DRAGDROP_S_DROP : DRAGDROP_S_CANCEL;
+        }
+        backend->DragOutLeave();
+        return hr;
+      }
       if (hr == DRAGDROP_S_DROP && cur != NULL) {
         DWORD e = ok;
         if (FAILED(cur->Drop(data, keys, ptl, &e))) e = DROPEFFECT_NONE;
@@ -105,29 +119,54 @@ HRESULT WINAPI DoDragDrop(LPDATAOBJECT data, LPDROPSOURCE source, DWORD ok, LPDW
       return hr == DRAGDROP_S_DROP ? DRAGDROP_S_CANCEL : hr;
     }
 
-    // Follow the cursor.
-    HWND where;
-    IDropTarget* now = TargetAt(pt, &where);
+    // Another program's window may be under the cursor.
     DWORD e = ok;
-    if (where != curWnd || now != cur) {
+    int where = backend->DragOut(data, source, ok, keys, pt, &e);
+    if (where == winport::Backend::kDragDone) {
+      // The desktop ran the rest of the drag.
       if (cur != NULL) {
         cur->DragLeave();
         cur->Release();
       }
-      cur = now;
-      curWnd = where;
+      *effect = e & ok;
+      return *effect != DROPEFFECT_NONE ? DRAGDROP_S_DROP : DRAGDROP_S_CANCEL;
+    }
+    if (where == winport::Backend::kDragOther) {
       if (cur != NULL) {
-        cur->AddRef();
-        if (FAILED(cur->DragEnter(data, keys, ptl, &e))) e = DROPEFFECT_NONE;
+        cur->DragLeave();
+        cur->Release();
+        cur = NULL;
+        curWnd = NULL;
+      }
+      out = true;
+      e &= ok;
+    } else {
+      if (out) backend->DragOutLeave();
+      out = false;
+      // Follow the cursor.
+      HWND h;
+      IDropTarget* now = TargetAt(pt, &h);
+      e = ok;
+      if (h != curWnd || now != cur) {
+        if (cur != NULL) {
+          cur->DragLeave();
+          cur->Release();
+        }
+        cur = now;
+        curWnd = h;
+        if (cur != NULL) {
+          cur->AddRef();
+          if (FAILED(cur->DragEnter(data, keys, ptl, &e))) e = DROPEFFECT_NONE;
+        } else {
+          e = DROPEFFECT_NONE;
+        }
+      } else if (cur != NULL) {
+        if (FAILED(cur->DragOver(keys, ptl, &e))) e = DROPEFFECT_NONE;
       } else {
         e = DROPEFFECT_NONE;
       }
-    } else if (cur != NULL) {
-      if (FAILED(cur->DragOver(keys, ptl, &e))) e = DROPEFFECT_NONE;
-    } else {
-      e = DROPEFFECT_NONE;
+      e &= ok | DROPEFFECT_SCROLL;
     }
-    e &= ok | DROPEFFECT_SCROLL;
     if (source->GiveFeedback(e) == DRAGDROP_S_USEDEFAULTCURSORS)
       SetCursor(LoadCursor(NULL, (e & ~DROPEFFECT_SCROLL) != DROPEFFECT_NONE ? IDC_ARROW : IDC_NO));
     MsgWaitForMultipleObjects(0, NULL, FALSE, 30, QS_ALLINPUT);

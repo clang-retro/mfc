@@ -160,6 +160,21 @@ the Dock on macOS). Wayland, X11 and xkbcommon are loaded when a program
 starts, so it runs without them. Text copied and pasted through the
 clipboard goes to and from other programs.
 
+Drag and drop works with other programs too, through XDND on X11, the
+data device on Wayland and the dragging pasteboard on macOS. Files and
+text dragged from another program reach the drop target a window
+registered (`RegisterDragDrop`, `COleDropTarget`) as a data object with
+`CF_HDROP`, `CF_UNICODETEXT` and `CF_TEXT`, fetched when the target
+asks for them, or reach a window that takes files (`DragAcceptFiles`)
+as `WM_DROPFILES`; the effect the target chooses goes back to the other
+program. A drag the program starts with `DoDragDrop` offers its
+`CF_HDROP` files as a URI list and its text when it leaves the program's
+windows. On X11 the program's own loop follows it over the other
+programs' windows. On Wayland and macOS the compositor or AppKit takes
+the rest of the drag, so it comes back to the program's own windows
+through the desktop, and the drop is the desktop's to see (on Wayland
+the source can still call the drag off through `QueryContinueDrag`).
+
 Printing and print preview work too. The printers are the system's CUPS
 queues and "Save as PDF"; a printer DC draws each page as a picture at
 the printer's resolution (300 dots an inch unless the `DEVMODE` asks for
@@ -738,7 +753,10 @@ try.
 * `dragtest`: `afxole.h` in a scroll view: data put on the clipboard
   and read back (cached, rendered when asked for, and as a file),
   a COleDropTarget fed enter, over, leave and drop by hand, scrolling
-  near the edges, and a real DoDragDrop from the view onto itself.
+  near the edges, and a real DoDragDrop from the view onto itself; on
+  Linux and macOS, drags from other programs handed in as a backend
+  hands them, onto the view (text, the effects going back) and onto a
+  window that takes files.
 * `cdlgtest`: the common dialogs, driven by their hooks: CFileDialog
   opening a file (its hook turning the first OK down), two files at
   once, and none, saving with the default extension, and a buffer too

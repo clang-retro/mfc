@@ -73,6 +73,7 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
@@ -517,6 +518,20 @@ struct WaylandBackend : Backend {
   DWORD selectionGeneration = 0;
   wl_data_source* source = NULL;    // ours, while the clipboard is this program's
   std::string sourceText;           // UTF-8
+  // A drag from another program, or one of ours come back: its offer,
+  // the window of ours it is over, and where.
+  struct DragOffer;
+  std::shared_ptr<DragOffer> dragOffer;
+  Native* dragOver = NULL;
+  POINT dragAt = {0, 0};
+  // A drag of ours the compositor runs: what it carries, the action the
+  // target last chose, and how it ended.
+  wl_data_source* dragSource = NULL;
+  IDataObject* dragData = NULL;
+  std::string dragUris, dragText;  // UTF-8
+  uint32_t dragAction = 0;
+  bool dragDropped = false, dragEnded = false;
+  DWORD dragEffect = DROPEFFECT_NONE;
   SIZE screen = {1024, 768};
   int wakePipe[2] = {-1, -1};
   std::recursive_mutex lock;  // the windows' buffers and the sets below
@@ -1228,7 +1243,11 @@ struct WaylandBackend : Backend {
     auto it = b->offers.find(offer);
     if (it != b->offers.end()) it->second.push_back(mime);
   }
-  static void OfferActions(void*, wl_data_offer*, uint32_t) {}
+  static void OfferActions(void* data, wl_data_offer* offer, uint32_t actions) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    std::lock_guard<std::recursive_mutex> g(b->lock);
+    if (b->dragOffer && b->dragOffer->offer == offer) b->dragOffer->allowed = EffectsOf(actions);
+  }
   static void OfferAction(void*, wl_data_offer*, uint32_t) {}
   static void DataOffer(void* data, wl_data_device*, wl_data_offer* offer) {
     WaylandBackend* b = (WaylandBackend*)data;
@@ -1242,16 +1261,176 @@ struct WaylandBackend : Backend {
     offers.erase(offer);
     wl_data_offer_destroy(offer);
   }
-  // Dragging and dropping between programs is not done yet.
-  static void DataEnter(void* data, wl_data_device*, uint32_t, wl_surface*, wl_fixed_t, wl_fixed_t,
+
+  // ---------------------------------------------------------------
+  // Drags from other programs
+
+  // The drop effects of Wayland's actions, and its actions of effects.
+  static DWORD EffectsOf(uint32_t actions) {
+    DWORD e = 0;
+    if (actions & WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY) e |= DROPEFFECT_COPY;
+    if (actions & WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE) e |= DROPEFFECT_MOVE;
+    if (actions & WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK) e |= DROPEFFECT_COPY | DROPEFFECT_MOVE;
+    return e;
+  }
+  static uint32_t ActionOf(DWORD effect) {
+    if (effect & DROPEFFECT_MOVE) return WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE;
+    if (effect & (DROPEFFECT_COPY | DROPEFFECT_LINK)) return WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY;
+    return WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE;
+  }
+
+  // What a drag offers, fetched through the compositor; the answers go
+  // back on the offer. The offer goes when the drag leaves or the drop
+  // has been taken.
+  struct DragOffer : DesktopOffer {
+    WaylandBackend* b = NULL;
+    wl_data_offer* offer = NULL;
+    std::vector<std::string> types;
+    uint32_t serial = 0;
+    DWORD allowed = DROPEFFECT_COPY;  // until the source says
+    bool dropped = false;
+    const char* Type(bool wantFiles) const {
+      if (wantFiles) {
+        for (const std::string& t : types)
+          if (t == "text/uri-list") return "text/uri-list";
+        return NULL;
+      }
+      for (const char* const* t = TextTypes(); *t; t++)
+        for (const std::string& h : types)
+          if (h == *t) return *t;
+      return NULL;
+    }
+    bool Fetch(bool wantFiles, std::string* bytes) override {
+      std::unique_lock<std::recursive_mutex> g(b->lock);
+      const char* type = Type(wantFiles);
+      if (!offer || !type || !b->Receive(offer, type, bytes, g)) return false;
+      if (strcmp(type, "STRING") == 0) {
+        std::wstring w;
+        for (unsigned char c : *bytes) w += (wchar_t)c;
+        *bytes = Narrow(w.c_str(), (int)w.size());
+      }
+      return true;
+    }
+    void Answer(DWORD effect) override {
+      std::lock_guard<std::recursive_mutex> g(b->lock);
+      if (!offer || dropped) return;
+      const char* type = Type(files);
+      if (!type) type = Type(false);
+      if (local && !type && !types.empty()) type = types[0].c_str();
+      wl_data_offer_accept(offer, serial, effect ? type : NULL);
+      if (winport_wl_proxy_get_version((wl_proxy*)offer) >= 3) {
+        uint32_t a = ActionOf(effect);
+        wl_data_offer_set_actions(offer, a, a);
+      }
+      b->wl.wl_display_flush(b->dpy);
+    }
+    void Finished(DWORD effect) override {
+      std::lock_guard<std::recursive_mutex> g(b->lock);
+      if (!offer) return;
+      if (effect && winport_wl_proxy_get_version((wl_proxy*)offer) >= 3) {
+        uint32_t a = ActionOf(effect);
+        wl_data_offer_set_actions(offer, a, a);
+        wl_data_offer_finish(offer);
+      }
+      b->DropOffer(offer);
+      offer = NULL;
+      b->wl.wl_display_flush(b->dpy);
+    }
+  };
+
+  // Reads an offer's data in a type through a pipe; the lock is let go
+  // while the other program writes.
+  bool Receive(wl_data_offer* offer, const char* type, std::string* bytes, std::unique_lock<std::recursive_mutex>& g) {
+    int fds[2];
+    if (pipe2(fds, O_CLOEXEC) != 0) return false;
+    wl_data_offer_receive(offer, type, fds[1]);
+    close(fds[1]);
+    wl.wl_display_flush(dpy);
+    g.unlock();
+    bytes->clear();
+    ULONGLONG end = Millis() + 1000;
+    for (;;) {
+      ULONGLONG now = Millis();
+      if (now >= end) break;
+      pollfd p = {fds[0], POLLIN, 0};
+      if (poll(&p, 1, (int)(end - now)) <= 0) break;
+      char buf[4096];
+      ssize_t n = read(fds[0], buf, sizeof buf);
+      if (n <= 0) break;
+      bytes->append(buf, (size_t)n);
+    }
+    close(fds[0]);
+    g.lock();
+    return true;
+  }
+
+  // The keys held, with the button that drags.
+  DWORD DragKeys() { return (DWORD)((Keys() & ~(WPARAM)(MK_LBUTTON | MK_MBUTTON | MK_RBUTTON)) | MK_LBUTTON); }
+
+  POINT DragPoint(Native* n, wl_fixed_t x, wl_fixed_t y) {
+    return POINT{n->w->rect.left + FromSurface(wl_fixed_to_double(x)), n->w->rect.top + FromSurface(wl_fixed_to_double(y))};
+  }
+
+  void LeaveDrag() {
+    if (!dragOffer) return;
+    if (dragOver) DesktopDragLeave(dragOver->w, dragOffer);
+    if (!dragOffer->dropped) {
+      DropOffer(dragOffer->offer);
+      dragOffer->offer = NULL;
+    }
+    dragOffer.reset();
+    dragOver = NULL;
+  }
+
+  static void DataEnter(void* data, wl_data_device*, uint32_t serial, wl_surface* s, wl_fixed_t x, wl_fixed_t y,
                         wl_data_offer* offer) {
     WaylandBackend* b = (WaylandBackend*)data;
     std::lock_guard<std::recursive_mutex> g(b->lock);
-    if (offer != b->selection) b->DropOffer(offer);
+    b->LeaveDrag();
+    Native* n = Of(s);
+    if (!offer) return;
+    if (!n || !n->toplevel) {
+      if (offer != b->selection) b->DropOffer(offer);
+      return;
+    }
+    std::shared_ptr<DragOffer> o = std::make_shared<DragOffer>();
+    o->b = b;
+    o->offer = offer;
+    o->serial = serial;
+    o->types = b->offers[offer];
+    o->files = o->Type(true) != NULL;
+    o->text = o->Type(false) != NULL;
+    // One of this program's own drags carries its data object.
+    if (b->dragSource) {
+      o->local = b->dragData;
+      o->allowed = b->dragOk;
+    }
+    b->dragOffer = o;
+    b->dragOver = n;
+    b->dragAt = b->DragPoint(n, x, y);
+    DesktopDragOver(n->w, o, b->dragAt, b->DragKeys(), o->allowed);
   }
-  static void DataLeave(void*, wl_data_device*) {}
-  static void DataMotion(void*, wl_data_device*, uint32_t, wl_fixed_t, wl_fixed_t) {}
-  static void DataDrop(void*, wl_data_device*) {}
+  static void DataLeave(void* data, wl_data_device*) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    std::lock_guard<std::recursive_mutex> g(b->lock);
+    b->LeaveDrag();
+  }
+  static void DataMotion(void* data, wl_data_device*, uint32_t, wl_fixed_t x, wl_fixed_t y) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    std::lock_guard<std::recursive_mutex> g(b->lock);
+    if (!b->dragOffer || !b->dragOver) return;
+    b->dragAt = b->DragPoint(b->dragOver, x, y);
+    DesktopDragOver(b->dragOver->w, b->dragOffer, b->dragAt, b->DragKeys(), b->dragOffer->allowed);
+  }
+  static void DataDrop(void* data, wl_data_device*) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    std::lock_guard<std::recursive_mutex> g(b->lock);
+    if (!b->dragOffer || !b->dragOver) return;
+    b->dragOffer->dropped = true;
+    DesktopDrop(b->dragOver->w, b->dragOffer, b->dragAt, b->DragKeys() & ~(DWORD)MK_LBUTTON, b->dragOffer->allowed);
+    b->dragOffer.reset();
+    b->dragOver = NULL;
+  }
   static void DataSelection(void* data, wl_data_device*, wl_data_offer* offer) {
     WaylandBackend* b = (WaylandBackend*)data;
     std::lock_guard<std::recursive_mutex> g(b->lock);
@@ -1260,13 +1439,25 @@ struct WaylandBackend : Backend {
     b->selectionGeneration++;
   }
 
+  // ---------------------------------------------------------------
+  // The clipboard's and drags' sources
+
   static void SourceTarget(void*, wl_data_source*, const char*) {}
-  static void SourceSend(void* data, wl_data_source*, const char*, int32_t fd) {
+  static void SourceSend(void* data, wl_data_source* src, const char* mime, int32_t fd) {
     WaylandBackend* b = (WaylandBackend*)data;
     std::string text;
     {
       std::lock_guard<std::recursive_mutex> g(b->lock);
-      text = b->sourceText;
+      if (src == b->dragSource) {
+        text = strcmp(mime, "text/uri-list") == 0 ? b->dragUris : b->dragText;
+        if (strcmp(mime, "STRING") == 0) {
+          std::wstring w = Widen(text.c_str(), (int)text.size());
+          text.clear();
+          for (wchar_t c : w) text += c < 0x100 ? (char)c : '?';
+        }
+      } else {
+        text = b->sourceText;
+      }
     }
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
     size_t done = 0;
@@ -1278,15 +1469,149 @@ struct WaylandBackend : Backend {
     close(fd);
   }
   static void SourceCancelled(void* data, wl_data_source* src) {
-    // Another program has taken the clipboard.
+    // Another program has taken the clipboard, or a drag came to nothing.
     WaylandBackend* b = (WaylandBackend*)data;
     std::lock_guard<std::recursive_mutex> g(b->lock);
     if (b->source == src) b->source = NULL;
+    if (b->dragSource == src) {
+      b->dragSource = NULL;
+      b->dragEnded = true;
+      b->dragEffect = DROPEFFECT_NONE;
+    }
     wl_data_source_destroy(src);
   }
-  static void SourceDropped(void*, wl_data_source*) {}
-  static void SourceFinished(void*, wl_data_source*) {}
-  static void SourceAction(void*, wl_data_source*, uint32_t) {}
+  static void SourceDropped(void* data, wl_data_source* src) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    std::lock_guard<std::recursive_mutex> g(b->lock);
+    if (b->dragSource == src) b->dragDropped = true;
+  }
+  static void SourceFinished(void* data, wl_data_source* src) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    std::lock_guard<std::recursive_mutex> g(b->lock);
+    if (b->dragSource != src) return;
+    b->dragSource = NULL;
+    b->dragEnded = true;
+    b->dragEffect = EffectsOf(b->dragAction);
+    if (b->dragEffect & DROPEFFECT_MOVE) b->dragEffect = DROPEFFECT_MOVE;
+    wl_data_source_destroy(src);
+  }
+  static void SourceAction(void* data, wl_data_source* src, uint32_t action) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    std::lock_guard<std::recursive_mutex> g(b->lock);
+    if (b->dragSource == src) b->dragAction = action;
+  }
+
+  // ---------------------------------------------------------------
+  // Drags to other programs
+
+  DWORD dragOk = 0;
+  bool dragArmed = false;
+
+  // A drag of ours leaves the window it started in: the compositor runs
+  // the rest of it, over other programs' windows and ours alike.
+  int DragOut(IDataObject* data, IDropSource* src, DWORD ok, DWORD keys, POINT, DWORD* effect) override {
+    std::unique_lock<std::recursive_mutex> g(lock);
+    if (!dpy || !dataDevice || !ptrIn || !ptrIn->toplevel || dragSource ||
+        winport_wl_proxy_get_version((wl_proxy*)dataManager) < 3)
+      return kDragOurs;
+    RECT r = ptrIn->w->rect;
+    if (ptrAt.x >= 0 && ptrAt.y >= 0 && ptrAt.x < r.right - r.left && ptrAt.y < r.bottom - r.top) {
+      dragArmed = false;
+      return kDragOurs;
+    }
+    // First the drag leaves the program's drop target; the compositor
+    // takes it the next time round.
+    if (!dragArmed) {
+      dragArmed = true;
+      *effect = DROPEFFECT_NONE;
+      return kDragOther;
+    }
+    dragArmed = false;
+    std::vector<std::wstring> paths;
+    std::wstring text;
+    g.unlock();
+    bool files = DataFiles(data, &paths), hasText = DataText(data, &text);
+    g.lock();
+    if (!files && !hasText) {
+      // Nothing another program could take.
+      *effect = DROPEFFECT_NONE;
+      return kDragOther;
+    }
+    dragUris = files ? UrisFromPaths(paths) : std::string();
+    dragText = hasText ? Narrow(text.c_str(), (int)text.size()) : std::string();
+    dragSource = wl_data_device_manager_create_data_source(dataManager);
+    static const wl_data_source_listener sl = {SourceTarget,  SourceSend,     SourceCancelled,
+                                               SourceDropped, SourceFinished, SourceAction};
+    wl_data_source_add_listener(dragSource, &sl, this);
+    if (files) wl_data_source_offer(dragSource, "text/uri-list");
+    if (hasText)
+      for (const char* const* t = TextTypes(); *t; t++) wl_data_source_offer(dragSource, *t);
+    uint32_t actions = 0;
+    if (ok & (DROPEFFECT_COPY | DROPEFFECT_LINK)) actions |= WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY;
+    if (ok & DROPEFFECT_MOVE) actions |= WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE;
+    wl_data_source_set_actions(dragSource, actions);
+    dragData = data;
+    dragOk = ok;
+    dragAction = 0;
+    dragDropped = dragEnded = false;
+    dragEffect = DROPEFFECT_NONE;
+    wl_data_device_start_drag(dataDevice, dragSource, ptrIn->surface, NULL, lastSerial);
+    // The compositor keeps the button's release.
+    releaseAfterGrab = true;
+    wl.wl_display_flush(dpy);
+    g.unlock();
+
+    ULONGLONG dropped = 0;
+    for (;;) {
+      MSG msg;
+      BOOL escape = FALSE;
+      while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
+        if (msg.message == WM_QUIT) {
+          PostQuitMessage((int)msg.wParam);
+          escape = TRUE;
+          break;
+        }
+        if (msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE) {
+          escape = TRUE;
+          continue;
+        }
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+      }
+      g.lock();
+      bool ended = dragEnded;
+      if (dragDropped && !dropped) dropped = Millis();
+      if (!ended && dropped && Millis() - dropped > 10000) {
+        // The target never said it had finished.
+        ended = true;
+        dragEffect = EffectsOf(dragAction);
+      }
+      DWORD now = EffectsOf(dragAction) & ok;
+      g.unlock();
+      if (ended) break;
+      // The source can still call the drag off; the drop is the
+      // compositor's to see.
+      if (!dragDropped) {
+        HRESULT hr = src->QueryContinueDrag(escape, (keys & ~(DWORD)(MK_LBUTTON | MK_MBUTTON | MK_RBUTTON)) | MK_LBUTTON);
+        if (hr != S_OK && hr != DRAGDROP_S_DROP) {
+          g.lock();
+          if (dragSource) wl_data_source_destroy(dragSource);
+          dragSource = NULL;
+          dragEnded = true;
+          dragEffect = DROPEFFECT_NONE;
+          wl.wl_display_flush(dpy);
+          g.unlock();
+          break;
+        }
+        src->GiveFeedback(now);
+      }
+      MsgWaitForMultipleObjects(0, NULL, FALSE, 30, QS_ALLINPUT);
+    }
+    g.lock();
+    dragData = NULL;
+    *effect = dragEffect & ok;
+    return kDragDone;
+  }
 
   // The text types the clipboard can hold, best first.
   static const char* const* TextTypes() {
@@ -1317,25 +1642,8 @@ struct WaylandBackend : Backend {
           break;
         }
     if (!type) return false;
-    int fds[2];
-    if (pipe2(fds, O_CLOEXEC) != 0) return false;
-    wl_data_offer_receive(selection, type, fds[1]);
-    close(fds[1]);
-    wl.wl_display_flush(dpy);
-    g.unlock();
     std::string bytes;
-    ULONGLONG end = Millis() + 1000;
-    for (;;) {
-      ULONGLONG now = Millis();
-      if (now >= end) break;
-      pollfd p = {fds[0], POLLIN, 0};
-      if (poll(&p, 1, (int)(end - now)) <= 0) break;
-      char buf[4096];
-      ssize_t n = read(fds[0], buf, sizeof buf);
-      if (n <= 0) break;
-      bytes.append(buf, (size_t)n);
-    }
-    close(fds[0]);
+    if (!Receive(selection, type, &bytes, g)) return false;
     if (strcmp(type, "STRING") == 0) {
       text->clear();
       for (unsigned char c : bytes) *text += (wchar_t)c;

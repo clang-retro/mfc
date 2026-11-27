@@ -1,12 +1,90 @@
 // dragtest.cpp - data transfer with afxole.h: a COleDataSource on the
 // clipboard (cached and rendered formats, flushing), a COleDataObject
 // reading it, a view's COleDropTarget called through IDropTarget (the
-// effects, drag scrolling), and a whole drag with DoDragDrop.
+// effects, drag scrolling), and a whole drag with DoDragDrop. On Linux
+// and macOS, drags from other programs too: the port's backends hand
+// them in through its own functions, as the test does here, and they
+// reach the view's drop target or a window that takes files.
 #include <afxwin.h>
 #include <afxext.h>
 #include <afxole.h>
 #include "dragtest.h"
 #include "testutil.h"
+
+#ifdef _WINPORT
+#include <memory>
+#include <string>
+
+// As the port's user.h declares them.
+namespace winport {
+struct Window;
+Window* GetWindow(HWND h);
+struct DesktopOffer {
+  virtual ~DesktopOffer() {}
+  bool files = false;
+  bool text = false;
+  IDataObject* local = NULL;
+  virtual bool Fetch(bool /*files*/, std::string* /*bytes*/) { return false; }
+  virtual void Answer(DWORD /*effect*/) {}
+  virtual void Finished(DWORD /*effect*/) {}
+};
+typedef std::shared_ptr<DesktopOffer> DesktopOfferPtr;
+void DesktopDragOver(Window* top, const DesktopOfferPtr& offer, POINT screen, DWORD keys, DWORD allowed);
+void DesktopDragLeave(Window* top, const DesktopOfferPtr& offer);
+void DesktopDrop(Window* top, const DesktopOfferPtr& offer, POINT screen, DWORD keys, DWORD allowed);
+}  // namespace winport
+
+// Another program's drag, as a backend describes it.
+struct TestOffer : winport::DesktopOffer {
+  std::string uris, utf8;
+  int fetches = 0, answers = 0, finishes = 0;
+  DWORD answer = 0xFFFF, finished = 0xFFFF;
+  bool Fetch(bool wantFiles, std::string* bytes) override {
+    fetches++;
+    *bytes = wantFiles ? uris : utf8;
+    return true;
+  }
+  void Answer(DWORD effect) override {
+    answers++;
+    answer = effect;
+  }
+  void Finished(DWORD effect) override {
+    finishes++;
+    finished = effect;
+  }
+};
+
+// Handles messages until done says so, for at most two seconds.
+template <class F>
+static bool PumpUntil(F done) {
+  DWORD start = ::GetTickCount();
+  while (!done()) {
+    if (::GetTickCount() - start > 2000) return false;
+    MSG msg;
+    while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+      ::TranslateMessage(&msg);
+      ::DispatchMessage(&msg);
+    }
+    ::Sleep(5);
+  }
+  return true;
+}
+
+// A window that takes files, and the ones it was given.
+static CStringW g_droppedFile;
+static POINT g_dropPoint;
+static LRESULT CALLBACK FilesProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_DROPFILES) {
+    WCHAR path[MAX_PATH];
+    if (::DragQueryFileW((HDROP)wp, 0xFFFFFFFF, NULL, 0) == 1 && ::DragQueryFileW((HDROP)wp, 0, path, MAX_PATH))
+      g_droppedFile = path;
+    ::DragQueryPoint((HDROP)wp, &g_dropPoint);
+    ::DragFinish((HDROP)wp);
+    return 0;
+  }
+  return ::DefWindowProc(hwnd, msg, wp, lp);
+}
+#endif
 
 static CLIPFORMAT g_cfRows;
 static CLIPFORMAT g_cfFile;
@@ -260,6 +338,82 @@ public:
     CHECK(pView->m_dropEffect == DROPEFFECT_COPY);
   }
 
+#ifdef _WINPORT
+  void TestDesktopDrag() {
+    CDragView* pView = View();
+    winport::Window* top = winport::GetWindow(m_hWnd);
+    CHECK(top != NULL);
+    CPoint ptClient(100, 80);
+    CPoint pt = ptClient;
+    pView->ClientToScreen(&pt);
+    int nEnters = pView->m_nEnters, nLeaves = pView->m_nLeaves, nDrops = pView->m_nDrops;
+
+    // Text from another program reaches the view's drop target, and the
+    // effects go back to the backend.
+    std::shared_ptr<TestOffer> offer = std::make_shared<TestOffer>();
+    offer->files = offer->text = true;
+    offer->uris = "file:///tmp/a%20b.txt\r\n";
+    offer->utf8 = "from afar \xC3\xA9";
+    winport::DesktopOfferPtr p = offer;
+    winport::DesktopDragOver(top, p, pt, MK_LBUTTON, DROPEFFECT_COPY | DROPEFFECT_MOVE);
+    CHECK(PumpUntil([&] { return offer->answers == 1; }));
+    CHECK(offer->answer == DROPEFFECT_MOVE);
+    CHECK(pView->m_nEnters == nEnters + 1);
+    winport::DesktopDragOver(top, p, pt, MK_LBUTTON | MK_CONTROL, DROPEFFECT_COPY | DROPEFFECT_MOVE);
+    CHECK(PumpUntil([&] { return offer->answers == 2; }));
+    CHECK(offer->answer == DROPEFFECT_COPY);
+    CHECK(pView->m_nEnters == nEnters + 1);
+    // Only a copy is allowed.
+    winport::DesktopDragOver(top, p, pt, MK_LBUTTON, DROPEFFECT_COPY);
+    CHECK(PumpUntil([&] { return offer->answers == 3; }));
+    CHECK(offer->answer == DROPEFFECT_COPY);
+    winport::DesktopDrop(top, p, pt, 0, DROPEFFECT_COPY | DROPEFFECT_MOVE);
+    CHECK(PumpUntil([&] { return offer->finishes == 1; }));
+    CHECK(offer->finished == DROPEFFECT_MOVE);
+    CHECK(pView->m_nDrops == nDrops + 1);
+    CHECK(pView->m_ptDrop == ptClient);
+    // CF_TEXT is in the ANSI code page, which is UTF-8 here.
+    CHECK(pView->m_strDropped == "from afar \xC3\xA9");
+    CHECK(offer->fetches == 1);
+
+    // Files without text: the view refuses them, and the drag leaves.
+    std::shared_ptr<TestOffer> files = std::make_shared<TestOffer>();
+    files->files = true;
+    files->uris = offer->uris;
+    winport::DesktopOfferPtr f = files;
+    winport::DesktopDragOver(top, f, pt, MK_LBUTTON, DROPEFFECT_COPY);
+    CHECK(PumpUntil([&] { return files->answers == 1; }));
+    CHECK(files->answer == DROPEFFECT_NONE);
+    winport::DesktopDragLeave(top, f);
+    CHECK(PumpUntil([&] { return pView->m_nLeaves == nLeaves + 1; }));
+    CHECK(files->fetches == 0);
+
+    // A window that takes files gets them as WM_DROPFILES.
+    WNDCLASSW wc = {};
+    wc.lpfnWndProc = FilesProc;
+    wc.hInstance = AfxGetInstanceHandle();
+    wc.lpszClassName = L"MfcTestFiles";
+    ::RegisterClassW(&wc);
+    HWND hFiles = ::CreateWindowExW(WS_EX_TOPMOST | WS_EX_ACCEPTFILES, L"MfcTestFiles", L"", WS_POPUP | WS_VISIBLE,
+                                    pt.x - 20, pt.y - 20, 60, 60, NULL, NULL, AfxGetInstanceHandle(), NULL);
+    winport::Window* filesTop = winport::GetWindow(hFiles);
+    std::shared_ptr<TestOffer> more = std::make_shared<TestOffer>();
+    more->files = true;
+    more->uris = "file:///tmp/a%20b.txt\r\n";
+    winport::DesktopOfferPtr m = more;
+    winport::DesktopDragOver(filesTop, m, pt, MK_LBUTTON, DROPEFFECT_COPY | DROPEFFECT_MOVE);
+    CHECK(PumpUntil([&] { return more->answers == 1; }));
+    CHECK(more->answer == DROPEFFECT_COPY);
+    winport::DesktopDrop(filesTop, m, pt, 0, DROPEFFECT_COPY | DROPEFFECT_MOVE);
+    CHECK(PumpUntil([&] { return more->finishes == 1 && !g_droppedFile.IsEmpty(); }));
+    CHECK(more->finished == DROPEFFECT_COPY);
+    CHECK(g_droppedFile == L"/tmp/a b.txt");
+    CHECK(g_dropPoint.x == 20 && g_dropPoint.y == 20);
+    CHECK(pView->m_nDrops == nDrops + 1);
+    ::DestroyWindow(hFiles);
+  }
+#endif
+
   afx_msg void OnTimer(UINT_PTR nIDEvent) {
     if (nIDEvent != 1) {
       CFrameWnd::OnTimer(nIDEvent);
@@ -277,6 +431,11 @@ public:
     case 1:
       TestDoDragDrop();
       break;
+#ifdef _WINPORT
+    case 2:
+      TestDesktopDrag();
+      break;
+#endif
     default:
       KillTimer(1);
       PostMessage(WM_CLOSE);

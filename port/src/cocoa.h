@@ -54,6 +54,11 @@ void SetAppIcon(const uint32_t* argb, int width, int height);
 long PasteboardChangeCount();
 bool PasteboardText(std::u16string* text);
 long SetPasteboardText(const std::u16string& text);
+// A drag of the program's own, of files (UTF-8 paths) or text (NULL for
+// none), that AppKit runs from where the pointer is until it ends: the
+// operation it ended with (one kDrag value, or 0), or -1 when there is
+// no window to drag from. The windows of ours it goes over get OnDrag.
+int RunDrag(const std::vector<std::string>& paths, const std::u16string* text, int allowed);
 // Takes and handles events for up to timeout ms (-1 for no limit), or
 // until Wake.
 void Wait(long timeout);
@@ -94,11 +99,22 @@ void OnBecameKey(void* owner);
 void OnProcessKey(void* owner, unsigned code);
 void OnImeText(void* owner, bool commit, const uint16_t* text, size_t length, size_t cursor);
 bool OnImeRect(void* owner, int* x, int* y, int* width, int* height);
-// Files dragged from the Finder, at a screen point: whether a window of
-// ours there takes them, and the drop (UTF-8 paths), which says whether
-// one did.
-bool OnDragFiles(int x, int y);
-bool OnDropFiles(int x, int y, const std::vector<std::string>& paths);
+// Drags over our windows, from other programs or our own: what the drag
+// carries (UTF-8 paths, text), the operations its source allows, and the
+// keys held. OnDrag (with enter for a drag new to our windows) gives the
+// operation that a window of ours at a screen point would take, or 0;
+// OnDragLeft says that the drag has left our windows; OnDrop drops it
+// and gives the operation done.
+enum { kDragCopy = 1, kDragMove = 2, kDragLink = 4 };
+struct DragData {
+  std::vector<std::string> paths;
+  bool hasText = false;
+  std::u16string text;
+  bool local = false;  // the program's own (RunDrag)
+};
+int OnDrag(int x, int y, bool enter, const DragData& d, int allowed, unsigned mods);
+void OnDragLeft();
+int OnDrop(int x, int y, const DragData& d, int allowed, unsigned mods);
 void OnQuit();
 // Drawing: the window's pixels (0x00RRGGBB in the machine's byte order,
 // top row first; premultiplied 0xAARRGGBB when alpha), held still until

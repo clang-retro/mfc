@@ -64,6 +64,7 @@ using namespace winport::cocoa;
 #define WinportWindow WINPORT_JOIN(WINPORT_OBJC_PREFIX, Window)
 #define WinportView WINPORT_JOIN(WINPORT_OBJC_PREFIX, View)
 #define WinportDelegate WINPORT_JOIN(WINPORT_OBJC_PREFIX, Delegate)
+#define WinportDragSource WINPORT_JOIN(WINPORT_OBJC_PREFIX, DragSource)
 #endif
 
 // A borderless window that can still take the keyboard, unless it is a
@@ -90,6 +91,15 @@ using namespace winport::cocoa;
 
 // Activation, and Exit in the application menu or Quit in the Dock.
 @interface WinportDelegate : NSObject
+@end
+
+// The source of a drag of the program's own (RunDrag): the operations it
+// allows, and the one it ended with.
+@interface WinportDragSource : NSObject {
+ @public
+  NSDragOperation allowed;
+  NSDragOperation done;
+}
 @end
 
 // A hosted window (SetHost) has no NSWindow: window is nil, and the
@@ -207,6 +217,50 @@ void Mouse(NSEvent* e) {
     if (!w) w = Ours([NSApp keyWindow]);
   }
   if (w) OnMouse(w->owner, kind, button, x, y, mods);
+}
+
+// Drags: the operations of our kinds, and the other way.
+int KindsOf(NSDragOperation ops) {
+  int k = 0;
+  if (ops & NSDragOperationCopy) k |= kDragCopy;
+  if (ops & (NSDragOperationMove | NSDragOperationGeneric)) k |= kDragMove;
+  if (ops & NSDragOperationLink) k |= kDragLink;
+  return k;
+}
+NSDragOperation OperationOf(int kind, NSDragOperation allowed) {
+  if (kind & kDragMove) return (allowed & NSDragOperationMove) ? NSDragOperationMove : NSDragOperationGeneric;
+  if (kind & kDragCopy) return NSDragOperationCopy;
+  if (kind & kDragLink) return NSDragOperationLink;
+  return NSDragOperationNone;
+}
+// What the drag over our windows carries, read as it enters.
+DragData g_drag;
+DragData ReadDrag(id<NSDraggingInfo> info) {
+  DragData d;
+  NSPasteboard* pb = [info draggingPasteboard];
+  NSArray* types = [pb types];
+  if ([types containsObject:NSFilenamesPboardType]) {
+    NSArray* names = [pb propertyListForType:NSFilenamesPboardType];
+    if ([names isKindOfClass:[NSArray class]])
+      for (NSUInteger i = 0; i < [names count]; i++) {
+        id name = [names objectAtIndex:i];
+        if ([name isKindOfClass:[NSString class]]) d.paths.push_back([(NSString*)name fileSystemRepresentation]);
+      }
+  }
+  if ([types containsObject:NSStringPboardType]) {
+    NSString* s = [pb stringForType:NSStringPboardType];
+    if (s) {
+      d.hasText = true;
+      d.text.resize([s length]);
+      if (!d.text.empty()) [s getCharacters:(unichar*)&d.text[0]];
+    }
+  }
+  d.local = [info draggingSource] != nil;
+  return d;
+}
+unsigned DragMods() {
+  NSEvent* e = [NSApp currentEvent];
+  return e ? Mods([e modifierFlags]) : 0;
 }
 
 std::vector<uint16_t> Chars(NSString* s) {
@@ -410,7 +464,7 @@ Win* Create(void* owner, int x, int y, int width, int height, bool popup) {
   WinportView* view = [[WinportView alloc] initWithFrame:NSMakeRect(0, 0, frame.size.width, frame.size.height)];
   view->owner = owner;
   [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  if (!popup) [view registerForDraggedTypes:[NSArray arrayWithObject:NSFilenamesPboardType]];
+  if (!popup) [view registerForDraggedTypes:[NSArray arrayWithObjects:NSFilenamesPboardType, NSStringPboardType, nil]];
   [win setContentView:view];
   [win makeFirstResponder:view];
   [win setDelegate:(id)g_delegate];
@@ -584,6 +638,74 @@ bool PasteboardText(std::u16string* text) {
   }
   [pool release];
   return ok;
+}
+
+int RunDrag(const std::vector<std::string>& paths, const std::u16string* text, int allowed) {
+  WinportWindow* win = g_grab ? g_grab : Ours([NSApp keyWindow]);
+  if (!win || (paths.empty() && !text)) return -1;
+  NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+  NSView* view = [win contentView];
+  NSPasteboard* pb = [NSPasteboard pasteboardWithName:NSDragPboard];
+  NSMutableArray* types = [NSMutableArray array];
+  if (!paths.empty()) [types addObject:NSFilenamesPboardType];
+  if (text) [types addObject:NSStringPboardType];
+  [pb declareTypes:types owner:nil];
+  if (!paths.empty()) {
+    NSMutableArray* names = [NSMutableArray array];
+    for (size_t i = 0; i < paths.size(); i++) {
+      NSString* name = [NSString stringWithUTF8String:paths[i].c_str()];
+      if (name) [names addObject:name];
+    }
+    [pb setPropertyList:names forType:NSFilenamesPboardType];
+  }
+  if (text) {
+    NSString* s = [[[NSString alloc] initWithCharacters:(const unichar*)text->data() length:text->size()] autorelease];
+    [pb setString:s forType:NSStringPboardType];
+  }
+  // A plain square goes with the pointer.
+  NSImage* image = [[[NSImage alloc] initWithSize:NSMakeSize(32, 32)] autorelease];
+  [image lockFocus];
+  [[NSColor colorWithCalibratedWhite:0.3 alpha:0.4] set];
+  NSRectFill(NSMakeRect(0, 0, 32, 32));
+  [image unlockFocus];
+  NSPoint mouse = [NSEvent mouseLocation];
+  NSPoint inWindow = [win convertScreenToBase:mouse];
+  NSPoint inView = [view convertPoint:inWindow fromView:nil];
+  NSEvent* now = [NSApp currentEvent];
+  NSEvent* e = [NSEvent mouseEventWithType:NSLeftMouseDragged
+                                  location:inWindow
+                             modifierFlags:now ? [now modifierFlags] : 0
+                                 timestamp:now ? [now timestamp] : 0
+                              windowNumber:[win windowNumber]
+                                   context:nil
+                               eventNumber:0
+                                clickCount:1
+                                  pressure:1];
+  WinportDragSource* source = [[WinportDragSource alloc] init];
+  source->allowed = NSDragOperationNone;
+  if (allowed & kDragCopy) source->allowed |= NSDragOperationCopy;
+  if (allowed & kDragMove) source->allowed |= NSDragOperationMove | NSDragOperationGeneric;
+  if (allowed & kDragLink) source->allowed |= NSDragOperationLink;
+  source->done = NSDragOperationNone;
+  [view dragImage:image
+               at:NSMakePoint(inView.x - 16, inView.y - 16)
+           offset:NSMakeSize(0, 0)
+            event:e
+       pasteboard:pb
+           source:source
+        slideBack:YES];
+  int kinds = KindsOf(source->done);
+  [source release];
+  // AppKit took the button's release.
+  if (g_buttons & 1) {
+    g_buttons &= ~1u;
+    if (!g_buttons) g_grab = nil;
+    NSPoint at = [NSEvent mouseLocation];
+    OnMouse(win->owner, kUp, 0, (int)floor(at.x * g_units), (int)floor((MainScreen().size.height - at.y) * g_units),
+            0);
+  }
+  [pool release];
+  return (kinds & kDragMove) ? kDragMove : (kinds & kDragCopy) ? kDragCopy : kinds & kDragLink;
 }
 
 long SetPasteboardText(const std::u16string& text) {
@@ -793,8 +915,7 @@ static NSString* PlainString(id s) {
 - (BOOL)acceptsFirstResponder {
   return YES;
 }
-// Files dragged from the Finder go to the window under them that takes
-// files, as WM_DROPFILES.
+// Drags from other programs, and ours, go to the window under them.
 - (BOOL)dropPointOf:(id<NSDraggingInfo>)info x:(int*)x y:(int*)y {
   NSWindow* win = [self window];
   if (!win) return NO;
@@ -803,26 +924,26 @@ static NSString* PlainString(id s) {
   *y = (int)floor((MainScreen().size.height - at.y) * g_units);
   return YES;
 }
+- (NSDragOperation)drag:(id<NSDraggingInfo>)info enter:(BOOL)enter {
+  int x, y;
+  if (![self dropPointOf:info x:&x y:&y]) return NSDragOperationNone;
+  if (enter) g_drag = ReadDrag(info);
+  NSDragOperation allowed = [info draggingSourceOperationMask];
+  return OperationOf(OnDrag(x, y, enter, g_drag, KindsOf(allowed), DragMods()), allowed);
+}
 - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info {
-  return [self draggingUpdated:info];
+  return [self drag:info enter:YES];
 }
 - (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info {
-  int x, y;
-  if (![[[info draggingPasteboard] types] containsObject:NSFilenamesPboardType]) return NSDragOperationNone;
-  if (![self dropPointOf:info x:&x y:&y] || !OnDragFiles(x, y)) return NSDragOperationNone;
-  return NSDragOperationCopy;
+  return [self drag:info enter:NO];
+}
+- (void)draggingExited:(id<NSDraggingInfo>)info {
+  OnDragLeft();
 }
 - (BOOL)performDragOperation:(id<NSDraggingInfo>)info {
   int x, y;
   if (![self dropPointOf:info x:&x y:&y]) return NO;
-  NSArray* names = [[info draggingPasteboard] propertyListForType:NSFilenamesPboardType];
-  if (![names isKindOfClass:[NSArray class]]) return NO;
-  std::vector<std::string> paths;
-  for (NSUInteger i = 0; i < [names count]; i++) {
-    id name = [names objectAtIndex:i];
-    if ([name isKindOfClass:[NSString class]]) paths.push_back([(NSString*)name fileSystemRepresentation]);
-  }
-  return OnDropFiles(x, y, paths) ? YES : NO;
+  return OnDrop(x, y, g_drag, KindsOf([info draggingSourceOperationMask]), DragMods()) ? YES : NO;
 }
 - (void)drawRect:(NSRect)dirty {
   const uint32_t* pixels;
@@ -865,6 +986,15 @@ static NSString* PlainString(id s) {
     CGColorSpaceRelease(rgb);
   }
   EndDraw();
+}
+@end
+
+@implementation WinportDragSource
+- (NSDragOperation)draggingSourceOperationMaskForLocal:(BOOL)local {
+  return allowed;
+}
+- (void)draggedImage:(NSImage*)image endedAt:(NSPoint)at operation:(NSDragOperation)op {
+  done = op;
 }
 @end
 

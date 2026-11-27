@@ -35,6 +35,84 @@ void SetTranslucent(Native* n) {
 
 std::set<Native*> g_natives;
 
+// Drags: the one over our windows, and the data object of ours that
+// AppKit is dragging (RunDrag).
+DesktopOfferPtr g_offer;
+IDataObject* g_dragData = NULL;
+bool g_dragArmed = false;
+
+// UTF-16 to the wide characters of the layer.
+std::wstring Wide(const std::u16string& u) {
+  std::wstring w;
+  for (size_t i = 0; i < u.size(); i++) {
+    unsigned c = u[i];
+    if (c >= 0xD800 && c < 0xDC00 && i + 1 < u.size() && u[i + 1] >= 0xDC00 && u[i + 1] < 0xE000) {
+      c = 0x10000 + ((c - 0xD800) << 10) + (u[i + 1] - 0xDC00);
+      i++;
+    }
+    w += (wchar_t)c;
+  }
+  return w;
+}
+std::u16string Utf16(const std::wstring& w) {
+  std::u16string u;
+  for (wchar_t wc : w) {
+    unsigned c = (unsigned)wc;
+    if (c >= 0x10000) {
+      c -= 0x10000;
+      u += (char16_t)(0xD800 + (c >> 10));
+      u += (char16_t)(0xDC00 + (c & 0x3FF));
+    } else {
+      u += (char16_t)c;
+    }
+  }
+  return u;
+}
+
+DWORD EffectsOf(int kinds) {
+  DWORD e = 0;
+  if (kinds & cocoa::kDragCopy) e |= DROPEFFECT_COPY;
+  if (kinds & cocoa::kDragMove) e |= DROPEFFECT_MOVE;
+  if (kinds & cocoa::kDragLink) e |= DROPEFFECT_LINK;
+  return e;
+}
+int KindOf(DWORD effect) {
+  if (effect & DROPEFFECT_MOVE) return cocoa::kDragMove;
+  if (effect & DROPEFFECT_COPY) return cocoa::kDragCopy;
+  if (effect & DROPEFFECT_LINK) return cocoa::kDragLink;
+  return 0;
+}
+// The keys of a drag as Windows has them: Option copies, as Control
+// does on Windows; Command and Shift move.
+DWORD DragKeys(unsigned mods) {
+  DWORD k = 0;
+  if (mods & cocoa::kOption) k |= MK_CONTROL;
+  if (mods & (cocoa::kShift | cocoa::kCommand)) k |= MK_SHIFT;
+  return k;
+}
+
+// What a drag carries, read from the pasteboard as it came in.
+struct CocoaOffer : DesktopOffer {
+  std::string uris, utf8;
+  bool Fetch(bool wantFiles, std::string* bytes) override {
+    if (wantFiles ? !files : !text) return false;
+    *bytes = wantFiles ? uris : utf8;
+    return true;
+  }
+};
+DesktopOfferPtr MakeOffer(const cocoa::DragData& d) {
+  std::shared_ptr<CocoaOffer> o = std::make_shared<CocoaOffer>();
+  std::vector<std::wstring> paths;
+  for (const std::string& p : d.paths) paths.push_back(Widen(p.c_str()));
+  o->files = !paths.empty();
+  o->uris = UrisFromPaths(paths);
+  o->text = d.hasText;
+  std::wstring w = Wide(d.text);
+  o->utf8 = Narrow(w.c_str(), (int)w.size());
+  if (d.local) o->local = g_dragData;
+  return o;
+}
+
 Native* Valid(void* owner) {
   Native* n = (Native*)owner;
   return g_natives.count(n) ? n : NULL;
@@ -222,6 +300,38 @@ struct CocoaBackend : Backend {
     pasteboardCount = cocoa::SetPasteboardText(std::u16string(text.begin(), text.end()));
   }
 
+  // A drag of ours that leaves our windows: AppKit runs the rest of it,
+  // over other programs' windows and ours alike. First the drag leaves
+  // the program's drop target; AppKit takes it the next time round.
+  int DragOut(IDataObject* data, IDropSource*, DWORD ok, DWORD, POINT pt, DWORD* effect) override {
+    HWND h = WindowFromPoint(pt);
+    if (h && h != GetDesktopWindow()) {
+      g_dragArmed = false;
+      return kDragOurs;
+    }
+    *effect = DROPEFFECT_NONE;
+    if (!g_dragArmed) {
+      g_dragArmed = true;
+      return kDragOther;
+    }
+    g_dragArmed = false;
+    std::vector<std::wstring> paths;
+    std::wstring text;
+    bool hasText = DataText(data, &text);
+    DataFiles(data, &paths);
+    std::vector<std::string> utf8;
+    for (const std::wstring& p : paths) utf8.push_back(Narrow(p.c_str(), (int)p.size()));
+    std::u16string u = Utf16(text);
+    g_dragData = data;
+    int kind = cocoa::RunDrag(utf8, hasText ? &u : NULL,
+                              (ok & DROPEFFECT_COPY ? cocoa::kDragCopy : 0) | (ok & DROPEFFECT_MOVE ? cocoa::kDragMove : 0) |
+                                  (ok & DROPEFFECT_LINK ? cocoa::kDragLink : 0));
+    g_dragData = NULL;
+    if (kind < 0) return kDragOther;
+    *effect = EffectsOf(kind) & ok;
+    return kDragDone;
+  }
+
   void Wait(DWORD timeout) override { cocoa::Wait(timeout == INFINITE ? -1 : (long)timeout); }
   void Wake() override { cocoa::Wake(); }
   void ImeReset(Window* w) override {
@@ -328,12 +438,24 @@ bool OnKey(void* owner, int type, unsigned code, unsigned mods, const uint16_t* 
   return true;
 }
 
-bool OnDragFiles(int x, int y) { return DropTarget(POINT{x, y}) != NULL; }
+int OnDrag(int x, int y, bool enter, const DragData& d, int allowed, unsigned mods) {
+  if (enter || !g_offer) {
+    if (g_offer) DesktopDragLeaveNow(g_offer);
+    g_offer = MakeOffer(d);
+  }
+  return KindOf(DesktopDragOverNow(g_offer, POINT{x, y}, DragKeys(mods) | MK_LBUTTON, EffectsOf(allowed)));
+}
 
-bool OnDropFiles(int x, int y, const std::vector<std::string>& paths) {
-  std::vector<std::wstring> wide;
-  for (const std::string& p : paths) wide.push_back(Widen(p.c_str()));
-  return DropFiles(POINT{x, y}, wide);
+void OnDragLeft() {
+  if (g_offer) DesktopDragLeaveNow(g_offer);
+  g_offer.reset();
+}
+
+int OnDrop(int x, int y, const DragData& d, int allowed, unsigned mods) {
+  if (!g_offer) g_offer = MakeOffer(d);
+  DesktopOfferPtr o = g_offer;
+  g_offer.reset();
+  return KindOf(DesktopDropNow(o, POINT{x, y}, DragKeys(mods), EffectsOf(allowed)));
 }
 
 // The window an input method's text is for: the key window's, or the
