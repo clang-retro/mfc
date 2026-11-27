@@ -358,12 +358,11 @@ WinInet checks it, and `INTERNET_OPTION_SECURITY_FLAGS`
 (`SECURITY_FLAG_IGNORE_UNKNOWN_CA` and the others) lets a problem with
 it go. `PlgBlt` draws through a parallelogram (and a mask) in software.
 
-There is no WinHelp viewer: `WinHelp` (and so MFC's Help commands)
-opens a document next to the program's `.hlp` file instead, of the same
-name as `.html`, `.htm`, `.pdf` or `.txt` (or a folder of that name with
-an `index.html`), with the desktop's opener, or with the command that
-`WINPORT_HELP` names. A help context is the HTML page's anchor
-(`app.html#131072`). The internet security manager has no zone settings:
+`WinHelp` (and so MFC's Help commands) shows `.hlp` files in the
+layer's own WinHelp viewer, with the Help Topics dialog box, popups,
+pictures and macros. Without a `.hlp` file, it opens a document of the
+same name as `.html`, `.pdf` or `.txt`. See
+[docs/winhelp.md](docs/winhelp.md). The internet security manager has no zone settings:
 local files and `res:` are the local machine, a share or a host without
 a dot the intranet, the rest the internet, and `SetZoneMapping` adds
 mappings for the process.
@@ -489,7 +488,8 @@ when there is no display. For a Linux or macOS target it builds `core`,
 `docobtest`, `linktest`, `bindtest`, `richtest`, `richsrvtest`,
 `autotest`, `srvtest`, `atlwintest`, `atltest`, `conntest`, `ctltest`,
 `wltest`, `dragtest`, `daotest`, `dvtest`, `htmltest`, `atlctltest`,
-`atlutiltest`, `cdlgtest`, `vistatest`, `iotest`, `audiotest` and `wtltest` against
+`atlutiltest`, `cdlgtest`, `vistatest`, `iotest`, `audiotest`, `wtltest`,
+`sstest` and `hlptest` against
 the portable layer, and `exttest`, `core`, `sditest`,
 `dlgtest` and `dlltest` again with the shared libraries
 (`SHARED_TESTS`), and runs them directly; `NATIVE_TESTS` names others to
@@ -839,6 +839,10 @@ try.
   CIndirectDialogImpl's in-memory template; a modeless property sheet;
   a CScrollWindowImpl view; and WTL's GDI and USER wrappers, CResource
   and CFindFile.
+* `hlptest`: the WinHelp viewer, with three help files in
+  `tests/winhelp`: the text, tables, pictures, hotspots, popups,
+  macros, keywords, `[MAP]` numbers and the Help Topics dialog box.
+  See [docs/winhelp.md](docs/winhelp.md).
 * `ctltest`: writing a control with COleControl, the test being both
   its server and its container: stock and custom properties, a method,
   stock and custom events, verbs from its message map (ON_OLEVERB,

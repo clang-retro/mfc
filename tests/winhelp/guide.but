@@ -1,0 +1,41 @@
+\title The Widget Guide
+
+\copyright Copyright 2026 the clang-retro MFC authors. AGPL-3.0-only.
+
+\versionid guide.but, the help file of hlptest
+
+This is the help file that the tests of the WinHelp viewer read. See
+\k{start} to begin, or \k{reference} for the details.
+
+\C{start} Getting started
+
+The \i{widget} is a small window. To make one, click \e{New Widget}
+on the \i{File menu}. See \k{making} for the steps.
+
+\H{making} Making a widget
+
+Do these steps:
+
+\n Click \e{File}.
+
+\n Click \e{New Widget}.
+
+\n Type a name, and then click \e{OK}.
+
+The widget then shows its \i{frame}, as \k{reference} tells.
+
+\C{reference} Reference
+
+\H{api} The widget functions
+
+\c CreateWidget(name, flags);
+\c DestroyWidget(widget);
+
+\b \cw{CreateWidget} makes a widget.
+
+\b \cw{DestroyWidget} removes it.
+
+\IM{widget} widget
+\IM{widget} widgets, making
+\IM{File menu} File menu
+\IM{frame} frame
