@@ -33,14 +33,24 @@ this command.
 
 | System | OpenGL under the `wgl` functions |
 | --- | --- |
-| Linux | The generic implementation (`port/softgl`). |
+| Linux | The system's driver through EGL when its renderer is hardware (`port/src/opengl_egl.cpp`), else the generic implementation (`port/softgl`). |
 | Classic Mac OS, 68k | The generic implementation (`port/softgl`). |
 | Classic Mac OS, PowerPC | Apple OpenGL through AGL (`port/src/opengl_agl.cpp`). |
 | Mac OS X and macOS | The OpenGL framework through CGL (`port/src/opengl.cpp`). |
 
-The Apple renderers have the function of the installable client driver
-(ICD) of Windows. The generic implementation is used on all other
-portable targets.
+The Apple renderers and the Linux drivers have the function of the
+installable client driver (ICD) of Windows. The generic implementation
+is used on all other portable targets, and on Linux when there is no
+`libEGL.so.1` or its renderer is software. `WINPORT_OPENGL=generic`
+always uses the generic implementation; `WINPORT_OPENGL=system` uses
+the driver even when its renderer is software. Compile with
+`-DWINPORT_NO_EGL` to leave the drivers out.
+
+On Linux the program's `gl` functions are still those of softgl: they
+call through the thread's dispatch table, and a context of the driver
+makes that table point at the driver's functions. The makefile takes
+the order of the table from `port/softgl/src/dispatch.h`
+(`gl_names.inc`).
 
 To remove the generic implementation, compile with
 `-DWINPORT_NO_SOFTGL`. Then `ChoosePixelFormat` fails with
@@ -70,7 +80,10 @@ color buffer to the context, and copies the buffer to the window after
 
 - `tests/gltest.cpp` uses the `wgl` functions. With the generic
   implementation, it also draws a triangle and examines its pixels.
-  `make check` runs it on Linux. `make check TARGET=m68k-apple-macos`
+  `make check` runs it on Linux, then once more with
+  `WINPORT_OPENGL=system` over the system's driver where there is
+  `libEGL.so.1`: the triangle, a window that grows, and the program's
+  pixel states kept across the read of the picture. `make check TARGET=m68k-apple-macos`
   runs it in the 68000 and 68020 simulators of mac-sdk.
 - `tools/build-sdk-samples.py` builds the OpenGL screen savers of the
   Win32 SDK for Linux and for the 68k Mac. See

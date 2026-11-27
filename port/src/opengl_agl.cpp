@@ -116,6 +116,15 @@ void* FindProc(const char* name) {
   return addr;
 }
 
+// Draws into the buffer itself (see opengl_backend.h).
+void Fetch(Native) {}
+
+// The pixel formats stay those of the generic implementation (see
+// opengl_backend.h).
+bool Accelerated() { return false; }
+int DepthBits() { return 32; }
+int StencilBits() { return 8; }
+
 }  // namespace gl
 }  // namespace winport
 

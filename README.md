@@ -382,10 +382,18 @@ all. A window maximizes on the monitor it is on. Wayland does not say
 where windows are, so there the outputs sit side by side as the
 compositor arranges them, with the first at the origin.
 
-OpenGL programs draw through
-the OpenGL framework on macOS, and elsewhere through the generic
-implementation, a software renderer for OpenGL 1.1 in `libwinport.a`
-(see [docs/software-opengl.md](docs/software-opengl.md)).
+OpenGL programs draw through the OpenGL framework on macOS. On Linux
+they draw through the system's OpenGL driver when its renderer is
+hardware: `libEGL.so.1` is loaded when OpenGL is first used, each context
+draws into an EGL pbuffer, and the picture goes to the window through GDI
+as on the other systems, so it works the same on X11, Wayland and with no
+display at all. The pixel formats are then not `PFD_GENERIC_FORMAT`, and
+`glGetString` names the driver's renderer. Otherwise, and on the other
+systems, they draw through the generic implementation, softgl, a software
+renderer for OpenGL 1.5 in `libwinport.a` (see
+[docs/software-opengl.md](docs/software-opengl.md)).
+`WINPORT_OPENGL=generic` always uses softgl, and `WINPORT_OPENGL=system`
+uses the driver even when its renderer is software (llvmpipe).
 
 Layered windows show with their transparency: `SetLayeredWindowAttributes`
 with a color key and a constant alpha, and `UpdateLayeredWindow` (and

@@ -26,6 +26,12 @@
 #if defined(WINPORT_CGL) || defined(WINPORT_AGL) || defined(WINPORT_SOFTGL)
 #define WINPORT_GL 1
 #endif
+// On Linux, the system's OpenGL through EGL comes before the generic
+// implementation when its renderer is hardware (opengl_egl.cpp). Define
+// WINPORT_NO_EGL to leave it out.
+#if defined(WINPORT_SOFTGL) && defined(__linux__) && !defined(WINPORT_NO_EGL)
+#define WINPORT_EGL 1
+#endif
 
 namespace winport {
 namespace gl {
@@ -60,6 +66,37 @@ void RealFlush(bool finish);
 // Gives the address of a function of the system's OpenGL by its name, or
 // NULL.
 void* FindProc(const char* name);
+
+// Makes the buffer of ctx, the current context, hold what it drew. A
+// backend that draws into the buffer itself does nothing.
+void Fetch(Native ctx);
+
+// Whether the renderer is the system's own (an ICD), not the generic
+// implementation: the pixel formats then have no PFD_GENERIC_FORMAT.
+bool Accelerated();
+
+// The bits of the depth and stencil buffers of a context.
+int DepthBits();
+int StencilBits();
+
+#ifdef WINPORT_EGL
+// The system's OpenGL through EGL (opengl_egl.cpp), with the functions
+// above. Use is whether contexts are made there; Hardware is whether its
+// renderer is hardware.
+namespace egl {
+bool Use();
+bool Hardware();
+int DepthBits();
+int StencilBits();
+void* Make(void* share);
+void Destroy(void* ctx);
+bool SetCurrent(void* ctx);
+bool SetBuffer(void* ctx, int w, int h, void* pixels);
+void Flush(bool finish);
+void Fetch(void* ctx);
+void* FindProc(const char* name);
+}  // namespace egl
+#endif
 
 }  // namespace gl
 }  // namespace winport

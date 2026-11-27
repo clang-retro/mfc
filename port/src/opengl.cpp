@@ -167,6 +167,15 @@ void RealFlush(bool finish) {
 // functions itself (see opengl_backend.h).
 void* FindProc(const char* name) { return dlsym(RTLD_DEFAULT, name); }
 
+// Draws into the buffer itself (see opengl_backend.h).
+void Fetch(Native) {}
+
+// The pixel formats stay those of the generic implementation (see
+// opengl_backend.h).
+bool Accelerated() { return false; }
+int DepthBits() { return 32; }
+int StencilBits() { return 8; }
+
 }  // namespace gl
 }  // namespace winport
 
@@ -185,7 +194,10 @@ void Describe(int i, PIXELFORMATDESCRIPTOR* p) {
   memset(p, 0, sizeof *p);
   p->nSize = sizeof *p;
   p->nVersion = 1;
-  p->dwFlags = PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW | PFD_GENERIC_FORMAT | PFD_SUPPORT_GDI;
+  p->dwFlags = PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW | PFD_SUPPORT_GDI;
+  // The system's driver (an ICD) has formats of its own; the generic
+  // implementation's are PFD_GENERIC_FORMAT.
+  if (!winport::gl::Accelerated()) p->dwFlags |= PFD_GENERIC_FORMAT;
   if (i == 1)
     p->dwFlags = (p->dwFlags & ~(DWORD)PFD_SUPPORT_GDI) | PFD_DOUBLEBUFFER;
   else
@@ -200,8 +212,8 @@ void Describe(int i, PIXELFORMATDESCRIPTOR* p) {
   p->cBlueShift = 0;
   p->cAlphaBits = 8;
   p->cAlphaShift = 24;
-  p->cDepthBits = 32;
-  p->cStencilBits = 8;
+  p->cDepthBits = (BYTE)winport::gl::DepthBits();
+  p->cStencilBits = (BYTE)winport::gl::StencilBits();
   p->iLayerType = PFD_MAIN_PLANE;
 }
 
@@ -290,6 +302,7 @@ void Resize(GLContext* c) {
 // DIB wants the bytes blue, green, red, alpha.
 void Present(GLContext* c, HDC dc) {
   if (c->pixels.empty()) return;
+  if (c == tCurrent) winport::gl::Fetch(c->native);
   // A color DC: the pixels go straight into its surface, in one pass. The
   // surface holds 0x00RRGGBB values in the machine's byte order, as CGL
   // and AGL do.
