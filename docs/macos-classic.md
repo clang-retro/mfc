@@ -78,7 +78,10 @@ first space, and the folder names in a path often have spaces.
 
 The layer reads the TrueType fonts in the Fonts folder of the System
 Folder (System 7.1 and later), from the `sfnt` resources of the font
-suitcases. Thus `GetGlyphOutline` and `wglUseFontOutlines` work. Before
+suitcases. Thus `GetGlyphOutline` and `wglUseFontOutlines` work. The
+TrueType fonts of System 7 have only a Mac Roman character map (`cmap`)
+and no `OS/2` table. The layer changes each Unicode character to its Mac
+Roman code for these fonts. Before
 System 7.1, and for bitmap-only fonts, the layer uses its built-in
 bitmap font.
 

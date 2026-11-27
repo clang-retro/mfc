@@ -500,6 +500,7 @@ struct FontSource {
   int strikePos = 0, strikeSize = 0;
   int weight = FW_NORMAL;
   bool italic = false, fixedPitch = false;
+  bool macRoman = false;  // the cmap has Mac Roman codes, not Unicode
 };
 
 namespace {
@@ -520,6 +521,55 @@ const BYTE* Table(const FontSource* s, const char* tag, UINT32* len) {
     return d + to;
   }
   return NULL;
+}
+
+// Tells if the cmap table of a font has no Unicode subtable (platform 0,
+// or platform 3 encoding 1 or 10). The TrueType fonts of System 7 have
+// only a Mac Roman subtable.
+bool OnlyMacRoman(const FontSource* s) {
+  UINT32 len = 0;
+  const BYTE* cmap = Table(s, "cmap", &len);
+  if (!cmap || len < 4) return false;
+  int n = U16(cmap + 2);
+  for (int i = 0; i < n && 4 + 8 * (UINT32)(i + 1) <= len; i++) {
+    int platform = U16(cmap + 4 + 8 * i), encoding = U16(cmap + 6 + 8 * i);
+    if (platform == 0 || (platform == 3 && (encoding == 1 || encoding == 10))) return false;
+  }
+  return true;
+}
+
+// Gives the Mac Roman code of a Unicode character, or 0 if Mac Roman has
+// no such character.
+int ToMacRomanCode(UINT32 ch) {
+  static const UINT16 kHigh[128] = {
+      0x00C4, 0x00C5, 0x00C7, 0x00C9, 0x00D1, 0x00D6, 0x00DC, 0x00E1, 0x00E0, 0x00E2, 0x00E4, 0x00E3, 0x00E5,
+      0x00E7, 0x00E9, 0x00E8, 0x00EA, 0x00EB, 0x00ED, 0x00EC, 0x00EE, 0x00EF, 0x00F1, 0x00F3, 0x00F2, 0x00F4,
+      0x00F6, 0x00F5, 0x00FA, 0x00F9, 0x00FB, 0x00FC, 0x2020, 0x00B0, 0x00A2, 0x00A3, 0x00A7, 0x2022, 0x00B6,
+      0x00DF, 0x00AE, 0x00A9, 0x2122, 0x00B4, 0x00A8, 0x2260, 0x00C6, 0x00D8, 0x221E, 0x00B1, 0x2264, 0x2265,
+      0x00A5, 0x00B5, 0x2202, 0x2211, 0x220F, 0x03C0, 0x222B, 0x00AA, 0x00BA, 0x03A9, 0x00E6, 0x00F8, 0x00BF,
+      0x00A1, 0x00AC, 0x221A, 0x0192, 0x2248, 0x2206, 0x00AB, 0x00BB, 0x2026, 0x00A0, 0x00C0, 0x00C3, 0x00D5,
+      0x0152, 0x0153, 0x2013, 0x2014, 0x201C, 0x201D, 0x2018, 0x2019, 0x00F7, 0x25CA, 0x00FF, 0x0178, 0x2044,
+      0x20AC, 0x2039, 0x203A, 0xFB01, 0xFB02, 0x2021, 0x00B7, 0x201A, 0x201E, 0x2030, 0x00C2, 0x00CA, 0x00C1,
+      0x00CB, 0x00C8, 0x00CD, 0x00CE, 0x00CF, 0x00CC, 0x00D3, 0x00D4, 0xF8FF, 0x00D2, 0x00DA, 0x00DB, 0x00D9,
+      0x0131, 0x02C6, 0x02DC, 0x00AF, 0x02D8, 0x02D9, 0x02DA, 0x00B8, 0x02DD, 0x02DB, 0x02C7,
+  };
+  if (ch < 0x80) return (int)ch;
+  for (int i = 0; i < 128; i++)
+    if (kHigh[i] == ch) return 0x80 + i;
+  return 0;
+}
+
+// Gives the glyph of a Unicode character in a font, or 0. For a font
+// with only a Mac Roman cmap, the character is first changed to its Mac
+// Roman code. A code of a symbol font (U+F020 to U+F0FF) is used as a
+// byte.
+int GlyphIndex(const FontSource* s, UINT32 ch) {
+  if (!s) return 0;
+  if (s->macRoman) {
+    int code = ch >= 0xF020 && ch <= 0xF0FF ? (int)(ch - 0xF000) : ToMacRomanCode(ch);
+    return code ? stbtt_FindGlyphIndex(&s->info, code) : 0;
+  }
+  return stbtt_FindGlyphIndex(&s->info, (int)ch);
 }
 
 FontSource* LoadSource(const FontFile& ff) {
@@ -556,6 +606,7 @@ FontSource* LoadSource(const FontFile& ff) {
         s->xMax = S16(head + 40);
       }
     if (s->unitsPerEm <= 0) s->unitsPerEm = 2048;
+    s->macRoman = OnlyMacRoman(s);
     stbtt_GetFontVMetrics(&s->info, &s->hheaAscent, &s->hheaDescent, &s->lineGap);
     s->winAscent = s->hheaAscent;
     s->winDescent = -s->hheaDescent;
@@ -633,7 +684,7 @@ FontSource* FallbackFor(UINT32 ch) {
     for (const wchar_t* const* f = kSymbolFallbacks; *f && !out; f++)
       if (const FontFile* ff = PickStyle(Index().files, *f, FW_NORMAL, false))
         if (FontSource* s = LoadSource(*ff))
-          if (int g = stbtt_FindGlyphIndex(&s->info, (int)ch))
+          if (int g = GlyphIndex(s, ch))
             if (!stbtt_IsGlyphEmpty(&s->info, g)) out = s;
   }
   std::lock_guard<std::mutex> g(*lock);
@@ -655,14 +706,14 @@ bool RealFont::Source(UINT32 ch, FontSource** s, int* glyph, float* sx, float* s
     if (b < 0x100) {
       if (!symbolMap) {
         // The font itself: its characters sit at U+F020 to U+F0FF.
-        *glyph = stbtt_FindGlyphIndex(&src->info, (int)(0xF000 + b));
-        if (!*glyph) *glyph = stbtt_FindGlyphIndex(&src->info, (int)b);
+        *glyph = GlyphIndex(src, 0xF000 + b);
+        if (!*glyph) *glyph = GlyphIndex(src, b);
         return true;
       }
       if (symbolMap[b]) ch = symbolMap[b];
     }
   }
-  if (src) *glyph = stbtt_FindGlyphIndex(&src->info, (int)ch);
+  if (src) *glyph = GlyphIndex(src, ch);
   if (symbolMap && (!src || !*glyph)) {
     if (FontSource* fb = FallbackFor(ch)) {
       // The same em size as the font asked for.
@@ -670,7 +721,7 @@ bool RealFont::Source(UINT32 ch, FontSource** s, int* glyph, float* sx, float* s
       *s = fb;
       *sy = (float)(em / fb->unitsPerEm);
       *sx = *sy * (src ? scaleX / scaleY : 1.0f);
-      *glyph = stbtt_FindGlyphIndex(&fb->info, (int)ch);
+      *glyph = GlyphIndex(fb, ch);
       return true;
     }
   }
@@ -890,7 +941,7 @@ RealFont* RealizeFont(const LOGFONTW& in) {
     int avg = src->avgWidth;
     if (avg <= 0) {
       int adv, lsb;
-      stbtt_GetCodepointHMetrics(&src->info, 'x', &adv, &lsb);
+      stbtt_GetGlyphHMetrics(&src->info, GlyphIndex(src, 'x'), &adv, &lsb);
       avg = adv;
     }
     f->avgWidth = std::max(1, Round(avg * f->scaleX));
