@@ -10,6 +10,7 @@
 
 #ifdef _AFX_WIN16
 #include "afximpl.h"
+#include <olenls.h>
 
 // ---------------------------------------------------------------------
 // GDI objects
@@ -1316,5 +1317,38 @@ DWORD MsgWaitForMultipleObjects(DWORD nCount, const HANDLE FAR *pHandles, BOOL f
                                 DWORD dwMilliseconds, DWORD dwWakeMask) {
   return _AfxWait(nCount, pHandles, fWaitAll, dwMilliseconds, dwWakeMask);
 }
+
+// ---------------------------------------------------------------------
+// Windows and locales
+
+/// Gives an ancestor of a window. GA_PARENT gives the parent of a child
+/// window (not the owner). GA_ROOT goes up the parents to the window that
+/// is not a child. GA_ROOTOWNER then goes up the owners. Gives NULL for
+/// NULL or for a flag that is not known.
+HWND GetAncestor(HWND hWnd, UINT gaFlags) {
+  if (hWnd == NULL) return NULL;
+  switch (gaFlags) {
+    case GA_PARENT:
+      return (::GetWindowLong(hWnd, GWL_STYLE) & WS_CHILD) ? ::GetParent(hWnd) : NULL;
+    case GA_ROOT:
+    case GA_ROOTOWNER: {
+      while (::GetWindowLong(hWnd, GWL_STYLE) & WS_CHILD) {
+        HWND hParent = ::GetParent(hWnd);
+        if (hParent == NULL) break;
+        hWnd = hParent;
+      }
+      if (gaFlags == GA_ROOT) return hWnd;
+      // The 16-bit GetParent of a window that is not a child is its owner.
+      for (HWND hOwner = ::GetParent(hWnd); hOwner != NULL; hOwner = ::GetParent(hWnd))
+        hWnd = hOwner;
+      return hWnd;
+    }
+  }
+  return NULL;
+}
+
+/// Gives the default locale of the user, from OLE 2's national language
+/// support. 16-bit Windows has no thread locale.
+LCID GetThreadLocale() { return ::GetUserDefaultLCID(); }
 
 #endif  // _AFX_WIN16

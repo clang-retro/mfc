@@ -4,9 +4,7 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
-#ifndef _AFX_WIN16
 #include <afxocc.h>
-#endif
 
 const _AFX_OCC_HOOKS* _afxOccHooks = NULL;
 
@@ -349,15 +347,11 @@ LRESULT CWnd::WindowProc(UINT message, WPARAM wParam, LPARAM lParam) {
   return lResult;
 }
 
-/// Gives an ambient property to an OLE control. Win16 has no control
-/// container, so on Win16 the function always returns FALSE.
+/// Gives an ambient property to an OLE control from the control container
+/// of the window. Gives FALSE when the window has no container or the
+/// container does not know the property.
 BOOL CWnd::OnAmbientProperty(COleControlSite* pSite, DISPID dispid, VARIANT* pvar) {
-#ifdef _AFX_WIN16
-  (void)pSite; (void)dispid; (void)pvar;
-  return FALSE;
-#else
   return m_pCtrlCont != NULL && m_pCtrlCont->GetAmbientProp(pSite, dispid, pvar);
-#endif
 }
 
 LRESULT CWnd::DefWindowProc(UINT nMsg, WPARAM wParam, LPARAM lParam) {

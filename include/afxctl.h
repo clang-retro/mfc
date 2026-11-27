@@ -16,6 +16,16 @@
 #include <olectl.h>
 #include <ocidl.h>
 
+// The continue function of IViewObject::Draw. 16-bit OLE 2 gives it a
+// DWORD argument and the CALLBACK calling convention.
+#ifdef _AFX_WIN16
+typedef BOOL(CALLBACK* _AFX_VIEWCONTINUEPROC)(DWORD);
+typedef DWORD _AFX_VIEWCONTINUEARG;
+#else
+typedef BOOL(STDMETHODCALLTYPE* _AFX_VIEWCONTINUEPROC)(ULONG_PTR);
+typedef ULONG_PTR _AFX_VIEWCONTINUEARG;
+#endif
+
 class COleControl;
 class CPropExchange;
 class CFontHolder;
@@ -742,8 +752,7 @@ public:
   BEGIN_INTERFACE_PART(ViewObject, IViewObjectEx)
     STDMETHOD(Draw)(DWORD dwDrawAspect, LONG lindex, void* pvAspect, DVTARGETDEVICE* ptd,
                     HDC hdcTargetDev, HDC hdcDraw, LPCRECTL lprcBounds, LPCRECTL lprcWBounds,
-                    BOOL(STDMETHODCALLTYPE* pfnContinue)(ULONG_PTR dwContinue),
-                    ULONG_PTR dwContinue);
+                    _AFX_VIEWCONTINUEPROC pfnContinue, _AFX_VIEWCONTINUEARG dwContinue);
     STDMETHOD(GetColorSet)(DWORD dwDrawAspect, LONG lindex, void* pvAspect, DVTARGETDEVICE* ptd,
                            HDC hicTargetDev, LOGPALETTE** ppColorSet);
     STDMETHOD(Freeze)(DWORD dwDrawAspect, LONG lindex, void* pvAspect, DWORD* pdwFreeze);

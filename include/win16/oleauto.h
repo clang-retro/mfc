@@ -13,6 +13,20 @@
 #ifndef VT_TYPEMASK
 #define VT_TYPEMASK 0x0FFF
 #endif
+// The type description codes of type libraries, as in Win32. 16-bit
+// TYPELIB uses them in TYPEDESC; dispatch.h does not name them.
+#ifndef VT_PTR
+#define VT_PTR 26
+#endif
+#ifndef VT_SAFEARRAY
+#define VT_SAFEARRAY 27
+#endif
+#ifndef VT_CARRAY
+#define VT_CARRAY 28
+#endif
+#ifndef VT_USERDEFINED
+#define VT_USERDEFINED 29
+#endif
 
 /// Gives the length of an ANSI BSTR in bytes.
 inline UINT SysStringByteLen(BSTR bstr) { return ::SysStringLen(bstr); }

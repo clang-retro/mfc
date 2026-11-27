@@ -18,7 +18,27 @@ void AFXAPI _AfxRegisterInPlaceDockSite(CFrameWnd* pFrame, BOOL bAdd);
 int AFXAPI _AfxMergeMenus(HMENU hMenuShared, HMENU hMenuSource, LONG* lpMenuWidths,
                           int nFirstGroup, int nLastGroup = -1, BOOL bStop = FALSE);
 void AFXAPI _AfxUnmergeMenus(HMENU hMenuShared, HMENU hMenuSource);
+
+/// Gives nNumber * nNumerator / nDenominator, rounded, in 32 bits, or -1
+/// when nDenominator is 0. The 16-bit MulDiv takes ints, which do not
+/// hold a size in HIMETRIC units.
+inline long _AfxMulDiv(long nNumber, long nNumerator, long nDenominator) {
 #ifdef _AFX_WIN16
+  if (nDenominator == 0) return -1;
+  long long n = (long long)nNumber * nNumerator;
+  long long h = nDenominator / 2;
+  if ((n < 0) != (nDenominator < 0)) h = -h;
+  return (long)((n + h) / nDenominator);
+#else
+  return ::MulDiv(nNumber, nNumerator, nDenominator);
+#endif
+}
+
+#ifdef _AFX_WIN16
+// Loads an object from a stream (OleLoadFromStream). The stock font and
+// picture come from the library: 16-bit OLE 2 has no class for them
+// (win16olepro.cpp).
+HRESULT AFXAPI _AfxW16LoadFromStream(LPSTREAM pStm, REFIID iid, LPVOID FAR* ppv);
 // Registers the toolbar and status bar classes of 16-bit Windows (win16bar.cpp).
 BOOL AFXAPI _AfxW16RegisterBarClasses();
 // Registers the progress bar, trackbar, up-down and tab control classes of

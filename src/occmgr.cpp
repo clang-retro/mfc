@@ -6,31 +6,75 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "afximpl.h"
 #include <afxocc.h>
+#ifdef _AFX_WIN16
+#include <afxext.h>  // CFormView
+#endif
 
 // ---------------------------------------------------------------------
 // Dialog templates
 
 namespace {
 
-// Skips a menu, class or title field: 0, an ordinal (0xFFFF and a word)
-// or a string.
-const WORD* SkipField(const WORD* p) {
+#ifdef _AFX_WIN16
+// 16-bit Windows: the strings of a template are ANSI bytes, an ordinal
+// is 0xFF and a word, the predefined class of an item is one byte of
+// 0x80 or more, the item count is a byte, and nothing is aligned.
+typedef const BYTE* FieldPtr;
+
+/// Skips a menu, class or title field: 0, an ordinal (0xFF and a word)
+/// or a string.
+FieldPtr SkipField(FieldPtr p) {
+  if (*p == 0xFF) return p + 3;
+  while (*p != 0) p++;
+  return p + 1;
+}
+
+/// Skips the class field of an item: a predefined class byte or a string.
+FieldPtr SkipClass(FieldPtr p) { return (*p & 0x80) ? p + 1 : SkipField(p); }
+
+/// Tells if a field is an ordinal.
+BOOL IsOrdinal(FieldPtr p) { return *p == 0xFF; }
+
+/// Gives the text of a string field.
+CString FieldText(FieldPtr p) { return CString((LPCSTR)p); }
+
+/// Gives the position of the next item. The 16-bit template has no
+/// alignment.
+const BYTE* AlignItem(const BYTE* p, const BYTE*) { return p; }
+#else
+typedef const WORD* FieldPtr;
+
+/// Skips a menu, class or title field: 0, an ordinal (0xFFFF and a word)
+/// or a string.
+FieldPtr SkipField(FieldPtr p) {
   if (*p == 0xFFFF) return p + 2;
   while (*p != 0) p++;
   return p + 1;
 }
 
-const BYTE* AlignDword(const BYTE* p, const BYTE* pBase) {
+/// Skips the class field of an item.
+FieldPtr SkipClass(FieldPtr p) { return SkipField(p); }
+
+/// Tells if a field is an ordinal.
+BOOL IsOrdinal(FieldPtr p) { return *p == 0xFFFF; }
+
+/// Gives the text of a string field.
+CString FieldText(FieldPtr p) { return CString(_AfxTemplateString(p)); }
+
+/// Gives the position of the next item: the next DWORD boundary.
+const BYTE* AlignItem(const BYTE* p, const BYTE* pBase) {
   return pBase + (((p - pBase) + 3) & ~3);
 }
 
+/// Tells if a template is a DLGTEMPLATEEX.
 BOOL IsDialogEx(const DLGTEMPLATE* pTemplate) { return ((const WORD*)pTemplate)[1] == 0xFFFF; }
+#endif
 
 struct ItemPos {
   const BYTE* pStart;
   const BYTE* pEnd;
-  const WORD* pClass;
-  const WORD* pTitle;
+  FieldPtr pClass;
+  FieldPtr pTitle;
   DWORD dwStyle;
   DWORD dwExStyle;
   short x, y, cx, cy;
@@ -40,10 +84,18 @@ struct ItemPos {
 // Walks a template: the end of its header and each item.
 class TemplateWalker {
 public:
+  /// Reads the header of a template and finds its first item.
   explicit TemplateWalker(const DLGTEMPLATE* pTemplate) : m_pBase((const BYTE*)pTemplate) {
-    m_bEx = IsDialogEx(pTemplate);
     const BYTE* p = m_pBase;
     DWORD dwStyle;
+#ifdef _AFX_WIN16
+    m_bEx = FALSE;
+    dwStyle = *(const DWORD*)p;
+    m_nItems = p[4];
+    m_nCountOffset = 4;
+    p += 13;
+#else
+    m_bEx = IsDialogEx(pTemplate);
     if (m_bEx) {
       dwStyle = *(const DWORD*)(p + 12);
       m_nItems = *(const WORD*)(p + 16);
@@ -55,21 +107,33 @@ public:
       m_nCountOffset = 8;
       p += 18;
     }
-    const WORD* pw = SkipField(SkipField(SkipField((const WORD*)p)));  // menu, class, title
+#endif
+    FieldPtr pf = SkipField(SkipField(SkipField((FieldPtr)p)));  // menu, class, title
     if (dwStyle & DS_SETFONT) {
-      pw++;  // point size
-      if (m_bEx) pw += 2;  // weight, italic and charset
-      pw = SkipField(pw);
+      pf = (FieldPtr)((const BYTE*)pf + 2);  // point size
+      if (m_bEx) pf = (FieldPtr)((const BYTE*)pf + 4);  // weight, italic and charset
+      pf = SkipField(pf);
     }
-    m_pHeaderEnd = (const BYTE*)pw;
+    m_pHeaderEnd = (const BYTE*)pf;
     m_pNext = m_pHeaderEnd;
     m_nDone = 0;
   }
 
+  /// Reads the next item. Gives FALSE after the last one.
   BOOL Next(ItemPos* pItem) {
     if (m_nDone >= m_nItems) return FALSE;
-    const BYTE* p = AlignDword(m_pNext, m_pBase);
+    const BYTE* p = AlignItem(m_pNext, m_pBase);
     pItem->pStart = p;
+#ifdef _AFX_WIN16
+    pItem->x = *(const short*)p;
+    pItem->y = *(const short*)(p + 2);
+    pItem->cx = *(const short*)(p + 4);
+    pItem->cy = *(const short*)(p + 6);
+    pItem->nID = *(const WORD*)(p + 8);
+    pItem->dwStyle = *(const DWORD*)(p + 10);
+    pItem->dwExStyle = 0;
+    p += 14;
+#else
     if (m_bEx) {
       pItem->dwExStyle = *(const DWORD*)(p + 4);
       pItem->dwStyle = *(const DWORD*)(p + 8);
@@ -89,11 +153,16 @@ public:
       pItem->nID = *(const WORD*)(p + 16);
       p += 18;
     }
-    pItem->pClass = (const WORD*)p;
-    pItem->pTitle = SkipField(pItem->pClass);
-    const WORD* pw = SkipField(pItem->pTitle);
-    WORD cbExtra = *pw++;
-    pItem->pEnd = (const BYTE*)pw + cbExtra;
+#endif
+    pItem->pClass = (FieldPtr)p;
+    pItem->pTitle = SkipClass(pItem->pClass);
+    FieldPtr pf = SkipField(pItem->pTitle);
+#ifdef _AFX_WIN16
+    BYTE cbExtra = *pf++;
+#else
+    WORD cbExtra = *pf++;
+#endif
+    pItem->pEnd = (const BYTE*)pf + cbExtra;
     m_pNext = pItem->pEnd;
     m_nDone++;
     return TRUE;
@@ -108,11 +177,17 @@ public:
   int m_nCountOffset;
 };
 
-// An OLE control's class is its CLSID in braces.
+/// Gives the CLSID of an item that is an OLE control. The class of an OLE
+/// control is its CLSID in braces.
 BOOL ItemClsid(const ItemPos& item, CLSID* pClsid) {
+#ifdef _AFX_WIN16
+  if (*item.pClass != '{') return FALSE;
+  return SUCCEEDED(::CLSIDFromString((LPOLESTR)item.pClass, pClsid));
+#else
   if (*item.pClass == 0xFFFF || *item.pClass != L'{') return FALSE;
   CStringW strClass = _AfxTemplateString(item.pClass);
   return SUCCEEDED(::CLSIDFromString((LPOLESTR)(LPCWSTR)strClass, pClsid));
+#endif
 }
 
 }  // namespace
@@ -179,11 +254,11 @@ DLGTEMPLATE* PASCAL COccManager::SplitDialogTemplate(const DLGTEMPLATE* pTemplat
       info.dwStyle = item.dwStyle;
       info.dwExStyle = item.dwExStyle;
       info.rect.SetRect(item.x, item.y, item.x + item.cx, item.y + item.cy);
-      if (*item.pTitle != 0xFFFF) info.strText = CString(_AfxTemplateString(item.pTitle));
+      if (!IsOrdinal(item.pTitle)) info.strText = FieldText(item.pTitle);
       pInfo->m_pnIndex[pInfo->m_cItems] = nIndex;
       pInfo->m_cItems++;
     } else {
-      pOut = pNew + (((pOut - pNew) + 3) & ~3);
+      pOut = (BYTE*)AlignItem(pOut, pNew);
       size_t cb = (size_t)(item.pEnd - item.pStart);
       memcpy(pOut, item.pStart, cb);
       pOut += cb;
@@ -191,7 +266,11 @@ DLGTEMPLATE* PASCAL COccManager::SplitDialogTemplate(const DLGTEMPLATE* pTemplat
     }
     nIndex++;
   }
+#ifdef _AFX_WIN16
+  pNew[walker.m_nCountOffset] = (BYTE)nKept;
+#else
   *(WORD*)(pNew + walker.m_nCountOffset) = (WORD)nKept;
+#endif
   pInfo->m_pNewTemplate = (DLGTEMPLATE*)pNew;
   return (DLGTEMPLATE*)pNew;
 }
@@ -423,6 +502,18 @@ struct FindDlgInitData {
   void* pDlgInit;
 };
 
+#ifdef _AFX_WIN16
+/// Gives the resource name of the template of a dialog or a form view, or
+/// NULL. 16-bit Windows has no EnumResourceNames, so the window object
+/// gives the name.
+LPCTSTR TemplateName(CWnd* pWnd) {
+  if (pWnd->IsKindOf(RUNTIME_CLASS(CDialog))) return ((CDialog*)pWnd)->m_lpszTemplateName;
+  if (pWnd->IsKindOf(RUNTIME_CLASS(CFormView))) return ((CFormView*)pWnd)->m_lpszTemplateName;
+  return NULL;
+}
+#else
+/// Finds the DLGINIT resource of the dialog resource that holds the
+/// template. Gives FALSE to stop the enumeration when it is found.
 BOOL CALLBACK FindDlgInitProc(HMODULE hModule, LPCTSTR, LPTSTR lpszName, LONG_PTR lParam) {
   FindDlgInitData* pData = (FindDlgInitData*)lParam;
   HRSRC hRsrc = ::FindResource(hModule, lpszName, RT_DIALOG);
@@ -432,7 +523,10 @@ BOOL CALLBACK FindDlgInitProc(HMODULE hModule, LPCTSTR, LPTSTR lpszName, LONG_PT
   if (hInit != NULL) pData->pDlgInit = ::LockResource(::LoadResource(hModule, hInit));
   return FALSE;
 }
+#endif
 
+/// Takes the OLE controls out of a dialog template before the dialog is
+/// made, and finds the DLGINIT resource that holds their state.
 const DLGTEMPLATE* AFXAPI HookPreCreateDialog(CWnd* pWnd, const DLGTEMPLATE* pTemplate,
                                               HINSTANCE hInst) {
   _AFX_OCC_DIALOG_INFO* pInfo = new _AFX_OCC_DIALOG_INFO;
@@ -444,10 +538,18 @@ const DLGTEMPLATE* AFXAPI HookPreCreateDialog(CWnd* pWnd, const DLGTEMPLATE* pTe
     return pTemplate;
   }
   // The DLGINIT resource of the same name holds the controls' state.
+#ifdef _AFX_WIN16
+  LPCTSTR lpszName = TemplateName(pWnd);
+  if (hInst != NULL && lpszName != NULL) {
+    HRSRC hInit = ::FindResource(hInst, lpszName, RT_DLGINIT);
+    if (hInit != NULL) pInfo->m_pDlgInit = ::LockResource(::LoadResource(hInst, hInit));
+  }
+#else
   FindDlgInitData data = {pTemplate, NULL};
   if (hInst != NULL)
     ::EnumResourceNames(hInst, RT_DIALOG, (ENUMRESNAMEPROC)FindDlgInitProc, (LONG_PTR)&data);
   pInfo->m_pDlgInit = data.pDlgInit;
+#endif
   pWnd->m_pOccDialogInfo = pInfo;
   return pNew;
 }
@@ -567,10 +669,10 @@ BOOL CWnd::CreateControl(LPCTSTR pszClass, LPCTSTR pszWindowName, DWORD dwStyle,
                          const RECT& rect, CWnd* pParentWnd, UINT nID, CFile* pPersist,
                          BOOL bStorage, BSTR bstrLicKey) {
   if (pszClass == NULL) return FALSE;
-  CStringW strClass(pszClass);
+  CStringOle strClass(pszClass);
   CLSID clsid;
-  HRESULT hr = strClass.GetLength() > 0 && strClass[0] == L'{'
-                   ? ::CLSIDFromString((LPOLESTR)(LPCWSTR)strClass, &clsid)
+  HRESULT hr = strClass.GetLength() > 0 && strClass[0] == '{'
+                   ? ::CLSIDFromString((LPOLESTR)(LPCOLESTR)strClass, &clsid)
                    : ::CLSIDFromProgID(strClass, &clsid);
   if (FAILED(hr)) return FALSE;
   return CreateControl(clsid, pszWindowName, dwStyle, rect, pParentWnd, nID, pPersist, bStorage,

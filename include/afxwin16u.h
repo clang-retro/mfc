@@ -494,6 +494,25 @@ BOOL SetThreadPriority(HANDLE hThread, int nPriority);
 #define OBJ_METAFILE 9
 #define OBJ_MEMDC 10
 #define OBJ_EXTPEN 11
+#define OBJ_ENHMETADC 12
+#define WS_EX_WINDOWEDGE 0x00000100L
+#define WS_EX_CONTROLPARENT 0x00010000L
+#define DS_3DLOOK 0x0004L
+#define DS_CONTROL 0x0400L
+#define SS_CENTERIMAGE 0x00000200L
+#define WM_HELP 0x0053
+#define WM_IME_SETCONTEXT 0x0281
+#define WM_IME_KEYUP 0x0291
+#define GA_PARENT 1
+#define GA_ROOT 2
+#define GA_ROOTOWNER 3
+// Gives the parent (GA_PARENT), the top-level window (GA_ROOT) or the
+// last owner of the top-level window (GA_ROOTOWNER) of a window
+// (src/win16u.cpp).
+HWND GetAncestor(HWND hWnd, UINT gaFlags);
+// Gives the locale of the user. 16-bit Windows has no thread locale
+// (src/win16u.cpp).
+LCID GetThreadLocale();
 #define GDI_ERROR 0xFFFFFFFFL
 #define CLR_INVALID 0xFFFFFFFFL
 #define GM_COMPATIBLE 1

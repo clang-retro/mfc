@@ -163,12 +163,24 @@ BOOL COlePropertyPage::OnCommand(WPARAM wParam, LPARAM lParam) {
 // The template: the dialog resource, made a child window without a frame,
 // and its size in pixels.
 
+#ifdef _AFX_WIN16
+/// Skips a menu, class or caption field of a 16-bit template: an ordinal
+/// (0xFF and a word) or an ANSI string.
+static const BYTE* SkipSzOrOrd(const BYTE* p) {
+  if (*p == 0xFF) return p + 3;
+  while (*p != 0) p++;
+  return p + 1;
+}
+#else
+/// Skips a menu, class or caption field: an ordinal (0xFFFF and a word)
+/// or a UTF-16 string.
 static const BYTE* SkipSzOrOrd(const BYTE* p) {
   const WORD* pw = (const WORD*)p;
   if (*pw == 0xFFFF) return p + 4;
   while (*pw != 0) pw++;
   return (const BYTE*)(pw + 1);
 }
+#endif
 
 HGLOBAL COlePropertyPage::MakeChildTemplate(SIZE* pSize) {
   const BYTE* pSrc = NULL;
@@ -198,30 +210,49 @@ HGLOBAL COlePropertyPage::MakeChildTemplate(SIZE* pSize) {
   memcpy(p, pSrc, cbSrc);
   if (m_hDialog != NULL) ::GlobalUnlock(m_hDialog);
 
+#ifdef _AFX_WIN16
+  // A 16-bit template: the style, a byte item count, then x, y, cx and
+  // cy. It has no extended style.
+  const BOOL bEx = FALSE;
+  DWORD* pStyle = (DWORD*)p;
+  short* pcx = (short*)(p + 9);
+  short* pcy = (short*)(p + 11);
+  const int cbHeader = 13;
+  DWORD dwStyle = *pStyle;
+  *pStyle = (dwStyle & ~(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | DS_MODALFRAME |
+                         WS_VISIBLE | WS_DISABLED | DS_CENTER | DS_ABSALIGN)) |
+            WS_CHILD;
+#else
   // DLGTEMPLATEEX starts with dlgVer 1 and signature 0xFFFF.
   BOOL bEx = ((WORD*)p)[0] == 1 && ((WORD*)p)[1] == 0xFFFF;
   DWORD* pStyle = (DWORD*)(p + (bEx ? 12 : 0));
   DWORD* pExStyle = (DWORD*)(p + (bEx ? 8 : 4));
   short* pcx = (short*)(p + (bEx ? 22 : 14));
   short* pcy = (short*)(p + (bEx ? 24 : 16));
+  const int cbHeader = bEx ? 26 : 18;
   DWORD dwStyle = *pStyle;
   *pStyle = (dwStyle & ~(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | DS_MODALFRAME |
                          WS_VISIBLE | WS_DISABLED | DS_CENTER | DS_ABSALIGN)) |
             WS_CHILD | DS_CONTROL;
   *pExStyle |= WS_EX_CONTROLPARENT;
   *pExStyle &= ~(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE);
+#endif
 
   if (pSize != NULL) {
     // The dialog units of the template's font.
     int cxBase = LOWORD(::GetDialogBaseUnits()), cyBase = HIWORD(::GetDialogBaseUnits());
     if (dwStyle & DS_SETFONT) {
-      const BYTE* q = p + (bEx ? 26 : 18);
+      const BYTE* q = p + cbHeader;
       q = SkipSzOrOrd(q);  // menu
       q = SkipSzOrOrd(q);  // class
       q = SkipSzOrOrd(q);  // caption
       WORD wPoint = *(const WORD*)q;
       q += bEx ? 6 : 2;  // point size, then weight, italic and charset in EX
+#ifdef _AFX_WIN16
+      CString strFace((LPCSTR)q);
+#else
       CString strFace(_AfxTemplateString((const WORD*)q));
+#endif
       HDC hdc = ::GetDC(NULL);
       LOGFONT lf;
       memset(&lf, 0, sizeof(lf));
@@ -265,8 +296,8 @@ void COlePropertyPage::LoadFromObjects() {
 // The controls' properties
 
 static BOOL GetDispID(LPDISPATCH pDisp, LPCTSTR lpszProp, DISPID* pDispID) {
-  CStringW strName(lpszProp);
-  LPOLESTR pszName = (LPOLESTR)(LPCWSTR)strName;
+  CStringOle strName(lpszProp);
+  LPOLESTR pszName = (LPOLESTR)(LPCOLESTR)strName;
   return SUCCEEDED(pDisp->GetIDsOfNames(IID_NULL, &pszName, 1, LOCALE_USER_DEFAULT, pDispID));
 }
 
@@ -282,6 +313,13 @@ BOOL COlePropertyPage::ReadProperty(LPCTSTR lpszProp, VARTYPE vt, void* pValue) 
                                    &params, &var, NULL, NULL);
   // VT_I8 and VT_UI8 mark a 64-bit long member; the property is still 32-bit.
   VARTYPE vtWire = vt == VT_I8 ? (VARTYPE)VT_I4 : vt == VT_UI8 ? (VARTYPE)VT_UI4 : vt;
+  // VT_UI2 marks an unsigned 16-bit member (a 16-bit UINT); the property
+  // is a 32-bit integer.
+  if (vt == VT_UI2) vtWire = VT_I4;
+#ifdef _AFX_WIN16
+  // 16-bit OLE 2 has no unsigned 32-bit type.
+  if (vtWire == VT_UI4) vtWire = VT_I4;
+#endif
   if (SUCCEEDED(hr) && var.vt != vtWire) hr = ::VariantChangeType(&var, &var, 0, vtWire);
   if (FAILED(hr)) {
     ::VariantClear(&var);
@@ -290,6 +328,7 @@ BOOL COlePropertyPage::ReadProperty(LPCTSTR lpszProp, VARTYPE vt, void* pValue) 
   switch (vt) {
     case VT_UI1: *(BYTE*)pValue = var.bVal; break;
     case VT_I2: *(short*)pValue = var.iVal; break;
+    case VT_UI2: *(USHORT*)pValue = (USHORT)var.lVal; break;
     case VT_I4: *(LONG*)pValue = var.lVal; break;
     case VT_UI4: *(ULONG*)pValue = var.ulVal; break;
     case VT_I8: *(LONGLONG*)pValue = var.lVal; break;
@@ -331,7 +370,16 @@ BOOL COlePropertyPage::WriteProperties() {
       case VT_UI1: var.bVal = *(BYTE*)pEntry->pValue; break;
       case VT_I2: var.iVal = *(short*)pEntry->pValue; break;
       case VT_I4: var.lVal = *(LONG*)pEntry->pValue; break;
-      case VT_UI4: var.ulVal = *(ULONG*)pEntry->pValue; break;
+      case VT_UI4:
+#ifdef _AFX_WIN16
+        var.vt = VT_I4;  // 16-bit OLE 2 has no unsigned 32-bit type
+#endif
+        var.ulVal = *(ULONG*)pEntry->pValue;
+        break;
+      case VT_UI2:
+        var.vt = VT_I4;
+        var.lVal = *(USHORT*)pEntry->pValue;
+        break;
       case VT_I8:
         var.vt = VT_I4;
         var.lVal = (LONG) * (LONGLONG*)pEntry->pValue;
@@ -388,9 +436,19 @@ static void DDPExchange(CDataExchange* pDX, int id, void* pValue, VARTYPE vt, LP
     pPage->ReadProperty(pszPropName, vt, pValue);
 }
 
-// int and UINT members are the size of the VARIANT field. A long member
-// is too on Windows, but may be 64-bit elsewhere.
+// The variant type of an int or UINT member. In 16-bit Windows they are
+// 16 bits: VT_I2, and VT_UI2 for an unsigned 16-bit member. Elsewhere
+// they are the size of the 32-bit VARIANT field. A long member is too on
+// Windows, but may be 64-bit elsewhere.
+#ifdef _AFX_WIN16
+static_assert(sizeof(int) == sizeof(short) && sizeof(UINT) == sizeof(USHORT), "16-bit int");
+#define _AFX_VT_INT ((VARTYPE)VT_I2)
+#define _AFX_VT_UINT ((VARTYPE)VT_UI2)
+#else
 static_assert(sizeof(int) == sizeof(LONG) && sizeof(UINT) == sizeof(ULONG), "32-bit int");
+#define _AFX_VT_INT ((VARTYPE)VT_I4)
+#define _AFX_VT_UINT ((VARTYPE)VT_UI4)
+#endif
 #define _AFX_VT_LONG (sizeof(long) == sizeof(LONG) ? (VARTYPE)VT_I4 : (VARTYPE)VT_I8)
 #define _AFX_VT_ULONG (sizeof(long) == sizeof(LONG) ? (VARTYPE)VT_UI4 : (VARTYPE)VT_UI8)
 
@@ -401,10 +459,10 @@ void AFXAPI DDP_Text(CDataExchange* pDX, int id, short& member, LPCTSTR pszPropN
   DDPExchange(pDX, id, &member, VT_I2, pszPropName);
 }
 void AFXAPI DDP_Text(CDataExchange* pDX, int id, int& member, LPCTSTR pszPropName) {
-  DDPExchange(pDX, id, &member, VT_I4, pszPropName);
+  DDPExchange(pDX, id, &member, _AFX_VT_INT, pszPropName);
 }
 void AFXAPI DDP_Text(CDataExchange* pDX, int id, UINT& member, LPCTSTR pszPropName) {
-  DDPExchange(pDX, id, &member, VT_UI4, pszPropName);
+  DDPExchange(pDX, id, &member, _AFX_VT_UINT, pszPropName);
 }
 void AFXAPI DDP_Text(CDataExchange* pDX, int id, long& member, LPCTSTR pszPropName) {
   DDPExchange(pDX, id, &member, _AFX_VT_LONG, pszPropName);
@@ -431,7 +489,7 @@ void AFXAPI DDP_Check(CDataExchange* pDX, int id, int& member, LPCTSTR pszPropNa
   DDPExchange(pDX, id, &member, VT_BOOL, pszPropName);
 }
 void AFXAPI DDP_Radio(CDataExchange* pDX, int id, int& member, LPCTSTR pszPropName) {
-  DDPExchange(pDX, id, &member, VT_I4, pszPropName);
+  DDPExchange(pDX, id, &member, _AFX_VT_INT, pszPropName);
 }
 void AFXAPI DDP_LBString(CDataExchange* pDX, int id, CString& member, LPCTSTR pszPropName) {
   DDPExchange(pDX, id, &member, VT_BSTR, pszPropName);
@@ -440,7 +498,7 @@ void AFXAPI DDP_LBStringExact(CDataExchange* pDX, int id, CString& member, LPCTS
   DDPExchange(pDX, id, &member, VT_BSTR, pszPropName);
 }
 void AFXAPI DDP_LBIndex(CDataExchange* pDX, int id, int& member, LPCTSTR pszPropName) {
-  DDPExchange(pDX, id, &member, VT_I4, pszPropName);
+  DDPExchange(pDX, id, &member, _AFX_VT_INT, pszPropName);
 }
 void AFXAPI DDP_CBString(CDataExchange* pDX, int id, CString& member, LPCTSTR pszPropName) {
   DDPExchange(pDX, id, &member, VT_BSTR, pszPropName);
@@ -449,7 +507,7 @@ void AFXAPI DDP_CBStringExact(CDataExchange* pDX, int id, CString& member, LPCTS
   DDPExchange(pDX, id, &member, VT_BSTR, pszPropName);
 }
 void AFXAPI DDP_CBIndex(CDataExchange* pDX, int id, int& member, LPCTSTR pszPropName) {
-  DDPExchange(pDX, id, &member, VT_I4, pszPropName);
+  DDPExchange(pDX, id, &member, _AFX_VT_INT, pszPropName);
 }
 
 void AFXAPI DDP_PostProcessing(CDataExchange* pDX) {
@@ -513,10 +571,10 @@ STDMETHODIMP COlePropertyPage::XPropertyPage::Deactivate() {
 
 static LPOLESTR AllocOleString(const CString& str) {
   if (str.IsEmpty()) return NULL;
-  CStringW strW(str);
-  SIZE_T cb = (strW.GetLength() + 1) * sizeof(WCHAR);
+  CStringOle strW(str);
+  SIZE_T cb = (strW.GetLength() + 1) * sizeof(OLECHAR);
   LPOLESTR psz = (LPOLESTR)::CoTaskMemAlloc(cb);
-  if (psz != NULL) memcpy(psz, (LPCWSTR)strW, cb);
+  if (psz != NULL) memcpy(psz, (LPCOLESTR)strW, cb);
   return psz;
 }
 
@@ -602,7 +660,7 @@ STDMETHODIMP COlePropertyPage::XPropertyPage::Apply() {
 
 STDMETHODIMP COlePropertyPage::XPropertyPage::Help(LPCOLESTR lpszHelpDir) {
   METHOD_PROLOGUE(COlePropertyPage, PropertyPage)
-  CString strDir(lpszHelpDir != NULL ? lpszHelpDir : L"");
+  CString strDir(lpszHelpDir != NULL ? lpszHelpDir : OLESTR(""));
   if (pThis->OnHelp(strDir)) return S_OK;
   return E_NOTIMPL;
 }

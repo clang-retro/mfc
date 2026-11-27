@@ -34,11 +34,72 @@ static void PutDWord(CByteArray& a, DWORD dw) {
   PutWord(a, LOWORD(dw));
   PutWord(a, HIWORD(dw));
 }
+#ifdef _AFX_WIN16
+// 16-bit Windows: the template has ANSI strings, a byte item count, one
+// byte for the predefined class of an item, and no alignment.
+
+/// Adds a string as ANSI bytes and a 0 byte. A character that is not
+/// ASCII becomes '?'.
+static void PutString(CByteArray& a, LPCWSTR lpsz) {
+  for (; lpsz != NULL && *lpsz != 0; lpsz++) a.Add((BYTE)(*lpsz < 0x80 ? *lpsz : '?'));
+  a.Add(0);
+}
+
+/// Starts a 16-bit template of a child dialog cx by cy dialog units, in
+/// the 8-point system dialog font.
+void CStockPropPage::BeginTemplate(short cx, short cy) {
+  m_template.RemoveAll();
+  m_nItems = 0;
+  PutDWord(m_template, WS_CHILD | DS_SETFONT);
+  m_template.Add(0);  // the item count, set at the end
+  PutWord(m_template, 0);
+  PutWord(m_template, 0);
+  PutWord(m_template, (WORD)cx);
+  PutWord(m_template, (WORD)cy);
+  m_template.Add(0);  // no menu
+  m_template.Add(0);  // the dialog class
+  m_template.Add(0);  // no caption
+  PutWord(m_template, 8);
+  PutString(m_template, L"MS Sans Serif");
+}
+
+/// Adds a control of a predefined class to the 16-bit template.
+void CStockPropPage::AddItem(DWORD dwStyle, short x, short y, short cx, short cy, WORD nID,
+                             WORD wClass, LPCWSTR lpszText) {
+  PutWord(m_template, (WORD)x);
+  PutWord(m_template, (WORD)y);
+  PutWord(m_template, (WORD)cx);
+  PutWord(m_template, (WORD)cy);
+  PutWord(m_template, nID);
+  PutDWord(m_template, dwStyle | WS_CHILD | WS_VISIBLE);
+  m_template.Add((BYTE)wClass);
+  PutString(m_template, lpszText);
+  m_template.Add(0);  // no creation data
+  m_nItems++;
+}
+
+/// Ends the 16-bit template: sets the item count and gives the template
+/// to the page.
+void CStockPropPage::EndTemplate() {
+  m_template[4] = (BYTE)m_nItems;
+  if (m_hTemplate != NULL) ::GlobalFree(m_hTemplate);
+  m_hTemplate = ::GlobalAlloc(GMEM_MOVEABLE, (DWORD)m_template.GetSize());
+  if (m_hTemplate != NULL) {
+    memcpy(::GlobalLock(m_hTemplate), m_template.GetData(), (size_t)m_template.GetSize());
+    ::GlobalUnlock(m_hTemplate);
+  }
+  m_template.RemoveAll();
+  SetDialogResource(m_hTemplate);
+}
+#else
+/// Adds a string as UTF-16 words and a 0 word.
 static void PutString(CByteArray& a, LPCWSTR lpsz) {
   for (; lpsz != NULL && *lpsz != 0; lpsz++) PutWord(a, (WORD)*lpsz);
   PutWord(a, 0);
 }
 
+/// Starts a template of a child dialog cx by cy dialog units, in the
+/// 8-point shell dialog font.
 void CStockPropPage::BeginTemplate(short cx, short cy) {
   m_template.RemoveAll();
   m_nItems = 0;
@@ -56,6 +117,7 @@ void CStockPropPage::BeginTemplate(short cx, short cy) {
   PutString(m_template, L"MS Shell Dlg");
 }
 
+/// Adds a control of a predefined class to the template.
 void CStockPropPage::AddItem(DWORD dwStyle, short x, short y, short cx, short cy, WORD nID,
                              WORD wClass, LPCWSTR lpszText) {
   while (m_template.GetSize() % 4 != 0) m_template.Add(0);
@@ -73,6 +135,8 @@ void CStockPropPage::AddItem(DWORD dwStyle, short x, short y, short cx, short cy
   m_nItems++;
 }
 
+/// Ends the template: sets the item count and gives the template to the
+/// page.
 void CStockPropPage::EndTemplate() {
   m_template[8] = (BYTE)(m_nItems & 0xFF);
   m_template[9] = (BYTE)(m_nItems >> 8);
@@ -85,6 +149,7 @@ void CStockPropPage::EndTemplate() {
   m_template.RemoveAll();
   SetDialogResource(m_hTemplate);
 }
+#endif
 
 enum : WORD { kButton = 0x0080, kEdit = 0x0081, kStatic = 0x0082, kCombo = 0x0085 };
 
@@ -187,8 +252,8 @@ void CStockPropPage::FillPropnameList(REFGUID guid, int nIndirect, CComboBox& co
     for (; *pNames != NULL; pNames++) {
       VARIANT var;
       ::VariantInit(&var);
-      CStringW strName(*pNames);
-      LPOLESTR pszName = (LPOLESTR)(LPCWSTR)strName;
+      CStringOle strName(*pNames);
+      LPOLESTR pszName = (LPOLESTR)(LPCOLESTR)strName;
       DISPID dispid;
       if (SUCCEEDED(pDisp->GetIDsOfNames(IID_NULL, &pszName, 1, m_lcid, &dispid)) &&
           GetPropValue(pDisp, *pNames, &var) && ValueMatches(var, guid))
@@ -226,8 +291,8 @@ BOOL CStockPropPage::OnEditProperty(DISPID dispid) { return COlePropertyPage::On
 void CStockPropPage::OnObjectsChanged() { COlePropertyPage::OnObjectsChanged(); }
 
 static BOOL DispIDOf(LPDISPATCH pDisp, LPCTSTR lpszProp, LCID lcid, DISPID* pDispID) {
-  CStringW strName(lpszProp);
-  LPOLESTR pszName = (LPOLESTR)(LPCWSTR)strName;
+  CStringOle strName(lpszProp);
+  LPOLESTR pszName = (LPOLESTR)(LPCOLESTR)strName;
   return SUCCEEDED(pDisp->GetIDsOfNames(IID_NULL, &pszName, 1, lcid, pDispID));
 }
 
@@ -323,7 +388,7 @@ void CColorPropPage::SetColor(OLE_COLOR color) {
   m_color = color;
   m_bHaveColor = TRUE;
   if (!m_strPropName.IsEmpty() && !m_bLoading) {
-    m_pending.SetAt(m_strPropName, (void*)(UINT_PTR)color);
+    m_pending.SetAt(m_strPropName, (void*)(DWORD_PTR)color);
     SetModifiedFlag(TRUE);
   }
   CComboBox* pSys = (CComboBox*)GetDlgItem(IDC_SYSCOLORS);
@@ -348,7 +413,7 @@ void CColorPropPage::ShowProperty() {
   OLE_COLOR color = 0;
   BOOL bHave = FALSE;
   if (!m_strPropName.IsEmpty() && m_pending.Lookup(m_strPropName, pv)) {
-    color = (OLE_COLOR)(UINT_PTR)pv;
+    color = (OLE_COLOR)(DWORD_PTR)pv;
     bHave = TRUE;
   } else if (!m_strPropName.IsEmpty()) {
     ULONG nObjects = 0;
@@ -385,7 +450,7 @@ void CColorPropPage::DoDataExchange(CDataExchange* pDX) {
     m_pending.GetNextAssoc(pos, strProp, pv);
     VARIANT var;
     var.vt = VT_I4;
-    var.lVal = (long)(OLE_COLOR)(UINT_PTR)pv;
+    var.lVal = (long)(OLE_COLOR)(DWORD_PTR)pv;
     if (!SetPropValue(strProp, &var)) TRACE(_T("color page: %s not set\n"), (LPCTSTR)strProp);
   }
   m_pending.RemoveAll();
@@ -503,7 +568,14 @@ static void SetPending(CMapStringToPtr& map, const CString& strProp,
     map.SetAt(strProp, new CFontPropPage::FONTSTATE(state));
 }
 
-static int CALLBACK EnumFace(const LOGFONT* plf, const TEXTMETRIC*, DWORD, LPARAM lParam) {
+#ifdef _AFX_WIN16
+typedef int _AfxFontType;  // the font type argument is an int in 16-bit Windows
+#else
+typedef DWORD _AfxFontType;
+#endif
+
+/// Adds the face name of one font family to the combo box in lParam.
+static int CALLBACK EnumFace(const LOGFONT* plf, const TEXTMETRIC*, _AfxFontType, LPARAM lParam) {
   CComboBox* pCombo = (CComboBox*)lParam;
   if (plf->lfFaceName[0] != _T('@') && pCombo->FindStringExact(-1, plf->lfFaceName) < 0)
     pCombo->AddString(plf->lfFaceName);
@@ -518,7 +590,12 @@ BOOL CFontPropPage::OnInitDialog() {
     LOGFONT lf;
     memset(&lf, 0, sizeof(lf));
     lf.lfCharSet = DEFAULT_CHARSET;
+#ifdef _AFX_WIN16
+    (void)lf;
+    ::EnumFontFamilies(hdc, NULL, (FONTENUMPROC)EnumFace, (LPARAM)pNames);
+#else
     ::EnumFontFamiliesEx(hdc, &lf, (FONTENUMPROC)EnumFace, (LPARAM)pNames, 0);
+#endif
     ::ReleaseDC(NULL, hdc);
   }
   CComboBox* pStyle = (CComboBox*)GetDlgItem(IDC_STYLE);
@@ -658,7 +735,7 @@ void CFontPropPage::UpdateSample() {
     LOGFONT lf;
     memset(&lf, 0, sizeof(lf));
     CClientDC dc(this);
-    lf.lfHeight = -(LONG)(m_state.cySize.int64 * dc.GetDeviceCaps(LOGPIXELSY) / (72 * 10000));
+    lf.lfHeight = -(LONG)(m_state.cySize.int64 * dc.GetDeviceCaps(LOGPIXELSY) / (72L * 10000));
     lf.lfWeight = m_state.bBold ? FW_BOLD : FW_NORMAL;
     lf.lfItalic = (BYTE)m_state.bItalic;
     lf.lfUnderline = (BYTE)m_state.bUnderline;
@@ -808,7 +885,13 @@ CPicturePropPage::CPicturePropPage() : CStockPropPage(0, 0), m_pPict(NULL), m_bH
   AddItem(BS_PUSHBUTTON | WS_TABSTOP, 8, 40, 50, 14, IDC_BROWSE, kButton, L"&Browse...");
   AddItem(BS_PUSHBUTTON | WS_TABSTOP, 8, 58, 50, 14, IDC_CLEAR, kButton, L"&Clear");
   AddItem(SS_LEFT, 120, 8, 100, 9, (WORD)-1, kStatic, L"Preview:");
+#ifdef _AFX_WIN16
+  // 16-bit Windows has no owner-drawn static control: a disabled
+  // owner-drawn button sends WM_DRAWITEM and takes no input.
+  AddItem(BS_OWNERDRAW | WS_DISABLED, 120, 19, 120, 84, IDC_PICTURE, kButton, NULL);
+#else
   AddItem(SS_OWNERDRAW, 120, 19, 120, 84, IDC_PICTURE, kStatic, NULL);
+#endif
   EndTemplate();
 }
 
@@ -980,8 +1063,8 @@ void CPicturePropPage::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDis) {
   pPict->get_Height(&hmHeight);
   if (hmWidth > 0 && hmHeight > 0) {
     // In proportion, centered, no larger than its own size.
-    int cx = ::MulDiv(hmWidth, pDC->GetDeviceCaps(LOGPIXELSX), 2540);
-    int cy = ::MulDiv(hmHeight, pDC->GetDeviceCaps(LOGPIXELSY), 2540);
+    int cx = (int)_AfxMulDiv(hmWidth, pDC->GetDeviceCaps(LOGPIXELSX), 2540);
+    int cy = (int)_AfxMulDiv(hmHeight, pDC->GetDeviceCaps(LOGPIXELSY), 2540);
     if (cx > rect.Width()) {
       cy = ::MulDiv(cy, rect.Width(), cx);
       cx = rect.Width();

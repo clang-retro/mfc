@@ -26,6 +26,24 @@ typedef CStringA CStringOle;
 typedef CStringW CStringOle;
 #endif
 
+/// Compares two OLECHAR strings without case.
+inline int _AfxOleStrCmpi(LPCOLESTR psz1, LPCOLESTR psz2) {
+#ifdef _AFX_WIN16
+  return ::lstrcmpi(psz1, psz2);
+#else
+  return ::lstrcmpiW(psz1, psz2);
+#endif
+}
+
+/// Gives the length of an OLECHAR string.
+inline int _AfxOleStrLen(LPCOLESTR psz) {
+#ifdef _AFX_WIN16
+  return ::lstrlen(psz);
+#else
+  return ::lstrlenW(psz);
+#endif
+}
+
 typedef const VARIANT* LPCVARIANT;
 typedef const SAFEARRAY* LPCSAFEARRAY;
 

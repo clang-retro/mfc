@@ -60,12 +60,48 @@ on the other targets. Use it and `OLESTR` for OLE strings in code for
 both.
 
 16-bit OLE 2 does not have the OLE control interfaces (connection
-points, `IProvideClassInfo` and `IClassFactory2`). `include/win16/ocidl.h`
-declares them with the IIDs of Win32. MFC objects use them between each
-other in one program.
+points, `IProvideClassInfo`, `IClassFactory2`, `IOleControl`,
+`IPropertyPage` and the others). `include/win16/ocidl.h` declares them
+with the IIDs of Win32. MFC objects use them between each other in one
+program.
 
 16-bit TYPELIB has no `UnRegisterTypeLib`. On 16-bit Windows, MFC
 deletes the registry key of the version (`src/win16ole.cpp`).
+
+OLE controls (`afxctl.h` and `afxocc.h`):
+
+- controls: `COleControl`, with the stock properties, methods and
+  events, the verbs, property exchange (`PX_` functions), the
+  persistence interfaces and the licence functions
+  (`AfxVerifyLicFile`)
+- property pages: `COlePropertyPage`, the `DDP_` functions, and the
+  stock pages for fonts, colours and pictures
+- containers: `AfxEnableControlContainer`, `CWnd::CreateControl`,
+  `COleControlSite` and controls in dialog templates (`RT_DLGINIT`)
+- `CFontHolder` and `CPictureHolder`
+
+16-bit Windows has no `OLEPRO32.DLL`. `src/win16olepro.cpp` has its
+functions:
+
+- `OleCreateFontIndirect`: a font object with `IFont`, `IFontDisp`,
+  `IPersistStream` and the property notifications
+- `OleCreatePictureIndirect` and `OleLoadPicture`: a picture object
+  for bitmaps, icons and metafiles, with `IPicture`, `IPictureDisp` and
+  `IPersistStream`. The stream format is the format of Win32.
+- `OleCreatePropertyFrame` and `OleCreatePropertyFrameIndirect`: a
+  dialog with a tab for each page, and OK, Cancel and Apply
+- `OleTranslateColor`
+
+These limits apply:
+
+- Controls are in the program (EXE) that uses them. The library does
+  not build 16-bit DLLs, thus there are no `.ocx` files.
+- There is no data binding. 16-bit Windows has no OLE DB.
+  `CWnd::BindDefaultProperty` and `CWnd::BindProperty` cause a
+  `CNotSupportedException`.
+- A 16-bit dialog template has no extended styles. The property pages
+  and the stock pages use 16-bit templates in "MS Sans Serif".
+- `int` and `UINT` properties are `VT_I2` and `VT_UI2`.
 
 Wine's 16-bit `OLE2DISP` does not have `VariantClear`, `VariantCopy` and
 `VariantChangeType`. Thus the Wine test does not call
@@ -120,9 +156,16 @@ finds its format with `COleDataObject`. The OLE dialogs run with a
 hook that closes them. These classes need a real
 16-bit Windows with OLE 2 to run.
 
+The Wine test of the OLE controls is a link check too:
+`tests/win16ctl.cpp` makes a control and a property page, hosts the
+control with `CWnd::CreateControl` and shows its property frame in a
+function that does not run. The part that runs makes fonts and pictures,
+saves and loads them through a stream, and calls `OleTranslateColor`.
+
 ## What is not there
 
-- OLE controls. `CWnd::CreateControlSite` fails (`src/win16ole.cpp`).
+- OLE control DLLs (`.ocx`) and data binding of controls (see "OLE
+  controls").
 - The Change Icon, Convert, Change Source and Object Properties
   dialogs (see "OLE documents").
 - `CWnd::EnableToolTips`. It does nothing on any target of the library.
