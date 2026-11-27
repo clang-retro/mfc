@@ -2706,6 +2706,48 @@ static void TestModalFocus() {
   ::DestroyWindow(owner);
 }
 
+// What TallBoxTimer saw of the message box.
+static bool g_tallBoxSeen, g_tallBoxFits, g_tallBoxScrolls;
+
+// Checks that the tall message box and its OK button are inside the work
+// area and that its text scrolls, then closes it.
+static void CALLBACK TallBoxTimer(HWND, UINT, UINT_PTR id, DWORD) {
+  HWND box = ::FindWindowW(NULL, L"Tall Box");
+  if (!box) return;
+  ::KillTimer(NULL, id);
+  g_tallBoxSeen = true;
+  RECT work, wr, br;
+  ::SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+  ::GetWindowRect(box, &wr);
+  HWND ok = ::GetDlgItem(box, IDOK);
+  if (ok) ::GetWindowRect(ok, &br);
+  g_tallBoxFits = ok && wr.top >= work.top && wr.bottom <= work.bottom && br.bottom <= work.bottom;
+  HWND text = ::GetDlgItem(box, 0xFFFF);
+  g_tallBoxScrolls = text && (::GetWindowLongW(text, GWL_STYLE) & WS_VSCROLL) != 0;
+  ::PostMessageW(box, WM_COMMAND, IDOK, 0);
+}
+
+static void TestTallMessageBox() {
+  // A box with more lines than the screen can hold keeps its buttons on
+  // the screen; its text scrolls.
+  std::wstring text;
+  for (int i = 0; i < 300; i++) text += L"A line of the message.\n";
+  const char* was = getenv("WINPORT_MESSAGEBOX");
+  std::string keep = was ? was : "";
+  setenv("WINPORT_MESSAGEBOX", "window", 1);
+  UINT_PTR t = ::SetTimer(NULL, 0, 50, TallBoxTimer);
+  CHECK(t != 0);
+  CHECK(::MessageBoxW(NULL, text.c_str(), L"Tall Box", MB_OK) == IDOK);
+  ::KillTimer(NULL, t);
+  if (was)
+    setenv("WINPORT_MESSAGEBOX", keep.c_str(), 1);
+  else
+    unsetenv("WINPORT_MESSAGEBOX");
+  CHECK(g_tallBoxSeen);
+  CHECK(g_tallBoxFits);
+  CHECK(g_tallBoxScrolls);
+}
+
 static void TestCWnd() {
   CTestWnd wnd;
   CString cls = AfxRegisterWndClass(CS_HREDRAW | CS_VREDRAW, NULL, (HBRUSH)(COLOR_WINDOW + 1));
@@ -4383,6 +4425,7 @@ int main() {
   TestPrinting();
   TestShapesAndDrops();
   TestModalFocus();
+  TestTallMessageBox();
   TestSymbolFont();
 #ifdef _WINPORT
   TestCaptionIcon();
