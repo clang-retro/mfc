@@ -641,6 +641,11 @@ try.
   current record, edits written back when moving, nulls shown as empty
   fields and indeterminate check boxes, and the record commands enabled
   at each end.
+* `atldbtest`: an OLE DB provider made with `atldb.h`, read and changed
+  through the consumer templates: its properties before and after
+  initializing, a table and a command over its column map, nulls, a
+  string too long for its column, a bad ordinal, rows changed, inserted
+  and deleted, and its TABLES schema rowset with restrictions.
 * `oledbtest`: the OLE DB consumer templates against an OLE DB provider
   written in the test: data sources opened by class ID and ProgID (and a
   password refused), tables and commands through column maps, accessor
@@ -1133,7 +1138,15 @@ request with the stock MinGW-w64 toolchain.
   BEGIN_COLUMN_MAP, BEGIN_ACCESSOR_MAP and BEGIN_PARAM_MAP classes with
   DEFINE_COMMAND, CDynamicAccessor, CDynamicStringAccessor,
   CManualAccessor, CNoAccessor, CRowset and CNoRowset, CDBPropSet,
-  CDBPropIDSet and CDBErrorInfo; Windows only); `atlimage.h` (CImage: DIB sections made, attached and
+  CDBPropIDSet and CDBErrorInfo; Windows only); `atldb.h` (the OLE DB
+  provider templates: BEGIN_PROVIDER_COLUMN_MAP and PROVIDER_COLUMN_ENTRY,
+  BEGIN_PROPSET_MAP and CUtlProps, IDBInitializeImpl, IDBPropertiesImpl,
+  IDBCreateSessionImpl, IOpenRowsetImpl, IDBCreateCommandImpl,
+  ICommandTextImpl, ICommandPropertiesImpl, IAccessorImpl,
+  IColumnsInfoImpl, IConvertTypeImpl, IRowsetImpl, IRowsetChangeImpl,
+  IRowsetIdentityImpl, IRowsetInfoImpl, CRowsetImpl, and schema rowsets
+  over BEGIN_SCHEMA_MAP with CSchemaRowsetImpl and the TABLES, COLUMNS and
+  PROVIDER_TYPES rows; Windows only); `atlimage.h` (CImage: DIB sections made, attached and
   drawn with BitBlt, StretchBlt, AlphaBlend, TransparentBlt, MaskBlt and
   PlgBlt, and BMP, GIF, JPEG, PNG and TIFF read and written through
   GDI+, which starts on first use; an image with an alpha channel keeps
