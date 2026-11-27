@@ -32,8 +32,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <map>
 #include <mutex>
+#include <vector>
 
 namespace winport {
 
@@ -47,7 +49,7 @@ namespace {
   F(XCreateFontCursor) F(XRaiseWindow) F(XSetInputFocus) F(XWarpPointer) F(XGetWindowAttributes)               \
   F(XTranslateCoordinates) F(XSync) F(XFreeCursor) F(XSetSelectionOwner) F(XGetSelectionOwner)          \
   F(XConvertSelection) F(XGetWindowProperty) F(XFree) F(XDeleteProperty) F(XSendEvent) F(XCheckTypedWindowEvent) F(XCheckTypedEvent) \
-  F(XMatchVisualInfo) F(XCreateColormap) F(XResourceManagerString)
+  F(XMatchVisualInfo) F(XCreateColormap) F(XResourceManagerString) F(XQueryPointer) F(XChangeActivePointerGrab)
 
 // The input method (XIM), when libX11 has it.
 #define XIM_FUNCTIONS(F)                                                                                 \
@@ -237,13 +239,26 @@ struct X11Backend : Backend {
   // The clipboard: an unmapped window owns it and is sent its requests.
   ::Window clipWin = 0;
   Atom clipboard = 0, targets = 0, textPlain = 0, clipProp = 0, incr = 0;
-  // Files dragged from other programs (the XDND protocol): the source,
-  // the window of ours it is over, where, and whether that takes them.
+  // Drags from other programs (the XDND protocol): the source, what it
+  // offers, the window of ours it is over and where.
   Atom xdndAware = 0, xdndEnter = 0, xdndPosition = 0, xdndStatus = 0, xdndDrop = 0, xdndFinished = 0,
-       xdndLeave = 0, xdndSelection = 0, xdndTypeList = 0, xdndActionCopy = 0, uriList = 0, dropProp = 0;
+       xdndLeave = 0, xdndSelection = 0, xdndTypeList = 0, xdndActionCopy = 0, xdndActionMove = 0,
+       xdndActionLink = 0, uriList = 0, textPlainBare = 0, dropProp = 0;
   ::Window dndSource = 0;
-  bool dndUris = false, dndAccept = false;
+  DesktopOfferPtr dndOffer;
+  Native* dndOver = NULL;
   POINT dndAt = {0, 0};
+  DWORD dndAllowed = 0;
+  // Drags to other programs: the window under the drag, its XDND
+  // version, and its last answer; what the drag carries, in the types
+  // offered.
+  ::Window outTarget = 0;
+  int outVersion = 0;
+  bool outActive = false, outWaiting = false, outAccept = false, outFinished = false;
+  Atom outAction = 0;
+  DWORD outSent = 0;
+  std::vector<Atom> outTypes;
+  std::string outUris, outText;  // UTF-8
   std::string clipText;  // UTF-8, what this program offers
   int fixesEvent = -1;   // XFixesSelectionNotify, when the server has XFixes
   DWORD clipGeneration = 0;
@@ -312,6 +327,9 @@ struct X11Backend : Backend {
     xdndSelection = x.XInternAtom(dpy, "XdndSelection", False);
     xdndTypeList = x.XInternAtom(dpy, "XdndTypeList", False);
     xdndActionCopy = x.XInternAtom(dpy, "XdndActionCopy", False);
+    xdndActionMove = x.XInternAtom(dpy, "XdndActionMove", False);
+    xdndActionLink = x.XInternAtom(dpy, "XdndActionLink", False);
+    textPlainBare = x.XInternAtom(dpy, "text/plain", False);
     uriList = x.XInternAtom(dpy, "text/uri-list", False);
     dropProp = x.XInternAtom(dpy, "WINPORT_DROP", False);
     OpenInputMethod();
@@ -702,6 +720,10 @@ struct X11Backend : Backend {
       c = it->second;
     }
     for (auto& e : byXid) x.XDefineCursor(dpy, e.first, c);
+    // Over another program's window the drag's grab shows it.
+    if (outActive)
+      x.XChangeActivePointerGrab(dpy, ButtonPressMask | ButtonReleaseMask | PointerMotionMask | EnterWindowMask |
+                                          LeaveWindowMask, c, CurrentTime);
     if (cursorOwned && cursor != c) x.XFreeCursor(dpy, cursor);
     cursor = c;
     cursorOwned = owned;
@@ -801,14 +823,26 @@ struct X11Backend : Backend {
     Atom prop = r.property != None ? r.property : r.target;
     reply.xselection.property = prop;
     std::lock_guard<std::recursive_mutex> g(lock);
+    // The clipboard's text, or what a drag to another program carries.
+    bool drag = r.selection == xdndSelection;
+    const std::string& text = drag ? outText : clipText;
+    bool hasText = !drag || !outText.empty();
     if (r.target == targets) {
-      Atom list[] = {targets, utf8, textPlain, XA_STRING};
-      x.XChangeProperty(dpy, r.requestor, prop, XA_ATOM, 32, PropModeReplace, (const unsigned char*)list, 4);
-    } else if (r.target == utf8 || r.target == textPlain) {
-      x.XChangeProperty(dpy, r.requestor, prop, r.target, 8, PropModeReplace, (const unsigned char*)clipText.data(),
-                        (int)clipText.size());
-    } else if (r.target == XA_STRING) {
-      std::wstring w = Widen(clipText.c_str(), (int)clipText.size());
+      std::vector<Atom> list = {targets};
+      if (drag)
+        list.insert(list.end(), outTypes.begin(), outTypes.end());
+      else
+        list.insert(list.end(), {utf8, textPlain, XA_STRING});
+      x.XChangeProperty(dpy, r.requestor, prop, XA_ATOM, 32, PropModeReplace, (const unsigned char*)list.data(),
+                        (int)list.size());
+    } else if (drag && r.target == uriList && !outUris.empty()) {
+      x.XChangeProperty(dpy, r.requestor, prop, r.target, 8, PropModeReplace, (const unsigned char*)outUris.data(),
+                        (int)outUris.size());
+    } else if (hasText && (r.target == utf8 || r.target == textPlain || (drag && r.target == textPlainBare))) {
+      x.XChangeProperty(dpy, r.requestor, prop, r.target, 8, PropModeReplace, (const unsigned char*)text.data(),
+                        (int)text.size());
+    } else if (hasText && r.target == XA_STRING) {
+      std::wstring w = Widen(text.c_str(), (int)text.size());
       std::string latin1;
       for (wchar_t c : w) latin1 += c < 0x100 ? (char)c : '?';
       x.XChangeProperty(dpy, r.requestor, prop, XA_STRING, 8, PropModeReplace, (const unsigned char*)latin1.data(),
@@ -839,31 +873,119 @@ struct X11Backend : Backend {
     return POINT{rootX - n->w->rect.left, rootY - n->w->rect.top};
   }
 
-  // Tells the source of a drag what happens.
-  void DndSend(Native* n, Atom type, long l1, long l2) {
+  // ---------------------------------------------------------------
+  // Drags from other programs
+
+  // What a drag from another program offers: its types, fetched from
+  // the XdndSelection; the answers go to its source.
+  struct Offer : DesktopOffer {
+    X11Backend* b = NULL;
+    ::Window self = 0, source = 0;
+    int version = 0;
+    std::vector<Atom> types;
+    Time dropTime = CurrentTime;
+    bool Has(Atom a) const { return std::find(types.begin(), types.end(), a) != types.end(); }
+    bool Fetch(bool wantFiles, std::string* bytes) override {
+      Atom type = 0;
+      if (wantFiles) {
+        type = b->uriList;
+      } else {
+        for (Atom a : {b->utf8, b->textPlain, b->textPlainBare, (Atom)XA_STRING})
+          if (Has(a)) {
+            type = a;
+            break;
+          }
+      }
+      if (!type || !b->ConvertDrop(type, dropTime, bytes)) return false;
+      if (type == XA_STRING) {
+        // Latin-1
+        std::wstring w;
+        for (unsigned char c : *bytes) w += (wchar_t)c;
+        *bytes = Narrow(w.c_str(), (int)w.size());
+      }
+      return true;
+    }
+    void Answer(DWORD effect) override {
+      // Bit 1: send the positions inside the window too.
+      b->SendDnd(source, b->xdndStatus, (long)self, (effect ? 1 : 0) | 2, 0, 0,
+                 effect ? (long)b->ActionOf(effect) : 0);
+    }
+    void Finished(DWORD effect) override {
+      b->SendDnd(source, b->xdndFinished, (long)self, effect ? 1 : 0, effect ? (long)b->ActionOf(effect) : 0, 0, 0);
+    }
+  };
+
+  void SendDnd(::Window to, Atom type, long l0, long l1, long l2, long l3, long l4) {
     XEvent r = {};
     r.xclient.type = ClientMessage;
     r.xclient.display = dpy;
-    r.xclient.window = dndSource;
+    r.xclient.window = to;
     r.xclient.message_type = type;
     r.xclient.format = 32;
-    r.xclient.data.l[0] = (long)n->xid;
+    r.xclient.data.l[0] = l0;
     r.xclient.data.l[1] = l1;
-    if (type == xdndStatus) {
-      r.xclient.data.l[4] = l2;
-    } else {
-      r.xclient.data.l[2] = l2;
-    }
+    r.xclient.data.l[2] = l2;
+    r.xclient.data.l[3] = l3;
+    r.xclient.data.l[4] = l4;
     std::lock_guard<std::recursive_mutex> g(lock);
-    x.XSendEvent(dpy, dndSource, False, NoEventMask, &r);
+    if (!dpy) return;
+    x.XSendEvent(dpy, to, False, NoEventMask, &r);
     x.XFlush(dpy);
+  }
+
+  // The XDND action of a drop effect, and the effect of an action.
+  Atom ActionOf(DWORD effect) {
+    if (effect & DROPEFFECT_MOVE) return xdndActionMove;
+    if (effect & DROPEFFECT_COPY) return xdndActionCopy;
+    if (effect & DROPEFFECT_LINK) return xdndActionLink;
+    return 0;
+  }
+  DWORD EffectOf(Atom action) {
+    if (action == xdndActionMove) return DROPEFFECT_MOVE;
+    if (action == xdndActionLink) return DROPEFFECT_LINK;
+    return DROPEFFECT_COPY;  // copy, ask, or one of the source's own
+  }
+
+  // The buttons and keys held now, as MK_ flags.
+  DWORD PointerKeys() {
+    ::Window r, c;
+    int rx, ry, wx, wy;
+    unsigned mask = 0;
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!x.XQueryPointer(dpy, root, &r, &c, &rx, &ry, &wx, &wy, &mask)) return 0;
+    return (DWORD)Keys(mask) | ((mask & Mod1Mask) ? MK_ALT : 0);
+  }
+
+  // Fetches the XdndSelection in a type, as the clipboard is fetched.
+  bool ConvertDrop(Atom type, Time time, std::string* bytes) {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!dpy) return false;
+    notified = false;
+    x.XConvertSelection(dpy, xdndSelection, type, dropProp, clipWin, time);
+    x.XFlush(dpy);
+    XSelectionEvent ev;
+    if (!AwaitNotify(&ev) || ev.property == None) return false;
+    Atom got;
+    int format;
+    unsigned long n, after;
+    unsigned char* data = NULL;
+    if (x.XGetWindowProperty(dpy, clipWin, dropProp, 0, 0x1000000, True, AnyPropertyType, &got, &format, &n, &after,
+                             &data) != Success)
+      return false;
+    bool ok = data && got != incr && format == 8;
+    if (ok) bytes->assign((const char*)data, n);
+    if (data) x.XFree(data);
+    return ok;
   }
 
   void DndMessage(Native* n, const XClientMessageEvent& m) {
     if (m.message_type == xdndEnter) {
-      dndSource = (::Window)m.data.l[0];
-      dndUris = false;
-      dndAccept = false;
+      if (dndOffer && dndOver) DesktopDragLeave(dndOver->w, dndOffer);
+      std::shared_ptr<Offer> o = std::make_shared<Offer>();
+      o->b = this;
+      o->self = n->xid;
+      o->source = dndSource = (::Window)m.data.l[0];
+      o->version = (int)((unsigned long)m.data.l[1] >> 24);
       if (m.data.l[1] & 1) {
         // More than three types: the source lists them.
         Atom got;
@@ -873,54 +995,215 @@ struct X11Backend : Backend {
         std::lock_guard<std::recursive_mutex> g(lock);
         if (x.XGetWindowProperty(dpy, dndSource, xdndTypeList, 0, 1024, False, XA_ATOM, &got, &format, &count,
                                  &after, &data) == Success && data) {
-          for (unsigned long i = 0; i < count; i++)
-            if (((Atom*)data)[i] == uriList) dndUris = true;
+          for (unsigned long i = 0; i < count; i++) o->types.push_back(((Atom*)data)[i]);
         }
         if (data) x.XFree(data);
       } else {
         for (int i = 2; i < 5; i++)
-          if ((Atom)m.data.l[i] == uriList) dndUris = true;
+          if (m.data.l[i]) o->types.push_back((Atom)m.data.l[i]);
       }
+      o->files = o->Has(uriList);
+      o->text = o->Has(utf8) || o->Has(textPlain) || o->Has(textPlainBare) || o->Has(XA_STRING);
+      dndOffer = o;
+      dndOver = NULL;
     } else if (m.message_type == xdndPosition) {
-      if ((::Window)m.data.l[0] != dndSource) return;
+      if ((::Window)m.data.l[0] != dndSource || !dndOffer) return;
       dndAt = POINT{(LONG)((unsigned long)m.data.l[2] >> 16), (LONG)(m.data.l[2] & 0xFFFF)};
-      dndAccept = dndUris && DropTarget(dndAt) != NULL;
-      // Bit 1: send the positions inside the window too.
-      DndSend(n, xdndStatus, (dndAccept ? 1 : 0) | 2, dndAccept ? (long)xdndActionCopy : 0);
+      // The source asks for one action; another program's drop may still
+      // be a copy. A source that asks the user offers all three.
+      Atom asked = (Atom)m.data.l[4];
+      dndAllowed = asked == xdndActionMove   ? DROPEFFECT_MOVE | DROPEFFECT_COPY
+                   : asked == xdndActionLink ? DROPEFFECT_LINK | DROPEFFECT_COPY
+                   : asked == xdndActionCopy || !asked ? DROPEFFECT_COPY
+                                                       : DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK;
+      if (dndOver && dndOver != n) DesktopDragLeave(dndOver->w, dndOffer);
+      dndOver = n;
+      DesktopDragOver(n->w, dndOffer, dndAt, PointerKeys(), dndAllowed);
     } else if (m.message_type == xdndLeave) {
-      dndSource = 0;
-      dndAccept = false;
-    } else if (m.message_type == xdndDrop) {
       if ((::Window)m.data.l[0] != dndSource) return;
-      if (!dndAccept) {
-        DndSend(n, xdndFinished, 0, 0);
-        dndSource = 0;
-        return;
-      }
-      std::lock_guard<std::recursive_mutex> g(lock);
-      x.XConvertSelection(dpy, xdndSelection, uriList, dropProp, n->xid, (Time)m.data.l[2]);
-      x.XFlush(dpy);
+      if (dndOffer && dndOver) DesktopDragLeave(dndOver->w, dndOffer);
+      dndOffer.reset();
+      dndOver = NULL;
+      dndSource = 0;
+    } else if (m.message_type == xdndDrop) {
+      if ((::Window)m.data.l[0] != dndSource || !dndOffer) return;
+      ((Offer*)dndOffer.get())->dropTime = (Time)m.data.l[2];
+      DesktopDrop(n->w, dndOffer, dndAt, PointerKeys() & ~(DWORD)(MK_LBUTTON | MK_MBUTTON | MK_RBUTTON), dndAllowed);
+      dndOffer.reset();
+      dndOver = NULL;
+      dndSource = 0;
     }
   }
 
-  // The dropped files arrive.
-  void DndData(Native* n, const XSelectionEvent& ev) {
-    std::string list;
-    if (ev.property != None) {
+  // ---------------------------------------------------------------
+  // Drags to other programs
+
+  // The window at a root point that takes drops, and its XDND version;
+  // ours is set when the program's own window is there.
+  ::Window DropWindowAt(POINT pt, int* version, bool* ours) {
+    *ours = false;
+    *version = 0;
+    ::Window w = root;
+    for (int depth = 0; depth < 32; depth++) {
+      ::Window child = 0;
+      int cx, cy;
+      if (!x.XTranslateCoordinates(dpy, root, w, pt.x, pt.y, &cx, &cy, &child) || !child) return 0;
+      w = child;
+      if (byXid.count(w)) {
+        *ours = true;
+        return 0;
+      }
       Atom got;
       int format;
       unsigned long count = 0, after;
       unsigned char* data = NULL;
-      std::lock_guard<std::recursive_mutex> g(lock);
-      if (x.XGetWindowProperty(dpy, n->xid, dropProp, 0, 0x1000000, True, AnyPropertyType, &got, &format, &count,
-                               &after, &data) == Success && data && format == 8)
-        list.assign((const char*)data, count);
+      if (x.XGetWindowProperty(dpy, w, xdndAware, 0, 1, False, XA_ATOM, &got, &format, &count, &after, &data) ==
+              Success && data && count == 1) {
+        *version = (int)*(Atom*)data;
+        x.XFree(data);
+        if (*version >= 3) return w;
+        *version = 0;
+        return 0;
+      }
       if (data) x.XFree(data);
     }
-    bool ok = !list.empty() && DropFiles(dndAt, PathsFromUris(list));
-    if (dndSource) DndSend(n, xdndFinished, ok ? 1 : 0, ok ? (long)xdndActionCopy : 0);
-    dndSource = 0;
-    dndAccept = false;
+    return 0;
+  }
+
+  // What the drag carries, as the other programs' types.
+  void OfferDrag(IDataObject* data) {
+    outTypes.clear();
+    outUris.clear();
+    outText.clear();
+    std::vector<std::wstring> paths;
+    std::wstring text;
+    if (DataFiles(data, &paths)) {
+      outUris = UrisFromPaths(paths);
+      outTypes.push_back(uriList);
+    }
+    if (DataText(data, &text)) {
+      outText = Narrow(text.c_str(), (int)text.size());
+      for (Atom a : {utf8, textPlain, textPlainBare, (Atom)XA_STRING}) outTypes.push_back(a);
+    }
+    x.XChangeProperty(dpy, clipWin, xdndTypeList, XA_ATOM, 32, PropModeReplace, (const unsigned char*)outTypes.data(),
+                      (int)outTypes.size());
+    x.XSetSelectionOwner(dpy, xdndSelection, clipWin, CurrentTime);
+  }
+
+  // The action the keys ask for, as Windows takes them: Ctrl copies,
+  // Shift moves, both link; else a copy.
+  Atom AskedAction(DWORD keys, DWORD ok) {
+    DWORD want = (keys & MK_CONTROL) && (keys & MK_SHIFT) ? DROPEFFECT_LINK
+                 : (keys & MK_CONTROL)                    ? DROPEFFECT_COPY
+                 : (keys & MK_SHIFT)                      ? DROPEFFECT_MOVE
+                                                          : DROPEFFECT_COPY;
+    if (!(want & ok)) want = ok;
+    return ActionOf(want & ok);
+  }
+
+  void LeaveTarget() {
+    if (outTarget) SendDnd(outTarget, xdndLeave, (long)clipWin, 0, 0, 0, 0);
+    outTarget = 0;
+    outAccept = outWaiting = outFinished = false;
+  }
+
+  int DragOut(IDataObject* data, IDropSource*, DWORD ok, DWORD keys, POINT pt, DWORD* effect) override {
+    std::unique_lock<std::recursive_mutex> g(lock);
+    if (!dpy) return kDragOurs;
+    int version;
+    bool ours;
+    ::Window target = DropWindowAt(pt, &version, &ours);
+    if (ours) return kDragOurs;
+    if (!outActive) {
+      outActive = true;
+      OfferDrag(data);
+    }
+    if (outTypes.empty()) target = 0;  // nothing another program could take
+    if (target != outTarget) {
+      LeaveTarget();
+      outTarget = target;
+      outVersion = std::min(version, 5);
+      if (target) {
+        SendDnd(target, xdndEnter, (long)clipWin, ((long)outVersion << 24) | (outTypes.size() > 3 ? 1 : 0),
+                outTypes.size() > 0 ? (long)outTypes[0] : 0, outTypes.size() > 1 ? (long)outTypes[1] : 0,
+                outTypes.size() > 2 ? (long)outTypes[2] : 0);
+      }
+    }
+    if (target && (!outWaiting || GetTickCount() - outSent > 500)) {
+      // One position at a time: the next waits for the answer.
+      SendDnd(target, xdndPosition, (long)clipWin, 0, ((long)pt.x << 16) | (pt.y & 0xFFFF), CurrentTime,
+              (long)AskedAction(keys, ok));
+      outWaiting = true;
+      outSent = GetTickCount();
+    }
+    *effect = target && outAccept ? EffectOf(outAction) & ok : DROPEFFECT_NONE;
+    if (target && outAccept && !*effect) *effect = ok & DROPEFFECT_COPY ? DROPEFFECT_COPY : ok;
+    return kDragOther;
+  }
+
+  // Waits for the target's answer, handling what comes meanwhile.
+  bool AwaitTarget(bool* flag, DWORD ms) {
+    DWORD start = GetTickCount();
+    while (!*flag && outTarget) {
+      if (GetTickCount() - start > ms) return false;
+      Drain();
+      if (*flag) break;
+      pollfd fd = {ConnectionNumber(dpy), POLLIN, 0};
+      poll(&fd, 1, 20);
+    }
+    return *flag;
+  }
+
+  DWORD DragOutDrop() override {
+    if (!dpy || !outTarget) {
+      DragOutLeave();
+      return DROPEFFECT_NONE;
+    }
+    // The answer to the last position decides.
+    DWORD start = GetTickCount();
+    while (outWaiting && GetTickCount() - start < 1000) {
+      Drain();
+      if (!outWaiting) break;
+      pollfd fd = {ConnectionNumber(dpy), POLLIN, 0};
+      poll(&fd, 1, 20);
+    }
+    if (!outAccept) {
+      DragOutLeave();
+      return DROPEFFECT_NONE;
+    }
+    DWORD effect = EffectOf(outAction);
+    outFinished = false;
+    SendDnd(outTarget, xdndDrop, (long)clipWin, 0, CurrentTime, 0, 0);
+    // The target fetches the data, then says it has finished. Before
+    // version 5 it does not say how.
+    AwaitTarget(&outFinished, 10000);
+    if (outFinished && outVersion >= 5) effect = outAccept ? EffectOf(outAction) : DROPEFFECT_NONE;
+    outTarget = 0;
+    outActive = false;
+    return effect;
+  }
+
+  void DragOutLeave() override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!dpy) return;
+    LeaveTarget();
+    outActive = false;
+  }
+
+  // The target of a drag to another program answers.
+  void TargetMessage(const XClientMessageEvent& m) {
+    if (!outTarget || (::Window)m.data.l[0] != outTarget) return;
+    if (m.message_type == xdndStatus) {
+      outWaiting = false;
+      outAccept = (m.data.l[1] & 1) != 0;
+      outAction = outVersion >= 2 ? (Atom)m.data.l[4] : xdndActionCopy;
+    } else if (m.message_type == xdndFinished) {
+      outFinished = true;
+      if (outVersion >= 5) {
+        outAccept = (m.data.l[1] & 1) != 0;
+        outAction = (Atom)m.data.l[2];
+      }
+    }
   }
 
   void Handle(XEvent& e) {
@@ -931,6 +1214,8 @@ struct X11Backend : Backend {
         std::lock_guard<std::recursive_mutex> g(lock);
         notifyEvent = e.xselection;
         notified = true;
+      } else if (e.type == ClientMessage) {
+        TargetMessage(e.xclient);
       } else if (fixesEvent >= 0 && e.type == fixesEvent) {
         std::lock_guard<std::recursive_mutex> g(lock);
         clipGeneration++;
@@ -985,9 +1270,6 @@ struct X11Backend : Backend {
           CloseRequested(w);
         else
           DndMessage(n, e.xclient);
-        break;
-      case SelectionNotify:
-        if (e.xselection.selection == xdndSelection) DndData(n, e.xselection);
         break;
       case FocusIn:
         if (n->ic && im) {

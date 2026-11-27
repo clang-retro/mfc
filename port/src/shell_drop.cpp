@@ -83,6 +83,26 @@ std::vector<std::wstring> PathsFromUris(const std::string& list) {
   return out;
 }
 
+std::string UrisFromPaths(const std::vector<std::wstring>& paths) {
+  static const char hex[] = "0123456789ABCDEF";
+  std::string out;
+  for (const std::wstring& p : paths) {
+    std::string path = Narrow(p.c_str(), (int)p.size());
+    out += "file://";
+    for (unsigned char c : path) {
+      if (isalnum(c) || strchr("/-._~", c)) {
+        out += (char)c;
+      } else {
+        out += '%';
+        out += hex[c >> 4];
+        out += hex[c & 15];
+      }
+    }
+    out += "\r\n";
+  }
+  return out;
+}
+
 HGLOBAL MakeDrop(const std::vector<std::wstring>& paths, POINT pt, bool nc) {
   size_t chars = 1;
   for (const std::wstring& p : paths) chars += p.size() + 1;
