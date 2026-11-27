@@ -317,6 +317,16 @@ build_and_run() {  # name label exe outdir shared ldflags
     extra="-isystem $WTL_INCLUDE -fms-compatibility -fgnuc-version=4.2.1"
     rcextra="-I $WTL_INCLUDE"
   fi
+  # comdeftest links MinGW's comsupp library, which not every MinGW-w64
+  # (Ubuntu's, for one) has.
+  if [ $name = comdeftest ]; then
+    # shellcheck disable=SC2086
+    p=$("$CXX" $CXXFLAGS -print-file-name=libcomsuppw.a 2>/dev/null)
+    if [ ! -f "$p" ]; then
+      echo "skip   $label-$v (no libcomsuppw.a)"
+      return
+    fi
+  fi
   dllflags=
   [ $shared = 1 ] && dllflags=-D_AFXDLL
   # A test with a DLL of its own: tests/NAME-dll.cpp, with its exports

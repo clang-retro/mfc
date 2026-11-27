@@ -32,6 +32,19 @@ __asm__(".section .drectve,\"yn\"\n"
 #ifdef __MINGW32__
 // MinGW's comutil.h declares vtMissing, which its comsupp library lacks.
 _variant_t vtMissing(DISP_E_PARAMNOTFOUND, VT_ERROR);
+// Older MinGW-w64 comdef.h types the IFooPtr smart pointers only where
+// __uuidof is the compiler's, so the test types its own.
+#define TEST_SMARTPTR(I)                                   \
+  inline const IID& Test##I##IID() { return __uuidof(I); } \
+  typedef _com_ptr_t<_com_IIID_getter<I, Test##I##IID> > Test##I##Ptr;
+TEST_SMARTPTR(IUnknown)
+TEST_SMARTPTR(IDispatch)
+TEST_SMARTPTR(IPersist)
+TEST_SMARTPTR(IStream)
+#define IUnknownPtr TestIUnknownPtr
+#define IDispatchPtr TestIDispatchPtr
+#define IPersistPtr TestIPersistPtr
+#define IStreamPtr TestIStreamPtr
 #endif
 
 static int g_nFailures;
