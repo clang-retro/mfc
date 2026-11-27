@@ -1254,6 +1254,16 @@ typedef struct {
 #define PBM_GETPOS (WM_USER + 8)
 #define PBM_SETBARCOLOR (WM_USER + 9)
 #define PBM_SETBKCOLOR CCM_SETBKCOLOR
+#ifndef PBM_GETSTEP
+#define PBM_GETSTEP (WM_USER + 13)
+#define PBM_GETBKCOLOR (WM_USER + 14)
+#define PBM_GETBARCOLOR (WM_USER + 15)
+#define PBM_SETSTATE (WM_USER + 16)
+#define PBM_GETSTATE (WM_USER + 17)
+#define PBST_NORMAL 0x0001
+#define PBST_ERROR 0x0002
+#define PBST_PAUSED 0x0003
+#endif
 
 // Hot keys
 #define HOTKEYF_SHIFT 0x01

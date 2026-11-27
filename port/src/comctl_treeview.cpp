@@ -5,6 +5,9 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "comctl.h"
+#include "theme.h"
+
+#include <vssym32.h>
 
 #include <string.h>
 
@@ -818,6 +821,10 @@ void DrawButton(Tree* t, HDC dc, int cx, int cy, bool open) {
   int k = GlyphScale();
   RECT b = {cx - 4 * k, cy - 4 * k, cx + 5 * k, cy + 5 * k};
   FillSolid(dc, b, BkColor(t));
+  if (winport::theme::Themed(t->hwnd)) {
+    winport::theme::DrawPart(winport::theme::kTreeView, dc, TVP_GLYPH, open ? GLPS_OPENED : GLPS_CLOSED, b, NULL);
+    return;
+  }
   HBRUSH frame = CreateSolidBrush(GetSysColor(COLOR_GRAYTEXT));
   for (int i = 0; i < k; i++) {
     RECT f = {b.left + i, b.top + i, b.right - i, b.bottom - i};

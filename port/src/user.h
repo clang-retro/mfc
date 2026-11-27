@@ -293,7 +293,9 @@ RECT SysMenuRect(Window* w);
 // The trough's brush is trough, or with NULL the one DefWindowProc gives
 // for WM_CTLCOLORSCROLLBAR (ScrollTroughBrush).
 HBRUSH ScrollTroughBrush(HDC dc);
-void PaintScrollBar(HDC dc, const RECT& r, bool vertical, const ScrollBar* sb, HBRUSH trough = NULL);
+// themed draws the visual style's flat scroll bar (theme.h) instead.
+void PaintScrollBar(HDC dc, const RECT& r, bool vertical, const ScrollBar* sb, HBRUSH trough = NULL,
+                    bool themed = false);
 void ClickScrollBar(Window* w, ScrollBar* sb, RECT r, bool vertical, POINT screen, HWND notify, HWND ctl);
 
 // Menus (user_menu.cpp): the menu window's class, drawing the menu bar,

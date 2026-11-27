@@ -7,6 +7,50 @@
 #include "cmntest.h"
 #include "testutil.h"
 
+#ifdef _WINPORT
+#include <uxtheme.h>
+#include <vssym32.h>
+
+// The manifest asks for version 6 of the common controls, so the
+// controls draw with the built-in visual style.
+static void TestVisualStyles(CWnd* pFrame) {
+  CHECK(::IsThemeActive() && ::IsAppThemed());
+  CButton button;
+  CHECK(button.Create(_T("Push"), WS_CHILD | BS_PUSHBUTTON, CRect(0, 0, 80, 24), pFrame, 4000));
+  HTHEME theme = ::OpenThemeData(button.m_hWnd, L"Nothing;Button");
+  CHECK(theme != NULL && ::GetWindowTheme(button.m_hWnd) == theme);
+  CHECK(::IsThemePartDefined(theme, BP_PUSHBUTTON, 0) && !::IsThemePartDefined(theme, 99, 0));
+  SIZE box = {};
+  CHECK(SUCCEEDED(::GetThemePartSize(theme, NULL, BP_CHECKBOX, CBS_CHECKEDNORMAL, NULL, TS_TRUE, &box)));
+  CHECK(box.cx > 0 && box.cx == box.cy);
+  CHECK(::IsThemeBackgroundPartiallyTransparent(theme, BP_CHECKBOX, CBS_UNCHECKEDNORMAL));
+  COLORREF text = 0;
+  CHECK(SUCCEEDED(::GetThemeColor(theme, BP_PUSHBUTTON, PBS_NORMAL, TMT_TEXTCOLOR, &text)));
+  RECT r = {0, 0, 40, 20}, in = {};
+  CHECK(SUCCEEDED(::GetThemeBackgroundContentRect(theme, NULL, BP_PUSHBUTTON, PBS_NORMAL, &r, &in)));
+  CHECK(in.left > r.left && in.right < r.right);
+  // A drawn button: its border differs from its face.
+  CDC dc;
+  dc.CreateCompatibleDC(NULL);
+  CBitmap bm;
+  BITMAPINFO bi = {{sizeof(BITMAPINFOHEADER), 40, -20, 1, 32, BI_RGB}};
+  void* bits = NULL;
+  bm.Attach(::CreateDIBSection(NULL, &bi, DIB_RGB_COLORS, &bits, NULL, 0));
+  CBitmap* old = dc.SelectObject(&bm);
+  dc.FillSolidRect(0, 0, 40, 20, RGB(255, 0, 255));
+  CHECK(SUCCEEDED(::DrawThemeBackground(theme, dc.m_hDC, BP_PUSHBUTTON, PBS_NORMAL, &r, NULL)));
+  CHECK(dc.GetPixel(20, 10) != RGB(255, 0, 255) && dc.GetPixel(20, 0) != dc.GetPixel(20, 10));
+  dc.SelectObject(old);
+  CHECK(SUCCEEDED(::CloseThemeData(theme)));
+  CHECK(::OpenThemeData(button.m_hWnd, L"Nothing") == NULL);
+  // SetWindowTheme with empty strings turns the style off for one window.
+  CHECK(SUCCEEDED(::SetWindowTheme(button.m_hWnd, L"", L"")));
+  CHECK(::OpenThemeData(button.m_hWnd, L"Button") == NULL);
+  CHECK(::OpenThemeData(pFrame->m_hWnd, L"Button") != NULL);
+  button.DestroyWindow();
+}
+#endif
+
 static CRect ClientRectOf(CWnd* pWnd, CWnd* pIn) {
   CRect rect;
   pWnd->GetWindowRect(&rect);
@@ -441,6 +485,9 @@ public:
     pFrame->SetWindowPos(NULL, 0, 0, 640, 480, SWP_NOZORDER);
     pFrame->ShowWindow(SW_SHOW);
     pFrame->UpdateWindow();
+#ifdef _WINPORT
+    TestVisualStyles(pFrame);
+#endif
     return TRUE;
   }
   virtual int ExitInstance() {

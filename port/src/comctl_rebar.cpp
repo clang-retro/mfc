@@ -3,6 +3,9 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "comctl.h"
+#include "theme.h"
+
+#include <vssym32.h>
 
 #include <string.h>
 
@@ -275,7 +278,10 @@ void PaintRebar(Rebar* r, HDC dc) {
     if (HasGripper(r, b) && b.cxHeader < 0) {
       RECT g = {x + 2, b.rect.top + 2, x + 5, b.rect.bottom - 2};
       RECT go = Oriented(r, g);
-      DrawEdge(dc, &go, BDR_RAISEDINNER, BF_RECT);
+      if (winport::theme::Themed(r->hwnd))
+        winport::theme::DrawPart(winport::theme::kRebar, dc, Vertical(r) ? RP_GRIPPERVERT : RP_GRIPPER, 0, go, NULL);
+      else
+        DrawEdge(dc, &go, BDR_RAISEDINNER, BF_RECT);
       x += kGripper;
     } else {
       x += kBandGap;

@@ -10,6 +10,7 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "gdi.h"
+#include "theme.h"
 #include "user.h"
 
 #include <string.h>
@@ -910,6 +911,8 @@ LRESULT CALLBACK EditProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       e->focus = true;
       PlaceCaret(e);
       Redraw(e);
+      // The visual style's border shows the focus.
+      if (winport::theme::Themed(h)) RedrawWindow(h, NULL, NULL, RDW_FRAME | RDW_INVALIDATE);
       Notify(e, EN_SETFOCUS);
       return 0;
     case WM_KILLFOCUS:
@@ -920,6 +923,7 @@ LRESULT CALLBACK EditProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       }
       e->tracking = false;
       Redraw(e);
+      if (winport::theme::Themed(h)) RedrawWindow(h, NULL, NULL, RDW_FRAME | RDW_INVALIDATE);
       Notify(e, EN_KILLFOCUS);
       return 0;
     case WM_LBUTTONDOWN: {

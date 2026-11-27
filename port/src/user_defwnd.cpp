@@ -9,6 +9,9 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "gdi.h"
+#include <vssym32.h>
+
+#include "theme.h"
 #include "user.h"
 
 #include <stdlib.h>
@@ -224,8 +227,33 @@ HBRUSH ScrollTroughBrush(HDC dc) {
 
 // Draws a scroll bar at r. trough is the brush for its trough, with the
 // colors of dc set for it; NULL takes the one of ScrollTroughBrush.
-void PaintScrollBar(HDC dc, const RECT& r, bool vertical, const ScrollBar* sb, HBRUSH trough_brush) {
+void PaintScrollBar(HDC dc, const RECT& r, bool vertical, const ScrollBar* sb, HBRUSH trough_brush, bool themed) {
   if (RectEmpty(r)) return;
+  if (themed) {
+    int a = vertical ? r.right - r.left : r.bottom - r.top;
+    int length = vertical ? r.bottom - r.top : r.right - r.left;
+    if (a * 2 > length) a = length / 2;
+    RECT first = vertical ? MakeRect(r.left, r.top, r.right, r.top + a) : MakeRect(r.left, r.top, r.left + a, r.bottom);
+    RECT last =
+        vertical ? MakeRect(r.left, r.bottom - a, r.right, r.bottom) : MakeRect(r.right - a, r.top, r.right, r.bottom);
+    RECT trough =
+        vertical ? MakeRect(r.left, first.bottom, r.right, last.top) : MakeRect(first.right, r.top, last.left, r.bottom);
+    int off = sb->enabled ? 0 : 3;  // the disabled states
+    theme::DrawPart(theme::kScrollBar, dc, vertical ? SBP_UPPERTRACKVERT : SBP_UPPERTRACKHORZ,
+                    sb->enabled ? SCRBS_NORMAL : SCRBS_DISABLED, trough, NULL);
+    theme::DrawPart(theme::kScrollBar, dc, SBP_ARROWBTN, (vertical ? ABS_UPNORMAL : ABS_LEFTNORMAL) + off, first, NULL);
+    theme::DrawPart(theme::kScrollBar, dc, SBP_ARROWBTN, (vertical ? ABS_DOWNNORMAL : ABS_RIGHTNORMAL) + off, last,
+                    NULL);
+    int tl = vertical ? trough.bottom - trough.top : trough.right - trough.left;
+    int pos, len;
+    ThumbOf(sb->info, tl, &pos, &len);
+    if (sb->enabled && len > 0 && sb->info.nMax > sb->info.nMin) {
+      RECT thumb = vertical ? MakeRect(r.left, trough.top + pos, r.right, trough.top + pos + len)
+                            : MakeRect(trough.left + pos, r.top, trough.left + pos + len, r.bottom);
+      theme::DrawPart(theme::kScrollBar, dc, vertical ? SBP_THUMBBTNVERT : SBP_THUMBBTNHORZ, SCRBS_NORMAL, thumb, NULL);
+    }
+    return;
+  }
   int a = vertical ? r.right - r.left : r.bottom - r.top;  // arrow box size
   int length = vertical ? r.bottom - r.top : r.right - r.left;
   if (a * 2 > length) a = length / 2;
@@ -254,7 +282,7 @@ void PaintScrollBar(HDC dc, const RECT& r, bool vertical, const ScrollBar* sb, H
 namespace {
 
 void DrawScrollBar(Window* w, HDC dc, const RECT& r, bool vertical) {
-  PaintScrollBar(dc, r, vertical, BarOf(w, vertical ? SB_VERT : SB_HORZ));
+  PaintScrollBar(dc, r, vertical, BarOf(w, vertical ? SB_VERT : SB_HORZ), NULL, theme::Themed(w->hwnd));
 }
 
 // Carets: one at a time, as on Windows.
@@ -535,11 +563,29 @@ void DrawFrameTo(Window* w, HDC dc) {
     if (w->style & WS_VSCROLL) c.right += GetSystemMetrics(SM_CXVSCROLL);
     if (w->style & WS_HSCROLL) c.bottom += GetSystemMetrics(SM_CYHSCROLL);
     InflateRect(&c, e, e);
-    DrawEdge(dc, &c, (w->exStyle & WS_EX_CLIENTEDGE) ? EDGE_SUNKEN : BDR_SUNKENOUTER, BF_RECT);
+    if ((w->exStyle & WS_EX_CLIENTEDGE) && theme::Themed(w->hwnd)) {
+      // The visual style's flat border: a line, then the window's color.
+      int state = !(w->style & WS_DISABLED) ? (GetFocus() == w->hwnd ? EPSN_FOCUSED : EPSN_NORMAL) : EPSN_DISABLED;
+      theme::DrawPart(theme::kEdit, dc, EP_EDITBORDER_NOSCROLL, state, c, NULL);
+      RECT in = c;
+      InflateRect(&in, -1, -1);
+      HBRUSH b = GetSysColorBrush((w->style & WS_DISABLED) ? COLOR_BTNFACE : COLOR_WINDOW);
+      for (int i = 1; i < e; i++) {
+        FrameRect(dc, &in, b);
+        InflateRect(&in, -1, -1);
+      }
+    } else {
+      DrawEdge(dc, &c, (w->exStyle & WS_EX_CLIENTEDGE) ? EDGE_SUNKEN : BDR_SUNKENOUTER, BF_RECT);
+    }
   }
   DrawScrollBar(w, dc, f.vscroll, true);
   DrawScrollBar(w, dc, f.hscroll, false);
-  if (!RectEmpty(f.grip)) Fill(dc, f.grip.left, f.grip.top, f.grip.right, f.grip.bottom, COLOR_BTNFACE);
+  if (!RectEmpty(f.grip)) {
+    if (theme::Themed(w->hwnd))
+      theme::DrawPart(theme::kScrollBar, dc, SBP_LOWERTRACKVERT, SCRBS_NORMAL, f.grip, NULL);
+    else
+      Fill(dc, f.grip.left, f.grip.top, f.grip.right, f.grip.bottom, COLOR_BTNFACE);
+  }
 }
 
 }  // namespace winport
