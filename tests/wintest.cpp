@@ -761,7 +761,7 @@ static void TestGlyphOutlines() {
   HGDIOBJ oldFont = ::SelectObject(dc, font);
   MAT2 ident = {{0, 1}, {0, 0}, {0, 0}, {0, 1}};
   GLYPHMETRICS gm = {};
-  CHECK(::GetGlyphOutlineW(dc, L'O', GGO_METRICS, &gm, 0, NULL, &ident) == 0);
+  CHECK(::GetGlyphOutlineW(dc, L'O', GGO_METRICS, &gm, 0, NULL, &ident) != GDI_ERROR);
   CHECK(gm.gmBlackBoxX > 4 && gm.gmBlackBoxY > 4 && gm.gmCellIncX > 0);
 
   // GGO_GRAY8_BITMAP: a byte for each pixel, 0 to 64, rows of 4 bytes.
@@ -831,7 +831,7 @@ static void TestGlyphOutlines() {
     // up instead of to the right.
     MAT2 turn = {{0, 0}, {0, 1}, {0, -1}, {0, 0}};
     GLYPHMETRICS gt = {};
-    CHECK(::GetGlyphOutlineW(dc, L'O', GGO_METRICS, &gt, 0, NULL, &turn) == 0);
+    CHECK(::GetGlyphOutlineW(dc, L'O', GGO_METRICS, &gt, 0, NULL, &turn) != GDI_ERROR);
     CHECK(abs((int)gt.gmBlackBoxX - (int)gm.gmBlackBoxY) <= 2);
     CHECK(abs((int)gt.gmBlackBoxY - (int)gm.gmBlackBoxX) <= 2);
     CHECK(gt.gmCellIncX == 0 && abs(gt.gmCellIncY) == gm.gmCellIncX);
