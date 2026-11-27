@@ -39,6 +39,22 @@
 
 using namespace Gdiplus;
 
+namespace winport {
+
+// Decodes a PNG image into rows of bytes red, green, blue and alpha, top
+// row first (see gdi.h).
+bool DecodePng(const unsigned char* data, size_t size, std::vector<unsigned char>& rgba, int* w, int* h) {
+  if (!data || size < 8 || size > 0x7FFFFFFF || memcmp(data, "\x89PNG\r\n\x1a\n", 8) != 0) return false;
+  int comp = 0;
+  stbi_uc* px = stbi_load_from_memory(data, (int)size, w, h, &comp, 4);
+  if (!px) return false;
+  rgba.assign(px, px + (size_t)*w * *h * 4);
+  stbi_image_free(px);
+  return true;
+}
+
+}  // namespace winport
+
 namespace {
 
 // A bitmap: its pixels top-down in its own format, rows of a whole

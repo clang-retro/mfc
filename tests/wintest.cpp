@@ -862,6 +862,78 @@ static HWND NewMenuWindow(HMENU menu) {
                            ::GetModuleHandleW(NULL), NULL);
 }
 
+// A 4 x 4 PNG image, row by row: opaque red, clear, blue at half alpha,
+// opaque green.
+static const unsigned char kPngIcon[] = {
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x08, 0x06, 0x00, 0x00, 0x00, 0xa9, 0xf1, 0x9e,
+    0x7e, 0x00, 0x00, 0x00, 0x17, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0xf8, 0xcf, 0xc0, 0xf0,
+    0x1f, 0x19, 0x33, 0x60, 0x01, 0xff, 0x1b, 0xd0, 0x30, 0x2a, 0x04, 0x00, 0xad, 0xe2, 0x15, 0xed,
+    0x56, 0x1c, 0x90, 0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
+
+// Whether two colors differ by at most 3 in each part.
+static bool NearColor(COLORREF a, COLORREF b) {
+  return abs((int)GetRValue(a) - (int)GetRValue(b)) <= 3 && abs((int)GetGValue(a) - (int)GetGValue(b)) <= 3 &&
+         abs((int)GetBValue(a) - (int)GetBValue(b)) <= 3;
+}
+
+// Draws an icon of the PNG image on white and checks its rows.
+static void CheckPngIcon(HICON icon) {
+  CHECK(icon != NULL);
+  if (!icon) return;
+  ICONINFO ii = {};
+  CHECK(::GetIconInfo(icon, &ii) && ii.fIcon && ii.hbmColor != NULL);
+  BITMAP bm = {};
+  if (ii.hbmColor) CHECK(::GetObjectW(ii.hbmColor, sizeof bm, &bm) && bm.bmWidth == 4 && bm.bmHeight == 4);
+  if (ii.hbmMask) ::DeleteObject(ii.hbmMask);
+  if (ii.hbmColor) ::DeleteObject(ii.hbmColor);
+  BITMAPINFO bi = {};
+  bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+  bi.bmiHeader.biWidth = 4;
+  bi.bmiHeader.biHeight = -4;
+  bi.bmiHeader.biPlanes = 1;
+  bi.bmiHeader.biBitCount = 32;
+  void* bits = NULL;
+  HBITMAP target = ::CreateDIBSection(NULL, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+  HDC mem = ::CreateCompatibleDC(NULL);
+  HGDIOBJ old = ::SelectObject(mem, target);
+  RECT all = {0, 0, 4, 4};
+  ::FillRect(mem, &all, (HBRUSH)::GetStockObject(WHITE_BRUSH));
+  CHECK(::DrawIconEx(mem, 0, 0, icon, 4, 4, 0, NULL, DI_NORMAL));
+  CHECK(::GetPixel(mem, 1, 0) == RGB(255, 0, 0));
+  CHECK(::GetPixel(mem, 1, 1) == RGB(255, 255, 255));
+  CHECK(NearColor(::GetPixel(mem, 1, 2), RGB(127, 127, 255)));
+  CHECK(::GetPixel(mem, 1, 3) == RGB(0, 255, 0));
+  ::SelectObject(mem, old);
+  ::DeleteDC(mem);
+  ::DeleteObject(target);
+  ::DestroyIcon(icon);
+}
+
+// Icons whose images are PNG files, as those of Windows Vista and later:
+// from the bits of a resource, and from an icon file.
+static void TestPngIcons() {
+  std::vector<BYTE> png(kPngIcon, kPngIcon + sizeof kPngIcon);
+  CheckPngIcon(::CreateIconFromResourceEx(png.data(), (DWORD)png.size(), TRUE, 0x00030000, 4, 4, 0));
+  CheckPngIcon(::CreateIconFromResourceEx(png.data(), (DWORD)png.size(), TRUE, 0x00030000, 0, 0, 0));
+
+  // An icon file with one entry: the PNG image.
+  std::vector<BYTE> file = {0, 0, 1, 0, 1, 0, 4, 4, 0, 0, 1, 0, 32, 0};
+  DWORD bytes = (DWORD)png.size(), offset = 22;
+  for (int i = 0; i < 4; i++) file.push_back((BYTE)(bytes >> (8 * i)));
+  for (int i = 0; i < 4; i++) file.push_back((BYTE)(offset >> (8 * i)));
+  file.insert(file.end(), png.begin(), png.end());
+  WCHAR dir[MAX_PATH], path[MAX_PATH];
+  ::GetTempPathW(MAX_PATH, dir);
+  ::GetTempFileNameW(dir, L"ico", 0, path);
+  HANDLE f = ::CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+  DWORD wrote = 0;
+  CHECK(f != INVALID_HANDLE_VALUE && ::WriteFile(f, file.data(), (DWORD)file.size(), &wrote, NULL));
+  if (f != INVALID_HANDLE_VALUE) ::CloseHandle(f);
+  CheckPngIcon((HICON)::LoadImageW(NULL, path, IMAGE_ICON, 4, 4, LR_LOADFROMFILE));
+  ::DeleteFileW(path);
+}
+
 static void TestIconsAndAccelerators() {
   HICON app = ::LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
   CHECK(app != NULL);
@@ -4662,6 +4734,7 @@ int main() {
   TestShapes();
   TestText();
   TestIconsAndAccelerators();
+  TestPngIcons();
   TestMenus();
   TestDialogsAndControls();
   TestMdi();
