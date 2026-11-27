@@ -11,6 +11,7 @@
 #include "winport.h"
 #include <shellapi.h>
 
+#include "shell.h"
 #include "winhelp.h"
 
 #include <dirent.h>
@@ -1256,6 +1257,11 @@ void WINAPI ExitProcess(UINT code) {
 static HINSTANCE ShellExecuteCore(const std::string& verb, const std::string& file) {
   if (!verb.empty() && verb != "open") return (HINSTANCE)(intptr_t)SE_ERR_NOASSOC;
   if (file.empty()) return (HINSTANCE)(intptr_t)ERROR_FILE_NOT_FOUND;
+  // A shortcut opens what it points to.
+  if (file.size() > 4 && strcasecmp(file.c_str() + file.size() - 4, ".lnk") == 0) {
+    std::wstring target = winport::ShortcutTarget(Widen(file.c_str()), NULL, NULL);
+    if (!target.empty()) return ShellExecuteCore(verb, Narrow(target.c_str()));
+  }
 #if defined(__APPLE__)
   const char* opener = "open";
 #else

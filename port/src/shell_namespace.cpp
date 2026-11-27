@@ -161,6 +161,7 @@ SFGAOF Attributes(const std::string& path, SFGAOF want) {
     if ((want & SFGAO_HASSUBFOLDER) && !ListDir(path, true, false, true).empty()) a |= SFGAO_HASSUBFOLDER;
   } else {
     a |= SFGAO_STREAM;
+    if (leaf.size() > 4 && strcasecmp(leaf.c_str() + leaf.size() - 4, ".lnk") == 0) a |= SFGAO_LINK;
   }
   return a;
 }
@@ -279,8 +280,7 @@ class ShellFolder final : public IShellFolder {
     return S_OK;
   }
 
-  // A folder below this one. No item is a shortcut (see shlobj.h), so
-  // IShellLink is not offered.
+  // A folder below this one.
   STDMETHODIMP BindToObject(PCUIDLIST_RELATIVE pidl, IBindCtx*, REFIID riid, void** ppv) override {
     if (!ppv) return E_POINTER;
     *ppv = NULL;
