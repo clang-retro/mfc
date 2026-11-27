@@ -30,5 +30,26 @@
 #include <afxpropertygridctrl.h>
 #include <afxshelltreectrl.h>
 #include <afxshelllistctrl.h>
+#include <afxbasepane.h>
+#include <afxpane.h>
+#include <afxdockingmanager.h>
+#include <afxdockablepane.h>
+#include <afxtabbedpane.h>
+#include <afxpaneframewnd.h>
+#include <afxautohidebar.h>
+#include <afxtoolbarimages.h>
+#include <afxtoolbarbutton.h>
+#include <afxtoolbarmenubutton.h>
+#include <afxtoolbarcomboboxbutton.h>
+#include <afxtoolbar.h>
+#include <afxmenubar.h>
+#include <afxstatusbar.h>
+#include <afxcommandmanager.h>
+#include <afxpopupmenu.h>
+#include <afxtooltipctrl.h>
+#include <afxframewndex.h>
+#include <afxmdiframewndex.h>
+#include <afxmdichildwndex.h>
+#include <afxtoolbarscustomizedialog.h>
 
 #endif  // __AFXCONTROLBARS_H__

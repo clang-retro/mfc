@@ -23,6 +23,13 @@ class CMFCHeaderCtrl;
 class CMFCBaseTabCtrl;
 class CMFCPropertyGridCtrl;
 class CMFCSpinButtonCtrl;
+class CBasePane;
+class CDockablePane;
+class CMFCToolBar;
+class CMFCToolBarButton;
+class CMFCCaptionButton;
+class CMFCStatusBar;
+struct CMFCStatusBarPaneInfo;
 
 // The spin button parts' states for OnDrawSpinButtons.
 #define AFX_SPIN_PRESSEDUP 0x0001
@@ -83,6 +90,33 @@ public:
   virtual COLORREF GetPropertyGridGroupColor(CMFCPropertyGridCtrl* pPropList);
   virtual COLORREF GetPropertyGridGroupTextColor(CMFCPropertyGridCtrl* pPropList);
   virtual COLORREF OnFillPropertyGridGroup(CDC* pDC, CMFCPropertyGridCtrl* pPropList, CRect rect);
+
+  // ----- Bars and their buttons.
+  virtual void OnFillBarBackground(CDC* pDC, CBasePane* pBar, CRect rectClient, CRect rectClip,
+                                   BOOL bNCArea = FALSE);
+  virtual void OnDrawBarGripper(CDC* pDC, CRect rectGripper, BOOL bHorz, CBasePane* pBar);
+  virtual void OnDrawSeparator(CDC* pDC, CBasePane* pBar, CRect rect, BOOL bIsHoriz);
+  virtual void OnFillButtonInterior(CDC* pDC, CMFCToolBarButton* pButton, CRect rect, AFX_BUTTON_STATE state);
+  virtual void OnDrawButtonBorder(CDC* pDC, CMFCToolBarButton* pButton, CRect rect, AFX_BUTTON_STATE state);
+  virtual COLORREF GetToolbarButtonTextColor(CMFCToolBarButton* pButton, AFX_BUTTON_STATE state);
+  virtual void OnHighlightMenuItem(CDC* pDC, CMFCToolBarButton* pButton, CRect rect, COLORREF& clrText);
+
+  // ----- Dockable panes: the caption (returns its text color), its
+  // buttons, and the divider that resizes the pane.
+  virtual COLORREF OnDrawPaneCaption(CDC* pDC, CDockablePane* pBar, BOOL bActive, CRect rectCaption,
+                                     CRect rectButtons);
+  virtual void OnDrawCaptionButton(CDC* pDC, CMFCCaptionButton* pButton, BOOL bActive, BOOL bHorz,
+                                   BOOL bMaximized, BOOL bDisabled, int nImageID = -1);
+  virtual void OnDrawPaneDivider(CDC* pDC, CBasePane* pBar, CRect rect, BOOL bIsHoriz);
+  virtual void OnDrawAutoHideButtonBorder(CDC* pDC, CRect rectBounds, CRect rectBorderSize, CBasePane* pButton);
+  virtual int GetDockingPaneCaptionExtraHeight() const { return 0; }
+
+  // ----- Status bars.
+  virtual void OnDrawStatusBarPaneBorder(CDC* pDC, CMFCStatusBar* pBar, CRect rectPane, UINT uiID, UINT nStyle);
+  virtual void OnDrawStatusBarProgress(CDC* pDC, CMFCStatusBar* pStatusBar, CRect rectProgress, int nProgressTotal,
+                                       int nProgressCurr, COLORREF clrBar, COLORREF clrProgressBarDest,
+                                       COLORREF clrProgressText, BOOL bProgressText);
+  virtual void OnDrawStatusBarSizeBox(CDC* pDC, CMFCStatusBar* pStatBar, CRect rectSizeBox);
 
   // ----- Colors of the look.
   virtual COLORREF GetHighlightColor() const { return m_clrHighlight; }
