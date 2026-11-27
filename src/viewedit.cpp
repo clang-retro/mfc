@@ -260,16 +260,30 @@ void CEditView::OnFindNext(LPCTSTR lpszFind, BOOL bNext, BOOL bCase) {
   if (!FindText(state.strFind, bNext, bCase)) OnTextNotFound(state.strFind);
 }
 
+// Prepares a replace with the find text, the direction and the case of
+// the last find or replace. If the selection is not the find text, this
+// selects the next occurrence. Returns FALSE, after OnTextNotFound, if
+// the find text is empty or is not in the text.
+BOOL CEditView::InitializeReplace() {
+  AFX_EDIT_STATE& state = _AfxEditState();
+  if (state.strFind.IsEmpty()) return FALSE;
+  if (!SameAsSelected(state.strFind, state.bCase) &&
+      !FindText(state.strFind, state.bNext, state.bCase)) {
+    OnTextNotFound(state.strFind);
+    return FALSE;
+  }
+  return TRUE;
+}
+
+// Replaces the selection, or the next occurrence of lpszFind, with
+// lpszReplace, then selects the occurrence after it.
 void CEditView::OnReplaceSel(LPCTSTR lpszFind, BOOL bNext, BOOL bCase, LPCTSTR lpszReplace) {
   AFX_EDIT_STATE& state = _AfxEditState();
   state.strFind = lpszFind;
   state.strReplace = lpszReplace;
   state.bCase = bCase;
   state.bNext = bNext;
-  if (!SameAsSelected(state.strFind, bCase)) {
-    if (!FindText(state.strFind, bNext, bCase)) OnTextNotFound(state.strFind);
-    return;
-  }
+  if (!InitializeReplace()) return;
   GetEditCtrl().ReplaceSel(state.strReplace, TRUE);
   if (!FindText(state.strFind, bNext, bCase)) OnTextNotFound(state.strFind);
 }

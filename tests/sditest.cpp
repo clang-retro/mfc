@@ -151,6 +151,16 @@ public:
         GetView()->GetSelectedText(strSel);
         CHECK(strSel == _T("Second"));
         CHECK(!GetView()->FindText(_T("missing")));
+        // Replace with no selection finds the next occurrence and
+        // replaces it; Replace All puts the text back.
+        GetView()->GetEditCtrl().SetSel(0, 0);
+        GetView()->OnReplaceSel(_T("second"), TRUE, FALSE, _T("Third"));
+        CString strText;
+        GetView()->GetWindowText(strText);
+        CHECK(strText == _T("Hello, world.\r\nThird line."));
+        GetView()->OnReplaceAll(_T("Third"), _T("Second"), TRUE);
+        GetView()->GetWindowText(strText);
+        CHECK(strText == _T("Hello, world.\r\nSecond line."));
         // Fly-by help puts a command's prompt in the status bar.
         SendMessage(WM_SETMESSAGESTRING, ID_FILE_NEW);
         CHECK(m_wndStatusBar.GetPaneText(0) == _T("Create a new document"));
