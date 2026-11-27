@@ -834,6 +834,11 @@ try.
   advised with AtlAdviseSinkMap); and CAxDialogImpl over DIALOG and
   DIALOGEX templates that name controls by CLSID, their saved state
   (and a license key) from DLGINIT, as the dialog editor writes them.
+* `atlnettest`: atlsocket.h, atlmime.h, atlsmtpconnection.h and
+  atlhttp.h against an HTTP and an SMTP server of the test's own on the
+  loopback address: messages and their encodings, mail sent with a
+  dot-stuffed line and a refused recipient, and requests with each kind
+  of body, POST, redirects, Basic authentication and a proxy.
 * `atlutiltest`: ATL's utility headers in a program without MFC: CString
   from `atlstr.h` (formatting, string resources, conversions, errors as
   CAtlException); CSimpleArray and CSimpleMap; CAtlArray, CAtlList,
@@ -1150,7 +1155,15 @@ request with the stock MinGW-w64 toolchain.
   (Base64, UUEncode, quoted-printable, hex, BEncode, EscapeXML and
   AtlUnicodeToUTF8); `atlcrypt.h` (CCryptProv, CCryptHash and the MD5,
   SHA and HMAC hashes, CCryptKey and the derived, random, imported and
-  user keys); `atlsocket.h` (CSocketAddr over getaddrinfo); `atlrx.h`
+  user keys); `atlsocket.h` (CSocketAddr over getaddrinfo, and
+  ZEvtSyncSocket, a stream socket with timeouts); `atlmime.h`
+  (CMimeMessage, its headers, text, attachments from files and memory in
+  base64, uuencoding or quoted-printable, and attached messages;
+  non-ASCII headers "B" encoded); `atlsmtpconnection.h` (CSMTPConnection:
+  SendMessage, SendRaw and SendSimple, "host:port" taken too);
+  `atlhttp.h` (CAtlHttpClient and CAtlNavigateData: kept connections,
+  bodies with a length, chunked or to the close, POST in blocks or
+  chunked, redirects, a proxy, and CBasicAuthObject; no NTLM); `atlrx.h`
   (CAtlRegExp and CAtlREMatchContext, ATL's syntax with {} for match
   groups); `atlutil.h` (CUrl, AtlEscapeUrl, AtlUnescapeUrl,
   AtlCanonicalizeUrl, AtlCombineUrl, AtlGetErrorDescription, the thread
