@@ -1,0 +1,13 @@
+// fptest.rc - resources for fptest.
+#include <windows.h>
+#include <afxres.h>
+#include "fptest.h"
+
+IDR_POPUPMENU MENU
+BEGIN
+  POPUP "Menu"
+  BEGIN
+    MENUITEM "&One", ID_MENU_ONE
+    MENUITEM "&Two", ID_MENU_TWO
+  END
+END

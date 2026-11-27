@@ -546,7 +546,7 @@ when there is no display. For a Linux or macOS target it builds `core`,
 `docobtest`, `linktest`, `bindtest`, `richtest`, `richsrvtest`,
 `autotest`, `srvtest`, `atlwintest`, `atltest`, `conntest`, `ctltest`,
 `wltest`, `dragtest`, `daotest`, `dvtest`, `htmltest`, `atlctltest`,
-`atlutiltest`, `cdlgtest`, `vistatest`, `iotest`, `dpitest`, `imetest`, `audiotest`,
+`atlutiltest`, `cdlgtest`, `vistatest`, `fptest`, `iotest`, `dpitest`, `imetest`, `audiotest`,
 `wtltest`, `sstest` and `hlptest` against
 the portable layer, and `exttest`, `core`, `sditest`,
 `dlgtest` and `dlltest` again with the shared libraries
@@ -907,6 +907,14 @@ try.
   a dispatch exception raised and left for GetErrorInfo); on Windows
   against MinGW's headers and comsupp library, elsewhere the portable
   layer's.
+* `fptest` (Windows, Linux and macOS): the Feature Pack's base:
+  CSettingsStore's values written and read back by type, CWinAppEx's
+  settings and managers, each visual manager in turn; CMFCButton as a
+  push button (sized to its text and image), check box and radio group;
+  the link; the menu button's menu and the color button's palette
+  driven from the keyboard; the browse button's frame space and click;
+  masked input (refused characters, backspace, delete, the whole text or
+  the typed characters); the font combo box's fonts; the spin button.
 * `atlutiltest`: ATL's utility headers in a program without MFC: CString
   from `atlstr.h` (formatting, string resources, conversions, errors as
   CAtlException); CSimpleArray and CSimpleMap; CAtlArray, CAtlList,
@@ -1140,6 +1148,19 @@ request with the stock MinGW-w64 toolchain.
   (command link notes, split button parts, the shield), CSplitButton
   drops down a menu, and CNetAddressCtrl wraps shell32's network address
   control. `afxmt.h`: synchronization objects.
+* The Feature Pack's base (MFC 9), so far: CWinAppEx (its settings
+  under `Software\<key>\<application>\Workspace`, the window
+  placement, and the context menu, keyboard, mouse, shell and tooltip
+  managers), CSettingsStore and CSettingsStoreSP (numbers, strings and
+  serialized arrays, lists, maps and objects in the registry),
+  `afxGlobalData`, and the visual managers (classic, Office XP, Windows,
+  Office 2003, VS 2005, Office 2007 in its four styles, VS 2008 and
+  Windows 7) that draw the standalone controls: CMFCButton (flat or 3D,
+  images for each state, check boxes and radio groups it keeps itself),
+  CMFCLinkCtrl, CMFCMenuButton, CMFCColorButton and its palette,
+  CMFCEditBrowseCtrl (a file, folder or custom browse button in the
+  edit's frame), CMFCMaskedEdit, CMFCFontComboBox and
+  CMFCSpinButtonCtrl. `afxcontrolbars.h` includes them all.
 * `afxinet.h`: the internet classes over WinINet: CInternetSession
   (OpenURL, options, cookies, the status callback), CHttpConnection and
   CHttpFile, CFtpConnection, CFtpFileFind, CGopherConnection,

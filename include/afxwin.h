@@ -534,6 +534,12 @@ public:
     return ::DrawState(m_hDC, hBrush, NULL, (LPARAM)hIcon, 0, pt.x, pt.y, size.cx, size.cy,
                        nFlags | DST_ICON);
   }
+  BOOL DrawState(CPoint pt, CSize size, HBITMAP hBitmap, UINT nFlags, CBrush* pBrush) {
+    return DrawState(pt, size, hBitmap, nFlags, (HBRUSH)(pBrush != NULL ? pBrush->m_hObject : NULL));
+  }
+  BOOL DrawState(CPoint pt, CSize size, HICON hIcon, UINT nFlags, CBrush* pBrush) {
+    return DrawState(pt, size, hIcon, nFlags, (HBRUSH)(pBrush != NULL ? pBrush->m_hObject : NULL));
+  }
   BOOL DrawState(CPoint pt, CSize size, LPCTSTR lpszText, UINT nFlags, BOOL bPrefixText = TRUE,
                  int nTextLen = 0, HBRUSH hBrush = NULL) {
     return ::DrawState(m_hDC, hBrush, NULL, (LPARAM)lpszText, (WPARAM)nTextLen, pt.x, pt.y,
