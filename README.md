@@ -339,8 +339,12 @@ and string functions, access control lists and SDDL work as well.
 The shell namespace is the file system: the desktop is the root `/`,
 an item ID list holds one item for each component of a path, and shell
 folders (`SHGetDesktopFolder`, `IShellFolder`) list, parse, compare and
-rename what is in them. There are no shortcuts (`SFGAO_LINK`), since
-symbolic links need none. `SHBrowseForFolder` shows a tree of the
+rename what is in them. Shortcuts (`CLSID_ShellLink`, with `IShellLink`,
+`IPersistFile` and `IPersistStream`) are `.lnk` files in Windows' own
+format, so shortcuts made on Windows open here and the other way round;
+a folder shows a `.lnk` file as a link (`SFGAO_LINK`), `Resolve` finds a
+moved target by the shortcut's relative path, and `ShellExecute` opens
+what a shortcut points to. `SHBrowseForFolder` shows a tree of the
 folders below its root and answers the `BFFM_` messages. There are no
 visual styles: the controls draw the classic look, as Windows does with
 styles turned off (scroll bar troughs in a checker, trackbar thumbs with
@@ -568,8 +572,11 @@ try.
   themes (absent), the classic look (the checker of a scroll bar's
   trough, a list box's scroll bar shown again, a trackbar's pointed
   thumb) and the OpenGL pixel formats, DECIMAL conversions and comparison,
-  and the shell namespace (ID lists, shell folders and their items) with
-  SHBrowseForFolder driven through its callback, on the console.
+  the shell namespace (ID lists, shell folders and their items) with
+  SHBrowseForFolder driven through its callback, and shortcuts (every
+  IShellLink field through a .lnk file and a stream, the file's header
+  and LinkInfo, a target moved with its shortcut found again), on the
+  console.
 * `disptest`: the automation helpers in `afxdisp.h` (COleDateTime and
   its span, COleCurrency, COleVariant, COleSafeArray) and a
   COleDispatchDriver calling an IDispatch written in the test, on the

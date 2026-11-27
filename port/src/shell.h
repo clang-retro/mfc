@@ -24,5 +24,11 @@ std::string AbsolutePath(const std::wstring& name);
 bool IsDir(const std::string& path);
 // A folder's entries, sorted by name, ignoring case.
 std::vector<std::string> ListDir(const std::string& path, bool folders, bool files, bool hidden);
+// A shortcut (.lnk) file's target, with its arguments and working
+// directory; empty when the file is not a shortcut (shell_link.cpp).
+std::wstring ShortcutTarget(const std::wstring& file, std::wstring* args, std::wstring* dir);
+namespace ole {
+HRESULT GetShellLinkClassObject(REFIID riid, void** out);
+}
 
 }  // namespace winport

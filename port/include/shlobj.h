@@ -73,6 +73,8 @@ BOOL WINAPI SHGetSpecialFolderPathW(HWND, LPWSTR, int, BOOL);
 // component, holding the component in UTF-8. The empty list is the
 // desktop itself.
 extern const IID IID_IShellFolder, IID_IEnumIDList, IID_IShellLinkA, IID_IShellLinkW;
+// shlguid.h's: the shell's shortcut object.
+extern const CLSID CLSID_ShellLink;
 
 typedef DWORD SHCONTF;
 #define SHCONTF_CHECKING_FOR_CHILDREN 0x0010
@@ -268,8 +270,9 @@ typedef IShellFolder* LPSHELLFOLDER;
 #define SHCIDS_CANONICALONLY 0x10000000L
 #define SHCIDS_COLUMNMASK 0x0000FFFFL
 
-// A shortcut. Native file systems have symbolic links instead, which the
-// system follows by itself, so no item here is a shortcut (SFGAO_LINK).
+// A shortcut (CLSID_ShellLink): a .lnk file, in Windows' format. A .lnk
+// file in a folder is a link (SFGAO_LINK); symbolic links are followed by
+// the system itself.
 #define SLR_NO_UI 0x0001
 #define SLR_ANY_MATCH 0x0002
 #define SLR_UPDATE 0x0004
