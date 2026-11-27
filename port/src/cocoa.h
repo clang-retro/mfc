@@ -33,6 +33,14 @@ void SetUnits(double unitsPerPoint);
 void ScreenSize(int* width, int* height);
 // The screen without the menu bar and the Dock.
 void WorkArea(int* x, int* y, int* width, int* height);
+// Every screen, the one with the menu bar first: its frame and the part
+// without the menu bar and the Dock, and its pixels to a point.
+struct Screen {
+  int x, y, width, height;
+  int workX, workY, workWidth, workHeight;
+  double scale;
+};
+std::vector<Screen> Screens();
 Win* Create(void* owner, int x, int y, int width, int height, bool popup);
 void Destroy(Win* w);
 enum { kHide, kShow, kShowKey };

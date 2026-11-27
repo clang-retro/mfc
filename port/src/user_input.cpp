@@ -650,8 +650,7 @@ BOOL WINAPI ClipCursor(const RECT* r) {
 BOOL WINAPI GetClipCursor(LPRECT r) {
   if (!r) return FALSE;
   if (RectEmpty(g_clipCursor)) {
-    SIZE s = GetBackend()->ScreenSize();
-    *r = MakeRect(0, 0, s.cx, s.cy);
+    *r = VirtualScreen();
   } else {
     *r = g_clipCursor;
   }

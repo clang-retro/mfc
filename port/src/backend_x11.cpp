@@ -116,6 +116,40 @@ struct XfixesLib {
   }
 };
 
+// libXrandr's monitors (RandR 1.5), else libXinerama's screens, for the
+// monitors. Their headers may be missing, so what is used is declared
+// here as the libraries define it.
+struct XRRMonitorInfoRec {
+  Atom name;
+  Bool primary, automatic;
+  int noutput;
+  int x, y, width, height;
+  int mwidth, mheight;
+  unsigned long* outputs;
+};
+struct XineramaScreenInfoRec {
+  int screen_number;
+  short x_org, y_org, width, height;
+};
+struct MonitorLibs {
+  XRRMonitorInfoRec* (*XRRGetMonitors)(Display* dpy, ::Window w, Bool active, int* n) = nullptr;
+  void (*XRRFreeMonitors)(XRRMonitorInfoRec* m) = nullptr;
+  Bool (*XineramaIsActive)(Display* dpy) = nullptr;
+  XineramaScreenInfoRec* (*XineramaQueryScreens)(Display* dpy, int* n) = nullptr;
+  void Load() {
+    if (void* lib = dlopen("libXrandr.so.2", RTLD_NOW | RTLD_LOCAL)) {
+      XRRGetMonitors = (decltype(XRRGetMonitors))dlsym(lib, "XRRGetMonitors");
+      XRRFreeMonitors = (decltype(XRRFreeMonitors))dlsym(lib, "XRRFreeMonitors");
+      if (!XRRFreeMonitors) XRRGetMonitors = nullptr;
+    }
+    if (void* lib = dlopen("libXinerama.so.1", RTLD_NOW | RTLD_LOCAL)) {
+      XineramaIsActive = (decltype(XineramaIsActive))dlsym(lib, "XineramaIsActive");
+      XineramaQueryScreens = (decltype(XineramaQueryScreens))dlsym(lib, "XineramaQueryScreens");
+      if (!XineramaIsActive) XineramaQueryScreens = nullptr;
+    }
+  }
+};
+
 // libXext's SHAPE extension, for windows that are not rectangles. Its
 // header may be missing, so the functions are declared here as the
 // library defines them.
@@ -366,9 +400,61 @@ struct X11Backend : Backend {
     return k >= 1 && k <= 10 ? k : 1;
   }
 
+  // The screen is the primary monitor; the root window may hold more.
   SIZE ScreenSize() override {
     if (!dpy) return SIZE{1024, 768};
-    return SIZE{DisplayWidth(dpy, screen), DisplayHeight(dpy, screen)};
+    RECT r = Monitors()[0].rect;
+    return SIZE{r.right - r.left, r.bottom - r.top};
+  }
+  RECT WorkArea() override { return Monitors()[0].work; }
+
+  // The monitors, from RandR or Xinerama, the primary one first; the
+  // whole root window when neither says. Asked again after a second.
+  MonitorLibs monitorLibs;
+  bool monitorLibsLoaded = false;
+  std::vector<Monitor> monitors;
+  DWORD monitorsAt = 0;
+  std::vector<Monitor> Monitors() override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!dpy) return Backend::Monitors();
+    DWORD now = GetTickCount();
+    if (!monitors.empty() && now - monitorsAt < 1000) return monitors;
+    if (!monitorLibsLoaded) {
+      monitorLibs.Load();
+      monitorLibsLoaded = true;
+    }
+    double scale = DesktopScale();
+    std::vector<Monitor> m;
+    int n = 0;
+    if (monitorLibs.XRRGetMonitors) {
+      if (XRRMonitorInfoRec* r = monitorLibs.XRRGetMonitors(dpy, root, True, &n)) {
+        for (int i = 0; i < n; i++) {
+          RECT rect = {r[i].x, r[i].y, r[i].x + r[i].width, r[i].y + r[i].height};
+          Monitor mon{rect, rect, scale};
+          if (r[i].primary)
+            m.insert(m.begin(), mon);
+          else
+            m.push_back(mon);
+        }
+        monitorLibs.XRRFreeMonitors(r);
+      }
+    }
+    if (m.empty() && monitorLibs.XineramaQueryScreens && monitorLibs.XineramaIsActive(dpy)) {
+      if (XineramaScreenInfoRec* s = monitorLibs.XineramaQueryScreens(dpy, &n)) {
+        for (int i = 0; i < n; i++) {
+          RECT rect = {s[i].x_org, s[i].y_org, s[i].x_org + s[i].width, s[i].y_org + s[i].height};
+          m.push_back(Monitor{rect, rect, scale});
+        }
+        x.XFree(s);
+      }
+    }
+    if (m.empty()) {
+      RECT rect = {0, 0, DisplayWidth(dpy, screen), DisplayHeight(dpy, screen)};
+      m.push_back(Monitor{rect, rect, scale});
+    }
+    monitors = m;
+    monitorsAt = now;
+    return monitors;
   }
 
   Native* NativeOf(Window* w) { return (Native*)w->native; }

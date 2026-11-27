@@ -687,9 +687,14 @@ int WINAPI GetSystemMetrics(int index) {
   Theme& t = CurrentTheme();
   int frame = t.border + 3;
   switch (index) {
-    case SM_CXSCREEN: case SM_CXFULLSCREEN: case SM_CXVIRTUALSCREEN: case SM_CXMAXIMIZED:
+    case SM_CXSCREEN: case SM_CXFULLSCREEN: case SM_CXMAXIMIZED:
       return GetBackend()->ScreenSize().cx;
-    case SM_CYSCREEN: case SM_CYVIRTUALSCREEN: case SM_CYMAXIMIZED: return GetBackend()->ScreenSize().cy;
+    case SM_CYSCREEN: case SM_CYMAXIMIZED: return GetBackend()->ScreenSize().cy;
+    case SM_XVIRTUALSCREEN: return VirtualScreen().left;
+    case SM_YVIRTUALSCREEN: return VirtualScreen().top;
+    case SM_CXVIRTUALSCREEN: return VirtualScreen().right - VirtualScreen().left;
+    case SM_CYVIRTUALSCREEN: return VirtualScreen().bottom - VirtualScreen().top;
+    case SM_CMONITORS: return (int)GetBackend()->Monitors().size();
     case SM_CYFULLSCREEN: return GetBackend()->ScreenSize().cy - (t.captionHeight + 1) - 30;
     case SM_CXVSCROLL: case SM_CYVSCROLL: return t.scrollWidth;
     case SM_CYHSCROLL: case SM_CXHSCROLL: return t.scrollHeight;
@@ -718,7 +723,6 @@ int WINAPI GetSystemMetrics(int index) {
     case SM_CXMENUCHECK: case SM_CYMENUCHECK: return Scale96(13);
     case SM_CMOUSEBUTTONS: return 3;
     case SM_MOUSEPRESENT: case SM_MOUSEWHEELPRESENT: return 1;
-    case SM_CMONITORS: return 1;
     case SM_SAMEDISPLAYFORMAT: return 1;
     default: return 0;
   }
@@ -831,60 +835,12 @@ BOOL WINAPI SystemParametersInfoW(UINT action, UINT uiParam, PVOID pv, UINT winI
       return FALSE;
   }
 }
-// Describes the screen's one display mode: its size, 32 bits a pixel and
-// 60 Hz. Only the current mode (or mode 0) exists.
-BOOL WINAPI EnumDisplaySettingsW(LPCWSTR, DWORD mode, DEVMODEW* dm) {
-  if (!dm || (mode != ENUM_CURRENT_SETTINGS && mode != ENUM_REGISTRY_SETTINGS && mode != 0)) return FALSE;
-  WORD extra = dm->dmDriverExtra;
-  memset(dm, 0, sizeof *dm);
-  dm->dmSize = sizeof *dm;
-  dm->dmDriverExtra = extra;
-  dm->dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
-  dm->dmBitsPerPel = 32;
-  dm->dmPelsWidth = (DWORD)GetSystemMetrics(SM_CXSCREEN);
-  dm->dmPelsHeight = (DWORD)GetSystemMetrics(SM_CYSCREEN);
-  dm->dmDisplayFrequency = 60;
-  return TRUE;
+// The screen's mode does not change (ChangeDisplaySettingsExW).
+LONG WINAPI ChangeDisplaySettingsW(DEVMODEW* dm, DWORD flags) {
+  return ChangeDisplaySettingsExW(NULL, dm, NULL, flags, NULL);
 }
-
-// The ANSI form of EnumDisplaySettingsW.
-BOOL WINAPI EnumDisplaySettingsA(LPCSTR, DWORD mode, DEVMODEA* dm) {
-  DEVMODEW w;
-  w.dmDriverExtra = 0;
-  if (!dm || !EnumDisplaySettingsW(NULL, mode, &w)) return FALSE;
-  WORD extra = dm->dmDriverExtra;
-  memset(dm, 0, sizeof *dm);
-  dm->dmSize = sizeof *dm;
-  dm->dmDriverExtra = extra;
-  dm->dmFields = w.dmFields;
-  dm->dmBitsPerPel = w.dmBitsPerPel;
-  dm->dmPelsWidth = w.dmPelsWidth;
-  dm->dmPelsHeight = w.dmPelsHeight;
-  dm->dmDisplayFrequency = w.dmDisplayFrequency;
-  return TRUE;
-}
-
-// The screen's mode does not change. Going back to the saved mode (no
-// DEVMODE) or asking for the current size succeeds; other modes are
-// refused.
-LONG WINAPI ChangeDisplaySettingsW(DEVMODEW* dm, DWORD) {
-  if (!dm) return DISP_CHANGE_SUCCESSFUL;
-  if ((dm->dmFields & DM_PELSWIDTH) && dm->dmPelsWidth != (DWORD)GetSystemMetrics(SM_CXSCREEN))
-    return DISP_CHANGE_BADMODE;
-  if ((dm->dmFields & DM_PELSHEIGHT) && dm->dmPelsHeight != (DWORD)GetSystemMetrics(SM_CYSCREEN))
-    return DISP_CHANGE_BADMODE;
-  return DISP_CHANGE_SUCCESSFUL;
-}
-
-// The ANSI form of ChangeDisplaySettingsW.
 LONG WINAPI ChangeDisplaySettingsA(DEVMODEA* dm, DWORD flags) {
-  if (!dm) return ChangeDisplaySettingsW(NULL, flags);
-  DEVMODEW w;
-  memset(&w, 0, sizeof w);
-  w.dmFields = dm->dmFields;
-  w.dmPelsWidth = dm->dmPelsWidth;
-  w.dmPelsHeight = dm->dmPelsHeight;
-  return ChangeDisplaySettingsW(&w, flags);
+  return ChangeDisplaySettingsExA(NULL, dm, NULL, flags, NULL);
 }
 
 BOOL WINAPI SystemParametersInfoA(UINT action, UINT uiParam, PVOID pv, UINT winIni) {
