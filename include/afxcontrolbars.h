@@ -23,5 +23,12 @@
 #include <afxmaskededit.h>
 #include <afxfontcombobox.h>
 #include <afxspinbuttonctrl.h>
+#include <afxheaderctrl.h>
+#include <afxlistctrl.h>
+#include <afxbasetabctrl.h>
+#include <afxtabctrl.h>
+#include <afxpropertygridctrl.h>
+#include <afxshelltreectrl.h>
+#include <afxshelllistctrl.h>
 
 #endif  // __AFXCONTROLBARS_H__

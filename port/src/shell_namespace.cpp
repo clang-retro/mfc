@@ -1,6 +1,7 @@
 // shell_namespace.cpp - the shell namespace over the file system: item
 // ID lists, shell folders (IShellFolder) and their enumerators, and the
-// functions that make and read ID lists.
+// functions that make and read ID lists; and SHGetFileInfo, with the
+// system image list's document and folder icons.
 //
 // The desktop, the namespace's root, is the file system's root "/". An
 // item ID list names a path under it with one item for each component;
@@ -12,6 +13,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include <windows.h>
 #include <shlobj.h>
+#include <shellapi.h>
+#include <commctrl.h>
 
 #include "shell.h"
 #include "winport.h"
@@ -584,6 +587,174 @@ HRESULT WINAPI SHBindToParent(PCIDLIST_ABSOLUTE pidl, REFIID riid, void** ppv, P
   f->Release();
   if (SUCCEEDED(hr) && last) *last = ILFindLastID(pidl);
   return hr;
+}
+
+}  // extern "C"
+
+// ---------------------------------------------------------------------
+// SHGetFileInfo. The system image lists, one small (16) and one large
+// (32), hold a document, a closed folder and an open folder, drawn here.
+
+namespace {
+
+enum { kIconDocument = 0, kIconFolder = 1, kIconFolderOpen = 2 };
+
+// The color of the icon's pixel at (x, y) on a 16 by 16 grid, or -1
+// where it is clear.
+long IconPixel(int kind, int x, int y) {
+  const long kEdge = 0x404040, kPaper = 0xFFFFFF, kFold = 0xC0C0C0;
+  const long kFolderEdge = 0x806020, kFolder = 0xE8C050, kFolderLight = 0xF8E090;
+  if (kind == kIconDocument) {
+    if (x < 3 || x > 12 || y < 1 || y > 14) return -1;
+    if (x >= 9 && y <= 4) {  // the folded corner
+      int dx = x - 8, dy = y;
+      if (dy < dx) return -1;
+      if (dy == dx || x == 9 || y == 4) return kEdge;
+      return kFold;
+    }
+    if (x == 3 || x == 12 || y == 1 || y == 14) return kEdge;
+    if (y >= 7 && y <= 12 && (y % 2) == 1 && x >= 5 && x <= 10) return kFold;
+    return kPaper;
+  }
+  // A folder: a tab, then the body.
+  if (y >= 2 && y <= 3 && x >= 1 && x <= 6) return y == 2 || x == 1 || x == 6 ? kFolderEdge : kFolder;
+  if (x < 1 || x > 14 || y < 4 || y > 13) return -1;
+  if (kind == kIconFolderOpen && y >= 7) {
+    // The open folder's front leans out.
+    int left = 1 + (13 - y) / 3;
+    if (x < left) return x == left - 1 ? kFolderEdge : -1;
+    if (x == left || x == 14 || y == 7 || y == 13) return kFolderEdge;
+    return kFolderLight;
+  }
+  if (x == 1 || x == 14 || y == 4 || y == 13) return kFolderEdge;
+  return kFolder;
+}
+
+void AddIcon(HIMAGELIST il, int kind, int size) {
+  BITMAPINFO bi;
+  memset(&bi, 0, sizeof(bi));
+  bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+  bi.bmiHeader.biWidth = size;
+  bi.bmiHeader.biHeight = -size;
+  bi.bmiHeader.biPlanes = 1;
+  bi.bmiHeader.biBitCount = 32;
+  bi.bmiHeader.biCompression = BI_RGB;
+  void* bits = NULL;
+  HBITMAP image = CreateDIBSection(NULL, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+  int stride = ((size + 15) / 16) * 2;
+  std::vector<BYTE> maskBits(stride * size, 0);
+  if (!image || !bits) {
+    if (image) DeleteObject(image);
+    return;
+  }
+  DWORD* px = (DWORD*)bits;
+  for (int y = 0; y < size; y++)
+    for (int x = 0; x < size; x++) {
+      long c = IconPixel(kind, x * 16 / size, y * 16 / size);
+      if (c < 0) {
+        px[y * size + x] = 0;
+        maskBits[y * stride + x / 8] |= (BYTE)(0x80 >> (x % 8));
+      } else {
+        px[y * size + x] = 0xFF000000u | (DWORD)c;
+      }
+    }
+  HBITMAP mask = CreateBitmap(size, size, 1, 1, maskBits.data());
+  ImageList_Add(il, image, mask);
+  DeleteObject(image);
+  if (mask) DeleteObject(mask);
+}
+
+HIMAGELIST SystemImageList(bool small) {
+  static HIMAGELIST lists[2];
+  HIMAGELIST& il = lists[small ? 0 : 1];
+  if (!il) {
+    int size = small ? 16 : 32;
+    il = ImageList_Create(size, size, ILC_COLOR32 | ILC_MASK, 3, 1);
+    if (il)
+      for (int kind = kIconDocument; kind <= kIconFolderOpen; kind++) AddIcon(il, kind, size);
+  }
+  return il;
+}
+
+// What SHGetFileInfo answers, in UTF-8.
+struct FileInfo {
+  int icon = kIconDocument;
+  DWORD attributes = 0;
+  std::string displayName, typeName;
+};
+
+bool GetFileInfo(const std::string& path, DWORD fileAttributes, UINT flags, FileInfo* out) {
+  bool folder;
+  if (flags & SHGFI_USEFILEATTRIBUTES) {
+    folder = (fileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+  } else {
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0) return false;
+    folder = S_ISDIR(st.st_mode);
+    if (flags & SHGFI_ATTRIBUTES) out->attributes = Attributes(path, SFGAO_HASSUBFOLDER);
+  }
+  out->icon = folder ? ((flags & SHGFI_OPENICON) ? kIconFolderOpen : kIconFolder) : kIconDocument;
+  std::string leaf = path == "/" ? "/" : path.substr(path.rfind('/') + 1);
+  out->displayName = leaf;
+  if (folder) {
+    out->typeName = "File folder";
+  } else {
+    size_t dot = leaf.rfind('.');
+    if (dot == std::string::npos || dot == 0 || dot + 1 == leaf.size()) {
+      out->typeName = "File";
+    } else {
+      std::string ext = leaf.substr(dot + 1);
+      for (char& c : ext) c = (char)toupper((unsigned char)c);
+      out->typeName = ext + " File";
+    }
+  }
+  return true;
+}
+
+DWORD_PTR FileInfoResult(const FileInfo& fi, UINT flags, HICON* icon, int* iIcon, DWORD* attrs) {
+  bool small = (flags & SHGFI_SMALLICON) != 0;
+  if (flags & (SHGFI_SYSICONINDEX | SHGFI_ICON)) *iIcon = fi.icon;
+  if (flags & SHGFI_ATTRIBUTES) *attrs = fi.attributes;
+  if (flags & SHGFI_ICON) *icon = ImageList_GetIcon(SystemImageList(small), fi.icon, ILD_NORMAL);
+  if (flags & SHGFI_SYSICONINDEX) return (DWORD_PTR)SystemImageList(small);
+  return 1;
+}
+
+std::string InfoPath(const std::wstring& name, UINT flags, LPCVOID p) {
+  if (flags & SHGFI_PIDL) return JoinPath(PidlItems((LPCITEMIDLIST)p));
+  return AbsolutePath(name);
+}
+
+}  // namespace
+
+extern "C" {
+
+DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path, DWORD fileAttributes, SHFILEINFOW* psfi, UINT cbFileInfo, UINT flags) {
+  if (!path) return 0;
+  FileInfo fi;
+  std::string full = InfoPath((flags & SHGFI_PIDL) ? std::wstring() : std::wstring(path), flags, path);
+  if (!GetFileInfo(full, fileAttributes, flags, &fi)) return 0;
+  if (!psfi || cbFileInfo < sizeof(SHFILEINFOW)) {
+    if (flags & SHGFI_SYSICONINDEX) return (DWORD_PTR)SystemImageList((flags & SHGFI_SMALLICON) != 0);
+    return psfi ? 0 : 1;
+  }
+  if (flags & SHGFI_DISPLAYNAME) CopyOut(Widen(fi.displayName.c_str()), psfi->szDisplayName, MAX_PATH);
+  if (flags & SHGFI_TYPENAME) CopyOut(Widen(fi.typeName.c_str()), psfi->szTypeName, 80);
+  return FileInfoResult(fi, flags, &psfi->hIcon, &psfi->iIcon, &psfi->dwAttributes);
+}
+
+DWORD_PTR WINAPI SHGetFileInfoA(LPCSTR path, DWORD fileAttributes, SHFILEINFOA* psfi, UINT cbFileInfo, UINT flags) {
+  if (!path) return 0;
+  FileInfo fi;
+  std::string full = InfoPath((flags & SHGFI_PIDL) ? std::wstring() : Widen(path), flags, path);
+  if (!GetFileInfo(full, fileAttributes, flags, &fi)) return 0;
+  if (!psfi || cbFileInfo < sizeof(SHFILEINFOA)) {
+    if (flags & SHGFI_SYSICONINDEX) return (DWORD_PTR)SystemImageList((flags & SHGFI_SMALLICON) != 0);
+    return psfi ? 0 : 1;
+  }
+  if (flags & SHGFI_DISPLAYNAME) CopyOut(fi.displayName, psfi->szDisplayName, MAX_PATH);
+  if (flags & SHGFI_TYPENAME) CopyOut(fi.typeName, psfi->szTypeName, 80);
+  return FileInfoResult(fi, flags, &psfi->hIcon, &psfi->iIcon, &psfi->dwAttributes);
 }
 
 }  // extern "C"

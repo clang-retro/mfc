@@ -550,7 +550,7 @@ when there is no display. For a Linux or macOS target it builds `core`,
 `docobtest`, `linktest`, `bindtest`, `richtest`, `richsrvtest`,
 `autotest`, `srvtest`, `atlwintest`, `atltest`, `conntest`, `ctltest`,
 `wltest`, `dragtest`, `daotest`, `dvtest`, `htmltest`, `atlctltest`,
-`atlutiltest`, `cdlgtest`, `vistatest`, `fptest`, `iotest`, `dpitest`, `imetest`, `audiotest`,
+`atlutiltest`, `cdlgtest`, `vistatest`, `fptest`, `fpctrltest`, `iotest`, `dpitest`, `imetest`, `audiotest`,
 `wtltest`, `sstest` and `hlptest` against
 the portable layer, and `exttest`, `core`, `sditest`,
 `dlgtest` and `dlltest` again with the shared libraries
@@ -919,6 +919,15 @@ try.
   driven from the keyboard; the browse button's frame space and click;
   masked input (refused characters, backspace, delete, the whole text or
   the typed characters); the font combo box's fonts; the spin button.
+* `fpctrltest` (Windows, Linux and macOS): the Feature Pack's bigger
+  controls: CMFCListCtrl sorting by its own comparison, from code and
+  from a header click, with the header's sort marks; CMFCTabCtrl's tabs
+  (the active window shown, the parent told and able to refuse, clicks,
+  colors, hiding, moving, scrolling when they do not fit); the property
+  grid's groups, values, options, colors and value lists, edited in
+  place with bad text refused; the shell list and tree over a folder the
+  test makes (sorting, sizes, opening a folder, Backspace, the tree and
+  list following each other).
 * `atlutiltest`: ATL's utility headers in a program without MFC: CString
   from `atlstr.h` (formatting, string resources, conversions, errors as
   CAtlException); CSimpleArray and CSimpleMap; CAtlArray, CAtlList,
@@ -1165,7 +1174,17 @@ request with the stock MinGW-w64 toolchain.
   CMFCLinkCtrl, CMFCMenuButton, CMFCColorButton and its palette,
   CMFCEditBrowseCtrl (a file, folder or custom browse button in the
   edit's frame), CMFCMaskedEdit, CMFCFontComboBox and
-  CMFCSpinButtonCtrl. `afxcontrolbars.h` includes them all.
+  CMFCSpinButtonCtrl. Then the bigger controls: CMFCListCtrl and
+  CMFCHeaderCtrl (sorting by one column or several, marked in the
+  header; each cell's colors and font), CMFCTabCtrl (3D, flat, OneNote,
+  VS 2005 and rounded tabs, on the top or bottom, with scroll buttons
+  and a close button; AFX_WM_CHANGING_ACTIVE_TAB and
+  AFX_WM_CHANGE_ACTIVE_TAB to the parent), CMFCPropertyGridCtrl (groups,
+  values edited in place or picked from a list, value lists, colors,
+  fonts, files and folders, a description area, AFX_WM_PROPERTY_CHANGED)
+  and CMFCShellTreeCtrl and CMFCShellListCtrl (the shell's namespace,
+  with the system's icons; on Linux and macOS the portable layer's
+  SHGetFileInfo draws them). `afxcontrolbars.h` includes them all.
 * `afxinet.h`: the internet classes over WinINet: CInternetSession
   (OpenURL, options, cookies, the status callback), CHttpConnection and
   CHttpFile, CFtpConnection, CFtpFileFind, CGopherConnection,

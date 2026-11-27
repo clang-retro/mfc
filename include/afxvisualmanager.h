@@ -19,6 +19,9 @@
 
 class CMFCButton;
 class CMFCEditBrowseCtrl;
+class CMFCHeaderCtrl;
+class CMFCBaseTabCtrl;
+class CMFCPropertyGridCtrl;
 class CMFCSpinButtonCtrl;
 
 // The spin button parts' states for OnDrawSpinButtons.
@@ -61,6 +64,25 @@ public:
                                   COLORREF& clrText);
   virtual void OnDrawSpinButtons(CDC* pDC, CRect rectSpin, int nState, BOOL bOrientation,
                                  CMFCSpinButtonCtrl* pSpinCtrl);
+
+  // ----- Header controls.
+  virtual void OnFillHeaderCtrlBackground(CMFCHeaderCtrl* pCtrl, CDC* pDC, CRect rect);
+  virtual void OnDrawHeaderCtrlBorder(CMFCHeaderCtrl* pCtrl, CDC* pDC, CRect& rect, BOOL bIsPressed,
+                                      BOOL bIsHighlighted);
+  virtual void OnDrawHeaderCtrlSortArrow(CMFCHeaderCtrl* pCtrl, CDC* pDC, CRect& rect, BOOL bIsUp);
+
+  // ----- Tab controls.
+  virtual void OnEraseTabsArea(CDC* pDC, CRect rect, const CMFCBaseTabCtrl* pTabWnd);
+  virtual void OnDrawTab(CDC* pDC, CRect rectTab, int iTab, BOOL bIsActive, const CMFCBaseTabCtrl* pTabWnd);
+  virtual void OnDrawTabCloseButton(CDC* pDC, CRect rect, const CMFCBaseTabCtrl* pTabWnd, BOOL bIsHighlighted,
+                                    BOOL bIsPressed, BOOL bIsDisabled);
+  virtual COLORREF GetTabTextColor(const CMFCBaseTabCtrl* pTabWnd, int iTab, BOOL bIsActive);
+  virtual int GetTabHorzMargin(const CMFCBaseTabCtrl*) { return 4; }
+
+  // ----- Property grids.
+  virtual COLORREF GetPropertyGridGroupColor(CMFCPropertyGridCtrl* pPropList);
+  virtual COLORREF GetPropertyGridGroupTextColor(CMFCPropertyGridCtrl* pPropList);
+  virtual COLORREF OnFillPropertyGridGroup(CDC* pDC, CMFCPropertyGridCtrl* pPropList, CRect rect);
 
   // ----- Colors of the look.
   virtual COLORREF GetHighlightColor() const { return m_clrHighlight; }

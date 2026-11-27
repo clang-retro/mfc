@@ -138,10 +138,12 @@ static LRESULT CALLBACK _AfxCbtFilterHook(int code, WPARAM wParam, LPARAM lParam
     if (::GetClassName(hWnd, szClass, 16) && lstrcmpi(szClass, _T("ime")) == 0)
       return ::CallNextHookEx(pState->m_hHookOldCbtFilter, code, wParam, lParam);
 
+    // m_pWndInit stays set through PreSubclassWindow, so that a window
+    // can tell being created (set) from being subclassed (NULL).
     CWnd* pWndInit = pState->m_pWndInit;
-    pState->m_pWndInit = NULL;
     pWndInit->Attach(hWnd);
     pWndInit->PreSubclassWindow();
+    pState->m_pWndInit = NULL;
     WNDPROC* pOldWndProc = pWndInit->GetSuperWndProcAddr();
     WNDPROC afxWndProc = AfxGetAfxWndProc();
     WNDPROC oldWndProc = (WNDPROC)::SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)afxWndProc);

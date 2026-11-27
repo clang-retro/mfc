@@ -1,0 +1,8 @@
+// fpctrltest.rc - resources for fpctrltest.
+#include <windows.h>
+#include <afxres.h>
+
+STRINGTABLE
+BEGIN
+  AFX_IDS_APP_TITLE "fpctrltest"
+END
