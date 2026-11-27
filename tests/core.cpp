@@ -275,10 +275,89 @@ static void TestSharedFile() {
 }
 #endif
 
+#ifndef _AFX_WIN16
+// Threads held and let go, stopped while they run, and ended from
+// outside. The cooperative threads of DOS and the classic Mac OS can be
+// held only before they start.
+static volatile LONG g_spins = 0;
+static DWORD WINAPI Spin(LPVOID) {
+  for (;;) ::InterlockedIncrement(&g_spins);
+}
+static DWORD WINAPI Quick(LPVOID p) { return (DWORD)(DWORD_PTR)p; }
+static DWORD WINAPI SuspendSelf(LPVOID p) {
+  ::SuspendThread(::GetCurrentThread());
+  *(volatile LONG*)p = 1;
+  return 7;
+}
+
+static void TestThreads() {
+  // Made suspended: nothing runs until the count is back to zero.
+  HANDLE h = ::CreateThread(NULL, 0, Quick, (LPVOID)42, CREATE_SUSPENDED, NULL);
+  CHECK(h != NULL);
+  CHECK(::SuspendThread(h) == 1);
+  CHECK(::ResumeThread(h) == 2);
+  CHECK(::WaitForSingleObject(h, 100) == WAIT_TIMEOUT);
+  CHECK(::ResumeThread(h) == 1);
+  CHECK(::WaitForSingleObject(h, 5000) == WAIT_OBJECT_0);
+  DWORD code = 0;
+  CHECK(::GetExitCodeThread(h, &code) && code == 42);
+  CHECK(::ResumeThread(h) == 0 || ::ResumeThread(h) == (DWORD)-1);
+  ::CloseHandle(h);
+  // Ended before it began.
+  h = ::CreateThread(NULL, 0, Quick, (LPVOID)1, CREATE_SUSPENDED, NULL);
+  CHECK(::TerminateThread(h, 99));
+  CHECK(::WaitForSingleObject(h, 5000) == WAIT_OBJECT_0);
+  CHECK(::GetExitCodeThread(h, &code) && code == 99);
+  ::CloseHandle(h);
+#if !defined(__MSDOS__) && !defined(macintosh)
+  // Stopped while it runs: the counter stands still, then goes on.
+  h = ::CreateThread(NULL, 0, Spin, NULL, 0, NULL);
+  while (g_spins < 1000) ::Sleep(1);
+  CHECK(::SuspendThread(h) == 0);
+  CHECK(::SuspendThread(h) == 1);
+  LONG at = g_spins;
+  ::Sleep(50);
+  CHECK(g_spins == at);
+  CHECK(::ResumeThread(h) == 2);
+  ::Sleep(20);
+  CHECK(g_spins == at);
+  CHECK(::ResumeThread(h) == 1);
+  ::Sleep(50);
+  CHECK(g_spins != at);
+  CHECK(::GetExitCodeThread(h, &code) && code == STILL_ACTIVE);
+  // Ended while it runs, and while it is held.
+  CHECK(::TerminateThread(h, 5));
+  CHECK(::WaitForSingleObject(h, 5000) == WAIT_OBJECT_0);
+  at = g_spins;
+  ::Sleep(30);
+  CHECK(g_spins == at);
+  CHECK(::GetExitCodeThread(h, &code) && code == 5);
+  ::CloseHandle(h);
+  h = ::CreateThread(NULL, 0, Spin, NULL, 0, NULL);
+  ::Sleep(10);
+  CHECK(::SuspendThread(h) == 0);
+  CHECK(::TerminateThread(h, 6));
+  CHECK(::WaitForSingleObject(h, 5000) == WAIT_OBJECT_0);
+  CHECK(::GetExitCodeThread(h, &code) && code == 6);
+  ::CloseHandle(h);
+  // A thread that holds itself, let go by another.
+  volatile LONG went = 0;
+  h = ::CreateThread(NULL, 0, SuspendSelf, (LPVOID)&went, 0, NULL);
+  ::Sleep(50);
+  CHECK(went == 0);
+  CHECK(::ResumeThread(h) == 1);
+  CHECK(::WaitForSingleObject(h, 5000) == WAIT_OBJECT_0);
+  CHECK(went == 1 && ::GetExitCodeThread(h, &code) && code == 7);
+  ::CloseHandle(h);
+#endif
+}
+#endif
+
 int main() {
   TestConversion();
 #ifndef _AFX_WIN16
   TestSharedFile();
+  TestThreads();
 #endif
   TestString();
   TestCollections();

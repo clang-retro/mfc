@@ -226,6 +226,7 @@ __WINPORT_EXTERN_C const GUID IID_NULL;
 #define VER_PLATFORM_WIN32_NT 2
 
 #define MAXCHAR 0x7f
+#define MAXIMUM_SUSPEND_COUNT MAXCHAR  // SuspendThread's limit
 #define MAXSHORT 0x7fff
 #define MAXLONG 0x7fffffff
 #define MAXBYTE 0xff

@@ -224,7 +224,13 @@ timers (named ones within the process), APCs and alertable waits
 (`QueueUserAPC`, `SleepEx`), I/O completion ports (packets posted, and
 the results of overlapped reads and writes on a file associated with
 one), and file mappings over `mmap` (a named mapping without a file is
-POSIX shared memory, which other processes open by name). Services work
+POSIX shared memory, which other processes open by name). Threads can be
+held and ended from outside as on Windows: `SuspendThread` stops a
+running thread where it is (with Mach on macOS, a signal elsewhere) and
+`ResumeThread` lets it go when the count is back to zero, and
+`TerminateThread` stops one for good, leaving what it holds held, as
+Windows does. On DOS and the classic Mac OS, whose threads take turns,
+a thread can be held only before it starts. Services work
 too: the service control manager keeps them under
 `HKLM\SYSTEM\CurrentControlSet\Services`, `StartService` runs the
 program, and its dispatcher takes `ControlService`'s controls over a
@@ -533,7 +539,9 @@ the portable layer, and `exttest`, `core`, `sditest`,
 try.
 
 * `core`: CString, collections, CFile, CArchive and serialization,
-  CTime, exceptions and run-time classes, on the console.
+  CTime, exceptions and run-time classes, on the console; and threads
+  made suspended, held while they run (by themselves too), and
+  terminated before they start, while they run and while they are held.
 * `memtest`: the memory diagnostics in a debug build: DEBUG_NEW and
   object blocks, CMemoryState (Checkpoint, Difference, DumpStatistics,
   DumpAllObjectsSince) caught through afxDump, guard bytes and
