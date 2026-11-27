@@ -1337,6 +1337,130 @@ static void TestImage() {
   ::DeleteFile(szJpg);
 }
 
+#ifdef _WINPORT
+// An animated GIF through GDI+'s flat API: frames saved one by one with
+// their delays and loop count, read back along FrameDimensionTime, saved
+// again whole, and one not flushed written when its image goes.
+static Gdiplus::GpBitmap* Solid(Gdiplus::ARGB color) {
+  using namespace Gdiplus::DllExports;
+  Gdiplus::GpBitmap* b = NULL;
+  GdipCreateBitmapFromScan0(6, 4, 0, PixelFormat32bppARGB, NULL, &b);
+  for (int y = 0; y < 4; y++)
+    for (int x = 0; x < 6; x++) GdipBitmapSetPixel(b, x, y, x == 0 && y == 0 ? 0 : color);
+  return b;
+}
+
+static void TestAnimatedGif() {
+  using namespace Gdiplus;
+  using namespace Gdiplus::DllExports;
+  ULONG_PTR token;
+  GdiplusStartupInput input;
+  CHECK(GdiplusStartup(&token, &input, NULL) == Ok);
+  WCHAR dir[MAX_PATH], file[MAX_PATH], again[MAX_PATH], loose[MAX_PATH];
+  ::GetTempPathW(MAX_PATH, dir);
+  wsprintfW(file, L"%sanim.gif", dir);
+  wsprintfW(again, L"%sanim2.gif", dir);
+  wsprintfW(loose, L"%sanim3.gif", dir);
+  UINT n = 0, size = 0;
+  CHECK(GdipGetImageEncodersSize(&n, &size) == Ok);
+  std::vector<BYTE> buf(size);
+  ImageCodecInfo* codecs = (ImageCodecInfo*)buf.data();
+  CHECK(GdipGetImageEncoders(n, size, codecs) == Ok);
+  CLSID gif = GUID_NULL;
+  for (UINT i = 0; i < n; i++)
+    if (codecs[i].FormatID == ImageFormatGIF) gif = codecs[i].Clsid;
+
+  GpBitmap* first = Solid(0xFFFF0000);
+  GpBitmap* second = Solid(0xFF00FF00);
+  GpBitmap* third = Solid(0xFF0000FF);
+  LONG delays[3] = {10, 20, 30};
+  PropertyItem delay = {PropertyTagFrameDelay, sizeof delays, PropertyTagTypeLong, delays};
+  CHECK(GdipSetPropertyItem(first, &delay) == Ok);
+  SHORT loops = 2;
+  PropertyItem loop = {PropertyTagLoopCount, sizeof loops, PropertyTagTypeShort, &loops};
+  CHECK(GdipSetPropertyItem(first, &loop) == Ok);
+  LONG d2 = 20, d3 = 30;
+  PropertyItem delay2 = {PropertyTagFrameDelay, 4, PropertyTagTypeLong, &d2};
+  PropertyItem delay3 = {PropertyTagFrameDelay, 4, PropertyTagTypeLong, &d3};
+  CHECK(GdipSetPropertyItem(second, &delay2) == Ok && GdipSetPropertyItem(third, &delay3) == Ok);
+
+  EncoderParameters p;
+  p.Count = 1;
+  p.Parameter[0].Guid = EncoderSaveFlag;
+  p.Parameter[0].NumberOfValues = 1;
+  p.Parameter[0].Type = EncoderParameterValueTypeLong;
+  ULONG flag = EncoderValueMultiFrame;
+  p.Parameter[0].Value = &flag;
+  CHECK(GdipSaveAdd(first, &p) == WrongState);  // nothing under way yet
+  CHECK(GdipSaveImageToFile(first, file, &gif, &p) == Ok);
+  flag = EncoderValueFrameDimensionTime;
+  CHECK(GdipSaveAddImage(first, second, &p) == Ok);
+  CHECK(GdipSaveAddImage(first, third, &p) == Ok);
+  flag = EncoderValueFlush;
+  CHECK(GdipSaveAdd(first, &p) == Ok);
+
+  GpImage* img = NULL;
+  CHECK(GdipLoadImageFromFile(file, &img) == Ok);
+  UINT dims = 0, frames = 0;
+  GUID dim;
+  CHECK(GdipImageGetFrameDimensionsCount(img, &dims) == Ok && dims == 1);
+  CHECK(GdipImageGetFrameDimensionsList(img, &dim, 1) == Ok && dim == FrameDimensionTime);
+  CHECK(GdipImageGetFrameCount(img, &FrameDimensionTime, &frames) == Ok && frames == 3);
+  UINT psize = 0;
+  CHECK(GdipGetPropertyItemSize(img, PropertyTagFrameDelay, &psize) == Ok && psize == sizeof(PropertyItem) + 12);
+  std::vector<BYTE> pbuf(psize);
+  PropertyItem* got = (PropertyItem*)pbuf.data();
+  CHECK(GdipGetPropertyItem(img, PropertyTagFrameDelay, psize, got) == Ok && got->type == PropertyTagTypeLong);
+  CHECK(((LONG*)got->value)[0] == 10 && ((LONG*)got->value)[1] == 20 && ((LONG*)got->value)[2] == 30);
+  CHECK(GdipGetPropertyItemSize(img, PropertyTagLoopCount, &psize) == Ok);
+  pbuf.resize(psize);
+  got = (PropertyItem*)pbuf.data();
+  CHECK(GdipGetPropertyItem(img, PropertyTagLoopCount, psize, got) == Ok && *(SHORT*)got->value == 2);
+  ARGB c = 0;
+  CHECK(GdipBitmapGetPixel((GpBitmap*)img, 3, 2, &c) == Ok && c == 0xFFFF0000);
+  CHECK(GdipBitmapGetPixel((GpBitmap*)img, 0, 0, &c) == Ok && (c >> 24) == 0);
+  CHECK(GdipImageSelectActiveFrame(img, &FrameDimensionTime, 2) == Ok);
+  CHECK(GdipBitmapGetPixel((GpBitmap*)img, 3, 2, &c) == Ok && c == 0xFF0000FF);
+  CHECK(GdipImageSelectActiveFrame(img, &FrameDimensionTime, 1) == Ok);
+  CHECK(GdipBitmapGetPixel((GpBitmap*)img, 3, 2, &c) == Ok && c == 0xFF00FF00);
+  CHECK(GdipImageSelectActiveFrame(img, &FrameDimensionTime, 3) == InvalidParameter);
+  // Saved as a GIF again, it keeps its frames.
+  CHECK(GdipSaveImageToFile(img, again, &gif, NULL) == Ok);
+  GpImage* img2 = NULL;
+  CHECK(GdipLoadImageFromFile(again, &img2) == Ok);
+  CHECK(GdipImageGetFrameCount(img2, &FrameDimensionTime, &frames) == Ok && frames == 3);
+  GdipDisposeImage(img2);
+  GdipDisposeImage(img);
+  // A still image has one page.
+  CHECK(GdipImageGetFrameDimensionsList(second, &dim, 1) == Ok && dim == FrameDimensionPage);
+  CHECK(GdipImageGetFrameCount(second, &FrameDimensionPage, &frames) == Ok && frames == 1);
+  CHECK(GdipGetPropertyItemSize(second, PropertyTagLoopCount, &psize) == PropertyNotFound);
+  CHECK(GdipRemovePropertyItem(second, PropertyTagFrameDelay) == Ok);
+  UINT props = 9;
+  CHECK(GdipGetPropertyCount(second, &props) == Ok && props == 0);
+
+  // Not flushed: written when the image goes.
+  flag = EncoderValueMultiFrame;
+  CHECK(GdipSaveImageToFile(second, loose, &gif, &p) == Ok);
+  flag = EncoderValueFrameDimensionTime;
+  CHECK(GdipSaveAddImage(second, third, &p) == Ok);
+  GdipDisposeImage(second);
+  CHECK(GdipLoadImageFromFile(loose, &img) == Ok);
+  CHECK(GdipImageGetFrameCount(img, &FrameDimensionTime, &frames) == Ok && frames == 2);
+  GdipDisposeImage(img);
+  // CImage takes the first frame.
+  CImage ci;
+  CHECK(SUCCEEDED(ci.Load(CString(file))) && ci.GetWidth() == 6 && ci.GetPixel(3, 2) == RGB(255, 0, 0));
+  ci.Destroy();
+  GdipDisposeImage(first);
+  GdipDisposeImage(third);
+  ::DeleteFileW(file);
+  ::DeleteFileW(again);
+  ::DeleteFileW(loose);
+  GdiplusShutdown(token);
+}
+#endif
+
 static void TestComTime() {
   // COleDateTime and COleDateTimeSpan without MFC.
   COleDateTime dt(2003, 7, 15, 13, 45, 30);
@@ -1926,6 +2050,9 @@ int main() {
   TestTime();
   Log("times: %d failure(s) so far", g_nFailures);
   TestImage();
+#ifdef _WINPORT
+  TestAnimatedGif();
+#endif
   Log("images: %d failure(s) so far", g_nFailures);
   TestComTime();
   TestSync();

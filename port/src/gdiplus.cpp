@@ -11,7 +11,9 @@
 #include <string.h>
 
 #include <algorithm>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #define STB_IMAGE_STATIC
@@ -54,9 +56,32 @@ struct Bitmap : GpBitmap {
   Rect lockRect;
   UINT lockFlags = 0;
   std::vector<BYTE> lockBuffer;
+  // An animated GIF's frames (each the bitmap's size, in its format),
+  // the one in bits, and the image's properties by ID: type and value.
+  std::vector<std::vector<BYTE>> frames;
+  UINT active = 0;
+  std::map<PROPID, std::pair<WORD, std::vector<BYTE>>> props;
 
   BYTE* Row(UINT y) { return bits.data() + (size_t)y * stride; }
+  const BYTE* Row(UINT y) const { return bits.data() + (size_t)y * stride; }
 };
+
+// A frame's delay in hundredths of a second, and the loop count (-1 when
+// the image has none), from its properties.
+UINT FrameDelay(const Bitmap* b, UINT frame) {
+  auto it = b->props.find(PropertyTagFrameDelay);
+  if (it == b->props.end() || it->second.second.size() < 4) return 0;
+  const std::vector<BYTE>& v = it->second.second;
+  size_t i = (size_t)frame * 4 + 4 <= v.size() ? (size_t)frame * 4 : 0;
+  UINT d;
+  memcpy(&d, &v[i], 4);
+  return d;
+}
+int LoopCount(const Bitmap* b) {
+  auto it = b->props.find(PropertyTagLoopCount);
+  if (it == b->props.end() || it->second.second.size() < 2) return -1;
+  return it->second.second[0] | it->second.second[1] << 8;
+}
 
 Bitmap* AsBitmap(GpImage* image) { return static_cast<Bitmap*>(image); }
 
@@ -262,6 +287,47 @@ Bitmap* DecodeIndexedBmp(const std::vector<BYTE>& d) {
   return b;
 }
 
+// A GIF of more than one frame: each frame as it shows, 32 bits with
+// alpha, and its delays and loop count as properties. NULL for a GIF of
+// one frame.
+Bitmap* DecodeAnimatedGif(const std::vector<BYTE>& data) {
+  int* delays = NULL;
+  int w = 0, h = 0, z = 0, comp = 0;
+  stbi_uc* px = stbi_load_gif_from_memory(data.data(), (int)data.size(), &delays, &w, &h, &z, &comp, 4);
+  if (!px || z < 2) {
+    if (px) stbi_image_free(px);
+    if (delays) stbi_image_free(delays);
+    return NULL;
+  }
+  Bitmap* b = NewBitmap((UINT)w, (UINT)h, PixelFormat32bppARGB);
+  b->raw = ImageFormatGIF;
+  std::vector<BYTE> delayValue;
+  for (int f = 0; f < z; f++) {
+    const stbi_uc* s = px + (size_t)f * w * h * 4;
+    for (int y = 0; y < h; y++)
+      for (int x = 0; x < w; x++) {
+        const stbi_uc* p = s + ((size_t)y * w + x) * 4;
+        WritePixel(b->format, b->Row(y), x, (ARGB)p[3] << 24 | (ARGB)p[0] << 16 | (ARGB)p[1] << 8 | p[2]);
+      }
+    b->frames.push_back(b->bits);
+    UINT d = delays ? (UINT)std::max(0, delays[f]) / 10 : 0;  // milliseconds to hundredths
+    delayValue.insert(delayValue.end(), (BYTE*)&d, (BYTE*)&d + 4);
+  }
+  b->bits = b->frames[0];
+  b->props[PropertyTagFrameDelay] = {PropertyTagTypeLong, delayValue};
+  // The loop count, from the NETSCAPE2.0 application extension.
+  static const char kNetscape[] = "NETSCAPE2.0";
+  for (size_t i = 0; i + 16 < data.size(); i++)
+    if (data[i] == 0x21 && data[i + 1] == 0xFF && data[i + 2] == 11 && memcmp(&data[i + 3], kNetscape, 11) == 0 &&
+        data[i + 14] == 3 && data[i + 15] == 1) {
+      b->props[PropertyTagLoopCount] = {PropertyTagTypeShort, {data[i + 16], data[i + 17]}};
+      break;
+    }
+  stbi_image_free(px);
+  if (delays) stbi_image_free(delays);
+  return b;
+}
+
 // A decoded image: a BMP with a palette as it is, else 24 bits when it
 // has no alpha and 32 bits with it.
 Status Decode(const std::vector<BYTE>& data, GpBitmap** out) {
@@ -276,6 +342,11 @@ Status Decode(const std::vector<BYTE>& data, GpBitmap** out) {
       return Ok;
     }
   }
+  if (IsEqualGUID(kind, ImageFormatGIF))
+    if (Bitmap* b = DecodeAnimatedGif(data)) {
+      *out = b;
+      return Ok;
+    }
   int w = 0, h = 0, comp = 0;
   stbi_uc* px = stbi_load_from_memory(data.data(), (int)data.size(), &w, &h, &comp, 4);
   if (!px) return UnknownImageFormat;
@@ -474,14 +545,23 @@ void LzwEncode(const std::vector<BYTE>& idx, int minCode, std::vector<BYTE>* out
   out->push_back(0);
 }
 
-// One frame, its colors in a global table: an indexed bitmap's palette
-// as it is; else the image's own colors when there are 256 or fewer,
-// and a 6-7-6 color cube when there are more. Pixels with less than half
-// alpha, or an indexed bitmap's colors of alpha 0, are transparent.
-std::vector<BYTE> EncodeGif(Bitmap* b) {
+// A frame's colors and pixels: an indexed bitmap's palette as it is;
+// else the image's own colors when there are 256 or fewer, and a 6-7-6
+// color cube when there are more. Pixels with less than half alpha, or
+// an indexed bitmap's colors of alpha 0, are transparent.
+struct GifImage {
   std::vector<ARGB> table;
-  std::vector<BYTE> idx((size_t)b->width * b->height);
+  std::vector<BYTE> idx;
   int transparent = -1;
+  int tableBits = 1;
+};
+
+GifImage Quantize(const Bitmap* b) {
+  GifImage g;
+  std::vector<ARGB>& table = g.table;
+  std::vector<BYTE>& idx = g.idx;
+  idx.assign((size_t)b->width * b->height, 0);
+  int& transparent = g.transparent;
   if (IsIndexedPixelFormat(b->format)) {
     table = b->palette;
     if (table.empty()) table.push_back(0xFF000000u);
@@ -533,54 +613,135 @@ std::vector<BYTE> EncodeGif(Bitmap* b) {
     } else {
       size_t base = table.size();
       for (UINT r = 0; r < 6; r++)
-        for (UINT g = 0; g < 7; g++)
+        for (UINT gr = 0; gr < 7; gr++)
           for (UINT bl = 0; bl < 6; bl++)
-            table.push_back(0xFF000000u | (r * 51) << 16 | (g * 255 / 6) << 8 | bl * 51);
+            table.push_back(0xFF000000u | (r * 51) << 16 | (gr * 255 / 6) << 8 | bl * 51);
       for (size_t i = 0; i < px.size(); i++) {
         ARGB c = px[i];
         if (!c) {
           idx[i] = 0;
           continue;
         }
-        UINT r = (((c >> 16) & 0xFF) * 5 + 127) / 255, g = (((c >> 8) & 0xFF) * 6 + 127) / 255,
+        UINT r = (((c >> 16) & 0xFF) * 5 + 127) / 255, gr = (((c >> 8) & 0xFF) * 6 + 127) / 255,
              bl = ((c & 0xFF) * 5 + 127) / 255;
-        idx[i] = (BYTE)(base + (r * 7 + g) * 6 + bl);
+        idx[i] = (BYTE)(base + (r * 7 + gr) * 6 + bl);
       }
     }
   }
-  int tableBits = 1;
-  while ((1u << tableBits) < table.size()) tableBits++;
+  while ((1u << g.tableBits) < table.size()) g.tableBits++;
+  return g;
+}
+
+void PutTable(std::vector<BYTE>* out, const GifImage& g) {
+  for (UINT i = 0; i < (1u << g.tableBits); i++) {
+    ARGB c = i < g.table.size() ? g.table[i] : 0;
+    out->push_back((BYTE)(c >> 16));
+    out->push_back((BYTE)(c >> 8));
+    out->push_back((BYTE)c);
+  }
+}
+
+// One frame, its colors in a global table.
+std::vector<BYTE> EncodeGif(const Bitmap* b) {
+  GifImage g = Quantize(b);
   std::vector<BYTE> out;
-  auto put16 = [&](UINT v) {
-    out.push_back((BYTE)v);
-    out.push_back((BYTE)(v >> 8));
-  };
   const char* sig = "GIF89a";
   out.insert(out.end(), sig, sig + 6);
-  put16(b->width);
-  put16(b->height);
-  out.push_back((BYTE)(0x80 | (tableBits - 1) << 4 | (tableBits - 1)));
+  Put16(&out, b->width);
+  Put16(&out, b->height);
+  out.push_back((BYTE)(0x80 | (g.tableBits - 1) << 4 | (g.tableBits - 1)));
   out.push_back(0);  // background
   out.push_back(0);  // aspect
-  for (UINT i = 0; i < (1u << tableBits); i++) {
-    ARGB c = i < table.size() ? table[i] : 0;
-    out.push_back((BYTE)(c >> 16));
-    out.push_back((BYTE)(c >> 8));
-    out.push_back((BYTE)c);
-  }
-  if (transparent >= 0) {
-    const BYTE gce[] = {0x21, 0xF9, 4, 1, 0, 0, (BYTE)transparent, 0};
+  PutTable(&out, g);
+  if (g.transparent >= 0) {
+    const BYTE gce[] = {0x21, 0xF9, 4, 1, 0, 0, (BYTE)g.transparent, 0};
     out.insert(out.end(), gce, gce + sizeof gce);
   }
   out.push_back(0x2C);
-  put16(0);
-  put16(0);
-  put16(b->width);
-  put16(b->height);
+  Put16(&out, 0);
+  Put16(&out, 0);
+  Put16(&out, b->width);
+  Put16(&out, b->height);
   out.push_back(0);
-  LzwEncode(idx, std::max(2, tableBits), &out);
+  LzwEncode(g.idx, std::max(2, g.tableBits), &out);
   out.push_back(0x3B);
   return out;
+}
+
+// An animated GIF: each frame with its own colors and delay (hundredths
+// of a second), the loop count in a NETSCAPE2.0 extension (0, for ever,
+// unless the first image says otherwise). A frame with transparent
+// pixels clears what was there before it, so that the last frame does not
+// show through.
+std::vector<BYTE> EncodeAnimatedGif(const std::vector<const Bitmap*>& frames, const std::vector<UINT>& delays,
+                                    int loop) {
+  UINT w = 0, h = 0;
+  for (const Bitmap* f : frames) {
+    w = std::max(w, f->width);
+    h = std::max(h, f->height);
+  }
+  std::vector<BYTE> out;
+  const char* sig = "GIF89a";
+  out.insert(out.end(), sig, sig + 6);
+  Put16(&out, w);
+  Put16(&out, h);
+  out.push_back(0);  // no global table
+  out.push_back(0);
+  out.push_back(0);
+  const char* app = "NETSCAPE2.0";
+  out.push_back(0x21);
+  out.push_back(0xFF);
+  out.push_back(11);
+  out.insert(out.end(), app, app + 11);
+  out.push_back(3);
+  out.push_back(1);
+  Put16(&out, loop < 0 ? 0 : (UINT)loop);
+  out.push_back(0);
+  for (size_t i = 0; i < frames.size(); i++) {
+    const Bitmap* f = frames[i];
+    GifImage g = Quantize(f);
+    BYTE flags = (BYTE)((g.transparent >= 0 ? 2 : 1) << 2 | (g.transparent >= 0 ? 1 : 0));
+    UINT delay = i < delays.size() ? delays[i] : 0;
+    const BYTE gce[] = {0x21, 0xF9, 4, flags, (BYTE)delay, (BYTE)(delay >> 8),
+                        (BYTE)(g.transparent >= 0 ? g.transparent : 0), 0};
+    out.insert(out.end(), gce, gce + sizeof gce);
+    out.push_back(0x2C);
+    Put16(&out, 0);
+    Put16(&out, 0);
+    Put16(&out, f->width);
+    Put16(&out, f->height);
+    out.push_back((BYTE)(0x80 | (g.tableBits - 1)));
+    PutTable(&out, g);
+    LzwEncode(g.idx, std::max(2, g.tableBits), &out);
+  }
+  out.push_back(0x3B);
+  return out;
+}
+
+// A bitmap of one of an image's frames, without the frames or properties.
+std::unique_ptr<Bitmap> FrameOf(const Bitmap* b, UINT frame) {
+  std::unique_ptr<Bitmap> c(new Bitmap);
+  c->width = b->width;
+  c->height = b->height;
+  c->format = b->format;
+  c->stride = b->stride;
+  c->bits = frame < b->frames.size() && frame != b->active ? b->frames[frame] : b->bits;
+  c->palette = b->palette;
+  c->paletteFlags = b->paletteFlags;
+  return c;
+}
+
+// An image of several frames saved as a GIF keeps them all.
+std::vector<BYTE> EncodeAllFrames(const Bitmap* b) {
+  std::vector<std::unique_ptr<Bitmap>> keep;
+  std::vector<const Bitmap*> frames;
+  std::vector<UINT> delays;
+  for (UINT i = 0; i < b->frames.size(); i++) {
+    keep.push_back(FrameOf(b, i));
+    frames.push_back(keep.back().get());
+    delays.push_back(FrameDelay(b, i));
+  }
+  return EncodeAnimatedGif(frames, delays, LoopCount(b));
 }
 
 void Append(void* context, void* data, int size) {
@@ -598,7 +759,7 @@ Status Encode(Bitmap* b, const CLSID* clsid, const EncoderParameters* params, st
     return Ok;
   }
   if (*codec->format == ImageFormatGIF) {
-    *out = EncodeGif(b);
+    *out = b->frames.size() > 1 ? EncodeAllFrames(b) : EncodeGif(b);
     return Ok;
   }
   bool alpha = IsAlphaPixelFormat(b->format);
@@ -631,6 +792,101 @@ Status Encode(Bitmap* b, const CLSID* clsid, const EncoderParameters* params, st
   }
   return ok ? Ok : GenericError;
 }
+
+// The EncoderSaveFlag value among the parameters, or -1.
+LONG SaveFlag(const EncoderParameters* params) {
+  for (UINT i = 0; params && i < params->Count; i++)
+    if (params->Parameter[i].Guid == EncoderSaveFlag && params->Parameter[i].NumberOfValues > 0 &&
+        params->Parameter[i].Value)
+      return (LONG) * (const ULONG*)params->Parameter[i].Value;
+  return -1;
+}
+
+bool IsGifEncoder(const CLSID* clsid) {
+  for (const Codec& c : kCodecs)
+    if (clsid && c.clsid == *clsid) return *c.format == ImageFormatGIF;
+  return false;
+}
+
+// A multi-frame save under way (Save with EncoderValueMultiFrame, then
+// SaveAdd), by the image it began with: where the file goes, and the
+// frames so far with their delays. The file is written when it is
+// flushed, or when that image is disposed of.
+struct SaveSession {
+  std::wstring file;
+  IStream* stream = NULL;
+  std::vector<std::unique_ptr<Bitmap>> frames;
+  std::vector<UINT> delays;
+  int loop = -1;
+};
+std::mutex g_sessionLock;
+std::map<const Bitmap*, std::unique_ptr<SaveSession>>& Sessions() {
+  static std::map<const Bitmap*, std::unique_ptr<SaveSession>> m;
+  return m;
+}
+
+void AddFrame(SaveSession* s, const Bitmap* b) {
+  s->frames.push_back(FrameOf(b, b->active));
+  s->delays.push_back(FrameDelay(b, b->active));
+}
+
+Status WriteBytes(const std::wstring& file, IStream* stream, const std::vector<BYTE>& data) {
+  if (stream) {
+    ULONG put = 0;
+    HRESULT hr = stream->Write(data.data(), (ULONG)data.size(), &put);
+    return SUCCEEDED(hr) && put == data.size() ? Ok : Win32Error;
+  }
+  HANDLE h = CreateFileW(file.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (h == INVALID_HANDLE_VALUE) return Win32Error;
+  DWORD put = 0;
+  BOOL ok = WriteFile(h, data.data(), (DWORD)data.size(), &put, NULL) && put == data.size();
+  CloseHandle(h);
+  return ok ? Ok : Win32Error;
+}
+
+// Begins a multi-frame save of b to a file or a stream.
+Status BeginSession(Bitmap* b, const std::wstring& file, IStream* stream) {
+  std::unique_ptr<SaveSession> s(new SaveSession);
+  s->file = file;
+  s->stream = stream;
+  if (stream) stream->AddRef();
+  s->loop = LoopCount(b);
+  AddFrame(s.get(), b);
+  if (!stream) {
+    // The file is made now, so that a name that cannot be written fails here.
+    HANDLE h = CreateFileW(file.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return Win32Error;
+    CloseHandle(h);
+  }
+  std::lock_guard<std::mutex> g(g_sessionLock);
+  Sessions()[b] = std::move(s);
+  return Ok;
+}
+
+// Writes and ends b's multi-frame save; Ok when there is none.
+Status EndSession(const Bitmap* b) {
+  std::unique_ptr<SaveSession> s;
+  {
+    std::lock_guard<std::mutex> g(g_sessionLock);
+    auto it = Sessions().find(b);
+    if (it == Sessions().end()) return Ok;
+    s = std::move(it->second);
+    Sessions().erase(it);
+  }
+  std::vector<const Bitmap*> frames;
+  for (auto& f : s->frames) frames.push_back(f.get());
+  Status st = WriteBytes(s->file, s->stream, EncodeAnimatedGif(frames, s->delays, s->loop));
+  if (s->stream) s->stream->Release();
+  return st;
+}
+
+SaveSession* SessionOf(const Bitmap* b) {
+  std::lock_guard<std::mutex> g(g_sessionLock);
+  auto it = Sessions().find(b);
+  return it == Sessions().end() ? NULL : it->second.get();
+}
+
+bool Animated(const Bitmap* b) { return b->frames.size() > 1 || IsEqualGUID(b->raw, ImageFormatGIF); }
 
 }  // namespace
 
@@ -761,14 +1017,129 @@ GpStatus WINAPI GdipCloneImage(GpImage* image, GpImage** cloneImage) {
   c->palette = b->palette;
   c->paletteFlags = b->paletteFlags;
   c->raw = b->raw;
+  c->frames = b->frames;
+  c->active = b->active;
+  c->props = b->props;
   *cloneImage = c;
   return Ok;
 }
 
 GpStatus WINAPI GdipDisposeImage(GpImage* image) {
   if (!image) return InvalidParameter;
+  // A multi-frame save not yet flushed is written now.
+  EndSession(AsBitmap(image));
   delete AsBitmap(image);
   return Ok;
+}
+
+// Frames: an animated GIF's along time; any other image has one page.
+GpStatus WINAPI GdipImageGetFrameDimensionsCount(GpImage* image, UINT* count) {
+  if (!image || !count) return InvalidParameter;
+  *count = 1;
+  return Ok;
+}
+GpStatus WINAPI GdipImageGetFrameDimensionsList(GpImage* image, GUID* ids, UINT count) {
+  if (!image || !ids || count != 1) return InvalidParameter;
+  ids[0] = Animated(AsBitmap(image)) ? FrameDimensionTime : FrameDimensionPage;
+  return Ok;
+}
+GpStatus WINAPI GdipImageGetFrameCount(GpImage* image, const GUID* dimension, UINT* count) {
+  if (!image || !dimension || !count) return InvalidParameter;
+  Bitmap* b = AsBitmap(image);
+  *count = 0;
+  if (!IsEqualGUID(*dimension, Animated(b) ? FrameDimensionTime : FrameDimensionPage)) return InvalidParameter;
+  *count = b->frames.size() > 1 ? (UINT)b->frames.size() : 1;
+  return Ok;
+}
+GpStatus WINAPI GdipImageSelectActiveFrame(GpImage* image, const GUID* dimension, UINT index) {
+  UINT count;
+  GpStatus st = GdipImageGetFrameCount(image, dimension, &count);
+  if (st != Ok) return st;
+  if (index >= count) return InvalidParameter;
+  Bitmap* b = AsBitmap(image);
+  if (b->locked) return WrongState;
+  if (b->frames.size() > 1 && index != b->active) {
+    // What was drawn on the frame stays with it.
+    b->frames[b->active] = b->bits;
+    b->bits = b->frames[index];
+    b->active = index;
+  }
+  return Ok;
+}
+
+// Properties
+GpStatus WINAPI GdipGetPropertyCount(GpImage* image, UINT* count) {
+  if (!image || !count) return InvalidParameter;
+  *count = (UINT)AsBitmap(image)->props.size();
+  return Ok;
+}
+GpStatus WINAPI GdipGetPropertyIdList(GpImage* image, UINT count, PROPID* list) {
+  if (!image || !list) return InvalidParameter;
+  Bitmap* b = AsBitmap(image);
+  if (count != b->props.size()) return InvalidParameter;
+  UINT i = 0;
+  for (auto& p : b->props) list[i++] = p.first;
+  return Ok;
+}
+GpStatus WINAPI GdipGetPropertyItemSize(GpImage* image, PROPID id, UINT* size) {
+  if (!image || !size) return InvalidParameter;
+  Bitmap* b = AsBitmap(image);
+  auto it = b->props.find(id);
+  if (it == b->props.end()) return PropertyNotFound;
+  *size = (UINT)(sizeof(PropertyItem) + it->second.second.size());
+  return Ok;
+}
+GpStatus WINAPI GdipGetPropertyItem(GpImage* image, PROPID id, UINT size, PropertyItem* item) {
+  if (!image || !item) return InvalidParameter;
+  Bitmap* b = AsBitmap(image);
+  auto it = b->props.find(id);
+  if (it == b->props.end()) return PropertyNotFound;
+  const std::vector<BYTE>& v = it->second.second;
+  if (size != sizeof(PropertyItem) + v.size()) return InvalidParameter;
+  // The value follows the item in the caller's buffer.
+  item->id = id;
+  item->length = (ULONG)v.size();
+  item->type = it->second.first;
+  item->value = (BYTE*)(item + 1);
+  if (!v.empty()) memcpy(item->value, v.data(), v.size());
+  return Ok;
+}
+GpStatus WINAPI GdipSetPropertyItem(GpImage* image, const PropertyItem* item) {
+  if (!image || !item || (item->length && !item->value)) return InvalidParameter;
+  const BYTE* p = (const BYTE*)item->value;
+  AsBitmap(image)->props[item->id] = {item->type, std::vector<BYTE>(p, p + item->length)};
+  return Ok;
+}
+GpStatus WINAPI GdipRemovePropertyItem(GpImage* image, PROPID id) {
+  if (!image) return InvalidParameter;
+  return AsBitmap(image)->props.erase(id) ? Ok : PropertyNotFound;
+}
+
+// More frames for a multi-frame save, and its end.
+GpStatus WINAPI GdipSaveAdd(GpImage* image, const EncoderParameters* params) {
+  if (!image || !params) return InvalidParameter;
+  Bitmap* b = AsBitmap(image);
+  SaveSession* s = SessionOf(b);
+  if (!s) return WrongState;
+  LONG flag = SaveFlag(params);
+  if (flag == EncoderValueFlush) return EndSession(b);
+  if (flag != EncoderValueFrameDimensionTime && flag != EncoderValueFrameDimensionPage &&
+      flag != EncoderValueLastFrame)
+    return InvalidParameter;
+  AddFrame(s, b);
+  return flag == EncoderValueLastFrame ? EndSession(b) : Ok;
+}
+GpStatus WINAPI GdipSaveAddImage(GpImage* image, GpImage* newImage, const EncoderParameters* params) {
+  if (!image || !newImage || !params) return InvalidParameter;
+  Bitmap* b = AsBitmap(image);
+  SaveSession* s = SessionOf(b);
+  if (!s) return WrongState;
+  LONG flag = SaveFlag(params);
+  if (flag != EncoderValueFrameDimensionTime && flag != EncoderValueFrameDimensionPage &&
+      flag != EncoderValueLastFrame)
+    return InvalidParameter;
+  AddFrame(s, AsBitmap(newImage));
+  return flag == EncoderValueLastFrame ? EndSession(b) : Ok;
 }
 
 GpStatus WINAPI GdipGetImageWidth(GpImage* image, UINT* width) {
@@ -905,26 +1276,25 @@ GpStatus WINAPI GdipBitmapUnlockBits(GpBitmap* bitmap, BitmapData* data) {
 GpStatus WINAPI GdipSaveImageToFile(GpImage* image, const WCHAR* filename, const CLSID* clsidEncoder,
                                     const EncoderParameters* encoderParams) {
   if (!image || !filename || !clsidEncoder) return InvalidParameter;
+  EndSession(AsBitmap(image));
+  if (SaveFlag(encoderParams) == EncoderValueMultiFrame && IsGifEncoder(clsidEncoder))
+    return BeginSession(AsBitmap(image), filename, NULL);
   std::vector<BYTE> data;
   GpStatus st = Encode(AsBitmap(image), clsidEncoder, encoderParams, &data);
   if (st != Ok) return st;
-  HANDLE h = CreateFileW(filename, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-  if (h == INVALID_HANDLE_VALUE) return Win32Error;
-  DWORD put = 0;
-  BOOL ok = WriteFile(h, data.data(), (DWORD)data.size(), &put, NULL) && put == data.size();
-  CloseHandle(h);
-  return ok ? Ok : Win32Error;
+  return WriteBytes(filename, NULL, data);
 }
 
 GpStatus WINAPI GdipSaveImageToStream(GpImage* image, IStream* stream, const CLSID* clsidEncoder,
                                       const EncoderParameters* encoderParams) {
   if (!image || !stream || !clsidEncoder) return InvalidParameter;
+  EndSession(AsBitmap(image));
+  if (SaveFlag(encoderParams) == EncoderValueMultiFrame && IsGifEncoder(clsidEncoder))
+    return BeginSession(AsBitmap(image), std::wstring(), stream);
   std::vector<BYTE> data;
   GpStatus st = Encode(AsBitmap(image), clsidEncoder, encoderParams, &data);
   if (st != Ok) return st;
-  ULONG put = 0;
-  HRESULT hr = stream->Write(data.data(), (ULONG)data.size(), &put);
-  return SUCCEEDED(hr) && put == data.size() ? Ok : Win32Error;
+  return WriteBytes(std::wstring(), stream, data);
 }
 
 GpStatus WINAPI GdipGetImageDecodersSize(UINT* numDecoders, UINT* size) {

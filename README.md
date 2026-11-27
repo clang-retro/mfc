@@ -318,11 +318,15 @@ GDI+ is there as far as images go (`CImage` uses it): bitmaps in the
 usual pixel formats, locking their bits, and BMP, PNG, JPEG and GIF
 files and streams, read with [stb_image](https://github.com/nothings/stb)
 and PNG and JPEG written with stb_image_write (public domain or MIT, in
-`port/src/third_party/`), BMP and GIF by hand. A GIF is written as one
-frame: an indexed bitmap with its own palette, and a true-color one with
+`port/src/third_party/`), BMP and GIF by hand. A GIF frame is written
+as an indexed bitmap with its own palette, and a true-color one with
 its own colors when it has 256 or fewer, else through a color cube
 (GDI+ takes every true-color image through its halftone palette);
-pixels under half alpha become the transparent color. CryptoAPI has the base and
+pixels under half alpha become the transparent color. Animated GIFs
+are read as frames along `FrameDimensionTime`, with their delays and
+loop count as the `PropertyTagFrameDelay` and `PropertyTagLoopCount`
+properties, and written frame by frame with `EncoderSaveFlag` and
+`SaveAdd`. CryptoAPI has the base and
 enhanced providers' hashes (MD4, MD5, SHA-1, SHA-256, SHA-384, SHA-512
 and HMAC), RC4 and AES keys (derived, imported or random),
 `CryptGenRandom`, and RSA: key pairs generated or imported (1024 bits
@@ -916,6 +920,7 @@ try.
   CAtlStringMgr, CFixedStringT, AtlGetStringResourceImage and
   CComCurrency (its arithmetic, rounding and overflow); CComSafeArray of numbers,
   BSTRs and VARIANTs, in one and two dimensions; CComDispatchDriver;
+  animated GIFs through GDI+;
   CAtlFile, CAtlTemporaryFile and CAtlFileMapping; CTime, CTimeSpan,
   CFileTime and CFileTimeSpan without MFC; CImage (a 32-bit image with
   alpha through PNG and back and drawn with AlphaBlend, 24 bits through
