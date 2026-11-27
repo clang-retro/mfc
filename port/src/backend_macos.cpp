@@ -16,6 +16,7 @@
 
 #include "macos_toolbox.h"
 
+#include <algorithm>
 #include <set>
 
 namespace winport {
@@ -27,7 +28,14 @@ struct Native {
   void* win = NULL;
   bool popup = false;
   std::vector<DWORD> composed;  // a translucent window's look, while it is drawn
+  std::vector<RECT> pending;    // changed parts not yet copied to the screen
+  DWORD pendingSince = 0;       // GetTickCount when the first of them came
 };
+
+// The most separate rectangles to keep for a window; more are joined.
+const size_t kMaxPending = 8;
+// The longest time in ms that a change waits before it is copied.
+const DWORD kMaxDelay = 50;
 
 std::set<Native*> g_natives;
 
@@ -118,6 +126,61 @@ void DrawSurface(Native* n, const RECT& r) {
               c.bottom - c.top);
 }
 
+// Tells whether two rectangles overlap or touch.
+bool Touch(const RECT& a, const RECT& b) {
+  return a.left <= b.right && b.left <= a.right && a.top <= b.bottom && b.top <= a.bottom;
+}
+
+// Gives the smallest rectangle that holds a and b.
+RECT Join(const RECT& a, const RECT& b) {
+  return RECT{std::min(a.left, b.left), std::min(a.top, b.top), std::max(a.right, b.right),
+              std::max(a.bottom, b.bottom)};
+}
+
+// Copies the changed parts of a window's surface to its Toolbox window.
+// The caller holds the lock.
+void Flush(Native* n) {
+  std::vector<RECT> rects;
+  rects.swap(n->pending);
+  for (const RECT& r : rects) DrawSurface(n, r);
+}
+
+// Copies the changed parts of all windows to the screen.
+void FlushAll() {
+  UserGuard g(UserLock());
+  for (Native* n : g_natives)
+    if (!n->pending.empty()) Flush(n);
+}
+
+// Adds a changed part of a window, to be copied later. Overlapping and
+// touching parts become one, and a change that waited kMaxDelay ms is
+// copied at once. Each CopyBits has a cost of its own, which is large
+// on a 68k Mac: a scroll bar alone can be 30 small drawings.
+// The caller holds the lock.
+void AddPending(Native* n, const RECT& r) {
+  if (r.right <= r.left || r.bottom <= r.top) return;
+  DWORD now = GetTickCount();
+  if (n->pending.empty()) n->pendingSince = now;
+  RECT add = r;
+  for (bool joined = true; joined;) {
+    joined = false;
+    for (size_t i = 0; i < n->pending.size(); i++)
+      if (Touch(n->pending[i], add)) {
+        add = Join(n->pending[i], add);
+        n->pending.erase(n->pending.begin() + (long)i);
+        joined = true;
+        break;
+      }
+  }
+  n->pending.push_back(add);
+  if (n->pending.size() > kMaxPending) {
+    RECT all = n->pending[0];
+    for (const RECT& p : n->pending) all = Join(all, p);
+    n->pending.assign(1, all);
+  }
+  if (now - n->pendingSince >= kMaxDelay) Flush(n);
+}
+
 struct MacBackend : Backend {
   // Gives the backend's name.
   const char* Name() override { return "macos"; }
@@ -184,7 +247,10 @@ struct MacBackend : Backend {
       SetTitle(n);
     }
     mactb::Show(n->win, show, (w->style & WS_DISABLED) != 0);
-    if (show) DrawSurface(n, RECT{0, 0, w->rect.right - w->rect.left, w->rect.bottom - w->rect.top});
+    if (show) {
+      n->pending.clear();
+      DrawSurface(n, RECT{0, 0, w->rect.right - w->rect.left, w->rect.bottom - w->rect.top});
+    }
   }
 
   // Disposes of a window's Toolbox window.
@@ -216,14 +282,17 @@ struct MacBackend : Backend {
       DrawSurface(n, RECT{0, 0, w->rect.right - w->rect.left, w->rect.bottom - w->rect.top});
   }
 
-  // Copies the changed part of the surface to the screen at once: the
-  // Toolbox keeps no picture of a window.
+  // Notes the changed part of the surface. Wait copies it to the screen
+  // (the Toolbox keeps no picture of a window), or AddPending does when
+  // changes keep coming for kMaxDelay ms.
   void Present(Window* w, const RECT& r) override {
-    if (Native* n = (Native*)w->native) DrawSurface(n, r);
+    if (Native* n = (Native*)w->native) AddPending(n, r);
   }
 
-  // Handles Toolbox events for up to timeout ms, or until Wake.
+  // Copies the changes to the screen, then handles Toolbox events for up
+  // to timeout ms, or until Wake.
   void Wait(DWORD timeout) override {
+    FlushAll();
     if (g_woken) {
       g_woken = false;
       return;

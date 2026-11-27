@@ -28,6 +28,12 @@ the changed pixels to the screen with `CopyBits`:
 - Without it (a Mac Plus, a Mac SE or a Classic), it dithers them to
   black and white.
 
+The backend does not copy each drawing at once. It keeps the changed
+rectangles of each window and joins the rectangles that touch. It copies
+them when the program waits for messages, or when a change is 50 ms
+old. Each `CopyBits` call has a fixed cost, which is large on a 68k Mac.
+For example, one scroll bar is about 30 small drawings.
+
 The code is in two files, because the Win32 headers and the Toolbox
 headers use the same names (`ShowWindow`, `Rect`, `Point` and more):
 
