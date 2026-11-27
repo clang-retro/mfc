@@ -168,6 +168,39 @@ HBITMAP NewDib32(int w, int h, DWORD** bits) {
 // Makes an icon from a DIB as icon resources hold it: the header's height
 // covers the image and the mask below it.
 HICON IconFromDib(const BYTE* data, DWORD size, bool isIcon, POINT hot, int cx, int cy) {
+  // An image of Windows Vista and later (most often the 256 x 256 one) is
+  // a PNG file: it becomes the 32-bit DIB with alpha that it stands for,
+  // with a mask that is set where the image is fully transparent.
+  if (size >= 8 && !memcmp(data, "\x89PNG", 4)) {
+    std::vector<unsigned char> rgba;
+    int w = 0, h = 0;
+    if (!winport::DecodePng(data, size, rgba, &w, &h) || w <= 0 || h <= 0 || w > 4096 || h > 4096) return NULL;
+    size_t maskStride = (size_t)((w + 31) / 32) * 4;
+    std::vector<BYTE> dib(sizeof(BITMAPINFOHEADER) + (size_t)w * h * 4 + maskStride * h, 0);
+    BITMAPINFOHEADER* bih = (BITMAPINFOHEADER*)dib.data();
+    bih->biSize = sizeof(BITMAPINFOHEADER);
+    bih->biWidth = w;
+    bih->biHeight = h * 2;
+    bih->biPlanes = 1;
+    bih->biBitCount = 32;
+    bih->biCompression = BI_RGB;
+    BYTE* image = dib.data() + sizeof(BITMAPINFOHEADER);
+    BYTE* mask = image + (size_t)w * h * 4;
+    for (int y = 0; y < h; y++) {
+      // DIB rows are bottom-up.
+      const unsigned char* src = rgba.data() + (size_t)(h - 1 - y) * w * 4;
+      BYTE* row = image + (size_t)y * w * 4;
+      BYTE* mrow = mask + (size_t)y * maskStride;
+      for (int x = 0; x < w; x++) {
+        row[x * 4] = src[x * 4 + 2];
+        row[x * 4 + 1] = src[x * 4 + 1];
+        row[x * 4 + 2] = src[x * 4];
+        row[x * 4 + 3] = src[x * 4 + 3];
+        if (src[x * 4 + 3] == 0) mrow[x / 8] |= (BYTE)(0x80 >> (x % 8));
+      }
+    }
+    return IconFromDib(dib.data(), (DWORD)dib.size(), isIcon, hot, cx, cy);
+  }
   if (size < sizeof(BITMAPINFOHEADER)) return NULL;
   BITMAPINFOHEADER bih;
   memcpy(&bih, data, sizeof bih);
@@ -751,10 +784,6 @@ HICON WINAPI CreateIconFromResourceEx(PBYTE bits, DWORD size, BOOL icon, DWORD, 
     hot.y = ((WORD*)bits)[1];
     bits += 4;
     size -= 4;
-  }
-  if (size >= 8 && !memcmp(bits, "\x89PNG", 4)) {
-    SetLastError(ERROR_NOT_SUPPORTED);  // PNG images are not read yet
-    return NULL;
   }
   if (flags & LR_DEFAULTSIZE) {
     if (!cx) cx = GetSystemMetrics(icon ? SM_CXICON : SM_CXCURSOR);

@@ -330,6 +330,11 @@ as it would be on Windows, colors with `WM_SYSCOLORCHANGE` and sizes and
 fonts with `WM_SETTINGCHANGE` and a new frame. A color a program set
 itself with `SetSysColors` stays until the file changes that color.
 
+Icons and cursors whose images are PNG files, as Windows Vista and
+later store them (most often the 256 x 256 image), are read from
+resources, from icon files and by `CreateIconFromResourceEx`: the
+image keeps its alpha, and the mask is set where it is fully clear.
+
 GDI+ is there as far as images go (`CImage` uses it): bitmaps in the
 usual pixel formats, locking their bits, and BMP, PNG, JPEG and GIF
 files and streams, read with [stb_image](https://github.com/nothings/stb)
@@ -609,7 +614,8 @@ try.
   Unicode window procedures, focus, painting and scrolling, memory DCs,
   monochrome bitmaps, DIB sections, raster operations, regions,
   clipping, SaveDC and mapping modes, lines, shapes, fill modes, flood
-  fills, paths, text metrics and extents, TextOut and DrawText; the
+  fills, paths, text metrics and extents, TextOut and DrawText; icons
+  whose images are PNG files, from bits and from an icon file; the
   common controls through their messages (status bar, progress,
   trackbar, up-down, header, tabs, hotkey, list and tree views, IP
   address, ComboBoxEx, month calendar, date and time picker, an

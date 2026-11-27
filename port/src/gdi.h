@@ -351,6 +351,10 @@ void MetaDCFreed(DCObj* dc);
 // The display's size and depth.
 SIZE ScreenSize();
 
+// Decodes a PNG image (gdiplus.cpp) into rows of bytes red, green, blue
+// and alpha, top row first. Gives false for data that is not a PNG image.
+bool DecodePng(const unsigned char* data, size_t size, std::vector<unsigned char>& rgba, int* w, int* h);
+
 
 }  // namespace winport
 
