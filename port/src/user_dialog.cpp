@@ -776,6 +776,21 @@ INT_PTR CALLBACK BoxProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       int buttonsW = (int)ids.size() * bw + ((int)ids.size() - 1) * gap + 2 * margin;
       int cw = contentW > buttonsW ? contentW : buttonsW;
       int textH = tr.bottom - tr.top;
+      // A box taller than the work area shows its text in a read-only
+      // edit control that scrolls, so that the buttons stay on the
+      // screen.
+      RECT work = MakeRect(0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+      SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+      RECT frame = {0, 0, 0, 0};
+      AdjustWindowRectEx(&frame, GetWindowLongW(h, GWL_STYLE), FALSE, GetWindowLongW(h, GWL_EXSTYLE));
+      int maxTextH = (work.bottom - work.top) - (frame.bottom - frame.top) - (3 * margin + bh);
+      bool scroll = textH > maxTextH && maxTextH > tm.tmHeight;
+      if (scroll) {
+        textH = maxTextH - maxTextH % tm.tmHeight;
+        tr.right += GetSystemMetrics(SM_CXVSCROLL);
+        contentW += GetSystemMetrics(SM_CXVSCROLL);
+        if (contentW > cw) cw = contentW;
+      }
       int top = iconSize > textH ? iconSize : textH;
       int ch = margin + top + margin + bh + margin;
       if (p->icon) {
@@ -783,9 +798,23 @@ INT_PTR CALLBACK BoxProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                                   iconSize, h, (HMENU)(UINT_PTR)0xFFFE, NULL, NULL);
         SendMessageW(ic, STM_SETICON, (WPARAM)p->icon, 0);
       }
-      HWND text = CreateWindowExW(0, L"Static", p->text.c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
-                                  textX, margin + (top - textH) / 2, tr.right - tr.left + 2, textH, h,
-                                  (HMENU)(UINT_PTR)kMsgText, NULL, NULL);
+      HWND text;
+      if (scroll) {
+        // An edit control wants CR LF line ends.
+        std::wstring crlf;
+        for (size_t i = 0; i < p->text.size(); i++) {
+          if (p->text[i] == L'\n' && (i == 0 || p->text[i - 1] != L'\r')) crlf += L'\r';
+          crlf += p->text[i];
+        }
+        text = CreateWindowExW(0, L"Edit", crlf.c_str(),
+                               WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
+                               textX, margin, tr.right - tr.left + 2, textH, h, (HMENU)(UINT_PTR)kMsgText, NULL,
+                               NULL);
+      } else {
+        text = CreateWindowExW(0, L"Static", p->text.c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX, textX,
+                               margin + (top - textH) / 2, tr.right - tr.left + 2, textH, h,
+                               (HMENU)(UINT_PTR)kMsgText, NULL, NULL);
+      }
       SendMessageW(text, WM_SETFONT, (WPARAM)font, FALSE);
       int bx = (cw - ((int)ids.size() * bw + ((int)ids.size() - 1) * gap)) / 2;
       UINT def = (p->type & MB_DEFMASK) >> 8;
@@ -811,8 +840,12 @@ INT_PTR CALLBACK BoxProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       HWND owner = GetWindow(h, GW_OWNER);
       RECT area = MakeRect(0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
       if (owner && IsWindowVisible(owner) && !IsIconic(owner)) GetWindowRect(owner, &area);
-      SetWindowPos(h, (p->type & (MB_TOPMOST | MB_SYSTEMMODAL)) ? HWND_TOPMOST : NULL,
-                   area.left + (area.right - area.left - ww) / 2, area.top + (area.bottom - area.top - wh) / 2, ww, wh,
+      // Centered on the owner, but inside the work area.
+      int x = area.left + (area.right - area.left - ww) / 2;
+      int y = area.top + (area.bottom - area.top - wh) / 2;
+      x = std::max((int)work.left, std::min(x, (int)work.right - ww));
+      y = std::max((int)work.top, std::min(y, (int)work.bottom - wh));
+      SetWindowPos(h, (p->type & (MB_TOPMOST | MB_SYSTEMMODAL)) ? HWND_TOPMOST : NULL, x, y, ww, wh,
                    SWP_NOACTIVATE | ((p->type & (MB_TOPMOST | MB_SYSTEMMODAL)) ? 0 : SWP_NOZORDER));
       SendMessageW(h, DM_REPOSITION, 0, 0);
       if (focus) SetFocus(focus);
