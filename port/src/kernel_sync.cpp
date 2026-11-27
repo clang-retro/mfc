@@ -1174,8 +1174,11 @@ static void InstallSuspendHandler() {
 // The thread itself lets the lock go first, as it stops at once.
 static void StopThread(Thread* t) {
   bool self = t == t_thread;
+  // A thread that stops itself as it starts may run before pthread_create
+  // has stored its handle in t->thread, so it names itself.
+  pthread_t thread = self ? pthread_self() : t->thread;
 #if WINPORT_MACH_SUSPEND
-  mach_port_t port = pthread_mach_thread_np(t->thread);
+  mach_port_t port = pthread_mach_thread_np(thread);
   t->machSuspends++;
   if (self) pthread_mutex_unlock(&t->control);
   if (thread_suspend(port) != KERN_SUCCESS && !self) t->machSuspends--;
@@ -1183,10 +1186,10 @@ static void StopThread(Thread* t) {
 #elif WINPORT_SIGNAL_SUSPEND
   if (self) {
     pthread_mutex_unlock(&t->control);
-    pthread_kill(t->thread, SuspendSignal());
+    pthread_kill(thread, SuspendSignal());
     return;
   }
-  pthread_kill(t->thread, SuspendSignal());
+  pthread_kill(thread, SuspendSignal());
   pthread_mutex_unlock(&t->control);
   while (!t->parked && !t->exited && !t->gone) sched_yield();
 #else
