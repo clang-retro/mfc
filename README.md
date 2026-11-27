@@ -961,6 +961,14 @@ try.
   place with bad text refused; the shell list and tree over a folder the
   test makes (sorting, sizes, opening a folder, Backspace, the tree and
   list following each other).
+* `fpframetest` (Windows, Linux and macOS): the Feature Pack's frames.
+  An SDI CFrameWndEx built as AppWizard builds one: the menu moved onto
+  the menu bar, the toolbar and status bar laid out with three docking
+  panes, a toolbar click and the View menu's commands, a pane put on a
+  tab beside another and taken off again, floated and docked, and
+  auto-hidden, slid out and back. Then a CMDIFrameWndEx with MDI tabs:
+  a tab for each child, picking a tab activates its child, a new title
+  shows on its tab, a closed child takes its tab with it.
 * `atlutiltest`: ATL's utility headers in a program without MFC: CString
   from `atlstr.h` (formatting, string resources, conversions, errors as
   CAtlException); CSimpleArray and CSimpleMap; CAtlArray, CAtlList,
@@ -1217,7 +1225,23 @@ request with the stock MinGW-w64 toolchain.
   fonts, files and folders, a description area, AFX_WM_PROPERTY_CHANGED)
   and CMFCShellTreeCtrl and CMFCShellListCtrl (the shell's namespace,
   with the system's icons; on Linux and macOS the portable layer's
-  SHGetFileInfo draws them). `afxcontrolbars.h` includes them all.
+  SHGetFileInfo draws them). Then the frames: CFrameWndEx,
+  CMDIFrameWndEx and CMDIChildWndEx, with CMFCMenuBar (the window's menu
+  moved onto a bar, Alt and F10 to open it), CMFCToolBar (RT_TOOLBAR
+  resources, shared and locked images, text labels, tooltips, the
+  customize chevron, user toolbars, CMFCToolBarMenuButton and
+  CMFCToolBarComboBoxButton), CMFCStatusBar (panes with text, icons,
+  animations and progress), and the docking manager with CDockablePane:
+  panes docked on any side, resized by their dividers, put on tabs
+  together (CTabbedPane), floated in a CPaneFrameWnd, auto-hidden on the
+  frame's edge to slide out over the view, and listed on the View menu
+  with commands to show and hide them. CMDIFrameWndEx draws MDI tabs over
+  its children. Not there yet: the menu bar's keyboard and hot-tracking
+  moves from one menu to the next, the maximized child's buttons on the
+  menu bar, smart docking markers (a dragged pane docks where it is
+  dropped on an edge), and dragging commands in the Customize window,
+  which only shows and hides, makes, renames, deletes and resets
+  toolbars. `afxcontrolbars.h` includes them all.
 * `afxinet.h`: the internet classes over WinINet: CInternetSession
   (OpenURL, options, cookies, the status callback), CHttpConnection and
   CHttpFile, CFtpConnection, CFtpFileFind, CGopherConnection,
