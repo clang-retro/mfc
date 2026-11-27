@@ -281,13 +281,23 @@ public:                                   \
 //     COM_INTERFACE_ENTRY_CHAIN(CBase)
 //   END_COM_MAP()
 
+// With _ATL_DEBUG_QI defined, each QueryInterface of a map is written to
+// the debugger: the class, the interface's name and whether it was had.
+#ifdef _ATL_DEBUG_QI
+#define _ATL_DUMP_QI(name, iid, hr) ATL::AtlDumpIID(iid, _T(name), hr)
+#else
+#define _ATL_DUMP_QI(name, iid, hr) ((void)0)
+#endif
+
 #define BEGIN_COM_MAP(x)                                                                  \
 public:                                                                                   \
   typedef x _ComMapClass;                                                                 \
   IUnknown* _GetRawUnknown() { return (IUnknown*)((DWORD_PTR)this + _GetEntries()->dw); } \
   IUnknown* GetUnknown() { return _GetRawUnknown(); }                                     \
   HRESULT _InternalQueryInterface(REFIID iid, void** ppvObject) {                         \
-    return this->InternalQueryInterface(this, _GetEntries(), iid, ppvObject);             \
+    HRESULT _hrQI = this->InternalQueryInterface(this, _GetEntries(), iid, ppvObject);    \
+    _ATL_DUMP_QI(#x, iid, _hrQI);                                                         \
+    return _hrQI;                                                                         \
   }                                                                                       \
   static const ATL::_ATL_INTMAP_ENTRY* WINAPI _GetEntries() {                             \
     static const ATL::_ATL_INTMAP_ENTRY _entries[] = {
@@ -894,9 +904,38 @@ public:
   void SetVoid(void* pv) { m_pfnCreateInstance = (_ATL_CREATORFUNC*)pv; }
 };
 
-// A factory that runs each object in a thread of its own: here, as in an
-// in-process server, the object is made in the caller's.
-typedef CComClassFactory CComClassFactoryAutoThread;
+// A factory that makes each object in one of the auto-thread module's
+// threads (CComAutoThreadModule or CAtlAutoThreadModule). Without such a
+// module, or for an aggregated object, the object is made in the
+// caller's thread.
+class CComClassFactoryAutoThread : public IClassFactory,
+                                   public CComObjectRootEx<CComGlobalsThreadModel> {
+public:
+  _ATL_CREATORFUNC* m_pfnCreateInstance;
+
+  BEGIN_COM_MAP(CComClassFactoryAutoThread)
+    COM_INTERFACE_ENTRY(IClassFactory)
+  END_COM_MAP()
+
+  CComClassFactoryAutoThread() : m_pfnCreateInstance(NULL) {}
+  STDMETHOD(CreateInstance)(LPUNKNOWN pUnkOuter, REFIID riid, void** ppvObj) override {
+    if (ppvObj == NULL) return E_POINTER;
+    *ppvObj = NULL;
+    if (pUnkOuter != NULL && !InlineIsEqualGUID(riid, IID_IUnknown)) return CLASS_E_NOAGGREGATION;
+    if (m_pfnCreateInstance == NULL) return E_UNEXPECTED;
+    if (pUnkOuter == NULL && _pAtlAutoThreadModule != NULL)
+      return _pAtlAutoThreadModule->CreateInstance((void*)m_pfnCreateInstance, riid, ppvObj);
+    return m_pfnCreateInstance(pUnkOuter, riid, ppvObj);
+  }
+  STDMETHOD(LockServer)(BOOL fLock) override {
+    if (fLock)
+      _pAtlModule->Lock();
+    else
+      _pAtlModule->Unlock();
+    return S_OK;
+  }
+  void SetVoid(void* pv) { m_pfnCreateInstance = (_ATL_CREATORFUNC*)pv; }
+};
 
 // One object for every client.
 template <class T>
@@ -1328,6 +1367,59 @@ template <const CLSID* pcoclsid, const IID* psrcid, const GUID* plibid, WORD wMa
 tihclass IProvideClassInfo2Impl<pcoclsid, psrcid, plibid, wMajor, wMinor, tihclass>::_tih = {
     pcoclsid, plibid, wMajor, wMinor, NULL, 0};
 
+// IProvideClassInfo alone: the coclass's type information.
+template <const CLSID* pcoclsid, const GUID* plibid = &CAtlModule::m_libid, WORD wMajor = 1,
+          WORD wMinor = 0, class tihclass = CComTypeInfoHolder>
+class ATL_NO_VTABLE IProvideClassInfoImpl : public IProvideClassInfo {
+public:
+  STDMETHOD(GetClassInfo)(ITypeInfo** pptinfo) override { return _tih.GetTypeInfo(0, LANG_NEUTRAL, pptinfo); }
+
+protected:
+  static tihclass _tih;
+};
+
+template <const CLSID* pcoclsid, const GUID* plibid, WORD wMajor, WORD wMinor, class tihclass>
+tihclass IProvideClassInfoImpl<pcoclsid, plibid, wMajor, wMinor, tihclass>::_tih = {
+    pcoclsid, plibid, wMajor, wMinor, NULL, 0};
+
+// ---------------------------------------------------------------------
+// IServiceProvider, answered from a service map:
+//
+//   class CThing : ..., public IServiceProviderImpl<CThing> {
+//     BEGIN_COM_MAP(CThing) ... COM_INTERFACE_ENTRY(IServiceProvider) END_COM_MAP()
+//     BEGIN_SERVICE_MAP(CThing)
+//       SERVICE_ENTRY(SID_SThing)          // the object itself
+//       SERVICE_ENTRY_CHAIN(m_spSite)      // then whoever m_spSite gives
+//     END_SERVICE_MAP()
+//   };
+
+template <class T>
+class ATL_NO_VTABLE IServiceProviderImpl : public IServiceProvider {
+public:
+  STDMETHOD(QueryService)(REFGUID guidService, REFIID riid, void** ppvObject) override {
+    return static_cast<T*>(this)->_InternalQueryService(guidService, riid, ppvObject);
+  }
+};
+
+#define BEGIN_SERVICE_MAP(x)                                                              \
+public:                                                                                   \
+  HRESULT _InternalQueryService(REFGUID guidService, REFIID riid, void** ppvObject) {     \
+    if (ppvObject == NULL) return E_POINTER;                                              \
+    *ppvObject = NULL;
+#define SERVICE_ENTRY(x) \
+  if (InlineIsEqualGUID(guidService, x)) return this->_InternalQueryInterface(riid, ppvObject);
+#define SERVICE_ENTRY_CHAIN(x)                                                     \
+  {                                                                                \
+    ATL::CComQIPtr<IServiceProvider, &IID_IServiceProvider> _spProvider(x);        \
+    if (_spProvider != NULL) {                                                     \
+      HRESULT _hrService = _spProvider->QueryService(guidService, riid, ppvObject); \
+      if (SUCCEEDED(_hrService)) return _hrService;                                \
+    }                                                                              \
+  }
+#define END_SERVICE_MAP() \
+  return E_NOINTERFACE;   \
+  }
+
 // ---------------------------------------------------------------------
 // Enumerators.
 
@@ -1616,6 +1708,45 @@ public:
   BEGIN_COM_MAP(_CComEnum)
     COM_INTERFACE_ENTRY_IID(*piid, _CComEnumBase)
   END_COM_MAP()
+};
+
+// A collection object's Count, Item (counting from 1) and _NewEnum, over
+// the STL-style collection m_coll:
+//
+//   typedef std::vector<CComVariant> Items;
+//   typedef CComEnumOnSTL<IEnumVARIANT, &IID_IEnumVARIANT, VARIANT, _Copy<VARIANT>, Items> Enum;
+//   class CItems : public ICollectionOnSTLImpl<IDispatchImpl<IItems, &IID_IItems>, Items,
+//                                              VARIANT, _Copy<VARIANT>, Enum>, ...
+template <class T, class CollType, class ItemType, class CopyItem, class EnumType>
+class ICollectionOnSTLImpl : public T {
+public:
+  CollType m_coll;
+
+  STDMETHOD(get_Count)(long* pcount) {
+    if (pcount == NULL) return E_POINTER;
+    *pcount = (long)m_coll.size();
+    return S_OK;
+  }
+  STDMETHOD(get_Item)(long Index, ItemType* pvar) {
+    if (pvar == NULL) return E_POINTER;
+    if (Index < 1) return E_INVALIDARG;
+    typename CollType::const_iterator iter = m_coll.begin();
+    for (long i = 1; i < Index && iter != m_coll.end(); i++) ++iter;
+    if (iter == m_coll.end()) return E_INVALIDARG;
+    CopyItem::init(pvar);
+    return CopyItem::copy(pvar, &*iter);
+  }
+  STDMETHOD(get__NewEnum)(IUnknown** ppUnk) {
+    if (ppUnk == NULL) return E_POINTER;
+    *ppUnk = NULL;
+    CComObject<EnumType>* p = NULL;
+    HRESULT hr = CComObject<EnumType>::CreateInstance(&p);
+    if (FAILED(hr)) return hr;
+    hr = p->Init(static_cast<IUnknown*>(static_cast<T*>(this)), m_coll);
+    if (SUCCEEDED(hr)) hr = p->QueryInterface(IID_IUnknown, (void**)ppUnk);
+    if (FAILED(hr)) delete p;
+    return hr;
+  }
 };
 
 

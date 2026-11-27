@@ -9,10 +9,15 @@
 //     aggregation, a singleton, IProvideClassInfo2;
 //   - once everything is released the DLL may unload;
 // and checks the ATL pieces a client uses itself: CComObject,
-// CComObjectStack, CComEnum, CComPtr, CComBSTR and CComVariant.
+// CComObjectStack, CComEnum, CComPtr, CComBSTR and CComVariant; and the
+// module's threads (CAtlAutoThreadModule and
+// DECLARE_CLASSFACTORY_AUTO_THREAD), CComGITPtr, a service map,
+// ICollectionOnSTLImpl, and the registrar as IRegistrar, per machine and
+// per user.
 #include <atlbase.h>
 #include <atlcom.h>
 #include <stdio.h>
+#include <vector>
 #include "atltest.h"
 
 CComModule _Module;
@@ -278,6 +283,224 @@ struct COuter : public IUnknown {
   STDMETHOD_(ULONG, AddRef)() override { return ++m_ref; }
   STDMETHOD_(ULONG, Release)() override { return --m_ref; }
 };
+
+// ---------------------------------------------------------------------
+// The module's threads, the global interface table, services and
+// collections.
+
+// A collection of numbers, with a service of its own.
+struct IAtlItems : public IUnknown {
+  STDMETHOD(get_Count)(long* pCount) = 0;
+  STDMETHOD(get_Item)(long Index, VARIANT* pvar) = 0;
+  STDMETHOD(get__NewEnum)(IUnknown** ppUnk) = 0;
+};
+__CRT_UUID_DECL(IAtlItems, 0x5d1f4a07, 0x93b2, 0x4c5e, 0x8a, 0x61, 0x2f, 0x07, 0xc4, 0x9e, 0x3b, 0x18)
+#define IID_IAtlItems __uuidof(IAtlItems)
+// {6E2A5B18-A4C3-4D6F-9B72-30F8D5AF4C29}
+static const GUID SID_SAtlItems = {
+    0x6e2a5b18, 0xa4c3, 0x4d6f, {0x9b, 0x72, 0x30, 0xf8, 0xd5, 0xaf, 0x4c, 0x29}};
+// {7F3B6C29-B5D4-4E70-AC83-41F9E6B05D3A}, a service nobody has.
+static const GUID SID_SNobody = {
+    0x7f3b6c29, 0xb5d4, 0x4e70, {0xac, 0x83, 0x41, 0xf9, 0xe6, 0xb0, 0x5d, 0x3a}};
+
+typedef std::vector<CComVariant> AtlItemVector;
+typedef CComEnumOnSTL<IEnumVARIANT, &IID_IEnumVARIANT, VARIANT, _Copy<VARIANT>, AtlItemVector>
+    AtlItemEnum;
+
+static DWORD g_dwItemsThread;
+class ATL_NO_VTABLE CItems
+    : public CComObjectRootEx<CComMultiThreadModel>,
+      public ICollectionOnSTLImpl<IAtlItems, AtlItemVector, VARIANT, _Copy<VARIANT>, AtlItemEnum>,
+      public IServiceProviderImpl<CItems> {
+public:
+  DWORD m_dwThread;
+  CComPtr<IUnknown> m_spNext;  // whose services come after ours
+
+  // Any thread may call it: it says so with the free-threaded marshaler.
+  CComPtr<IUnknown> m_spMarshaler;
+  DECLARE_GET_CONTROLLING_UNKNOWN()
+  DECLARE_PROTECT_FINAL_CONSTRUCT()
+
+  BEGIN_COM_MAP(CItems)
+    COM_INTERFACE_ENTRY(IAtlItems)
+    COM_INTERFACE_ENTRY(IServiceProvider)
+    COM_INTERFACE_ENTRY_AGGREGATE(IID_IMarshal, m_spMarshaler.p)
+  END_COM_MAP()
+  BEGIN_SERVICE_MAP(CItems)
+    SERVICE_ENTRY(SID_SAtlItems)
+    SERVICE_ENTRY_CHAIN(m_spNext)
+  END_SERVICE_MAP()
+
+  HRESULT FinalConstruct() {
+    m_dwThread = g_dwItemsThread = ::GetCurrentThreadId();
+    for (long i = 1; i <= 3; i++) m_coll.push_back(CComVariant(i * 100));
+    return ::CoCreateFreeThreadedMarshaler(GetControllingUnknown(), &m_spMarshaler.p);
+  }
+  void FinalRelease() { m_spMarshaler.Release(); }
+};
+
+// The object of the auto-thread factory.
+class ATL_NO_VTABLE CThreadItems : public CItems {
+public:
+  DECLARE_CLASSFACTORY_AUTO_THREAD()
+};
+
+struct GitData {
+  DWORD dwCookie;
+  long nCount;
+  HRESULT hr;
+};
+static DWORD WINAPI GitThread(LPVOID pv) {
+  GitData* d = (GitData*)pv;
+  ::CoInitialize(NULL);
+  CComGITPtr<IAtlItems> git(d->dwCookie);
+  CComPtr<IAtlItems> sp;
+  d->hr = git.CopyTo(&sp);
+  if (sp != NULL) sp->get_Count(&d->nCount);
+  git.Detach();  // the cookie stays the main thread's
+  sp.Release();
+  ::CoUninitialize();
+  return 0;
+}
+
+static void TestModulePieces() {
+  // The collection: Count, Item from 1, _NewEnum.
+  CComObject<CItems>* pItems = NULL;
+  CHECK(SUCCEEDED(CComObject<CItems>::CreateInstance(&pItems)));
+  CComPtr<IAtlItems> spItems;
+  pItems->QueryInterface(IID_IAtlItems, (void**)&spItems);
+  long n = 0;
+  CHECK(spItems->get_Count(&n) == S_OK && n == 3);
+  CComVariant v;
+  CHECK(spItems->get_Item(2, &v) == S_OK && v.vt == VT_I4 && v.lVal == 200);
+  CHECK(spItems->get_Item(0, &v) == E_INVALIDARG);
+  CHECK(spItems->get_Item(4, &v) == E_INVALIDARG);
+  {
+    CComPtr<IUnknown> spUnk;
+    CHECK(spItems->get__NewEnum(&spUnk) == S_OK && spUnk != NULL);
+    CComQIPtr<IEnumVARIANT> spEnum(spUnk);
+    CHECK(spEnum != NULL);
+    VARIANT got[4];
+    ULONG nGot = 0;
+    CHECK(spEnum != NULL && spEnum->Next(4, got, &nGot) == S_FALSE && nGot == 3);
+    CHECK(got[0].lVal == 100 && got[2].lVal == 300);
+  }
+
+  // The service map: its own service, then the chain's, then none.
+  CComObject<CItems>* pNext = NULL;
+  CComObject<CItems>::CreateInstance(&pNext);
+  pNext->AddRef();
+  pItems->m_spNext = pNext->GetUnknown();
+  {
+    CComQIPtr<IServiceProvider> spSP(spItems);
+    CHECK(spSP != NULL);
+    CComPtr<IAtlItems> spGot;
+    CHECK(spSP->QueryService(SID_SAtlItems, IID_IAtlItems, (void**)&spGot) == S_OK);
+    CHECK(spGot.p == spItems.p);
+    void* pv = (void*)1;
+    CHECK(spSP->QueryService(SID_SNobody, IID_IAtlItems, &pv) == E_NOINTERFACE && pv == NULL);
+    // The second one's own map has no chain: asked for itself through ours.
+    pItems->m_spNext.Release();
+    pNext->m_spNext = spItems;
+    CComQIPtr<IServiceProvider> spSP2(pNext->GetUnknown());
+    spGot.Release();
+    CHECK(spSP2->QueryService(SID_SAtlItems, IID_IAtlItems, (void**)&spGot) == S_OK);
+    CHECK(spGot.p == static_cast<IAtlItems*>(pNext));
+    pNext->m_spNext.Release();
+  }
+  pNext->Release();
+
+  // CComGITPtr: the cookie taken to another thread, the object had there.
+  {
+    CComGITPtr<IAtlItems> git(spItems);
+    CHECK(git.GetCookie() != 0);
+    GitData d = {git.GetCookie(), 0, E_FAIL};
+    HANDLE h = ::CreateThread(NULL, 0, GitThread, &d, 0, NULL);
+    ::WaitForSingleObject(h, INFINITE);
+    ::CloseHandle(h);
+    CHECK(d.hr == S_OK && d.nCount == 3);
+    CComPtr<IAtlItems> sp;
+    CHECK(git.CopyTo(&sp) == S_OK && sp.p == spItems.p);
+    DWORD dw = git.Detach();
+    CComGITPtr<IAtlItems> git2(dw);
+    CHECK(git2.Revoke() == S_OK && git2.GetCookie() == 0);
+    sp.Release();
+    CComPtr<IAtlItems> sp2;
+    CHECK(FAILED(git2.CopyTo(&sp2)));
+  }
+  spItems.Release();
+
+  // The auto-thread factory: without a pool the object is made here...
+  CComObject<CComClassFactoryAutoThread>* pCF = NULL;
+  CHECK(SUCCEEDED(CComObject<CComClassFactoryAutoThread>::CreateInstance(&pCF)));
+  CComPtr<IClassFactory> spCF;
+  pCF->QueryInterface(IID_IClassFactory, (void**)&spCF);
+  pCF->SetVoid((void*)&CComCreator<CComObject<CThreadItems> >::CreateInstance);
+  {
+    CComPtr<IAtlItems> sp;
+    CHECK(spCF->CreateInstance(NULL, IID_IAtlItems, (void**)&sp) == S_OK && sp != NULL);
+    CHECK(g_dwItemsThread == ::GetCurrentThreadId());
+  }
+  // ...and with one, in its threads, taken in turn.
+  {
+    CAtlAutoThreadModule pool(2);
+    CHECK(pool.m_nThreads == 2);
+    CComPtr<IAtlItems> sp1, sp2, sp3;
+    CHECK(spCF->CreateInstance(NULL, IID_IAtlItems, (void**)&sp1) == S_OK && sp1 != NULL);
+    DWORD dw1 = g_dwItemsThread;
+    CHECK(spCF->CreateInstance(NULL, IID_IAtlItems, (void**)&sp2) == S_OK && sp2 != NULL);
+    DWORD dw2 = g_dwItemsThread;
+    CHECK(spCF->CreateInstance(NULL, IID_IAtlItems, (void**)&sp3) == S_OK && sp3 != NULL);
+    DWORD dw3 = g_dwItemsThread;
+    CHECK(dw1 != ::GetCurrentThreadId() && dw2 != ::GetCurrentThreadId());
+    CHECK(dw1 != dw2 && dw3 == dw1);
+    CHECK(pool.FindApartment(dw1) != NULL && pool.FindApartment(::GetCurrentThreadId()) == NULL);
+    long nCount = 0;
+    CHECK(sp2 != NULL && sp2->get_Count(&nCount) == S_OK && nCount == 3);
+    // An aggregate is made here, as a plain factory would.
+    void* pv = (void*)1;
+    CHECK(spCF->CreateInstance((IUnknown*)1, IID_IAtlItems, &pv) == CLASS_E_NOAGGREGATION && pv == NULL);
+  }
+  CHECK(_pAtlAutoThreadModule == NULL);
+  spCF.Release();
+  CHECK(_Module.GetLockCount() == 0);
+}
+
+// The registrar as IRegistrar, and registration per user.
+static void TestRegistrar() {
+  CRegObject ro;
+  CComPtr<IRegistrar> spReg;
+  CHECK(ro.QueryInterface(IID_IRegistrar, (void**)&spReg) == S_OK && spReg != NULL);
+  CHECK(spReg->AddReplacement(L"WHAT", L"Tested") == S_OK);
+  static const WCHAR kScript[] =
+      L"HKCU { NoRemove Software { ForceRemove AtlTestRegistrar = s '%WHAT%' { val Kind = d 7 } } }";
+  CHECK(spReg->StringRegister(kScript) == S_OK);
+  CRegKey key;
+  CHECK(key.Open(HKEY_CURRENT_USER, TEXT("Software\\AtlTestRegistrar"), KEY_READ) == ERROR_SUCCESS);
+  DWORD dw = 0;
+  CHECK(key.QueryDWORDValue(TEXT("Kind"), dw) == ERROR_SUCCESS && dw == 7);
+  TCHAR sz[32];
+  ULONG cch = 32;
+  CHECK(key.QueryStringValue(NULL, sz, &cch) == ERROR_SUCCESS && lstrcmp(sz, TEXT("Tested")) == 0);
+  key.Close();
+  CHECK(spReg->StringUnregister(kScript) == S_OK);
+  CHECK(key.Open(HKEY_CURRENT_USER, TEXT("Software\\AtlTestRegistrar"), KEY_READ) != ERROR_SUCCESS);
+
+  // Per user, HKCR is the user's own classes.
+  bool bPerUser = true;
+  CHECK(AtlGetPerUserRegistration(&bPerUser) == S_OK && !bPerUser);
+  CHECK(AtlSetPerUserRegistration(true) == S_OK);
+  static const WCHAR kClasses[] = L"HKCR { ForceRemove AtlTest.PerUser = s 'Per user' }";
+  CHECK(spReg->StringRegister(kClasses) == S_OK);
+  CHECK(key.Open(HKEY_CURRENT_USER, TEXT("Software\\Classes\\AtlTest.PerUser"), KEY_READ) ==
+        ERROR_SUCCESS);
+  key.Close();
+  CHECK(spReg->StringUnregister(kClasses) == S_OK);
+  CHECK(key.Open(HKEY_CURRENT_USER, TEXT("Software\\Classes\\AtlTest.PerUser"), KEY_READ) !=
+        ERROR_SUCCESS);
+  AtlSetPerUserRegistration(false);
+  spReg.Release();
+}
 
 // ---------------------------------------------------------------------
 
@@ -666,6 +889,8 @@ static void TestServer(LPCWSTR lpszDll) {
 int main() {
   ::CoInitialize(NULL);
   TestClientPieces();
+  TestModulePieces();
+  TestRegistrar();
 
   // The type library, registered for the server's IDispatchImpl.
   WCHAR szTlb[MAX_PATH];

@@ -25,6 +25,7 @@
 #include <olectl.h>
 #include <ocidl.h>
 #include <comcat.h>
+#include "atliface.h"
 #include <limits.h>
 #include <stddef.h>
 #include <tchar.h>
@@ -370,6 +371,34 @@ inline HRESULT WINAPI AtlInternalQueryInterface(void* pThis, const _ATL_INTMAP_E
   return E_NOINTERFACE;
 }
 
+// _ATL_DEBUG_QI: one QueryInterface, written to the debugger with the
+// interface's registered name.
+inline HRESULT WINAPI AtlDumpIID(REFIID iid, LPCTSTR pszClassName, HRESULT hr) {
+  OLECHAR szIID[40];
+  ::StringFromGUID2(iid, szIID, 40);
+  TCHAR szKey[64];
+  TCHAR szName[128];
+  szName[0] = 0;
+#ifdef UNICODE
+  ::wsprintf(szKey, TEXT("Interface\\%s"), szIID);
+#else
+  char szA[40];
+  ::WideCharToMultiByte(CP_ACP, 0, szIID, -1, szA, 40, NULL, NULL);
+  ::wsprintf(szKey, TEXT("Interface\\%s"), szA);
+#endif
+  HKEY hk = NULL;
+  if (::RegOpenKeyEx(HKEY_CLASSES_ROOT, szKey, 0, KEY_READ, &hk) == ERROR_SUCCESS) {
+    LONG cb = sizeof(szName);
+    if (::RegQueryValue(hk, NULL, szName, &cb) != ERROR_SUCCESS) szName[0] = 0;
+    ::RegCloseKey(hk);
+  }
+  TCHAR szOut[320];
+  ::wsprintf(szOut, TEXT("%s - %s%s\n"), pszClassName != NULL ? pszClassName : TEXT("?"),
+             szName[0] != 0 ? szName : szKey + 10, FAILED(hr) ? TEXT(" - failed") : TEXT(""));
+  ::OutputDebugString(szOut);
+  return hr;
+}
+
 // ---------------------------------------------------------------------
 // Connections.
 
@@ -701,12 +730,41 @@ public:
 // path), %% by %. Values are s (string), e (expandable string), d (DWORD),
 // m (strings), b (binary, in hex).
 
-class CRegObject {
+// With per-user registration (ATL 9), what a script writes under HKCR
+// goes to HKEY_CURRENT_USER\Software\Classes, and type libraries are
+// registered for the user, so that a server registers without
+// administrator rights.
+inline bool _AtlRegisterPerUser = false;
+inline HRESULT AtlSetPerUserRegistration(bool bEnable) {
+  _AtlRegisterPerUser = bEnable;
+  return S_OK;
+}
+inline HRESULT AtlGetPerUserRegistration(bool* pbEnabled) {
+  if (pbEnabled == NULL) return E_POINTER;
+  *pbEnabled = _AtlRegisterPerUser;
+  return S_OK;
+}
+
+// The registrar is an IRegistrar too, on the stack; its reference count
+// does nothing.
+class CRegObject : public IRegistrar {
 public:
   CRegObject() : m_nRep(0) {}
-  ~CRegObject() { ClearReplacements(); }
+  virtual ~CRegObject() { ClearReplacements(); }
 
-  HRESULT AddReplacement(LPCOLESTR key, LPCOLESTR item) {
+  STDMETHOD(QueryInterface)(REFIID riid, void** ppv) override {
+    if (ppv == NULL) return E_POINTER;
+    if (riid == IID_IUnknown || riid == IID_IRegistrarBase || riid == IID_IRegistrar) {
+      *ppv = static_cast<IRegistrar*>(this);
+      return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+  }
+  STDMETHOD_(ULONG, AddRef)() override { return 1; }
+  STDMETHOD_(ULONG, Release)() override { return 0; }
+
+  STDMETHOD(AddReplacement)(LPCOLESTR key, LPCOLESTR item) override {
     if (key == NULL || item == NULL) return E_INVALIDARG;
     if (m_nRep == kMaxRep) return E_OUTOFMEMORY;
     m_rep[m_nRep].key = Dup(key);
@@ -714,7 +772,7 @@ public:
     m_nRep++;
     return S_OK;
   }
-  HRESULT ClearReplacements() {
+  STDMETHOD(ClearReplacements)() override {
     for (int i = 0; i < m_nRep; i++) {
       delete[] m_rep[i].key;
       delete[] m_rep[i].item;
@@ -723,20 +781,24 @@ public:
     return S_OK;
   }
 
-  HRESULT StringRegister(LPCOLESTR bstrData) { return Run(bstrData, TRUE); }
-  HRESULT StringUnregister(LPCOLESTR bstrData) { return Run(bstrData, FALSE); }
-  HRESULT ResourceRegister(LPCOLESTR szFileName, UINT nID, LPCOLESTR szType) {
+  STDMETHOD(StringRegister)(LPCOLESTR bstrData) override { return Run(bstrData, TRUE); }
+  STDMETHOD(StringUnregister)(LPCOLESTR bstrData) override { return Run(bstrData, FALSE); }
+  STDMETHOD(ResourceRegister)(LPCOLESTR szFileName, UINT nID, LPCOLESTR szType) override {
     return RunResource(szFileName, MAKEINTRESOURCEW(nID), szType, TRUE);
   }
-  HRESULT ResourceUnregister(LPCOLESTR szFileName, UINT nID, LPCOLESTR szType) {
+  STDMETHOD(ResourceUnregister)(LPCOLESTR szFileName, UINT nID, LPCOLESTR szType) override {
     return RunResource(szFileName, MAKEINTRESOURCEW(nID), szType, FALSE);
   }
-  HRESULT ResourceRegisterSz(LPCOLESTR szFileName, LPCOLESTR szID, LPCOLESTR szType) {
+  STDMETHOD(ResourceRegisterSz)(LPCOLESTR szFileName, LPCOLESTR szID, LPCOLESTR szType) override {
     return RunResource(szFileName, szID, szType, TRUE);
   }
-  HRESULT ResourceUnregisterSz(LPCOLESTR szFileName, LPCOLESTR szID, LPCOLESTR szType) {
+  STDMETHOD(ResourceUnregisterSz)(LPCOLESTR szFileName, LPCOLESTR szID,
+                                  LPCOLESTR szType) override {
     return RunResource(szFileName, szID, szType, FALSE);
   }
+  // A script in a file (ANSI, or UTF-16 with a byte order mark).
+  STDMETHOD(FileRegister)(LPCOLESTR fileName) override { return RunFile(fileName, TRUE); }
+  STDMETHOD(FileUnregister)(LPCOLESTR fileName) override { return RunFile(fileName, FALSE); }
   // A script in a module that is loaded already.
   HRESULT ModuleResource(HINSTANCE hInst, LPCWSTR lpszRes, BOOL bRegister) {
     HRSRC hrsrc = ::FindResourceW(hInst, lpszRes, L"REGISTRY");
@@ -745,7 +807,24 @@ public:
     DWORD cb = ::SizeofResource(hInst, hrsrc);
     const char* p = (const char*)::LockResource(hg);
     if (p == NULL) return E_FAIL;
-    // The script is ANSI text, or UTF-16 when it starts with a BOM.
+    return RunText(p, cb, bRegister);
+  }
+
+private:
+  HRESULT RunFile(LPCOLESTR fileName, BOOL bRegister) {
+    HANDLE h = ::CreateFileW(fileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                             FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return HRESULT_FROM_WIN32(::GetLastError());
+    DWORD cb = ::GetFileSize(h, NULL), nRead = 0;
+    char* p = new char[cb + 1];
+    BOOL bOK = ::ReadFile(h, p, cb, &nRead, NULL);
+    ::CloseHandle(h);
+    HRESULT hr = bOK ? RunText(p, nRead, bRegister) : HRESULT_FROM_WIN32(::GetLastError());
+    delete[] p;
+    return hr;
+  }
+  // The script is ANSI text, or UTF-16 when it starts with a BOM.
+  HRESULT RunText(const char* p, DWORD cb, BOOL bRegister) {
     LPWSTR w;
     if (cb >= 2 && (BYTE)p[0] == 0xFF && (BYTE)p[1] == 0xFE) {
       UINT n = (cb - 2) / 2;
@@ -763,7 +842,6 @@ public:
     return hr;
   }
 
-private:
   enum { kMaxRep = 64 };
   struct Rep {
     LPWSTR key;
@@ -1108,7 +1186,16 @@ private:
       if (root == NULL) return DISP_E_EXCEPTION;
       Buf brace;
       if (!Token(brace) || !Is(brace, L"{")) return DISP_E_EXCEPTION;
+      // Per user, HKCR is the user's own classes.
+      HKEY hUser = NULL;
+      if (root == HKEY_CLASSES_ROOT && _AtlRegisterPerUser) {
+        if (::RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes", 0, NULL, 0,
+                              KEY_ALL_ACCESS, NULL, &hUser, NULL) != ERROR_SUCCESS)
+          return E_FAIL;
+        root = hUser;
+      }
       hr = Block(root, false);
+      if (hUser != NULL) ::RegCloseKey(hUser);
       if (FAILED(hr)) return hr;
     }
     return S_OK;
@@ -1401,7 +1488,16 @@ inline HRESULT WINAPI AtlRegisterTypeLib(HINSTANCE hInstTypeLib, LPCOLESTR lpszI
     szDir[MAX_PATH - 1] = 0;
     WCHAR* slash = wcsrchr(szDir, L'\\');
     if (slash != NULL) *slash = 0;
-    hr = ::RegisterTypeLib(pTypeLib, bstrPath, szDir);
+    hr = E_NOTIMPL;
+    // Per user through oleaut32's RegisterTypeLibForUser, where it has one.
+    if (_AtlRegisterPerUser) {
+      typedef HRESULT(WINAPI * PFN)(ITypeLib*, OLECHAR*, OLECHAR*);
+      HMODULE hOleAut = ::GetModuleHandle(TEXT("oleaut32.dll"));
+      PFN pfn = hOleAut != NULL ? (PFN)(void*)::GetProcAddress(hOleAut, "RegisterTypeLibForUser")
+                                : NULL;
+      if (pfn != NULL) hr = pfn(pTypeLib, bstrPath, szDir);
+    }
+    if (hr == E_NOTIMPL) hr = ::RegisterTypeLib(pTypeLib, bstrPath, szDir);
   }
   if (pTypeLib != NULL) pTypeLib->Release();
   ::SysFreeString(bstrPath);
@@ -1416,8 +1512,20 @@ inline HRESULT WINAPI AtlUnRegisterTypeLib(HINSTANCE hInstTypeLib, LPCOLESTR lps
     TLIBATTR* pAttr = NULL;
     hr = pTypeLib->GetLibAttr(&pAttr);
     if (SUCCEEDED(hr)) {
-      hr = ::UnRegisterTypeLib(pAttr->guid, pAttr->wMajorVerNum, pAttr->wMinorVerNum, pAttr->lcid,
-                               pAttr->syskind);
+      hr = E_NOTIMPL;
+      if (_AtlRegisterPerUser) {
+        typedef HRESULT(WINAPI * PFN)(REFGUID, WORD, WORD, LCID, SYSKIND);
+        HMODULE hOleAut = ::GetModuleHandle(TEXT("oleaut32.dll"));
+        PFN pfn = hOleAut != NULL
+                      ? (PFN)(void*)::GetProcAddress(hOleAut, "UnRegisterTypeLibForUser")
+                      : NULL;
+        if (pfn != NULL)
+          hr = pfn(pAttr->guid, pAttr->wMajorVerNum, pAttr->wMinorVerNum, pAttr->lcid,
+                   pAttr->syskind);
+      }
+      if (hr == E_NOTIMPL)
+        hr = ::UnRegisterTypeLib(pAttr->guid, pAttr->wMajorVerNum, pAttr->wMinorVerNum,
+                                 pAttr->lcid, pAttr->syskind);
       pTypeLib->ReleaseTLibAttr(pAttr);
     }
   }
@@ -1470,6 +1578,28 @@ inline HRESULT WINAPI AtlRegisterClassCategoriesHelper(REFCLSID clsid,
   pcr->Release();
   return bRegister ? hr : S_OK;
 }
+
+// HKEY_CLASSES_ROOT, or with per-user registration the user's classes.
+class _AtlClassesRoot {
+public:
+  _AtlClassesRoot() : m_h(HKEY_CLASSES_ROOT), m_bOwn(false) {
+    HKEY h;
+    if (_AtlRegisterPerUser &&
+        ::RegCreateKeyEx(HKEY_CURRENT_USER, TEXT("Software\\Classes"), 0, NULL, 0, KEY_ALL_ACCESS,
+                         NULL, &h, NULL) == ERROR_SUCCESS) {
+      m_h = h;
+      m_bOwn = true;
+    }
+  }
+  ~_AtlClassesRoot() {
+    if (m_bOwn) ::RegCloseKey(m_h);
+  }
+  operator HKEY() const { return m_h; }
+
+private:
+  HKEY m_h;
+  bool m_bOwn;
+};
 
 // ---------------------------------------------------------------------
 // ATL 3's CComModule: the object map is the one Init is given (or, when
@@ -1631,15 +1761,16 @@ public:
 #else
     ::WideCharToMultiByte(CP_ACP, 0, wClsid, -1, szClsid, 40, NULL, NULL);
 #endif
+    _AtlClassesRoot root;
     CRegKey key, sub;
     if (lpszProgID != NULL && *lpszProgID) {
-      if (key.Create(HKEY_CLASSES_ROOT, lpszProgID) == ERROR_SUCCESS) {
+      if (key.Create(root, lpszProgID) == ERROR_SUCCESS) {
         key.SetStringValue(NULL, szDesc);
         key.SetKeyValue(TEXT("CLSID"), szClsid);
       }
     }
     if (lpszVerIndProgID != NULL && *lpszVerIndProgID) {
-      if (key.Create(HKEY_CLASSES_ROOT, lpszVerIndProgID) == ERROR_SUCCESS) {
+      if (key.Create(root, lpszVerIndProgID) == ERROR_SUCCESS) {
         key.SetStringValue(NULL, szDesc);
         key.SetKeyValue(TEXT("CLSID"), szClsid);
         if (lpszProgID != NULL) key.SetKeyValue(TEXT("CurVer"), lpszProgID);
@@ -1648,7 +1779,7 @@ public:
     TCHAR szKey[64];
     lstrcpy(szKey, TEXT("CLSID\\"));
     lstrcat(szKey, szClsid);
-    if (key.Create(HKEY_CLASSES_ROOT, szKey) != ERROR_SUCCESS) return E_FAIL;
+    if (key.Create(root, szKey) != ERROR_SUCCESS) return E_FAIL;
     key.SetStringValue(NULL, szDesc);
     if (lpszProgID != NULL) key.SetKeyValue(TEXT("ProgID"), lpszProgID);
     if (lpszVerIndProgID != NULL) key.SetKeyValue(TEXT("VersionIndependentProgID"), lpszVerIndProgID);
@@ -1668,8 +1799,9 @@ public:
     return S_OK;
   }
   HRESULT UnregisterClassHelper(const CLSID& clsid, LPCTSTR lpszProgID, LPCTSTR lpszVerIndProgID) {
+    _AtlClassesRoot root;
     CRegKey key;
-    key.Attach(HKEY_CLASSES_ROOT);
+    key.Attach(root);
     if (lpszProgID != NULL && *lpszProgID) key.RecurseDeleteKey(lpszProgID);
     if (lpszVerIndProgID != NULL && *lpszVerIndProgID) key.RecurseDeleteKey(lpszVerIndProgID);
     OLECHAR wClsid[40];
@@ -1698,6 +1830,389 @@ public:
   // its last object goes (see CComModule::Unlock's override in the
   // program, or CAtlExeModuleT).
   HRESULT RegisterAppId(LPCTSTR) { return S_OK; }
+};
+
+// ---------------------------------------------------------------------
+// ATL 7's _AtlComModule: registers what OBJECT_ENTRY_AUTO lists, for
+// code that calls it directly.
+
+class CAtlComModule {
+public:
+  HINSTANCE m_hInstTypeLib;
+
+  CAtlComModule() : m_hInstTypeLib(_AtlBaseModule.GetModuleInstance()) {}
+
+  HRESULT RegisterServer(BOOL bRegTypeLib = FALSE, const CLSID* pCLSID = NULL) {
+    HRESULT hr = S_OK;
+    for (_ATL_AUTO_OBJMAP* a = _AtlAutoObjectMap; a != NULL && SUCCEEDED(hr); a = a->pNext) {
+      _ATL_OBJMAP_ENTRY* e = &a->entry;
+      if (pCLSID != NULL && !InlineIsEqualGUID(*pCLSID, *e->pclsid)) continue;
+      if (e->pfnUpdateRegistry != NULL) hr = e->pfnUpdateRegistry(TRUE);
+      if (SUCCEEDED(hr) && e->pfnGetCategoryMap != NULL)
+        hr = AtlRegisterClassCategoriesHelper(*e->pclsid, e->pfnGetCategoryMap(), TRUE);
+    }
+    if (SUCCEEDED(hr) && bRegTypeLib) hr = AtlRegisterTypeLib(m_hInstTypeLib, NULL);
+    return hr;
+  }
+  HRESULT UnregisterServer(BOOL bUnRegTypeLib, const CLSID* pCLSID = NULL) {
+    for (_ATL_AUTO_OBJMAP* a = _AtlAutoObjectMap; a != NULL; a = a->pNext) {
+      _ATL_OBJMAP_ENTRY* e = &a->entry;
+      if (pCLSID != NULL && !InlineIsEqualGUID(*pCLSID, *e->pclsid)) continue;
+      if (e->pfnGetCategoryMap != NULL)
+        AtlRegisterClassCategoriesHelper(*e->pclsid, e->pfnGetCategoryMap(), FALSE);
+      if (e->pfnUpdateRegistry != NULL) e->pfnUpdateRegistry(FALSE);
+    }
+    if (bUnRegTypeLib) AtlUnRegisterTypeLib(m_hInstTypeLib, NULL);
+    return S_OK;
+  }
+  HRESULT RegisterTypeLib() { return AtlRegisterTypeLib(m_hInstTypeLib, NULL); }
+  HRESULT RegisterTypeLib(LPCTSTR lpszIndex) {
+    USES_CONVERSION;
+    return AtlRegisterTypeLib(m_hInstTypeLib, lpszIndex != NULL ? T2COLE(lpszIndex) : NULL);
+  }
+  HRESULT UnRegisterTypeLib() { return AtlUnRegisterTypeLib(m_hInstTypeLib, NULL); }
+  HRESULT UnRegisterTypeLib(LPCTSTR lpszIndex) {
+    USES_CONVERSION;
+    return AtlUnRegisterTypeLib(m_hInstTypeLib, lpszIndex != NULL ? T2COLE(lpszIndex) : NULL);
+  }
+  // The class object of one of the auto entries.
+  HRESULT GetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv) {
+    if (ppv == NULL) return E_POINTER;
+    *ppv = NULL;
+    for (_ATL_AUTO_OBJMAP* a = _AtlAutoObjectMap; a != NULL; a = a->pNext) {
+      _ATL_OBJMAP_ENTRY* e = &a->entry;
+      if (e->pfnGetClassObject == NULL || !InlineIsEqualGUID(rclsid, *e->pclsid)) continue;
+      if (e->pCF == NULL) {
+        HRESULT hr =
+            e->pfnGetClassObject((void*)e->pfnCreateInstance, IID_IUnknown, (LPVOID*)&e->pCF);
+        if (FAILED(hr)) return hr;
+      }
+      return e->pCF->QueryInterface(riid, ppv);
+    }
+    return CLASS_E_CLASSNOTAVAILABLE;
+  }
+};
+inline CAtlComModule _AtlComModule;
+
+// ---------------------------------------------------------------------
+// Objects that live in a pool of single-threaded apartments
+// (DECLARE_CLASSFACTORY_AUTO_THREAD): each is made in one of the
+// module's threads, chosen by the thread allocator, and handed to its
+// caller through COM's marshaling.
+
+// What a creation request carries to an apartment's thread.
+struct _AtlAptCreateObjData {
+  _ATL_CREATORFUNC* pfnCreateInstance;
+  const IID* piid;
+  HANDLE hEvent;
+  LPSTREAM pStream;
+  HRESULT hRes;
+};
+
+class CComApartment {
+public:
+  // The thread message that asks for an object.
+  enum { ATL_CREATE_OBJECT = WM_APP + 0x3A7 };
+
+  DWORD m_dwThreadID;
+  HANDLE m_hThread;
+  LONG m_nLockCnt;
+
+  CComApartment() : m_dwThreadID(0), m_hThread(NULL), m_nLockCnt(0) {}
+
+  LONG Lock() { return ::InterlockedIncrement(&m_nLockCnt); }
+  LONG Unlock() { return ::InterlockedDecrement(&m_nLockCnt); }
+  LONG GetLockCount() { return m_nLockCnt; }
+
+  // The thread: an apartment with a message loop that makes objects.
+  DWORD Apartment(HANDLE hReady) {
+    ::CoInitialize(NULL);
+    MSG msg;
+    ::PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE);  // the queue, before anyone posts
+    ::SetEvent(hReady);
+    while (::GetMessage(&msg, NULL, 0, 0) > 0) {
+      if (msg.message == ATL_CREATE_OBJECT && msg.hwnd == NULL) {
+        Create((_AtlAptCreateObjData*)msg.lParam);
+        continue;
+      }
+      ::TranslateMessage(&msg);
+      ::DispatchMessage(&msg);
+    }
+    ::CoUninitialize();
+    return 0;
+  }
+  static void Create(_AtlAptCreateObjData* p) {
+    IUnknown* pUnk = NULL;
+    p->hRes = p->pfnCreateInstance(NULL, IID_IUnknown, (void**)&pUnk);
+    if (SUCCEEDED(p->hRes))
+      p->hRes = ::CoMarshalInterThreadInterfaceInStream(*p->piid, pUnk, &p->pStream);
+    if (pUnk != NULL) pUnk->Release();
+    ::SetEvent(p->hEvent);
+  }
+};
+
+// Each new object in the next thread.
+class CComSimpleThreadAllocator {
+public:
+  CComSimpleThreadAllocator() : m_nThread(0) {}
+  int GetThread(CComApartment* /*pApt*/, int nThreads) {
+    if (++m_nThread >= nThreads) m_nThread = 0;
+    return m_nThread;
+  }
+  int m_nThread;
+};
+
+struct IAtlAutoThreadModule {
+  virtual HRESULT CreateInstance(void* pfnCreateInstance, REFIID riid, void** ppvObj) = 0;
+};
+inline IAtlAutoThreadModule* _pAtlAutoThreadModule = NULL;
+
+template <class T, class ThreadAllocator = CComSimpleThreadAllocator, DWORD dwWait = INFINITE>
+class CAtlAutoThreadModuleT : public IAtlAutoThreadModule {
+public:
+  CComApartment* m_pApartments;
+  int m_nThreads;
+  ThreadAllocator m_Allocator;
+  DWORD m_dwWait;
+
+  CAtlAutoThreadModuleT(int nThreads = T::GetDefaultThreads())
+      : m_pApartments(NULL), m_nThreads(0), m_dwWait(dwWait) {
+    _pAtlAutoThreadModule = this;
+    if (nThreads > 0) Init(nThreads);
+  }
+  virtual ~CAtlAutoThreadModuleT() {
+    Term();
+    if (_pAtlAutoThreadModule == this) _pAtlAutoThreadModule = NULL;
+  }
+
+  // Four threads for each processor.
+  static int GetDefaultThreads() {
+    SYSTEM_INFO si;
+    ::GetSystemInfo(&si);
+    int n = (int)si.dwNumberOfProcessors * 4;
+    return n > 0 ? n : 4;
+  }
+
+  HRESULT Init(int nThreads) {
+    Term();
+    if (nThreads <= 0) return E_INVALIDARG;
+    m_pApartments = new (std::nothrow) CComApartment[nThreads];
+    if (m_pApartments == NULL) return E_OUTOFMEMORY;
+    m_nThreads = nThreads;
+    for (int i = 0; i < nThreads; i++) {
+      _Start* s = new _Start;
+      s->pApt = &m_pApartments[i];
+      s->hReady = ::CreateEvent(NULL, FALSE, FALSE, NULL);
+      HANDLE hReady = s->hReady;
+      m_pApartments[i].m_hThread =
+          ::CreateThread(NULL, 0, _Thread, s, 0, &m_pApartments[i].m_dwThreadID);
+      if (m_pApartments[i].m_hThread == NULL) {
+        HRESULT hr = AtlHresultFromLastError();
+        ::CloseHandle(hReady);
+        delete s;
+        m_nThreads = i;
+        return hr;
+      }
+      ::WaitForSingleObject(hReady, INFINITE);
+      ::CloseHandle(hReady);
+    }
+    return S_OK;
+  }
+  // The threads end once their loops see WM_QUIT.
+  void Term() {
+    if (m_pApartments == NULL) return;
+    for (int i = 0; i < m_nThreads; i++)
+      ::PostThreadMessage(m_pApartments[i].m_dwThreadID, WM_QUIT, 0, 0);
+    for (int i = 0; i < m_nThreads; i++) {
+      ::WaitForSingleObject(m_pApartments[i].m_hThread, m_dwWait);
+      ::CloseHandle(m_pApartments[i].m_hThread);
+    }
+    delete[] m_pApartments;
+    m_pApartments = NULL;
+    m_nThreads = 0;
+  }
+
+  HRESULT CreateInstance(void* pfnCreateInstance, REFIID riid, void** ppvObj) override {
+    if (ppvObj == NULL) return E_POINTER;
+    *ppvObj = NULL;
+    if (m_nThreads == 0) return ((_ATL_CREATORFUNC*)pfnCreateInstance)(NULL, riid, ppvObj);
+    int n = m_Allocator.GetThread(m_pApartments, m_nThreads);
+    if (n < 0 || n >= m_nThreads) n = 0;
+    _AtlAptCreateObjData data;
+    data.pfnCreateInstance = (_ATL_CREATORFUNC*)pfnCreateInstance;
+    data.piid = &riid;
+    data.pStream = NULL;
+    data.hRes = S_OK;
+    // Asked from that thread itself: made there and then.
+    if (m_pApartments[n].m_dwThreadID == ::GetCurrentThreadId())
+      return data.pfnCreateInstance(NULL, riid, ppvObj);
+    data.hEvent = ::CreateEvent(NULL, FALSE, FALSE, NULL);
+    if (data.hEvent == NULL) return AtlHresultFromLastError();
+    ::PostThreadMessage(m_pApartments[n].m_dwThreadID, CComApartment::ATL_CREATE_OBJECT, 0,
+                        (LPARAM)&data);
+    AtlWaitWithMessageLoop(data.hEvent);
+    ::CloseHandle(data.hEvent);
+    if (SUCCEEDED(data.hRes)) data.hRes = ::CoGetInterfaceAndReleaseStream(data.pStream, riid, ppvObj);
+    return data.hRes;
+  }
+
+  // The apartment a thread is, or NULL.
+  CComApartment* FindApartment(DWORD dwThreadID) {
+    for (int i = 0; i < m_nThreads; i++)
+      if (m_pApartments[i].m_dwThreadID == dwThreadID) return &m_pApartments[i];
+    return NULL;
+  }
+
+private:
+  struct _Start {
+    CComApartment* pApt;
+    HANDLE hReady;
+  };
+  static DWORD WINAPI _Thread(LPVOID pv) {
+    _Start s = *(_Start*)pv;
+    delete (_Start*)pv;
+    return s.pApt->Apartment(s.hReady);
+  }
+};
+
+class CAtlAutoThreadModule : public CAtlAutoThreadModuleT<CAtlAutoThreadModule> {
+public:
+  CAtlAutoThreadModule(int nThreads = GetDefaultThreads())
+      : CAtlAutoThreadModuleT<CAtlAutoThreadModule>(nThreads) {}
+};
+
+// ATL 3's form: the module is the apartment pool, started by Init.
+template <class ThreadAllocator = CComSimpleThreadAllocator, DWORD dwWait = INFINITE>
+class CComAutoThreadModule
+    : public CComModule,
+      public CAtlAutoThreadModuleT<CComAutoThreadModule<ThreadAllocator, dwWait>, ThreadAllocator,
+                                   dwWait> {
+  typedef CAtlAutoThreadModuleT<CComAutoThreadModule<ThreadAllocator, dwWait>, ThreadAllocator,
+                                dwWait>
+      _Pool;
+
+public:
+  CComAutoThreadModule() : _Pool(0) {}
+  static int GetDefaultThreads() { return _Pool::GetDefaultThreads(); }
+
+  HRESULT Init(_ATL_OBJMAP_ENTRY* p, HINSTANCE h, const GUID* plibid = NULL,
+               int nThreads = GetDefaultThreads()) {
+    HRESULT hr = CComModule::Init(p, h, plibid);
+    if (FAILED(hr)) return hr;
+    return _Pool::Init(nThreads);
+  }
+  void Term() {
+    _Pool::Term();
+    CComModule::Term();
+  }
+  // An object's lock counts for its apartment too.
+  LONG Lock() override {
+    LONG l = CComModule::Lock();
+    CComApartment* pApt = this->FindApartment(::GetCurrentThreadId());
+    if (pApt != NULL) pApt->Lock();
+    return l;
+  }
+  LONG Unlock() override {
+    LONG l = CComModule::Unlock();
+    CComApartment* pApt = this->FindApartment(::GetCurrentThreadId());
+    if (pApt != NULL) pApt->Unlock();
+    return l;
+  }
+  HRESULT CreateInstance(void* pfnCreateInstance, REFIID riid, void** ppvObj) override {
+    return _Pool::CreateInstance(pfnCreateInstance, riid, ppvObj);
+  }
+};
+
+// ---------------------------------------------------------------------
+// CComGITPtr: an interface kept in the global interface table, so that
+// any thread of the process can have it, by its cookie.
+
+template <class T>
+class CComGITPtr {
+public:
+  DWORD m_dwCookie;
+
+  CComGITPtr() : m_dwCookie(0) {}
+  CComGITPtr(T* p) : m_dwCookie(0) { Attach(p); }
+  CComGITPtr(const CComGITPtr& git) : m_dwCookie(0) { CopyFrom(git); }
+  explicit CComGITPtr(DWORD dwCookie) : m_dwCookie(dwCookie) {}
+  ~CComGITPtr() { Revoke(); }
+
+  CComGITPtr& operator=(const CComGITPtr& git) {
+    if (this != &git) {
+      Revoke();
+      CopyFrom(git);
+    }
+    return *this;
+  }
+  CComGITPtr& operator=(T* p) {
+    Attach(p);
+    return *this;
+  }
+  CComGITPtr& operator=(DWORD dwCookie) {
+    Attach(dwCookie);
+    return *this;
+  }
+  operator DWORD() const { return m_dwCookie; }
+  DWORD GetCookie() const { return m_dwCookie; }
+
+  HRESULT Attach(T* p) {
+    HRESULT hr = Revoke();
+    if (FAILED(hr) || p == NULL) return hr;
+    IGlobalInterfaceTable* pGIT = NULL;
+    hr = GetGIT(&pGIT);
+    if (FAILED(hr)) return hr;
+    hr = pGIT->RegisterInterfaceInGlobal(p, __uuidof(T), &m_dwCookie);
+    pGIT->Release();
+    return hr;
+  }
+  HRESULT Attach(DWORD dwCookie) {
+    HRESULT hr = Revoke();
+    m_dwCookie = dwCookie;
+    return hr;
+  }
+  // Gives up the cookie without revoking it.
+  DWORD Detach() {
+    DWORD dw = m_dwCookie;
+    m_dwCookie = 0;
+    return dw;
+  }
+  HRESULT Revoke() {
+    if (m_dwCookie == 0) return S_OK;
+    IGlobalInterfaceTable* pGIT = NULL;
+    HRESULT hr = GetGIT(&pGIT);
+    if (SUCCEEDED(hr)) {
+      hr = pGIT->RevokeInterfaceFromGlobal(m_dwCookie);
+      pGIT->Release();
+    }
+    m_dwCookie = 0;
+    return hr;
+  }
+  // This thread's pointer to the interface.
+  HRESULT CopyTo(T** pp) const {
+    if (pp == NULL) return E_POINTER;
+    *pp = NULL;
+    if (m_dwCookie == 0) return E_INVALIDARG;
+    IGlobalInterfaceTable* pGIT = NULL;
+    HRESULT hr = GetGIT(&pGIT);
+    if (FAILED(hr)) return hr;
+    hr = pGIT->GetInterfaceFromGlobal(m_dwCookie, __uuidof(T), (void**)pp);
+    pGIT->Release();
+    return hr;
+  }
+
+private:
+  static HRESULT GetGIT(IGlobalInterfaceTable** pp) {
+    return ::CoCreateInstance(CLSID_StdGlobalInterfaceTable, NULL, CLSCTX_INPROC_SERVER,
+                              IID_IGlobalInterfaceTable, (void**)pp);
+  }
+  void CopyFrom(const CComGITPtr& git) {
+    T* p = NULL;
+    if (git.m_dwCookie != 0 && SUCCEEDED(git.CopyTo(&p))) {
+      Attach(p);
+      p->Release();
+    }
+  }
 };
 
 // ---------------------------------------------------------------------
@@ -2151,6 +2666,130 @@ inline int AtlLoadString(UINT nID, LPTSTR lpBuffer, int nBufferMax) {
 }
 inline HINSTANCE AtlFindStringResourceInstance(UINT, WORD = 0) {
   return _AtlBaseModule.GetResourceInstance();
+}
+
+// A string resource as it sits in the module: its length, then its
+// characters (not ended by a zero). Where WCHAR is wider than the
+// resource's UTF-16 (the portable layer's wchar_t), the image handed
+// back is a copy in WCHARs, made once and kept, as the module's are.
+struct ATLSTRINGRESOURCEIMAGE {
+  WORD nLength;
+  WCHAR achString[1];
+};
+#ifdef _WINPORT
+inline const ATLSTRINGRESOURCEIMAGE* _AtlWideStringImage(const WORD* p) {
+  struct Kept {
+    const WORD* pFrom;
+    ATLSTRINGRESOURCEIMAGE* pImage;
+    Kept* pNext;
+  };
+  static Kept* s_pKept = NULL;
+  static CComAutoCriticalSection s_cs;
+  CComCritSecLock<CComAutoCriticalSection> lock(s_cs);
+  for (Kept* k = s_pKept; k != NULL; k = k->pNext)
+    if (k->pFrom == p) return k->pImage;
+  WORD n = p[0];
+  ATLSTRINGRESOURCEIMAGE* pImage = (ATLSTRINGRESOURCEIMAGE*)::malloc(
+      offsetof(ATLSTRINGRESOURCEIMAGE, achString) + (n + 1) * sizeof(WCHAR));
+  if (pImage == NULL) return NULL;
+  // UTF-16 to the wider WCHAR, pairs of surrogates joined.
+  WORD nOut = 0;
+  for (WORD i = 0; i < n; i++) {
+    unsigned c = p[1 + i];
+    if (c >= 0xd800 && c < 0xdc00 && i + 1 < n && p[2 + i] >= 0xdc00 && p[2 + i] < 0xe000) {
+      c = 0x10000 + ((c - 0xd800) << 10) + (p[2 + i] - 0xdc00);
+      i++;
+    }
+    pImage->achString[nOut++] = (WCHAR)c;
+  }
+  pImage->achString[nOut] = 0;
+  pImage->nLength = nOut;
+  Kept* k = new Kept;
+  k->pFrom = p;
+  k->pImage = pImage;
+  k->pNext = s_pKept;
+  s_pKept = k;
+  return pImage;
+}
+#endif
+inline const ATLSTRINGRESOURCEIMAGE* AtlGetStringResourceImage(HINSTANCE hInstance, UINT id,
+                                                               WORD wLanguage = 0) {
+  // Strings are kept sixteen to a block, the block's id one more than
+  // the string's divided by sixteen; each is a count of UTF-16 units and
+  // the units.
+  HRSRC hRsrc = ::FindResourceExW(hInstance, (LPCWSTR)RT_STRING,
+                                  MAKEINTRESOURCEW((id >> 4) + 1), wLanguage);
+  if (hRsrc == NULL) return NULL;
+  HGLOBAL hGlobal = ::LoadResource(hInstance, hRsrc);
+  if (hGlobal == NULL) return NULL;
+  const WORD* p = (const WORD*)::LockResource(hGlobal);
+  if (p == NULL) return NULL;
+  const WORD* pEnd = p + ::SizeofResource(hInstance, hRsrc) / sizeof(WORD);
+  for (UINT i = 0; i < (id & 0x0f); i++) {
+    p += 1 + *p;
+    if (p >= pEnd) return NULL;
+  }
+  if (*p == 0) return NULL;
+#ifdef _WINPORT
+  if (sizeof(WCHAR) != sizeof(WORD)) return _AtlWideStringImage(p);
+#endif
+  return (const ATLSTRINGRESOURCEIMAGE*)p;
+}
+inline const ATLSTRINGRESOURCEIMAGE* AtlGetStringResourceImage(UINT id) {
+  return AtlGetStringResourceImage(_AtlBaseModule.GetResourceInstance(), id);
+}
+inline const ATLSTRINGRESOURCEIMAGE* AtlGetStringResourceImage(UINT id, WORD wLanguage) {
+  return AtlGetStringResourceImage(_AtlBaseModule.GetResourceInstance(), id, wLanguage);
+}
+
+// The version of the library, as the DLL of ATL's own would give it.
+inline DWORD AtlGetVersion(void* /*pReserved*/ = NULL) { return _ATL_VER; }
+
+// ATL 3's free function for a module's AddTermFunc.
+inline HRESULT WINAPI AtlModuleAddTermFunc(CAtlModule* pModule, _ATL_TERMFUNC* pFunc,
+                                           DWORD_PTR dw) {
+  if (pModule == NULL) return E_INVALIDARG;
+  return pModule->AddTermFunc(pFunc, dw);
+}
+
+// A DEVMODEW, as the ANSI DEVMODEA a caller asked for; the extra driver
+// bytes come after it, as they were.
+inline LPDEVMODEA AtlDevModeW2A(LPDEVMODEA lpDevModeA, const DEVMODEW* lpDevModeW) {
+  if (lpDevModeA == NULL || lpDevModeW == NULL) return NULL;
+  ::WideCharToMultiByte(CP_ACP, 0, lpDevModeW->dmDeviceName, -1, (LPSTR)lpDevModeA->dmDeviceName,
+                        CCHDEVICENAME, NULL, NULL);
+  lpDevModeA->dmDeviceName[CCHDEVICENAME - 1] = 0;
+  memcpy(&lpDevModeA->dmSpecVersion, &lpDevModeW->dmSpecVersion,
+         offsetof(DEVMODEW, dmFormName) - offsetof(DEVMODEW, dmSpecVersion));
+  ::WideCharToMultiByte(CP_ACP, 0, lpDevModeW->dmFormName, -1, (LPSTR)lpDevModeA->dmFormName,
+                        CCHFORMNAME, NULL, NULL);
+  lpDevModeA->dmFormName[CCHFORMNAME - 1] = 0;
+  memcpy(&lpDevModeA->dmLogPixels, &lpDevModeW->dmLogPixels,
+         lpDevModeW->dmSize - offsetof(DEVMODEW, dmLogPixels));
+  lpDevModeA->dmSize = (WORD)(lpDevModeW->dmSize - (offsetof(DEVMODEW, dmSpecVersion) -
+                                                    offsetof(DEVMODEA, dmSpecVersion)) -
+                              (sizeof(lpDevModeW->dmFormName) - sizeof(lpDevModeA->dmFormName)));
+  memcpy((BYTE*)lpDevModeA + lpDevModeA->dmSize, (const BYTE*)lpDevModeW + lpDevModeW->dmSize,
+         lpDevModeW->dmDriverExtra);
+  return lpDevModeA;
+}
+
+// A device context for the device a DVTARGETDEVICE names; the screen
+// when there is none.
+inline HDC AtlCreateTargetDC(HDC hdc, DVTARGETDEVICE* ptd) {
+  if (ptd == NULL) {
+    if (hdc != NULL) return hdc;
+    return ::CreateDCW(L"DISPLAY", NULL, NULL, NULL);
+  }
+  LPCWSTR pszDriver = (LPCWSTR)((BYTE*)ptd + ptd->tdDriverNameOffset);
+  LPCWSTR pszDevice = (LPCWSTR)((BYTE*)ptd + ptd->tdDeviceNameOffset);
+  LPCWSTR pszPort = (LPCWSTR)((BYTE*)ptd + ptd->tdPortNameOffset);
+  const DEVMODEW* pdm =
+      ptd->tdExtDevmodeOffset != 0 ? (const DEVMODEW*)((BYTE*)ptd + ptd->tdExtDevmodeOffset) : NULL;
+  if (ptd->tdDriverNameOffset == 0) pszDriver = NULL;
+  if (ptd->tdDeviceNameOffset == 0) pszDevice = NULL;
+  if (ptd->tdPortNameOffset == 0) pszPort = NULL;
+  return ::CreateDCW(pszDriver, pszDevice, pszPort, pdm);
 }
 
 }  // namespace ATL

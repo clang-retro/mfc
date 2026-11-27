@@ -579,6 +579,25 @@ interface IMarshal : public IUnknown {
 typedef struct IMarshal IMarshal;
 #endif
 typedef IMarshal* LPMARSHAL;
+#ifdef __cplusplus
+// Interfaces kept for any thread of the process, by cookie.
+interface IGlobalInterfaceTable : public IUnknown {
+  STDMETHOD(RegisterInterfaceInGlobal)(IUnknown* pUnk, REFIID riid, DWORD* pdwCookie) = 0;
+  STDMETHOD(RevokeInterfaceFromGlobal)(DWORD dwCookie) = 0;
+  STDMETHOD(GetInterfaceFromGlobal)(DWORD dwCookie, REFIID riid, void** ppv) = 0;
+};
+#else
+typedef struct IGlobalInterfaceTable IGlobalInterfaceTable;
+#endif
+typedef IGlobalInterfaceTable* LPGLOBALINTERFACETABLE;
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern const IID IID_IGlobalInterfaceTable;
+extern const CLSID CLSID_StdGlobalInterfaceTable;
+#ifdef __cplusplus
+}
+#endif
 
 WINPORT_UUIDOF(IMalloc)
 WINPORT_UUIDOF(ISequentialStream)
@@ -607,5 +626,6 @@ WINPORT_UUIDOF(IDataAdviseHolder)
 WINPORT_UUIDOF(IMessageFilter)
 WINPORT_UUIDOF(IExternalConnection)
 WINPORT_UUIDOF(IMarshal)
+WINPORT_UUIDOF(IGlobalInterfaceTable)
 
 #endif
