@@ -187,6 +187,50 @@ __WINPORT_INLINE const GUID ImageFormatEXIF = {0xb96b3cb2, 0x0728, 0x11d3, {0x9d
 __WINPORT_INLINE const GUID ImageFormatIcon = {0xb96b3cb5, 0x0728, 0x11d3, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
 // The JPEG encoder's one parameter: the quality, a LONG from 0 to 100.
 __WINPORT_INLINE const GUID EncoderQuality = {0x1d5be4b5, 0xfa4a, 0x452d, {0x9c, 0xdd, 0x5d, 0xb3, 0x51, 0x05, 0xe7, 0xeb}};
+// Saving more than one frame (an animated GIF): Save with
+// EncoderValueMultiFrame, SaveAdd with EncoderValueFrameDimensionTime for
+// each frame after the first, and SaveAdd with EncoderValueFlush.
+__WINPORT_INLINE const GUID EncoderSaveFlag = {0x292266fc, 0xac40, 0x47bf, {0x8c, 0xfc, 0xa8, 0x5b, 0x89, 0xa6, 0x55, 0xde}};
+enum EncoderValue {
+  EncoderValueColorTypeCMYK, EncoderValueColorTypeYCCK, EncoderValueCompressionLZW, EncoderValueCompressionCCITT3,
+  EncoderValueCompressionCCITT4, EncoderValueCompressionRle, EncoderValueCompressionNone,
+  EncoderValueScanMethodInterlaced, EncoderValueScanMethodNonInterlaced, EncoderValueVersionGif87,
+  EncoderValueVersionGif89, EncoderValueRenderProgressive, EncoderValueRenderNonProgressive,
+  EncoderValueTransformRotate90, EncoderValueTransformRotate180, EncoderValueTransformRotate270,
+  EncoderValueTransformFlipHorizontal, EncoderValueTransformFlipVertical, EncoderValueMultiFrame,
+  EncoderValueLastFrame, EncoderValueFlush, EncoderValueFrameDimensionTime, EncoderValueFrameDimensionResolution,
+  EncoderValueFrameDimensionPage
+};
+// The dimensions an image's frames are along: time for an animated GIF.
+__WINPORT_INLINE const GUID FrameDimensionTime = {0x6aedbd6d, 0x3fb5, 0x418a, {0x83, 0xa6, 0x7f, 0x45, 0x22, 0x9d, 0xc8, 0x72}};
+__WINPORT_INLINE const GUID FrameDimensionResolution = {0x84236f7b, 0x3bd3, 0x428f, {0x8d, 0xab, 0x4e, 0xa1, 0x43, 0x9c, 0xa3, 0x15}};
+__WINPORT_INLINE const GUID FrameDimensionPage = {0x7462dc86, 0x6180, 0x4c7e, {0x8e, 0x3f, 0xee, 0x73, 0x33, 0xa7, 0xa4, 0x83}};
+
+// An image's properties: an animated GIF's frame delays (LONGs, in
+// hundredths of a second, one a frame) and loop count (a SHORT, 0 for
+// for ever).
+typedef ULONG PROPID;
+#ifdef __cplusplus
+class PropertyItem {
+ public:
+  PROPID id;
+  ULONG length;
+  WORD type;
+  VOID* value;
+};
+#else
+typedef struct PropertyItem PropertyItem;
+#endif
+#define PropertyTagTypeByte 1
+#define PropertyTagTypeASCII 2
+#define PropertyTagTypeShort 3
+#define PropertyTagTypeLong 4
+#define PropertyTagTypeRational 5
+#define PropertyTagTypeUndefined 7
+#define PropertyTagTypeSLONG 9
+#define PropertyTagTypeSRational 10
+#define PropertyTagFrameDelay 0x5100
+#define PropertyTagLoopCount 0x5101
 
 enum DebugEventLevel { DebugEventLevelFatal, DebugEventLevelWarning };
 typedef VOID(WINAPI* DebugEventProc)(DebugEventLevel level, CHAR* message);
@@ -256,6 +300,18 @@ GpStatus WINAPI GdipSaveImageToFile(GpImage* image, const WCHAR* filename, const
                                     const EncoderParameters* encoderParams);
 GpStatus WINAPI GdipSaveImageToStream(GpImage* image, IStream* stream, const CLSID* clsidEncoder,
                                       const EncoderParameters* encoderParams);
+GpStatus WINAPI GdipSaveAdd(GpImage* image, const EncoderParameters* encoderParams);
+GpStatus WINAPI GdipSaveAddImage(GpImage* image, GpImage* newImage, const EncoderParameters* encoderParams);
+GpStatus WINAPI GdipImageGetFrameDimensionsCount(GpImage* image, UINT* count);
+GpStatus WINAPI GdipImageGetFrameDimensionsList(GpImage* image, GUID* dimensionIDs, UINT count);
+GpStatus WINAPI GdipImageGetFrameCount(GpImage* image, const GUID* dimensionID, UINT* count);
+GpStatus WINAPI GdipImageSelectActiveFrame(GpImage* image, const GUID* dimensionID, UINT frameIndex);
+GpStatus WINAPI GdipGetPropertyCount(GpImage* image, UINT* numOfProperty);
+GpStatus WINAPI GdipGetPropertyIdList(GpImage* image, UINT numOfProperty, PROPID* list);
+GpStatus WINAPI GdipGetPropertyItemSize(GpImage* image, PROPID propId, UINT* size);
+GpStatus WINAPI GdipGetPropertyItem(GpImage* image, PROPID propId, UINT propSize, PropertyItem* buffer);
+GpStatus WINAPI GdipSetPropertyItem(GpImage* image, const PropertyItem* item);
+GpStatus WINAPI GdipRemovePropertyItem(GpImage* image, PROPID propId);
 GpStatus WINAPI GdipGetImageDecodersSize(UINT* numDecoders, UINT* size);
 GpStatus WINAPI GdipGetImageDecoders(UINT numDecoders, UINT size, ImageCodecInfo* decoders);
 GpStatus WINAPI GdipGetImageEncodersSize(UINT* numEncoders, UINT* size);
