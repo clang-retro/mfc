@@ -584,8 +584,8 @@ int WINAPI SetMapMode(HDC hdc, int mode) {
     s.viewportExt.cx = s.viewportExt.cy = 1;
   } else if (units) {
     s.windowExt.cx = s.windowExt.cy = units;
-    s.viewportExt.cx = kLogPixels;
-    s.viewportExt.cy = -kLogPixels;
+    s.viewportExt.cx = SystemDpi();
+    s.viewportExt.cy = -SystemDpi();
   } else if (old != MM_ISOTROPIC && old != MM_ANISOTROPIC && mode == MM_ISOTROPIC) {
     FixIsotropic(s);
   }
@@ -903,7 +903,7 @@ int WINAPI GetDeviceCaps(HDC hdc, int index) {
   if (!dc) return 0;
   bool printer = dc->kind == kPrinterDC;
   SIZE sz = printer ? dc->size : ScreenSize();
-  int dpi = printer ? dc->dpiX : kLogPixels, dpiY = printer ? dc->dpiY : kLogPixels;
+  int dpi = printer ? dc->dpiX : SystemDpi(), dpiY = printer ? dc->dpiY : SystemDpi();
   switch (index) {
     case DRIVERVERSION: return 0x4000;
     case TECHNOLOGY: return printer ? DT_RASPRINTER : dc->type == OBJ_METADC ? DT_METAFILE : DT_RASDISPLAY;

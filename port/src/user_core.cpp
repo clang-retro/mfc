@@ -1747,8 +1747,6 @@ DWORD WINAPI GetWindowContextHelpId(HWND h) {
   return w ? w->contextHelpId : 0;
 }
 
-UINT WINAPI GetDpiForWindow(HWND) { return 96; }
-
 BOOL WINAPI IsHungAppWindow(HWND) { return FALSE; }
 
 BOOL WINAPI FlashWindow(HWND, BOOL) { return FALSE; }

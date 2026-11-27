@@ -156,9 +156,10 @@ HGDIOBJ StockPen(UINT style, COLORREF c) {
   return Stock(p);
 }
 
+// Heights at 96 dots per inch, as on Windows grown with the screen's.
 HGDIOBJ StockFont(const wchar_t* face, LONG height, LONG weight, BYTE pitch, BYTE charset) {
   FontObj* f = new FontObj;
-  f->lf.lfHeight = height;
+  f->lf.lfHeight = Scale96(height);
   f->lf.lfWeight = weight;
   f->lf.lfCharSet = charset;
   f->lf.lfPitchAndFamily = pitch;

@@ -248,8 +248,8 @@ of `UserPreferencesMask`, as on Windows, also turns the gradient on).
 Sizes and fonts come from `HKEY_CURRENT_USER\Control Panel\Desktop\WindowMetrics`:
 `BorderWidth`, `CaptionWidth`, `CaptionHeight`, `SmCaptionWidth`,
 `SmCaptionHeight`, `MenuWidth`, `MenuHeight`, `ScrollWidth` and
-`ScrollHeight` in pixels (or, as Windows keeps them, negative twips:
-`"-270"` is 18 pixels), and `CaptionFont`, `SmCaptionFont`, `MenuFont`,
+`ScrollHeight` in pixels at 96 dots per inch (or, as Windows keeps them,
+negative twips: `"-270"` is 18 pixels at 96 dots per inch), and `CaptionFont`, `SmCaptionFont`, `MenuFont`,
 `StatusFont`, `MessageFont` and `IconFont` as `"face,points"` with
 `,bold` or `,italic` after it (or a LOGFONTW as Windows writes it):
 
@@ -263,6 +263,28 @@ Sizes and fonts come from `HKEY_CURRENT_USER\Control Panel\Desktop\WindowMetrics
 `SPI_SETNONCLIENTMETRICS` changes them while the program runs, and
 windows that are open take the new frame; with `SPIF_UPDATEINIFILE` it
 saves them there too, as `SPI_SETGRADIENTCAPTIONS` does the gradient.
+
+On a HiDPI display a program draws at the display's resolution, as a
+DPI-aware program does on Windows: a screen DC's `LOGPIXELSX` is 96 times
+the desktop's scale (192 on a Retina display or a Wayland output of scale
+2, 144 at 150%), and the system's sizes, fonts, stock fonts, icons, check
+boxes and the glyphs of caption buttons, scroll bars and menus grow with
+it, so dialogs, laid out in dialog units, keep their proportions. The
+scale is the output's on Wayland (fractional ones through xdg-output and
+the viewporter), `Xft.dpi` (or `GDK_SCALE`) on X11 and
+`backingScaleFactor` on macOS; `LogPixels` (a DWORD) in
+`HKEY_CURRENT_USER\Control Panel\Desktop` sets the DPI instead. A
+program that is not DPI aware sees 96 dots per inch, and Wayland and
+macOS show its windows scaled up as pictures (X11 shows them as they
+are). The awareness comes from the compatibility setting for the
+program's file (in `HKEY_CURRENT_USER\Software\Microsoft\Windows
+NT\CurrentVersion\AppCompatFlags\Layers`, `"~ HIGHDPIAWARE"` or
+`"~ DPIUNAWARE"` under the file's path), else its manifest (`dpiAware`,
+`dpiAwareness`), else `SetProcessDPIAware`, `SetProcessDpiAwareness` or
+`SetProcessDpiAwarenessContext` called before the first window; a
+program that says nothing is aware. Per-monitor awareness is taken as
+system awareness: the DPI is the same on every screen and does not
+change while the program runs.
 
 Each program watches the registry file (with inotify on Linux, kqueue on
 macOS), so saving it in an editor, or another program changing these

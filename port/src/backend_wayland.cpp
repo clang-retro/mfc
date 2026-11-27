@@ -235,6 +235,7 @@ wl_interface xdg_toplevel_iface = {"xdg_toplevel", 1, 14, kToplevelRequests, 2, 
 wl_interface xdg_popup_iface = {"xdg_popup", 1, 2, kPopupRequests, 2, kPopupEvents};
 
 extern const wl_interface* iconTypes[6];
+extern const wl_interface* scaleTypes[8];
 
 void FillXdgTypes() {
   xdgTypes[6] = &wl_surface_interface;
@@ -244,6 +245,8 @@ void FillXdgTypes() {
   xdgTypes[21] = &wl_output_interface;
   xdgTypes[22] = &wl_seat_interface;
   iconTypes[4] = &wl_buffer_interface;
+  scaleTypes[5] = &wl_surface_interface;
+  scaleTypes[7] = &wl_output_interface;
 }
 
 // ---------------------------------------------------------------
@@ -291,6 +294,35 @@ wl_interface zxdg_decoration_manager_iface = {"zxdg_decoration_manager_v1", 1, 2
                                               NULL};
 wl_interface zxdg_toplevel_decoration_iface = {"zxdg_toplevel_decoration_v1", 1, 3, kDecorationRequests, 1,
                                                kDecorationEvents};
+
+// ---------------------------------------------------------------
+// viewporter: showing a buffer at another size, for fractional scales.
+// xdg-output, unstable version 1: an output's size in surface units,
+// which with its mode gives its scale.
+
+enum { VIEWPORTER_DESTROY, VIEWPORTER_GET_VIEWPORT };
+enum { VIEWPORT_DESTROY, VIEWPORT_SET_SOURCE, VIEWPORT_SET_DESTINATION };
+enum { XDG_OUTPUT_MANAGER_DESTROY, XDG_OUTPUT_MANAGER_GET_XDG_OUTPUT };
+enum { XDG_OUTPUT_DESTROY };
+
+extern wl_interface wp_viewporter_iface, wp_viewport_iface, zxdg_output_manager_iface, zxdg_output_iface;
+const wl_interface* scaleTypes[8] = {
+    NULL, NULL, NULL, NULL,          // 0: untyped arguments
+    &wp_viewport_iface, NULL,        // 4: get_viewport (wl_surface)
+    &zxdg_output_iface, NULL,        // 6: get_xdg_output (wl_output)
+};
+const wl_message kViewporterRequests[] = {{"destroy", "", scaleTypes}, {"get_viewport", "no", scaleTypes + 4}};
+const wl_message kViewportRequests[] = {
+    {"destroy", "", scaleTypes}, {"set_source", "ffff", scaleTypes}, {"set_destination", "ii", scaleTypes}};
+const wl_message kOutputManagerRequests[] = {{"destroy", "", scaleTypes}, {"get_xdg_output", "no", scaleTypes + 6}};
+const wl_message kXdgOutputRequests[] = {{"destroy", "", scaleTypes}};
+const wl_message kXdgOutputEvents[] = {{"logical_position", "ii", scaleTypes}, {"logical_size", "ii", scaleTypes},
+                                       {"done", "", scaleTypes}, {"name", "2s", scaleTypes},
+                                       {"description", "2s", scaleTypes}};
+wl_interface wp_viewporter_iface = {"wp_viewporter", 1, 2, kViewporterRequests, 0, NULL};
+wl_interface wp_viewport_iface = {"wp_viewport", 1, 3, kViewportRequests, 0, NULL};
+wl_interface zxdg_output_manager_iface = {"zxdg_output_manager_v1", 2, 2, kOutputManagerRequests, 0, NULL};
+wl_interface zxdg_output_iface = {"zxdg_output_v1", 2, 1, kXdgOutputRequests, 5, kXdgOutputEvents};
 
 // A request on an xdg object; iface is the new object's, if it makes one.
 template <typename... A>
@@ -400,6 +432,9 @@ struct Native {
   // The input region last given, for a translucent window.
   bool inputSet = false;
   std::vector<RECT> input;
+  void* viewport = NULL;  // wp_viewport, when the buffer is shown at another size
+  int bufferScale = 1;
+  SIZE shownAt = {0, 0};  // the viewport's destination
 };
 
 struct WaylandBackend;
@@ -416,6 +451,11 @@ struct WaylandBackend : Backend {
   wl_keyboard* keyboard = NULL;
   wl_output* output = NULL;
   void* wmBase = NULL;
+  void* viewporter = NULL;     // wp_viewporter
+  void* outputManager = NULL;  // zxdg_output_manager_v1
+  int outputScale = 1;         // the output's integer scale
+  SIZE logical = {0, 0};       // the output's size in surface units, from xdg-output
+  double units = 0;            // the program's pixels in a surface unit, once known
   void* decorationManager = NULL;  // zxdg_decoration_manager_v1, likewise
   void* iconManager = NULL;  // xdg_toplevel_icon_manager_v1, when the compositor has it
   // The clipboard
@@ -444,6 +484,7 @@ struct WaylandBackend : Backend {
   wl_cursor_theme* cursorTheme = NULL;
   wl_surface* cursorSurface = NULL;
   int cursorHotX = 0, cursorHotY = 0;
+  int cursorScale = 1;  // the theme's cursors' buffer scale
   bool cursorHidden = false;
   Buffer cursorBuffer;  // a program's own cursor
 
@@ -472,7 +513,14 @@ struct WaylandBackend : Backend {
       dpy = NULL;
       return false;
     }
-    wl.wl_display_roundtrip(dpy);  // the seat's devices, the output's mode
+    if (outputManager && output) {
+      void* xo = Req(outputManager, XDG_OUTPUT_MANAGER_GET_XDG_OUTPUT, &zxdg_output_iface, NULL, output);
+      static void (*const xl[])(void) = {(void (*)(void))XdgOutPosition, (void (*)(void))XdgOutSize,
+                                         (void (*)(void))XdgOutDone, (void (*)(void))XdgOutName,
+                                         (void (*)(void))XdgOutName};
+      winport_wl_proxy_add_listener((wl_proxy*)xo, (void (**)(void))xl, this);
+    }
+    wl.wl_display_roundtrip(dpy);  // the seat's devices, the output's mode and scale
     if (dataManager && seat) {
       dataDevice = wl_data_device_manager_get_data_device(dataManager, seat);
       static const wl_data_device_listener dl = {DataOffer, DataEnter, DataLeave, DataMotion, DataDrop, DataSelection};
@@ -484,8 +532,11 @@ struct WaylandBackend : Backend {
     }
     xkbCtx = wl.xkb_context_new(XKB_CONTEXT_NO_FLAGS);
     if (wl.cursors) {
+      // The theme's cursors at the output's scale, shown at that buffer
+      // scale so that they keep their size in surface units.
       const char* size = getenv("XCURSOR_SIZE");
-      cursorTheme = wl.wl_cursor_theme_load(getenv("XCURSOR_THEME"), size ? atoi(size) : 24, shm);
+      cursorScale = std::max(1, (int)(DesktopScale() + 0.99));
+      cursorTheme = wl.wl_cursor_theme_load(getenv("XCURSOR_THEME"), (size ? atoi(size) : 24) * cursorScale, shm);
     }
     cursorSurface = wl_compositor_create_surface(compositor);
     ThemeCursor("left_ptr");
@@ -500,7 +551,33 @@ struct WaylandBackend : Backend {
   }
 
   const char* Name() override { return "wayland"; }
-  SIZE ScreenSize() override { return screen; }
+
+  // The output's scale: its mode over its size in surface units when
+  // xdg-output tells that (a fractional scale, to 1/120), else its
+  // integer scale. Fractional scales need the viewporter.
+  double DesktopScale() override {
+    if (viewporter && logical.cx > 0 && screen.cx > 0) {
+      double s = (double)screen.cx / logical.cx;
+      s = (int)(s * 120 + 0.5) / 120.0;
+      if (s >= 1) return s;
+    }
+    return outputScale > 1 ? outputScale : 1;
+  }
+  // The program's pixels in a surface unit: the scale for a DPI-aware
+  // program, which draws at the output's resolution; 1 for one the
+  // compositor scales up.
+  double Units() {
+    if (units <= 0) units = DpiAware() ? DesktopScale() : 1;
+    return units;
+  }
+  int ToSurface(int v) { return (int)(v / Units() + (v >= 0 ? 0.5 : -0.5)); }
+  int FromSurface(double v) { return (int)(v * Units() + (v >= 0 ? 0.5 : -0.5)); }
+  // The screen in the program's pixels.
+  SIZE ScreenSize() override {
+    double s = DesktopScale(), u = Units();
+    if (s == u) return screen;
+    return SIZE{(LONG)(screen.cx / s * u + 0.5), (LONG)(screen.cy / s * u + 0.5)};
+  }
 
   // ---------------------------------------------------------------
   // Globals
@@ -528,6 +605,10 @@ struct WaylandBackend : Backend {
     } else if (strcmp(iface, "wl_data_device_manager") == 0 && !b->dataManager) {
       b->dataManager = (wl_data_device_manager*)wl_registry_bind(r, name, &wl_data_device_manager_interface,
                                                                  std::min<uint32_t>(version, 3));
+    } else if (strcmp(iface, "wp_viewporter") == 0 && !b->viewporter) {
+      b->viewporter = wl_registry_bind(r, name, &wp_viewporter_iface, 1);
+    } else if (strcmp(iface, "zxdg_output_manager_v1") == 0 && !b->outputManager && version >= 2) {
+      b->outputManager = wl_registry_bind(r, name, &zxdg_output_manager_iface, 2);
     } else if (strcmp(iface, "wl_output") == 0 && !b->output && version >= 2) {
       b->output = (wl_output*)wl_registry_bind(r, name, &wl_output_interface, 2);
       static const wl_output_listener ol = {OutGeometry, OutMode, OutDone, OutScale, NULL, NULL};
@@ -551,7 +632,15 @@ struct WaylandBackend : Backend {
     if ((flags & WL_OUTPUT_MODE_CURRENT) && width > 0 && height > 0) ((WaylandBackend*)data)->screen = {width, height};
   }
   static void OutDone(void*, wl_output*) {}
-  static void OutScale(void*, wl_output*, int32_t) {}
+  static void OutScale(void* data, wl_output*, int32_t scale) {
+    if (scale >= 1) ((WaylandBackend*)data)->outputScale = scale;
+  }
+  static void XdgOutPosition(void*, void*, int32_t, int32_t) {}
+  static void XdgOutSize(void* data, void*, int32_t width, int32_t height) {
+    if (width > 0 && height > 0) ((WaylandBackend*)data)->logical = {width, height};
+  }
+  static void XdgOutDone(void*, void*) {}
+  static void XdgOutName(void*, void*, const char*) {}
 
   static void SeatCaps(void* data, wl_seat* seat, uint32_t caps) {
     WaylandBackend* b = (WaylandBackend*)data;
@@ -628,8 +717,8 @@ struct WaylandBackend : Backend {
   }
   static void ToplevelConfigure(void* data, void*, int32_t width, int32_t height, wl_array*) {
     Native* n = (Native*)data;
-    n->pendingWidth = width;
-    n->pendingHeight = height;
+    n->pendingWidth = width > 0 ? g_wl->FromSurface(width) : 0;
+    n->pendingHeight = height > 0 ? g_wl->FromSurface(height) : 0;
   }
   static void ToplevelClose(void* data, void*) { CloseRequested(((Native*)data)->w); }
   static void PopupConfigure(void* data, void*, int32_t x, int32_t y, int32_t, int32_t) {
@@ -637,7 +726,7 @@ struct WaylandBackend : Backend {
     Native* n = (Native*)data;
     if (!n->parent) return;
     Window* w = n->w;
-    POINT at = {n->parent->w->rect.left + x, n->parent->w->rect.top + y};
+    POINT at = {n->parent->w->rect.left + g_wl->FromSurface(x), n->parent->w->rect.top + g_wl->FromSurface(y)};
     if (at.x != w->rect.left || at.y != w->rect.top) {
       g_wl->placing = true;
       SetWindowPos(w->hwnd, NULL, at.x, at.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
@@ -656,7 +745,7 @@ struct WaylandBackend : Backend {
 
   void SizeLimits(Native* n) {
     Window* w = n->w;
-    int cw = std::max(1, (int)(w->rect.right - w->rect.left)), ch = std::max(1, (int)(w->rect.bottom - w->rect.top));
+    int cw = std::max(1, ToSurface(w->rect.right - w->rect.left)), ch = std::max(1, ToSurface(w->rect.bottom - w->rect.top));
     if (w->style & WS_THICKFRAME) {
       Req(n->toplevel, XDG_TOPLEVEL_SET_MIN_SIZE, NULL, 1, 1);
       Req(n->toplevel, XDG_TOPLEVEL_SET_MAX_SIZE, NULL, 0, 0);
@@ -675,10 +764,10 @@ struct WaylandBackend : Backend {
     Native* parent = IsPopup(w) ? PopupParent(w) : NULL;
     if (parent) {
       n->parent = parent;
-      int cw = std::max(1, (int)(w->rect.right - w->rect.left)), ch = std::max(1, (int)(w->rect.bottom - w->rect.top));
-      int pw = std::max(1, (int)(parent->w->rect.right - parent->w->rect.left));
-      int ph = std::max(1, (int)(parent->w->rect.bottom - parent->w->rect.top));
-      int dx = w->rect.left - parent->w->rect.left, dy = w->rect.top - parent->w->rect.top;
+      int cw = std::max(1, ToSurface(w->rect.right - w->rect.left)), ch = std::max(1, ToSurface(w->rect.bottom - w->rect.top));
+      int pw = std::max(1, ToSurface(parent->w->rect.right - parent->w->rect.left));
+      int ph = std::max(1, ToSurface(parent->w->rect.bottom - parent->w->rect.top));
+      int dx = ToSurface(w->rect.left - parent->w->rect.left), dy = ToSurface(w->rect.top - parent->w->rect.top);
       // The anchor must lie in the parent; the offset takes it the rest of
       // the way.
       int ax = std::max(0, std::min(dx, pw - 1)), ay = std::max(0, std::min(dy, ph - 1));
@@ -768,6 +857,7 @@ struct WaylandBackend : Backend {
     if (!n) return;
     if (n->shown) Unmap(n);
     for (Buffer& b : n->buffers) FreeBuffer(b);
+    if (n->viewport) Done(n->viewport, VIEWPORT_DESTROY);
     wl_surface_destroy(n->surface);
     natives.erase(n);
     if (kbdIn == n) kbdIn = NULL;
@@ -938,6 +1028,7 @@ struct WaylandBackend : Backend {
     else
       memcpy(b->data, s->pixels.data(), b->size);
     SetInputRegion(n, translucent);
+    SetScale(n, s->width, s->height);
     wl_surface_attach(n->surface, b->buffer, 0, 0);
     RECT d = n->damage;
     wl_surface_damage_buffer(n->surface, d.left, d.top, d.right - d.left, d.bottom - d.top);
@@ -947,6 +1038,29 @@ struct WaylandBackend : Backend {
     static const wl_callback_listener fl = {FrameDone};
     wl_callback_add_listener(n->frame, &fl, n);
     wl_surface_commit(n->surface);
+  }
+
+  // How the buffer, in the program's pixels, maps to the surface: a
+  // buffer scale when the scale is a whole number that divides the size,
+  // otherwise the viewporter's destination size.
+  void SetScale(Native* n, int width, int height) {
+    double u = Units();
+    int whole = (int)u;
+    int scale = 1;
+    SIZE dest = {-1, -1};
+    if (whole == u && width % whole == 0 && height % whole == 0) scale = whole;
+    else if (viewporter && u != 1) dest = SIZE{std::max(1, ToSurface(width)), std::max(1, ToSurface(height))};
+    else if (whole == u) scale = whole;  // shown a little cut off rather than twice as large
+    if (dest.cx > 0 && !n->viewport)
+      n->viewport = Req(viewporter, VIEWPORTER_GET_VIEWPORT, &wp_viewport_iface, NULL, n->surface);
+    if (n->viewport && (dest.cx != n->shownAt.cx || dest.cy != n->shownAt.cy)) {
+      Req(n->viewport, VIEWPORT_SET_DESTINATION, NULL, (int32_t)dest.cx, (int32_t)dest.cy);
+      n->shownAt = dest;
+    }
+    if (scale != n->bufferScale) {
+      wl_surface_set_buffer_scale(n->surface, scale);
+      n->bufferScale = scale;
+    }
   }
 
   // Where a translucent window takes the mouse; all of an opaque one.
@@ -961,7 +1075,10 @@ struct WaylandBackend : Backend {
         std::equal(area.begin(), area.end(), n->input.begin(), [](const RECT& a, const RECT& b) { return EqualRect(&a, &b); }))
       return;
     wl_region* rgn = wl_compositor_create_region(compositor);
-    for (const RECT& r : area) wl_region_add(rgn, r.left, r.top, r.right - r.left, r.bottom - r.top);
+    for (const RECT& r : area) {
+      int l = ToSurface(r.left), t = ToSurface(r.top), rr = ToSurface(r.right), bb = ToSurface(r.bottom);
+      if (rr > l && bb > t) wl_region_add(rgn, l, t, rr - l, bb - t);
+    }
     wl_surface_set_input_region(n->surface, rgn);
     wl_region_destroy(rgn);
     n->input = area;
@@ -1172,11 +1289,13 @@ struct WaylandBackend : Backend {
     if (!c && strcmp(name, "left_ptr") == 0) c = wl.wl_cursor_theme_get_cursor(cursorTheme, "default");
     if (!c || c->image_count == 0) return false;
     wl_cursor_image* img = c->images[0];
+    int k = (img->width % cursorScale == 0 && img->height % cursorScale == 0) ? cursorScale : 1;
+    wl_surface_set_buffer_scale(cursorSurface, k);
     wl_surface_attach(cursorSurface, wl.wl_cursor_image_get_buffer(img), 0, 0);
-    wl_surface_damage(cursorSurface, 0, 0, img->width, img->height);
+    wl_surface_damage_buffer(cursorSurface, 0, 0, img->width, img->height);
     wl_surface_commit(cursorSurface);
-    cursorHotX = img->hotspot_x;
-    cursorHotY = img->hotspot_y;
+    cursorHotX = img->hotspot_x / k;
+    cursorHotY = img->hotspot_y / k;
     return true;
   }
 
@@ -1208,11 +1327,15 @@ struct WaylandBackend : Backend {
     b.size = size;
     b.width = p.width;
     b.height = p.height;
+    // The picture is in the program's pixels.
+    int u = (int)Units();
+    int k = (u == Units() && p.width % u == 0 && p.height % u == 0) ? u : 1;
+    wl_surface_set_buffer_scale(cursorSurface, k);
     wl_surface_attach(cursorSurface, b.buffer, 0, 0);
-    wl_surface_damage(cursorSurface, 0, 0, p.width, p.height);
+    wl_surface_damage_buffer(cursorSurface, 0, 0, p.width, p.height);
     wl_surface_commit(cursorSurface);
-    cursorHotX = p.hotspot.x;
-    cursorHotY = p.hotspot.y;
+    cursorHotX = p.hotspot.x / k;
+    cursorHotY = p.hotspot.y / k;
     return true;
   }
 
@@ -1282,7 +1405,7 @@ struct WaylandBackend : Backend {
     WaylandBackend* b = (WaylandBackend*)data;
     b->enterSerial = serial;
     b->ptrIn = Of(s);
-    b->ptrAt = {wl_fixed_to_int(x), wl_fixed_to_int(y)};
+    b->ptrAt = {b->FromSurface(wl_fixed_to_double(x)), b->FromSurface(wl_fixed_to_double(y))};
     b->ApplyCursor();
     b->EndGrab();
     if (b->ptrIn) MouseInput(b->ptrIn->w, WM_MOUSEMOVE, b->ptrAt.x, b->ptrAt.y, b->Keys());
@@ -1290,7 +1413,7 @@ struct WaylandBackend : Backend {
   static void PtrLeave(void* data, wl_pointer*, uint32_t, wl_surface*) { ((WaylandBackend*)data)->ptrIn = NULL; }
   static void PtrMotion(void* data, wl_pointer*, uint32_t, wl_fixed_t x, wl_fixed_t y) {
     WaylandBackend* b = (WaylandBackend*)data;
-    b->ptrAt = {wl_fixed_to_int(x), wl_fixed_to_int(y)};
+    b->ptrAt = {b->FromSurface(wl_fixed_to_double(x)), b->FromSurface(wl_fixed_to_double(y))};
     b->EndGrab();
     if (b->ptrIn) MouseInput(b->ptrIn->w, WM_MOUSEMOVE, b->ptrAt.x, b->ptrAt.y, b->Keys());
   }

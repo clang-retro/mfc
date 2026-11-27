@@ -1,0 +1,57 @@
+// shellscalingapi.h - the shell's DPI functions: a process's DPI
+// awareness and a monitor's dots per inch.
+//
+// Part of clang-retro MFC, an independent implementation of the MFC API.
+// SPDX-License-Identifier: AGPL-3.0-only
+#ifndef _WINPORT_SHELLSCALINGAPI_H
+#define _WINPORT_SHELLSCALINGAPI_H
+
+#include <windows.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef enum PROCESS_DPI_AWARENESS {
+  PROCESS_DPI_UNAWARE = 0,
+  PROCESS_SYSTEM_DPI_AWARE = 1,
+  PROCESS_PER_MONITOR_DPI_AWARE = 2
+} PROCESS_DPI_AWARENESS;
+
+typedef enum MONITOR_DPI_TYPE {
+  MDT_EFFECTIVE_DPI = 0,
+  MDT_ANGULAR_DPI = 1,
+  MDT_RAW_DPI = 2,
+  MDT_DEFAULT = MDT_EFFECTIVE_DPI
+} MONITOR_DPI_TYPE;
+
+typedef enum DEVICE_SCALE_FACTOR {
+  DEVICE_SCALE_FACTOR_INVALID = 0,
+  SCALE_100_PERCENT = 100,
+  SCALE_120_PERCENT = 120,
+  SCALE_125_PERCENT = 125,
+  SCALE_140_PERCENT = 140,
+  SCALE_150_PERCENT = 150,
+  SCALE_160_PERCENT = 160,
+  SCALE_175_PERCENT = 175,
+  SCALE_180_PERCENT = 180,
+  SCALE_200_PERCENT = 200,
+  SCALE_225_PERCENT = 225,
+  SCALE_250_PERCENT = 250,
+  SCALE_300_PERCENT = 300,
+  SCALE_350_PERCENT = 350,
+  SCALE_400_PERCENT = 400,
+  SCALE_450_PERCENT = 450,
+  SCALE_500_PERCENT = 500
+} DEVICE_SCALE_FACTOR;
+
+HRESULT WINAPI SetProcessDpiAwareness(PROCESS_DPI_AWARENESS);
+HRESULT WINAPI GetProcessDpiAwareness(HANDLE, PROCESS_DPI_AWARENESS*);
+HRESULT WINAPI GetDpiForMonitor(HMONITOR, MONITOR_DPI_TYPE, UINT*, UINT*);
+HRESULT WINAPI GetScaleFactorForMonitor(HMONITOR, DEVICE_SCALE_FACTOR*);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

@@ -425,8 +425,8 @@ void FillMetrics(DCObj* dc, RealFont* f, TEXTMETRICW* tm) {
   tm->tmMaxCharWidth = dc->LogicalX(f->maxWidth);
   tm->tmWeight = f->weight;
   tm->tmOverhang = 0;
-  tm->tmDigitizedAspectX = kLogPixels;
-  tm->tmDigitizedAspectY = kLogPixels;
+  tm->tmDigitizedAspectX = SystemDpi();
+  tm->tmDigitizedAspectY = SystemDpi();
   tm->tmFirstChar = 0x20;
   tm->tmLastChar = 0xFFFC;
   tm->tmDefaultChar = 0x1F;
