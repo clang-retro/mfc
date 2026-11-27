@@ -1,0 +1,58 @@
+// atlsnaptest.rc - the menus, toolbar and property page of atlsnaptest's
+// snap-in nodes.
+#include <windows.h>
+#include "atlsnaptest.h"
+
+// The popups are MMC's top, new, task and view insertion points.
+IDR_NODEMENU MENU
+BEGIN
+  POPUP "Top"
+  BEGIN
+    MENUITEM "&Refresh\nRefreshes the node", ID_REFRESH
+    MENUITEM SEPARATOR
+    MENUITEM "&Gray\nNever available", ID_GRAY, GRAYED
+  END
+  POPUP "New"
+  BEGIN
+    MENUITEM "&Item\nMakes an item", ID_NEWITEM
+  END
+  POPUP "Task"
+  BEGIN
+    MENUITEM "&Task", ID_TASK
+  END
+  POPUP "View"
+  BEGIN
+    MENUITEM "&Big\nBig icons", ID_BIG
+  END
+END
+
+IDR_EXTMENU MENU
+BEGIN
+  POPUP "Top"
+  BEGIN
+    MENUITEM "&Extension\nFrom the extension", ID_EXTCMD
+  END
+END
+
+// version, image width, image height, count, command IDs
+IDR_NODETOOLBAR 241
+BEGIN
+  1, 16, 15, 3,
+  ID_REFRESH, 0, ID_TASK
+END
+IDR_NODETOOLBAR BITMAP "toolbar.bmp"
+
+STRINGTABLE
+BEGIN
+  ID_REFRESH "Refresh\nRefresh now"
+  ID_TASK "Task\nDo the task"
+END
+
+IDD_PAGE DIALOG 0, 0, 200, 80
+STYLE WS_CHILD | WS_CAPTION
+CAPTION "General"
+FONT 8, "MS Shell Dlg"
+BEGIN
+  LTEXT "Name:", -1, 7, 9, 40, 8
+  EDITTEXT IDC_NAME, 50, 7, 140, 14, ES_AUTOHSCROLL
+END
