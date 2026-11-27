@@ -479,6 +479,12 @@ counterpart (the Adobe Symbol mapping, and for Wingdings the characters
 Unicode encodes, such as U+2713 for the check mark), from the stand-in
 family or a symbol font such as Symbola, Noto Sans Symbols or DejaVu
 Sans. A Wingdings character with no clear counterpart draws as its byte.
+`GetGlyphOutline` gives a glyph's outline with quadratic curves
+(`GGO_NATIVE`) or cubic ones (`GGO_BEZIER`), and its bitmap as one bit
+(`GGO_BITMAP`) or as 5, 17 or 65 levels of gray (`GGO_GRAY2_BITMAP`,
+`GGO_GRAY4_BITMAP`, `GGO_GRAY8_BITMAP`), the same pixels that text
+draws; with a matrix, the outline, the bitmap, the box and the advance
+are transformed.
 
 The ANSI code page there is UTF-8, `WCHAR` is the system's 32-bit
 `wchar_t`, and `long` is 64 bits on 64-bit systems while `LONG` and
@@ -614,7 +620,8 @@ try.
   Unicode window procedures, focus, painting and scrolling, memory DCs,
   monochrome bitmaps, DIB sections, raster operations, regions,
   clipping, SaveDC and mapping modes, lines, shapes, fill modes, flood
-  fills, paths, text metrics and extents, TextOut and DrawText; icons
+  fills, paths, text metrics and extents, TextOut and DrawText; glyph
+  bitmaps, cubic outlines and a turned glyph from GetGlyphOutline; icons
   whose images are PNG files, from bits and from an icon file; the
   common controls through their messages (status bar, progress,
   trackbar, up-down, header, tabs, hotkey, list and tree views, IP

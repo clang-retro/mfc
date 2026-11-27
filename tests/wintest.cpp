@@ -26,8 +26,10 @@
 #include <urlmon.h>
 #endif
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <string>
+#include <algorithm>
 #include <vector>
 
 static int g_failures = 0;
@@ -718,6 +720,137 @@ static void TestShapes() {
   ::SelectObject(p.dc, ::GetStockObject(BLACK_BRUSH));
   CHECK(::FillPath(p.dc));
   CHECK(p.At(15, 15) == kBlack && p.At(30, 30) == kWhite);
+}
+
+// Reads the records of a GGO_NATIVE or GGO_BEZIER outline: the number of
+// contours, the primitive types seen, and whether each cubic record has
+// whole curves (three points each).
+static bool WalkOutline(const std::vector<BYTE>& d, int* contours, bool* qspline, bool* cspline) {
+  *contours = 0;
+  *qspline = *cspline = false;
+  size_t at = 0;
+  while (at < d.size()) {
+    TTPOLYGONHEADER h;
+    if (at + sizeof h > d.size()) return false;
+    memcpy(&h, &d[at], sizeof h);
+    if (h.dwType != TT_POLYGON_TYPE || h.cb < sizeof h || at + h.cb > d.size()) return false;
+    size_t p = at + sizeof h;
+    while (p < at + h.cb) {
+      WORD type, count;
+      memcpy(&type, &d[p], 2);
+      memcpy(&count, &d[p + 2], 2);
+      if (type == TT_PRIM_QSPLINE) *qspline = true;
+      if (type == TT_PRIM_CSPLINE) {
+        *cspline = true;
+        if (count % 3) return false;
+      }
+      p += 4 + (size_t)count * sizeof(POINTFX);
+    }
+    if (p != at + h.cb) return false;
+    (*contours)++;
+    at += h.cb;
+  }
+  return true;
+}
+
+// GetGlyphOutline's bitmaps (GGO_BITMAP and the GGO_GRAY ones), its cubic
+// outlines (GGO_BEZIER) and a glyph turned by a matrix.
+static void TestGlyphOutlines() {
+  HDC dc = ::CreateCompatibleDC(NULL);
+  HFONT font = ::CreateFontW(-32, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, 0, L"Arial");
+  HGDIOBJ oldFont = ::SelectObject(dc, font);
+  MAT2 ident = {{0, 1}, {0, 0}, {0, 0}, {0, 1}};
+  GLYPHMETRICS gm = {};
+  CHECK(::GetGlyphOutlineW(dc, L'O', GGO_METRICS, &gm, 0, NULL, &ident) == 0);
+  CHECK(gm.gmBlackBoxX > 4 && gm.gmBlackBoxY > 4 && gm.gmCellIncX > 0);
+
+  // GGO_GRAY8_BITMAP: a byte for each pixel, 0 to 64, rows of 4 bytes.
+  GLYPHMETRICS g8 = {};
+  DWORD n = ::GetGlyphOutlineW(dc, L'O', GGO_GRAY8_BITMAP, &g8, 0, NULL, &ident);
+  CHECK(n != GDI_ERROR && n == ((g8.gmBlackBoxX + 3) & ~3u) * g8.gmBlackBoxY);
+  CHECK(g8.gmBlackBoxX == gm.gmBlackBoxX && g8.gmBlackBoxY == gm.gmBlackBoxY);
+  if (n != GDI_ERROR && n) {
+    std::vector<BYTE> px(n);
+    CHECK(::GetGlyphOutlineW(dc, L'O', GGO_GRAY8_BITMAP, &g8, n, px.data(), &ident) == n);
+    BYTE most = 0, least = 255;
+    for (BYTE b : px) {
+      most = std::max(most, b);
+      least = std::min(least, b);
+    }
+    CHECK(most == 64 && least == 0);
+  }
+  // GGO_GRAY2_BITMAP: 0 to 4.
+  n = ::GetGlyphOutlineW(dc, L'O', GGO_GRAY2_BITMAP, &g8, 0, NULL, &ident);
+  if (n != GDI_ERROR && n) {
+    std::vector<BYTE> px(n);
+    CHECK(::GetGlyphOutlineW(dc, L'O', GGO_GRAY2_BITMAP, &g8, n, px.data(), &ident) == n);
+    BYTE most = 0;
+    for (BYTE b : px) most = std::max(most, b);
+    CHECK(most == 4);
+  }
+  // GGO_BITMAP: a bit for each pixel, rows of 4 bytes.
+  n = ::GetGlyphOutlineW(dc, L'O', GGO_BITMAP, &g8, 0, NULL, &ident);
+  CHECK(n != GDI_ERROR && n == (g8.gmBlackBoxX + 31) / 32 * 4 * g8.gmBlackBoxY);
+  if (n != GDI_ERROR && n) {
+    std::vector<BYTE> px(n);
+    CHECK(::GetGlyphOutlineW(dc, L'O', GGO_BITMAP, &g8, n, px.data(), &ident) == n);
+    int set = 0;
+    for (BYTE b : px)
+      for (int i = 0; i < 8; i++) set += (b >> i) & 1;
+    CHECK(set > 0 && set < (int)(g8.gmBlackBoxX * g8.gmBlackBoxY));
+  }
+#ifdef _WINPORT
+  // A space has no ink and no bitmap.
+  CHECK(::GetGlyphOutlineW(dc, L' ', GGO_GRAY8_BITMAP, &g8, 0, NULL, &ident) == 0);
+#endif
+
+  // The outlines, where the font has them: the same contours as
+  // quadratic and as cubic curves.
+  DWORD qn = ::GetGlyphOutlineW(dc, L'O', GGO_NATIVE, &g8, 0, NULL, &ident);
+  if (qn != GDI_ERROR && qn) {
+    std::vector<BYTE> q(qn), c;
+    CHECK(::GetGlyphOutlineW(dc, L'O', GGO_NATIVE, &g8, qn, q.data(), &ident) == qn);
+    DWORD cn = ::GetGlyphOutlineW(dc, L'O', GGO_BEZIER, &g8, 0, NULL, &ident);
+    CHECK(cn != GDI_ERROR && cn > 0);
+    if (cn != GDI_ERROR && cn) {
+      c.resize(cn);
+      CHECK(::GetGlyphOutlineW(dc, L'O', GGO_BEZIER, &g8, cn, c.data(), &ident) == cn);
+      int qc = 0, cc = 0;
+      bool qq, qcub, cq, ccub;
+      CHECK(WalkOutline(q, &qc, &qq, &qcub) && qq && !qcub);
+      CHECK(WalkOutline(c, &cc, &cq, &ccub) && ccub && !cq);
+      CHECK(qc == 2 && cc == 2);
+      // The contours start at the same points.
+      TTPOLYGONHEADER a, b;
+      memcpy(&a, q.data(), sizeof a);
+      memcpy(&b, c.data(), sizeof b);
+      CHECK(memcmp(&a.pfxStart, &b.pfxStart, sizeof a.pfxStart) == 0);
+    }
+
+    // Turned a quarter turn to the left: the box turns, and the pen moves
+    // up instead of to the right.
+    MAT2 turn = {{0, 0}, {0, 1}, {0, -1}, {0, 0}};
+    GLYPHMETRICS gt = {};
+    CHECK(::GetGlyphOutlineW(dc, L'O', GGO_METRICS, &gt, 0, NULL, &turn) == 0);
+    CHECK(abs((int)gt.gmBlackBoxX - (int)gm.gmBlackBoxY) <= 2);
+    CHECK(abs((int)gt.gmBlackBoxY - (int)gm.gmBlackBoxX) <= 2);
+    CHECK(gt.gmCellIncX == 0 && abs(gt.gmCellIncY) == gm.gmCellIncX);
+    n = ::GetGlyphOutlineW(dc, L'O', GGO_GRAY8_BITMAP, &gt, 0, NULL, &turn);
+    CHECK(n != GDI_ERROR && n == ((gt.gmBlackBoxX + 3) & ~3u) * gt.gmBlackBoxY);
+    if (n != GDI_ERROR && n) {
+      std::vector<BYTE> px(n);
+      CHECK(::GetGlyphOutlineW(dc, L'O', GGO_GRAY8_BITMAP, &gt, n, px.data(), &turn) == n);
+      // The ring: ink all round, and none in the middle.
+      DWORD stride = (gt.gmBlackBoxX + 3) & ~3u;
+      BYTE most = 0;
+      for (BYTE b : px) most = std::max(most, b);
+      CHECK(most == 64);
+      CHECK(px[stride * (gt.gmBlackBoxY / 2) + gt.gmBlackBoxX / 2] == 0);
+    }
+  }
+  ::SelectObject(dc, oldFont);
+  ::DeleteObject(font);
+  ::DeleteDC(dc);
 }
 
 static void TestText() {
@@ -4733,6 +4866,7 @@ int main() {
   TestRegionsAndClipping();
   TestShapes();
   TestText();
+  TestGlyphOutlines();
   TestIconsAndAccelerators();
   TestPngIcons();
   TestMenus();

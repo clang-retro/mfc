@@ -641,6 +641,172 @@ void NativeOutline(const std::vector<std::vector<OutlinePoint>>& contours, std::
   }
 }
 
+
+// The contours as GGO_BEZIER records: straight runs as TT_PRIM_LINE and
+// each quadratic curve raised to a cubic one as TT_PRIM_CSPLINE (two
+// control points, then the end point, for each curve).
+void BezierOutline(const std::vector<std::vector<OutlinePoint>>& contours, std::vector<BYTE>* out) {
+  for (const auto& c : contours) {
+    size_t start = out->size();
+    TTPOLYGONHEADER h = {};
+    h.dwType = TT_POLYGON_TYPE;
+    h.pfxStart.x = ToFixed(c[0].x);
+    h.pfxStart.y = ToFixed(c[0].y);
+    Put(out, &h, sizeof h);
+    size_t n = c.size();
+    size_t i = 1;
+    double px = c[0].x, py = c[0].y;  // the last point on the curve
+    while (i <= n) {
+      bool line = c[i % n].onCurve;
+      std::vector<POINTFX> pts;
+      if (line) {
+        while (i <= n && c[i % n].onCurve) {
+          POINTFX p = {ToFixed(c[i % n].x), ToFixed(c[i % n].y)};
+          pts.push_back(p);
+          px = c[i % n].x;
+          py = c[i % n].y;
+          i++;
+        }
+      } else {
+        // Each off-curve point is a quadratic curve, which ends on the
+        // next point or halfway to the next off-curve point.
+        while (i <= n && !c[i % n].onCurve) {
+          const OutlinePoint& q = c[i % n];
+          const OutlinePoint& next = c[(i + 1) % n];
+          double ex = next.onCurve ? next.x : (q.x + next.x) / 2;
+          double ey = next.onCurve ? next.y : (q.y + next.y) / 2;
+          POINTFX c1 = {ToFixed(px + (q.x - px) * 2 / 3), ToFixed(py + (q.y - py) * 2 / 3)};
+          POINTFX c2 = {ToFixed(ex + (q.x - ex) * 2 / 3), ToFixed(ey + (q.y - ey) * 2 / 3)};
+          POINTFX e = {ToFixed(ex), ToFixed(ey)};
+          pts.push_back(c1);
+          pts.push_back(c2);
+          pts.push_back(e);
+          px = ex;
+          py = ey;
+          i++;
+          if (next.onCurve) i++;
+        }
+      }
+      WORD type = line ? TT_PRIM_LINE : TT_PRIM_CSPLINE, count = (WORD)pts.size();
+      Put(out, &type, sizeof type);
+      Put(out, &count, sizeof count);
+      Put(out, pts.data(), pts.size() * sizeof(POINTFX));
+    }
+    DWORD cb = (DWORD)(out->size() - start);
+    memcpy(out->data() + start, &cb, sizeof cb);
+  }
+}
+
+// A glyph drawn for GetGlyphOutline: coverage 0 to 255 for each pixel,
+// top row first, with its place: left and top from the pen position on
+// the baseline, y up.
+struct GlyphBits {
+  int left = 0, top = 0, w = 0, h = 0;
+  std::vector<BYTE> cov;
+};
+
+// Draws contours (y up) with 8 x 8 samples in each pixel, filled by the
+// nonzero rule, as TrueType fills.
+GlyphBits Rasterize(const std::vector<std::vector<OutlinePoint>>& contours) {
+  struct Edge {
+    double x0, y0, x1, y1;
+  };
+  std::vector<Edge> edges;
+  double minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+  auto add = [&](double x0, double y0, double x1, double y1) {
+    if (y0 != y1) edges.push_back({x0, y0, x1, y1});
+    minX = std::min(minX, std::min(x0, x1));
+    maxX = std::max(maxX, std::max(x0, x1));
+    minY = std::min(minY, std::min(y0, y1));
+    maxY = std::max(maxY, std::max(y0, y1));
+  };
+  for (const auto& c : contours) {
+    size_t n = c.size();
+    if (n < 2) continue;
+    double px = c[0].x, py = c[0].y;
+    for (size_t i = 1; i <= n; i++) {
+      const OutlinePoint& q = c[i % n];
+      if (q.onCurve) {
+        add(px, py, q.x, q.y);
+        px = q.x;
+        py = q.y;
+        continue;
+      }
+      const OutlinePoint& next = c[(i + 1) % n];
+      double ex = next.onCurve ? next.x : (q.x + next.x) / 2;
+      double ey = next.onCurve ? next.y : (q.y + next.y) / 2;
+      const int kSteps = 16;
+      for (int k = 1; k <= kSteps; k++) {
+        double t = (double)k / kSteps, u = 1 - t;
+        double x = u * u * px + 2 * u * t * q.x + t * t * ex;
+        double y = u * u * py + 2 * u * t * q.y + t * t * ey;
+        add(px, py, x, y);
+        px = x;
+        py = y;
+      }
+      if (next.onCurve) i++;
+    }
+  }
+  GlyphBits b;
+  if (edges.empty()) return b;
+  b.left = (int)floor(minX);
+  b.top = (int)ceil(maxY);
+  b.w = std::max(1, (int)ceil(maxX) - b.left);
+  b.h = std::max(1, b.top - (int)floor(minY));
+  if ((size_t)b.w * b.h > 4096u * 4096u) return GlyphBits();
+  const int kSub = 8;
+  std::vector<int> counts((size_t)b.w * b.h, 0);
+  std::vector<std::pair<double, int>> cross;
+  for (int row = 0; row < b.h * kSub; row++) {
+    // The sample's height, at the middle of its row of samples.
+    double y = b.top - (row + 0.5) / kSub;
+    cross.clear();
+    for (const Edge& e : edges) {
+      bool up = e.y1 > e.y0;
+      double lo = up ? e.y0 : e.y1, hi = up ? e.y1 : e.y0;
+      if (y < lo || y >= hi) continue;
+      double x = e.x0 + (y - e.y0) * (e.x1 - e.x0) / (e.y1 - e.y0);
+      cross.push_back({x, up ? 1 : -1});
+    }
+    std::sort(cross.begin(), cross.end());
+    int wind = 0;
+    for (size_t k = 0; k + 1 < cross.size(); k++) {
+      wind += cross[k].second;
+      if (!wind) continue;
+      // The samples whose middles fall between the two crossings.
+      int s0 = (int)ceil((cross[k].first - b.left) * kSub - 0.5);
+      int s1 = (int)ceil((cross[k + 1].first - b.left) * kSub - 0.5);
+      s0 = std::max(s0, 0);
+      s1 = std::min(s1, b.w * kSub);
+      int* line = counts.data() + (size_t)(row / kSub) * b.w;
+      for (int sx = s0; sx < s1; sx++) line[sx / kSub]++;
+    }
+  }
+  b.cov.resize(counts.size());
+  for (size_t i = 0; i < counts.size(); i++) b.cov[i] = (BYTE)std::min(255, counts[i] * 255 / (kSub * kSub));
+  return b;
+}
+
+// Writes a glyph as a GGO_BITMAP (one bit for each pixel) or a GGO_GRAY
+// bitmap (a byte for each pixel, 0 to levels), rows on 4-byte bounds.
+void GlyphBitmap(const GlyphBits& b, UINT kind, std::vector<BYTE>* out) {
+  bool mono = kind == GGO_BITMAP;
+  int levels = kind == GGO_GRAY2_BITMAP ? 4 : kind == GGO_GRAY4_BITMAP ? 16 : 64;
+  size_t stride = mono ? (size_t)((b.w + 31) / 32) * 4 : (size_t)((b.w + 3) / 4) * 4;
+  out->assign(stride * b.h, 0);
+  for (int y = 0; y < b.h; y++) {
+    BYTE* row = out->data() + stride * y;
+    for (int x = 0; x < b.w; x++) {
+      int c = b.cov[(size_t)y * b.w + x];
+      if (mono) {
+        if (c >= 128) row[x / 8] |= (BYTE)(0x80 >> (x % 8));
+      } else {
+        row[x] = (BYTE)((c * levels + 127) / 255);
+      }
+    }
+  }
+}
+
 }  // namespace
 
 // Fills the outline metrics of the font of hdc, with its names.
@@ -716,17 +882,12 @@ DWORD WINAPI GetGlyphOutlineW(HDC hdc, UINT ch, UINT format, LPGLYPHMETRICS gm, 
   gm->gmptGlyphOrigin.y = g.top < 0 ? dc->LogicalY(-g.top) : -dc->LogicalY(g.top);
   gm->gmCellIncX = (short)dc->LogicalX(g.advance);
   gm->gmCellIncY = 0;
-  if (kind == GGO_METRICS) return 0;
-  if (kind != GGO_NATIVE) {
-    // Bitmaps and cubic (GGO_BEZIER) outlines are not made.
-    SetLastError(ERROR_NOT_SUPPORTED);
+  bool bitmap = kind == GGO_BITMAP || kind == GGO_GRAY2_BITMAP || kind == GGO_GRAY4_BITMAP ||
+                kind == GGO_GRAY8_BITMAP;
+  if (kind != GGO_METRICS && kind != GGO_NATIVE && kind != GGO_BEZIER && !bitmap) {
+    SetLastError(ERROR_INVALID_PARAMETER);
     return GDI_ERROR;
   }
-  std::vector<std::vector<OutlinePoint>> contours;
-  if (!f->Outline(ch, &contours)) return GDI_ERROR;
-  // Device pixels to logical units, then the caller's transformation.
-  double ux = g.advance ? (double)dc->LogicalX(g.advance) / g.advance : 1.0;
-  double uy = dc->LogicalY(1000) / 1000.0;
   double m11 = 1, m12 = 0, m21 = 0, m22 = 1;
   if (mat) {
     m11 = FromFixed(mat->eM11);
@@ -734,17 +895,62 @@ DWORD WINAPI GetGlyphOutlineW(HDC hdc, UINT ch, UINT format, LPGLYPHMETRICS gm, 
     m21 = FromFixed(mat->eM21);
     m22 = FromFixed(mat->eM22);
   }
-  for (auto& c : contours)
-    for (OutlinePoint& p : c) {
-      double x = p.x * ux, y = p.y * uy;
-      p.x = (float)(m11 * x + m21 * y);
-      p.y = (float)(m12 * x + m22 * y);
+  bool identity = m11 == 1 && m12 == 0 && m21 == 0 && m22 == 1;
+  std::vector<std::vector<OutlinePoint>> contours;
+  bool outline = f->Outline(ch, &contours);
+  // Device pixels to logical units, then the caller's transformation.
+  double ux = g.advance ? (double)dc->LogicalX(g.advance) / g.advance : 1.0;
+  double uy = dc->LogicalY(1000) / 1000.0;
+  if (outline)
+    for (auto& c : contours)
+      for (OutlinePoint& p : c) {
+        double x = p.x * ux, y = p.y * uy;
+        p.x = (float)(m11 * x + m21 * y);
+        p.y = (float)(m12 * x + m22 * y);
+      }
+
+  // A transformed glyph: the box and the advance follow the
+  // transformation, and the bitmap is drawn from the outline.
+  GlyphBits bits;
+  bool drawn = false;
+  if (!identity && outline) {
+    bits = Rasterize(contours);
+    drawn = true;
+    if (bits.w > 0) {
+      gm->gmBlackBoxX = (UINT)bits.w;
+      gm->gmBlackBoxY = (UINT)bits.h;
+      gm->gmptGlyphOrigin.x = bits.left;
+      gm->gmptGlyphOrigin.y = bits.top;
     }
+    double adv = gm->gmCellIncX;
+    gm->gmCellIncX = (short)floor(m11 * adv + 0.5);
+    gm->gmCellIncY = (short)floor(m12 * adv + 0.5);
+  }
+  if (kind == GGO_METRICS) return 0;
+
   std::vector<BYTE> data;
-  NativeOutline(contours, &data);
+  if (bitmap) {
+    if (!drawn) {
+      // The glyph as text draws it.
+      bits.left = gm->gmptGlyphOrigin.x;
+      bits.top = gm->gmptGlyphOrigin.y;
+      bits.w = g.w;
+      bits.h = g.h;
+      bits.cov = g.cov;
+      if (bits.cov.size() != (size_t)bits.w * bits.h) bits.w = bits.h = 0;
+    }
+    // A glyph with no ink (a space) has no bitmap.
+    if (bits.w > 0 && bits.h > 0) GlyphBitmap(bits, kind, &data);
+  } else {
+    if (!outline) return GDI_ERROR;
+    if (kind == GGO_BEZIER)
+      BezierOutline(contours, &data);
+    else
+      NativeOutline(contours, &data);
+  }
   if (!buf || !size) return (DWORD)data.size();
   if (size < data.size()) return GDI_ERROR;
-  memcpy(buf, data.data(), data.size());
+  if (!data.empty()) memcpy(buf, data.data(), data.size());
   return (DWORD)data.size();
 }
 
