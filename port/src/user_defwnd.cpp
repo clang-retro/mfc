@@ -625,6 +625,8 @@ static bool g_altAlone;
 static LRESULT DefCore(HWND h, UINT msg, WPARAM wp, LPARAM lp, bool unicode) {
   Window* w = GetWindow(h);
   if (!w) return 0;
+  LRESULT ime;
+  if (DefImeMessage(h, msg, wp, lp, unicode, &ime)) return ime;
   switch (msg) {
     case WM_NCCREATE: {
       CREATESTRUCTW* cs = (CREATESTRUCTW*)lp;
@@ -1424,6 +1426,7 @@ BOOL WINAPI CreateCaret(HWND h, HBITMAP bm, int width, int height) {
   g_caret.pos.x = g_caret.pos.y = 0;
   g_caret.hidden = 1;
   g_caret.on = false;
+  ImeCaretMoved(h);
   return TRUE;
 }
 
@@ -1460,6 +1463,7 @@ BOOL WINAPI SetCaretPos(int x, int y) {
   g_caret.pos.x = x;
   g_caret.pos.y = y;
   if (was || g_caret.hidden == 0) ToggleCaret();
+  ImeCaretMoved(g_caret.hwnd);
   return TRUE;
 }
 
@@ -1476,3 +1480,14 @@ BOOL WINAPI SetCaretBlinkTime(UINT ms) {
 }
 
 }  // extern "C"
+
+namespace winport {
+
+bool CaretRect(HWND* owner, RECT* r) {
+  if (!g_caret.hwnd || !IsWindow(g_caret.hwnd)) return false;
+  *owner = g_caret.hwnd;
+  *r = RECT{g_caret.pos.x, g_caret.pos.y, g_caret.pos.x + g_caret.width, g_caret.pos.y + g_caret.height};
+  return true;
+}
+
+}  // namespace winport

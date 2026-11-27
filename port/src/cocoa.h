@@ -58,6 +58,10 @@ long SetPasteboardText(const std::u16string& text);
 // until Wake.
 void Wait(long timeout);
 void Wake();
+// The input method: the program has ended the composition itself; and
+// where the candidates go has changed.
+void ImeReset(Win* w);
+void ImeMoved(Win* w);
 // A screen saver bundle (saver_host.cpp): the views of the top-level
 // windows go into host (an NSView) in place of windows of their own, and
 // Wait calls yield, which gives control back to the program that owns
@@ -83,6 +87,13 @@ enum { kKeyDown, kKeyUp, kModifiers };
 bool OnKey(void* owner, int type, unsigned code, unsigned mods, const uint16_t* text, size_t textLength,
            const uint16_t* plain, size_t plainLength);
 void OnBecameKey(void* owner);
+// The input method has taken a key (it shows as VK_PROCESSKEY), and the
+// text it is composing (commit false, with its cursor) or has finished,
+// in UTF-16. OnImeRect gives where its candidates go, in screen
+// coordinates; false when there is no such place.
+void OnProcessKey(void* owner, unsigned code);
+void OnImeText(void* owner, bool commit, const uint16_t* text, size_t length, size_t cursor);
+bool OnImeRect(void* owner, int* x, int* y, int* width, int* height);
 // Files dragged from the Finder, at a screen point: whether a window of
 // ours there takes them, and the drop (UTF-8 paths), which says whether
 // one did.
