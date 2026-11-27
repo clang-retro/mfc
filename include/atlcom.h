@@ -2028,6 +2028,17 @@ public:
   }
 };
 
+// IPersist: the object's class, from CComCoClass.
+template <class T>
+class ATL_NO_VTABLE IPersistImpl : public IPersist {
+public:
+  STDMETHOD(GetClassID)(CLSID* pClassID) override {
+    if (pClassID == NULL) return E_POINTER;
+    *pClassID = T::GetObjectCLSID();
+    return S_OK;
+  }
+};
+
 // IObjectSafety: the object says it is safe for scripting and data.
 template <class T, DWORD dwSupportedSafety>
 class ATL_NO_VTABLE IObjectSafetyImpl : public IObjectSafety {
