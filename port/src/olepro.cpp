@@ -1278,6 +1278,8 @@ HRESULT GetBuiltinClassObject(REFCLSID clsid, REFIID riid, void** out) {
   *out = NULL;
   if (IsEqualCLSID(clsid, CLSID_StdFont)) return font.QueryInterface(riid, out);
   if (IsEqualCLSID(clsid, CLSID_StdPicture)) return picture.QueryInterface(riid, out);
+  if (IsEqualCLSID(clsid, CLSID_StdGlobalInterfaceTable))
+    return GetGlobalInterfaceTableClassObject(riid, out);
   return GetShellClassObject(clsid, riid, out);
 }
 

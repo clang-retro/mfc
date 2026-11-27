@@ -1,7 +1,8 @@
 // atliface.h - the interfaces of ATL's control host (atlhost.h): the
 // host window's own (IAxWinHostWindow), its ambient properties
-// (IAxWinAmbientDispatch) and the dispatch form of a document host's UI
-// handler (IDocHostUIHandlerDispatch).
+// (IAxWinAmbientDispatch), the dispatch form of a document host's UI
+// handler (IDocHostUIHandlerDispatch), and the registrar's (IRegistrar,
+// which CRegObject in atlbase.h implements).
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -108,5 +109,31 @@ struct IAxWinAmbientDispatchEx : public IAxWinAmbientDispatch {
 __CRT_UUID_DECL(IAxWinAmbientDispatchEx, 0xb2d0778b, 0xac99, 0x4c58, 0xa5, 0xc8, 0xe7, 0x72, 0x4e,
                 0x53, 0x16, 0xb5)
 #define IID_IAxWinAmbientDispatchEx __uuidof(IAxWinAmbientDispatchEx)
+
+// The registrar: runs .rgs scripts, with %NAME% replacements.
+struct IRegistrarBase : public IUnknown {
+  STDMETHOD(AddReplacement)(LPCOLESTR key, LPCOLESTR item) = 0;
+  STDMETHOD(ClearReplacements)() = 0;
+};
+__CRT_UUID_DECL(IRegistrarBase, 0xe21f8a85, 0xb05d, 0x4243, 0x81, 0x83, 0xc7, 0xcb, 0x40, 0x55,
+                0x88, 0xf7)
+#define IID_IRegistrarBase __uuidof(IRegistrarBase)
+
+struct IRegistrar : public IRegistrarBase {
+  STDMETHOD(ResourceRegisterSz)(LPCOLESTR resFileName, LPCOLESTR szID, LPCOLESTR szType) = 0;
+  STDMETHOD(ResourceUnregisterSz)(LPCOLESTR resFileName, LPCOLESTR szID, LPCOLESTR szType) = 0;
+  STDMETHOD(FileRegister)(LPCOLESTR fileName) = 0;
+  STDMETHOD(FileUnregister)(LPCOLESTR fileName) = 0;
+  STDMETHOD(StringRegister)(LPCOLESTR data) = 0;
+  STDMETHOD(StringUnregister)(LPCOLESTR data) = 0;
+  STDMETHOD(ResourceRegister)(LPCOLESTR resFileName, UINT nID, LPCOLESTR szType) = 0;
+  STDMETHOD(ResourceUnregister)(LPCOLESTR resFileName, UINT nID, LPCOLESTR szType) = 0;
+};
+__CRT_UUID_DECL(IRegistrar, 0x44ec053b, 0x400f, 0x11d0, 0x9d, 0xcd, 0x00, 0xa0, 0xc9, 0x03, 0x91,
+                0xd3)
+#define IID_IRegistrar __uuidof(IRegistrar)
+// atl.dll's registrar object.
+static const CLSID CLSID_Registrar = {
+    0x44ec053a, 0x400f, 0x11d0, {0x9d, 0xcd, 0x00, 0xa0, 0xc9, 0x03, 0x91, 0xd3}};
 
 #endif  // __ATLIFACE_H__

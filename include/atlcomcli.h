@@ -239,6 +239,29 @@ public:
 // IDispatch's helpers on any interface pointer it is given.
 typedef CComQIPtr<IDispatch, &__uuidof(IDispatch)> CComDispatchDriver;
 
+// The base ATL 7 gives CComPtr; here CComPtr is the whole of it.
+template <class T>
+using CComPtrBase = CComPtr<T>;
+
+// What CComPtr's and CComQIPtr's assignments do, for a raw pointer: the
+// new one AddRef'd (or asked for by QueryInterface) before the old one
+// goes.
+inline IUnknown* WINAPI AtlComPtrAssign(IUnknown** pp, IUnknown* lp) {
+  if (pp == NULL) return NULL;
+  if (lp != NULL) lp->AddRef();
+  if (*pp != NULL) (*pp)->Release();
+  *pp = lp;
+  return lp;
+}
+inline IUnknown* WINAPI AtlComQIPtrAssign(IUnknown** pp, IUnknown* lp, REFIID riid) {
+  if (pp == NULL) return NULL;
+  IUnknown* pTemp = *pp;
+  *pp = NULL;
+  if (lp != NULL) lp->QueryInterface(riid, (void**)pp);
+  if (pTemp != NULL) pTemp->Release();
+  return *pp;
+}
+
 class CComBSTR {
 public:
   BSTR m_str;

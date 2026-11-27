@@ -781,8 +781,11 @@ try.
   through the connection point (Advise, Unadvise, the enumerators),
   IProvideClassInfo2, a tear-off and a cached tear-off, aggregation, a
   singleton class factory, unloading through DllCanUnloadNow and
-  unregistration; and the client's own CComObject, CComObjectStack and
-  CComEnum.
+  unregistration; the client's own CComObject, CComObjectStack and
+  CComEnum; objects made in a CAtlAutoThreadModule's threads by
+  CComClassFactoryAutoThread, CComGITPtr from another thread, a service
+  map, ICollectionOnSTLImpl, the free-threaded marshaler, and the
+  registrar as IRegistrar, per machine and per user.
 * `atlwintest`: ATL's windows without MFC: a CWindowImpl frame with its
   own window class and traits, its message map (MESSAGE_, COMMAND_ and
   NOTIFY_ handlers, a range, bHandled set to FALSE, a chained map,
@@ -809,7 +812,9 @@ try.
   CAtlException); CSimpleArray and CSimpleMap; CAtlArray, CAtlList,
   CAtlMap (rehashing as it grows), CRBMap and CRBMultiMap, and the arrays
   and lists of CAutoPtr and interface pointers; CHeapPtr, CComHeapPtr,
-  CTempBuffer, CAutoPtr, CHandle; AtlThrow; CComSafeArray of numbers,
+  CTempBuffer, CAutoPtr, CHandle; AtlThrow; the heaps of `atlmem.h`,
+  CAtlStringMgr, CFixedStringT, AtlGetStringResourceImage and
+  CComCurrency (its arithmetic, rounding and overflow); CComSafeArray of numbers,
   BSTRs and VARIANTs, in one and two dimensions; CComDispatchDriver;
   CAtlFile, CAtlTemporaryFile and CAtlFileMapping; CTime, CTimeSpan,
   CFileTime and CFileTimeSpan without MFC; CImage (a 32-bit image with
@@ -1058,9 +1063,14 @@ request with the stock MinGW-w64 toolchain.
   their members use.
 * ATL, for COM servers and objects (`atlbase.h`, `atlcom.h`): CComModule
   (ATL 3, with an object map) and CAtlDllModuleT and CAtlExeModuleT
-  (ATL 7, with OBJECT_ENTRY_AUTO); the registrar that runs `.rgs`
-  scripts from REGISTRY resources (with %MODULE% and replacement maps)
-  and CRegKey; CComObjectRootEx and the threading models; CComObject,
+  (ATL 7, with OBJECT_ENTRY_AUTO), CAtlComModule; the registrar that
+  runs `.rgs` scripts from REGISTRY resources, files and strings (with
+  %MODULE% and replacement maps), also as IRegistrar, and per user with
+  AtlSetPerUserRegistration (HKCR as `HKCU\Software\Classes`, type
+  libraries with RegisterTypeLibForUser); CRegKey; CComAutoThreadModule
+  and CAtlAutoThreadModule, whose threads make the objects of
+  DECLARE_CLASSFACTORY_AUTO_THREAD, with CComApartment and
+  CComSimpleThreadAllocator; CComGITPtr over the global interface table; CComObjectRootEx and the threading models; CComObject,
   CComObjectNoLock, CComObjectCached, CComObjectGlobal,
   CComObjectStack, CComAggObject, CComPolyObject, CComContainedObject,
   tear-offs and cached tear-offs; BEGIN_COM_MAP with the
@@ -1071,10 +1081,13 @@ request with the stock MinGW-w64 toolchain.
   factory; CComCoClass with Error and CreateInstance; the
   DECLARE_REGISTRY forms and the category map; IDispatchImpl over a
   registered type library (or the module's own), ISupportErrorInfoImpl
-  and AtlReportError, IProvideClassInfo2Impl; IConnectionPointImpl,
+  and AtlReportError, IProvideClassInfoImpl and
+  IProvideClassInfo2Impl; IServiceProviderImpl and the service map
+  (SERVICE_ENTRY, SERVICE_ENTRY_CHAIN); _ATL_DEBUG_QI, which writes each
+  QueryInterface to the debugger; IConnectionPointImpl,
   IConnectionPointContainerImpl and the connection point map,
   CComDynamicUnkArray and CComUnkArray; CComEnum and CComEnumOnSTL with
-  the _Copy policies; IObjectWithSiteImpl and IObjectSafetyImpl.
+  the _Copy policies, and ICollectionOnSTLImpl; IObjectWithSiteImpl and IObjectSafetyImpl.
   `atlimpl.cpp` is there, empty, for the ATL 3 programs that include it.
 * ATL's windows (`atlwin.h`): CWindow and its wrappers; message maps
   (BEGIN_MSG_MAP, ALT_MSG_MAP, the MESSAGE_, COMMAND_ and NOTIFY_
@@ -1093,7 +1106,12 @@ request with the stock MinGW-w64 toolchain.
   CInterfaceArray, CInterfaceList and the element traits, CElementTraits
   and CStringElementTraits among them); `atlalloc.h` (the allocators,
   CHeapPtr, CComHeapPtr, CTempBuffer, CAutoPtr, CAutoVectorPtr, CHandle,
-  AtlAdd and AtlMultiply); `atlexcept.h` (CAtlException and AtlThrow,
+  AtlAdd and AtlMultiply); `atlmem.h` (IAtlMemMgr, CWin32Heap,
+  CComHeap, CCRTHeap, CLocalHeap, CGlobalHeap); CAtlStringMgr and
+  CFixedStringT (the strings accept a string manager and keep their
+  own buffers); `atlcur.h` (CComCurrency); AtlGetStringResourceImage,
+  AtlCreateTargetDC, AtlDevModeW2A, AtlComPtrAssign and
+  AtlComQIPtrAssign; `atlexcept.h` (CAtlException and AtlThrow,
   which throws MFC's exceptions when MFC is in use); `atlsafe.h`
   (CComSafeArray, CComSafeArrayBound); `atlfile.h` (CAtlFile,
   CAtlTemporaryFile, CAtlFileMapping); CComPtr<IDispatch>'s helpers and
@@ -1132,7 +1150,7 @@ request with the stock MinGW-w64 toolchain.
   IQuickActivateImpl, IDataObjectImpl, IRunnableObjectImpl,
   IPointerInactiveImpl, IPerPropertyBrowsingImpl,
   ISpecifyPropertyPagesImpl and IPropertyNotifySinkCP; CStockPropImpl
-  (the stock properties the class has members for); IPropertyPageImpl;
+  (the stock properties the class has members for); IPropertyPageImpl and IPropertyPage2Impl;
   CComCompositeControl. The property map (BEGIN_PROP_MAP, PROP_ENTRY,
   PROP_ENTRY_EX, PROP_DATA_ENTRY, PROP_PAGE) behind IPersistStreamInitImpl,
   IPersistStorageImpl and IPersistPropertyBagImpl, in ATL's stream

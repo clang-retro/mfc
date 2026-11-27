@@ -141,6 +141,8 @@ HRESULT CopyMedium(STGMEDIUM* dst, const STGMEDIUM* src, CLIPFORMAT cf);
 // The classes the layer serves itself (the standard font and picture),
 // for CoGetClassObject when no program or DLL serves them.
 HRESULT GetBuiltinClassObject(REFCLSID clsid, REFIID riid, void** out);
+// The global interface table's class (com_thread.cpp).
+HRESULT GetGlobalInterfaceTableClassObject(REFIID riid, void** out);
 // The shell's classes: the Vista-style file dialogs (shell_filedlg.cpp).
 HRESULT GetShellClassObject(REFCLSID clsid, REFIID riid, void** out);
 

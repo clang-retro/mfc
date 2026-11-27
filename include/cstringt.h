@@ -115,6 +115,40 @@ template <> struct ChTraitsMFC<WCHAR> {
 // LoadString looks. MFC's strings use the library's (StrTraitMFC); ATL's
 // own, without MFC, are inline (StrTraitATL, atlstr.h). The two share the
 // buffer layout, but each string type frees only its own buffers.
+// A string manager: where a string's buffers come from (ATL 7's
+// IAtlStringMgr). The strings here take theirs from their traits; a
+// manager given to a constructor is accepted, and the string's own
+// (GetManager) is one over its traits.
+struct IAtlStringMgr {
+  virtual CStringData* Allocate(int nAllocLength, int nCharSize) = 0;
+  virtual void Free(CStringData* pData) = 0;
+  virtual CStringData* Reallocate(CStringData* pData, int nAllocLength, int nCharSize) = 0;
+  virtual CStringData* GetNilString() = 0;
+  virtual IAtlStringMgr* Clone() = 0;
+};
+
+// The manager over a string's traits.
+template <class Tr>
+struct _CStringTraitsMgr : IAtlStringMgr {
+  CStringData* Allocate(int nAllocLength, int nCharSize) override {
+    return Tr::StrAlloc(nAllocLength, nCharSize);
+  }
+  void Free(CStringData* pData) override { Tr::StrRelease(pData); }
+  CStringData* Reallocate(CStringData* pData, int nAllocLength, int nCharSize) override {
+    CStringData* p = Tr::StrAlloc(nAllocLength, nCharSize);
+    if (p == NULL) return NULL;
+    if (pData != NULL) {
+      int n = pData->nDataLength < nAllocLength ? pData->nDataLength : nAllocLength;
+      memcpy(p->data(), pData->data(), (size_t)(n + 1) * nCharSize);
+      p->nDataLength = n;
+      Tr::StrRelease(pData);
+    }
+    return p;
+  }
+  CStringData* GetNilString() override { return Tr::StrNil(); }
+  IAtlStringMgr* Clone() override { return this; }
+};
+
 template <typename BaseType>
 struct StrTraitMFC : ChTraitsMFC<BaseType> {
   template <typename C> using Rebind = StrTraitMFC<C>;
@@ -192,6 +226,16 @@ public:
   CStringT(const CStringT<Other, OtherTraits>& s) {
     Init();
     AssignAny(s.GetString(), s.GetLength());
+  }
+  // With a string manager (see IAtlStringMgr).
+  explicit CStringT(IAtlStringMgr* /*pStringMgr*/) { Init(); }
+  CStringT(PCXSTR psz, IAtlStringMgr* /*pStringMgr*/) : CStringT(psz) {}
+  CStringT(PCYSTR psz, IAtlStringMgr* /*pStringMgr*/) : CStringT(psz) {}
+  CStringT(PCXSTR pch, int nLength, IAtlStringMgr* /*pStringMgr*/) : CStringT(pch, nLength) {}
+  CStringT(PCYSTR pch, int nLength, IAtlStringMgr* /*pStringMgr*/) : CStringT(pch, nLength) {}
+  IAtlStringMgr* GetManager() const {
+    static _CStringTraitsMgr<Tr> mgr;
+    return &mgr;
   }
   ~CStringT() { Tr::StrRelease(GetData()); }
 

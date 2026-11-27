@@ -1424,8 +1424,8 @@ public:
 // Property pages: a dialog (T::IDD) that edits the objects the frame
 // gives it, through IPropertyPage.
 
-template <class T>
-class ATL_NO_VTABLE IPropertyPageImpl : public IPropertyPage {
+template <class T, class _PageBase = IPropertyPage>
+class ATL_NO_VTABLE IPropertyPageImpl : public _PageBase {
 public:
   IPropertyPageImpl()
       : m_pPageSite(NULL), m_ppUnk(NULL), m_nObjects(0), m_bDirty(FALSE), m_dwTitleID(0),
@@ -1524,7 +1524,7 @@ public:
   STDMETHOD(IsPageDirty)() override { return m_bDirty ? S_OK : S_FALSE; }
 
   // For the page's map to chain to.
-  typedef IPropertyPageImpl<T> _PropertyPageClass;
+  typedef IPropertyPageImpl<T, _PageBase> _PropertyPageClass;
   BEGIN_MSG_MAP(_PropertyPageClass)
   END_MSG_MAP()
   STDMETHOD(Apply)() override { return S_OK; }
@@ -1566,6 +1566,14 @@ private:
     return p;
   }
   static INT_PTR CALLBACK _EmptyDlgProc(HWND, UINT, WPARAM, LPARAM) { return FALSE; }
+};
+
+// IPropertyPage2: a page that can be asked to show one property. The
+// page does nothing with it unless T has EditProperty of its own.
+template <class T>
+class ATL_NO_VTABLE IPropertyPage2Impl : public IPropertyPageImpl<T, IPropertyPage2> {
+public:
+  STDMETHOD(EditProperty)(DISPID /*dispID*/) override { return E_NOTIMPL; }
 };
 
 }  // namespace ATL

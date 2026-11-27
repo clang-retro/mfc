@@ -5,6 +5,8 @@
 //     CAutoPtr and interface pointers;
 //   - CHeapPtr, CComHeapPtr, CTempBuffer, CAutoPtr, CAutoVectorPtr,
 //     CHandle, AtlAdd and AtlMultiply;
+//   - atlmem.h's heaps, CAtlStringMgr, CFixedStringT,
+//     AtlGetStringResourceImage and atlcur.h's CComCurrency;
 //   - AtlThrow and CAtlException;
 //   - CComSafeArray, one- and two-dimensional;
 //   - CComDispatchDriver over an IDispatch of the test's own;
@@ -39,6 +41,8 @@
 #include <atlcrypt.h>
 #include <atlrx.h>
 #include <atlutil.h>
+#include <atlmem.h>
+#include <atlcur.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include "atlutiltest.h"
@@ -525,6 +529,109 @@ static void TestMemory() {
 
 // ---------------------------------------------------------------------
 // CComSafeArray
+
+// The memory managers, the string manager over one, fixed strings, a
+// string resource as it is in the module, and currency.
+static void TestHeapsAndCurrency() {
+  CWin32Heap own(0, 0);
+  CCRTHeap crt;
+  CComHeap com;
+  CLocalHeap local;
+  CGlobalHeap global;
+  IAtlMemMgr* heaps[] = {&own, &crt, &com, &local, &global};
+  for (int i = 0; i < 5; i++) {
+    IAtlMemMgr* m = heaps[i];
+    char* p = (char*)m->Allocate(10);
+    CHECK(p != NULL);
+    if (p == NULL) continue;
+    memcpy(p, "123456789", 10);
+    CHECK(m->GetSize(p) >= 10);
+    p = (char*)m->Reallocate(p, 1000);
+    CHECK(p != NULL && strcmp(p, "123456789") == 0 && m->GetSize(p) >= 1000);
+    m->Free(p);
+  }
+  CHECK(crt.GetSize(crt.Allocate(0)) == 0);  // leaks nothing much: 16 bytes
+  CWin32Heap process(::GetProcessHeap());
+  void* pp = process.Allocate(8);
+  CHECK(pp != NULL && ::HeapSize(::GetProcessHeap(), 0, pp) == 8);
+  process.Free(pp);
+  CHECK(process.Detach() == ::GetProcessHeap());
+
+  CAtlStringMgr mgr(&own);
+  CStringData* pd = mgr.Allocate(20, sizeof(TCHAR));
+  CHECK(pd != NULL && pd->nRefs == 1 && pd->nAllocLength >= 20 && pd->nDataLength == 0);
+  pd = mgr.Reallocate(pd, 200, sizeof(TCHAR));
+  CHECK(pd != NULL && pd->nAllocLength >= 200);
+  mgr.Free(pd);
+  CHECK(mgr.GetNilString()->nDataLength == 0 && mgr.Clone() == &mgr);
+  CString sMgr(_T("managed"), &mgr);
+  CHECK(sMgr == _T("managed") && sMgr.GetManager() != NULL);
+
+  CFixedStringT<CString, 100> fs;
+  CHECK(fs.IsEmpty() && fs.GetAllocLength() >= 100);
+  fs = _T("fixed");
+  fs += _T(" string");
+  CHECK(fs == _T("fixed string") && fs.GetAllocLength() >= 100);
+  CString other = _T("shared?");
+  fs = other;
+  CHECK(fs == _T("shared?") && fs.GetString() != other.GetString());
+  CFixedStringT<CStringW, 4> fw(L"longer than four");
+  CHECK(fw == L"longer than four");
+
+  const ATLSTRINGRESOURCEIMAGE* img = AtlGetStringResourceImage(IDS_HELLO);
+  CHECK(img != NULL && img->nLength == 9 && wcsncmp(img->achString, L"Hello, %s", 9) == 0);
+  CHECK(AtlGetStringResourceImage(999) == NULL);
+  CHECK(AtlGetVersion() == _ATL_VER);
+
+  CComCurrency c(12, 3456);
+  CHECK(c.GetInteger() == 12 && c.GetFraction() == 3456 && c.m_currency.int64 == 123456);
+  CComCurrency neg(-3, 2500);
+  CHECK(neg.m_currency.int64 == -32500 && neg.GetFraction() == -2500);
+  CHECK(c.SetFraction(10000) == E_INVALIDARG);
+  CComCurrency sum = c + neg;
+  CHECK(sum.m_currency.int64 == 90956);
+  CHECK((c - neg).m_currency.int64 == 155956);
+  // 12.3456 * 2.5 = 30.864; / 3 = 10.288
+  CComCurrency prod = c * CComCurrency(2.5);
+  CHECK(prod.m_currency.int64 == 308640);
+  CHECK((prod / CComCurrency(3L)).m_currency.int64 == 102880);
+  CHECK((prod / 3L).m_currency.int64 == 102880);
+  CHECK((c * 2L).m_currency.int64 == 246912);
+  // 0.0001 * 0.5: half a ten-thousandth, rounded to the even 0.
+  CComCurrency tiny;
+  tiny.m_currency.int64 = 1;
+  CHECK((tiny * CComCurrency(0.5)).m_currency.int64 == 0);
+  tiny.m_currency.int64 = 3;
+  CHECK((tiny * CComCurrency(0.5)).m_currency.int64 == 2);  // 1.5 to 2
+  CComCurrency r(12, 3450);
+  CHECK(r.Round(2) == S_OK && r.m_currency.int64 == 123400);  // 12.345 to 12.34
+  r = CComCurrency(12, 3350);
+  CHECK(r.Round(2) == S_OK && r.m_currency.int64 == 123400);  // 12.335 to 12.34
+  CHECK(r.Round(5) == E_INVALIDARG);
+  CHECK(CComCurrency(L"1.5").m_currency.int64 == 15000);
+  CComVariant vr(2.25);
+  CComCurrency fromVar(vr);
+  CHECK(fromVar.m_currency.int64 == 22500);
+  CHECK(c > neg && neg < c && c != neg && c == CComCurrency(12, 3456));
+  CHECK((-neg).m_currency.int64 == 32500);
+  bool bThrew = false;
+  try {
+    CComCurrency big;
+    big.m_currency.int64 = 0x7fffffffffffffffLL;
+    big += CComCurrency(1L);
+  } catch (CAtlException& e) {
+    bThrew = e.m_hr == DISP_E_OVERFLOW;
+  }
+  CHECK(bThrew);
+  bThrew = false;
+  try {
+    CComCurrency z = c / CComCurrency();
+    (void)z;
+  } catch (CAtlException& e) {
+    bThrew = e.m_hr == DISP_E_DIVBYZERO;
+  }
+  CHECK(bThrew);
+}
 
 static void TestSafeArray() {
   CComSafeArray<LONG> sa;
@@ -1810,6 +1917,7 @@ int main() {
   TestRBMap();
   Log("collections: %d failure(s) so far", g_nFailures);
   TestMemory();
+  TestHeapsAndCurrency();
   TestSafeArray();
   TestDispatchDriver();
   Log("memory, safe arrays, dispatch: %d failure(s) so far", g_nFailures);
