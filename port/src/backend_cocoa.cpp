@@ -224,6 +224,12 @@ struct CocoaBackend : Backend {
 
   void Wait(DWORD timeout) override { cocoa::Wait(timeout == INFINITE ? -1 : (long)timeout); }
   void Wake() override { cocoa::Wake(); }
+  void ImeReset(Window* w) override {
+    if (Native* n = (Native*)w->native) cocoa::ImeReset(n->win);
+  }
+  void ImeCursorMoved(Window* w) override {
+    if (Native* n = (Native*)w->native) cocoa::ImeMoved(n->win);
+  }
 };
 
 }  // namespace
@@ -328,6 +334,56 @@ bool OnDropFiles(int x, int y, const std::vector<std::string>& paths) {
   std::vector<std::wstring> wide;
   for (const std::string& p : paths) wide.push_back(Widen(p.c_str()));
   return DropFiles(POINT{x, y}, wide);
+}
+
+// The window an input method's text is for: the key window's, or the
+// program's active window when a popup is in front of it.
+Native* KeyNative(void* owner) {
+  Native* n = Valid(owner);
+  if (!n) {
+    HWND active = GetActiveWindow();
+    for (Native* c : g_natives)
+      if (c->w->hwnd == active) n = c;
+  }
+  return n;
+}
+
+void OnProcessKey(void* owner, unsigned code) {
+  Native* n = KeyNative(owner);
+  if (!n) return;
+  LPARAM lp = 1 | ((LPARAM)(code & 0xFF) << 16) | 0x02000000;
+  KeyInput(n->w, WM_KEYDOWN, VK_PROCESSKEY, lp);
+}
+
+void OnImeText(void* owner, bool commit, const uint16_t* text, size_t length, size_t cursor) {
+  Native* n = KeyNative(owner);
+  if (!n) return;
+  // UTF-16 to characters, and the cursor with it.
+  std::wstring t;
+  int at = -1;
+  for (size_t i = 0; i < length; i++) {
+    if (i == cursor) at = (int)t.size();
+    uint32_t c = text[i];
+    if (c >= 0xD800 && c < 0xDC00 && i + 1 < length && text[i + 1] >= 0xDC00 && text[i + 1] < 0xE000)
+      c = 0x10000 + ((c - 0xD800) << 10) + (text[++i] - 0xDC00);
+    t += (wchar_t)c;
+  }
+  if (at < 0) at = (int)t.size();
+  if (commit)
+    ImeCommit(n->w, t);
+  else
+    ImePreedit(n->w, t, at);
+}
+
+bool OnImeRect(void* owner, int* x, int* y, int* width, int* height) {
+  Native* n = KeyNative(owner);
+  RECT r;
+  if (!n || !ImeCursorRect(n->w, &r)) return false;
+  *x = n->w->rect.left + r.left;
+  *y = n->w->rect.top + r.top;
+  *width = r.right - r.left;
+  *height = r.bottom - r.top;
+  return true;
 }
 
 void OnBecameKey(void* owner) {

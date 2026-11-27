@@ -75,8 +75,14 @@ using namespace winport::cocoa;
 }
 @end
 
-// Draws the window's pixels.
-@interface WinportView : NSView {
+// Draws the window's pixels, and is the client of the input method:
+// NSTextInputClient from 10.5, NSTextInput before.
+#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 1050 && !defined(GNUSTEP)
+#define WINPORT_TEXT_INPUT_CLIENT 1
+@interface WinportView : NSView <NSTextInputClient> {
+#else
+@interface WinportView : NSView <NSTextInput> {
+#endif
  @public
   void* owner;
 }
@@ -107,6 +113,17 @@ NSView* g_host;
 void (*g_yield)(long);
 // The program's pixels to a point (SetUnits).
 double g_units = 1;
+// The input method: the text it is composing (marked text) and the
+// selection in it, and what it did with the key being handed to it.
+std::vector<uint16_t> g_marked;
+NSUInteger g_markedSelection;
+void* g_markedOwner;
+struct KeyRecord {
+  bool active;    // interpretKeyEvents is running
+  bool inserted;  // it typed text, in text
+  bool composed;  // it finished a composition, or typed more than one character
+  std::vector<uint16_t> text;
+} g_key;
 
 int Px(CGFloat points) { return (int)floor(points * g_units + 0.5); }
 CGFloat Pt(int pixels) { return (CGFloat)(pixels / g_units); }
@@ -214,8 +231,28 @@ bool TakeEvent(NSEvent* e) {
         plain = Chars([e charactersIgnoringModifiers]);
       }
       WinportWindow* key = Ours([NSApp keyWindow]);
-      return OnKey(key ? key->owner : NULL, type, [e keyCode], Mods([e modifierFlags]), text.empty() ? NULL : &text[0],
-                   text.size(), plain.empty() ? NULL : &plain[0], plain.size());
+      // A key without Command, Control or Option (which is Alt here)
+      // goes to the input method first, and every key but Command's while
+      // it is composing. What it types comes back to the view.
+      unsigned mods = Mods([e modifierFlags]);
+      WinportView* view = key ? (WinportView*)[key contentView] : nil;
+      if (type == kKeyDown && view && [view isKindOfClass:[WinportView class]] &&
+          (!(mods & (kCommand | kControl | kOption)) || (!g_marked.empty() && !(mods & kCommand)))) {
+        bool hadMarked = !g_marked.empty();
+        g_key.active = true;
+        g_key.inserted = g_key.composed = false;
+        g_key.text.clear();
+        [view interpretKeyEvents:[NSArray arrayWithObject:e]];
+        g_key.active = false;
+        if (hadMarked || !g_marked.empty() || g_key.composed) {
+          OnProcessKey(key->owner, [e keyCode]);
+          return true;
+        }
+        // What it typed is the key's text: with a dead key's accent, say.
+        if (g_key.inserted) text = g_key.text;
+      }
+      return OnKey(key ? key->owner : NULL, type, [e keyCode], mods, text.empty() ? NULL : &text[0], text.size(),
+                   plain.empty() ? NULL : &plain[0], plain.size());
     }
     case NSLeftMouseDown: case NSLeftMouseUp: case NSRightMouseDown: case NSRightMouseUp:
     case NSOtherMouseDown: case NSOtherMouseUp:
@@ -375,6 +412,7 @@ Win* Create(void* owner, int x, int y, int width, int height, bool popup) {
   [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   if (!popup) [view registerForDraggedTypes:[NSArray arrayWithObject:NSFilenamesPboardType]];
   [win setContentView:view];
+  [win makeFirstResponder:view];
   [win setDelegate:(id)g_delegate];
   w->window = win;
   w->view = view;
@@ -586,6 +624,31 @@ void Wait(long timeout) {
 }
 
 // Wake: ends a Wait. A host calls the program again each frame.
+void ImeReset(Win* w) {
+  NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+  if (g_markedOwner == w->view->owner) g_marked.clear();
+  // Through the selectors, as the headers before 10.6 lack them.
+  if ([w->view respondsToSelector:@selector(inputContext)]) {
+    id context = [w->view performSelector:@selector(inputContext)];
+    if ([context respondsToSelector:@selector(discardMarkedText)]) [context performSelector:@selector(discardMarkedText)];
+  } else if (Class manager = NSClassFromString(@"NSInputManager")) {
+    id current = [manager performSelector:@selector(currentInputManager)];
+    if ([current respondsToSelector:@selector(markedTextAbandoned:)])
+      [current performSelector:@selector(markedTextAbandoned:) withObject:w->view];
+  }
+  [pool release];
+}
+
+void ImeMoved(Win* w) {
+  NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+  if ([w->view respondsToSelector:@selector(inputContext)]) {
+    id context = [w->view performSelector:@selector(inputContext)];
+    if ([context respondsToSelector:@selector(invalidateCharacterCoordinates)])
+      [context performSelector:@selector(invalidateCharacterCoordinates)];
+  }
+  [pool release];
+}
+
 void Wake() {
   if (g_yield) return;
   NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
@@ -641,6 +704,89 @@ void MoveHosted(void* host) {
 - (BOOL)isOpaque {
   return YES;
 }
+// The input method's side.
+static NSString* PlainString(id s) {
+  return [s isKindOfClass:[NSAttributedString class]] ? [(NSAttributedString*)s string] : (NSString*)s;
+}
+- (void)insertText:(id)s {
+  std::vector<uint16_t> text = Chars(PlainString(s));
+  bool wasMarked = !g_marked.empty();
+  g_marked.clear();
+  if (g_key.active && !wasMarked && text.size() == 1) {
+    g_key.inserted = true;
+    g_key.text = text;
+    return;
+  }
+  // Text finished: by the composition, or more than a key types, or
+  // from outside a key (the character viewer).
+  if (g_key.active) g_key.composed = true;
+  OnImeText(owner, true, text.empty() ? NULL : &text[0], text.size(), 0);
+}
+- (void)setMarkedText:(id)s selectedRange:(NSRange)selection {
+  std::vector<uint16_t> text = Chars(PlainString(s));
+  if (text.empty() && g_marked.empty()) return;
+  g_marked = text;
+  g_markedSelection = selection.location <= text.size() ? selection.location : text.size();
+  g_markedOwner = owner;
+  OnImeText(owner, false, text.empty() ? NULL : &text[0], text.size(), g_markedSelection);
+}
+- (void)unmarkText {
+  // The composition is finished as it stands.
+  if (g_marked.empty()) return;
+  std::vector<uint16_t> text;
+  text.swap(g_marked);
+  OnImeText(owner, true, &text[0], text.size(), 0);
+}
+- (BOOL)hasMarkedText {
+  return g_marked.empty() ? NO : YES;
+}
+- (NSRange)markedRange {
+  return g_marked.empty() ? NSMakeRange(NSNotFound, 0) : NSMakeRange(0, g_marked.size());
+}
+- (NSRange)selectedRange {
+  return NSMakeRange(g_marked.empty() ? 0 : g_markedSelection, 0);
+}
+- (NSArray*)validAttributesForMarkedText {
+  return [NSArray array];
+}
+// The program's text is its own: the input method gets none of it.
+- (NSAttributedString*)attributedSubstringFromRange:(NSRange)range {
+  return nil;
+}
+- (NSUInteger)characterIndexForPoint:(NSPoint)p {
+  return 0;
+}
+// Where the candidates go: by the caret of the window with the focus.
+- (NSRect)firstRectForCharacterRange:(NSRange)range {
+  int x, y, width, height;
+  if (!OnImeRect(owner, &x, &y, &width, &height)) {
+    NSRect f = [self window] ? [[self window] frame] : NSMakeRect(0, 0, 0, 0);
+    return NSMakeRect(f.origin.x, f.origin.y, 0, 0);
+  }
+  return ToCocoa(x, y, width, height);
+}
+// Keys the input method does not type with (arrows, Return) are the
+// window's, as OnKey gives them.
+- (void)doCommandBySelector:(SEL)selector {
+}
+#ifdef WINPORT_TEXT_INPUT_CLIENT
+- (void)insertText:(id)s replacementRange:(NSRange)range {
+  [self insertText:s];
+}
+- (void)setMarkedText:(id)s selectedRange:(NSRange)selection replacementRange:(NSRange)range {
+  [self setMarkedText:s selectedRange:selection];
+}
+- (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)range actualRange:(NSRangePointer)actual {
+  return nil;
+}
+- (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actual {
+  return [self firstRectForCharacterRange:range];
+}
+#else
+- (long)conversationIdentifier {
+  return (long)self;
+}
+#endif
 - (BOOL)acceptsFirstMouse:(NSEvent*)e {
   return YES;
 }

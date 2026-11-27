@@ -790,6 +790,10 @@ LRESULT DispatchCore(const MSG* m, bool unicode) {
     SetLastError(ERROR_MESSAGE_SYNC_ONLY);
     return 0;
   }
+  if (IsImeUpdate(m->message)) {
+    DeliverImeUpdate(m->hwnd, m->lParam);
+    return 0;
+  }
   LRESULT r = CallProc(w->proc, w->unicode, m->hwnd, m->message, m->wParam, m->lParam, unicode);
   if (m->message == WM_PAINT) {
     UserGuard g(UserLock());

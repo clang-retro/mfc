@@ -265,6 +265,27 @@ void MouseInput(Window* top, UINT msg, int x, int y, WPARAM keys);
 void KeyInput(Window* top, UINT msg, UINT vk, LPARAM lParam);
 void CharInput(Window* top, wchar_t ch);
 void CloseRequested(Window* top);
+// Text from the desktop's input method (imm.cpp), for the window with
+// the focus: what it is composing, with its cursor in characters, which
+// an empty text ends; and text it has finished.
+void ImePreedit(Window* top, const std::wstring& text, int cursor);
+void ImeCommit(Window* top, const std::wstring& text);
+// Where the input method's candidates should go for the window with the
+// focus: the caret, or where the program has put the composition or the
+// candidate window; in the top-level window's surface coordinates.
+bool ImeCursorRect(Window* top, RECT* r);
+// The message that carries the backend's text to the window's thread,
+// which DispatchMessage hands to DeliverImeUpdate.
+bool IsImeUpdate(UINT msg);
+void DeliverImeUpdate(HWND h, LPARAM id);
+// DefWindowProc's WM_IME_ messages; false for any other message.
+bool DefImeMessage(HWND h, UINT msg, WPARAM wParam, LPARAM lParam, bool unicode, LRESULT* result);
+// The caret has moved or been made in h.
+void ImeCaretMoved(HWND h);
+void RegisterImeClass();
+// The caret's window and its rectangle there, in client coordinates;
+// false when there is none.
+bool CaretRect(HWND* owner, RECT* r);
 void ResizeRequested(Window* top, int width, int height);
 
 // A cursor's picture for a backend: ARGB pixels, not premultiplied, top
@@ -342,6 +363,11 @@ struct Backend {
   virtual bool ClipboardForeign(DWORD* /*generation*/) { return false; }
   virtual bool ClipboardFetch(std::wstring* /*text*/) { return false; }
   virtual void ClipboardOwn(const std::wstring& /*text*/) {}
+  // The input method: the program has ended a composition itself
+  // (ImmNotifyIME), so the input method should forget it; and where its
+  // candidates go has changed (see ImeCursorRect).
+  virtual void ImeReset(Window* /*top*/) {}
+  virtual void ImeCursorMoved(Window* /*top*/) {}
   // Waits up to timeout ms for input, handing what comes to the input
   // functions above; returns early when WakeBackend is called. Called
   // without the lock.

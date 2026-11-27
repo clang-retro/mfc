@@ -26,6 +26,7 @@
 #include <X11/keysym.h>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <locale.h>
 #include <poll.h>
 #include <stdio.h>
 #include <string.h>
@@ -48,10 +49,18 @@ namespace {
   F(XConvertSelection) F(XGetWindowProperty) F(XFree) F(XDeleteProperty) F(XSendEvent) F(XCheckTypedWindowEvent) F(XCheckTypedEvent) \
   F(XMatchVisualInfo) F(XCreateColormap) F(XResourceManagerString)
 
+// The input method (XIM), when libX11 has it.
+#define XIM_FUNCTIONS(F)                                                                                 \
+  F(XOpenIM) F(XCloseIM) F(XGetIMValues) F(XSetIMValues) F(XCreateIC) F(XDestroyIC) F(XSetICFocus) F(XUnsetICFocus)    \
+  F(XFilterEvent) F(Xutf8LookupString) F(Xutf8ResetIC) F(XSetICValues) F(XGetICValues)               \
+  F(XVaCreateNestedList) F(XSetLocaleModifiers) F(XSupportsLocale)
+
 struct XLib {
 #define F(name) decltype(&::name) name = nullptr;
   X11_FUNCTIONS(F)
+  XIM_FUNCTIONS(F)
 #undef F
+  bool xim = false;
   bool Load() {
     void* lib = dlopen("libX11.so.6", RTLD_NOW | RTLD_LOCAL);
     if (!lib) lib = dlopen("libX11.so", RTLD_NOW | RTLD_LOCAL);
@@ -60,6 +69,12 @@ struct XLib {
   name = (decltype(&::name))dlsym(lib, #name);          \
   if (!name) return false;
     X11_FUNCTIONS(F)
+#undef F
+    xim = true;
+#define F(name)                                \
+  name = (decltype(&::name))dlsym(lib, #name); \
+  if (!name) xim = false;
+    XIM_FUNCTIONS(F)
 #undef F
     return true;
   }
@@ -182,6 +197,11 @@ struct Native {
   // The shapes last given the server, and whether any were.
   bool shaped = false;
   std::vector<RECT> input, bounding;
+  // The input method's context for the window, and the text it is
+  // composing there when the program shows it (XIMPreeditCallbacks).
+  XIC ic = NULL;
+  std::wstring preedit;
+  int caret = 0;
 };
 
 struct X11Backend : Backend {
@@ -206,6 +226,8 @@ struct X11Backend : Backend {
        typeDialog = 0, typeMenu = 0, typeTooltip = 0, typeCombo = 0;
   std::map<::Window, Native*> byXid;
   std::recursive_mutex lock;  // the X connection and the map
+  XIM im = NULL;
+  XIMStyle imStyle = 0;
   Cursor arrow = 0;
   XcursorLib xcursor;
   bool haveXcursor = false;
@@ -292,6 +314,7 @@ struct X11Backend : Backend {
     xdndActionCopy = x.XInternAtom(dpy, "XdndActionCopy", False);
     uriList = x.XInternAtom(dpy, "text/uri-list", False);
     dropProp = x.XInternAtom(dpy, "WINPORT_DROP", False);
+    OpenInputMethod();
     XSetWindowAttributes ca = {};
     clipWin = x.XCreateWindow(dpy, root, -10, -10, 1, 1, 0, 0, InputOnly, CopyFromParent, 0, &ca);
     XfixesLib fixes;
@@ -467,6 +490,7 @@ struct X11Backend : Backend {
     byXid[n->xid] = n;
     w->native = n;
     SetShapes(n);
+    if (n->managed) CreateIC(n);
     return n;
   }
 
@@ -555,6 +579,7 @@ struct X11Backend : Backend {
     Native* n = NativeOf(w);
     if (!n) return;
     byXid.erase(n->xid);
+    if (n->ic && im) x.XDestroyIC(n->ic);
     if (dpy) {
       x.XDestroyWindow(dpy, n->xid);
       x.XFlush(dpy);
@@ -965,8 +990,19 @@ struct X11Backend : Backend {
         if (e.xselection.selection == xdndSelection) DndData(n, e.xselection);
         break;
       case FocusIn:
+        if (n->ic && im) {
+          std::lock_guard<std::recursive_mutex> g(lock);
+          x.XSetICFocus(n->ic);
+        }
         if (n->managed && e.xfocus.mode == NotifyNormal && GetActiveWindow() != w->hwnd && IsWindowEnabled(w->hwnd))
           SetActiveWindow(w->hwnd);
+        if (n->ic) ImeCursorMoved(w);
+        break;
+      case FocusOut:
+        if (n->ic && im) {
+          std::lock_guard<std::recursive_mutex> g(lock);
+          x.XUnsetICFocus(n->ic);
+        }
         break;
       case ButtonPress:
       case ButtonRelease: {
@@ -1001,9 +1037,37 @@ struct X11Backend : Backend {
         char buf[16];
         KeySym sym = 0;
         int len;
+        std::string text;  // what the input method gives, in UTF-8
+        bool fromIm = false;
         {
           std::lock_guard<std::recursive_mutex> g(lock);
           len = x.XLookupString(&e.xkey, buf, sizeof buf, &sym, NULL);
+          if (e.type == KeyPress && n->ic && im) {
+            char big[256];
+            Status st = 0;
+            KeySym s2 = 0;
+            int n8 = x.Xutf8LookupString(n->ic, &e.xkey, big, sizeof big - 1, &s2, &st);
+            std::vector<char> more;
+            if (st == XBufferOverflow) {
+              more.resize(n8 + 1);
+              n8 = x.Xutf8LookupString(n->ic, &e.xkey, more.data(), n8, &s2, &st);
+            }
+            if ((st == XLookupChars || st == XLookupBoth) && n8 > 0)
+              text.assign(more.empty() ? big : more.data(), n8);
+            // Text with no key of its own is the input method's: what
+            // it has finished composing, or a compose sequence's.
+            fromIm = e.xkey.keycode == 0 || !n->preedit.empty();
+          }
+        }
+        if (fromIm) {
+          std::wstring done = Widen(text.c_str(), (int)text.size());
+          if (!n->preedit.empty())
+            ImeCommit(w, done);
+          else
+            for (wchar_t c : done) CharInput(w, c);
+          n->preedit.clear();
+          if (e.xkey.keycode == 0) break;
+          text.clear();
         }
         KeySym base = x.XLookupKeysym(&e.xkey, 0);
         bool ext;
@@ -1013,8 +1077,9 @@ struct X11Backend : Backend {
         LPARAM lp = 1 | ((LPARAM)(scan & 0xFF) << 16) | (ext ? (1 << 24) : 0);
         bool down = e.type == KeyPress;
         wchar_t ch = 0;
+        std::wstring typed = Widen(text.c_str(), (int)text.size());
         if (down) {
-          ch = CharOf(sym, buf, len);
+          ch = typed.size() == 1 ? typed[0] : CharOf(sym, buf, len);
           if (sym == XK_Return || sym == XK_KP_Enter) ch = L'\r';
           if (sym == XK_BackSpace) ch = L'\b';
           if (sym == XK_Tab || sym == XK_ISO_Left_Tab) ch = L'\t';
@@ -1026,9 +1091,152 @@ struct X11Backend : Backend {
         if (ch) lp |= 0x02000000;
         if (vk) KeyInput(w, down ? WM_KEYDOWN : WM_KEYUP, vk, lp);
         if (ch) CharInput(w, ch);
+        // A compose sequence's text, of more than one character.
+        if (down && typed.size() > 1)
+          for (wchar_t c : typed) CharInput(w, c);
         break;
       }
     }
+  }
+
+  // ---------------------------------------------------------------
+  // The input method
+
+  // Opens the user's input method (XMODIFIERS names it) in the locale's
+  // character set, or a UTF-8 one, and chooses how its composition shows:
+  // drawn by the program, at the caret by the input method, or in the
+  // input method's own window.
+  void OpenInputMethod() {
+    if (!x.xim) return;
+    std::string before = setlocale(LC_CTYPE, NULL) ? setlocale(LC_CTYPE, NULL) : "C";
+    if (!setlocale(LC_CTYPE, "") || !x.XSupportsLocale() || strcmp(setlocale(LC_CTYPE, NULL), "C") == 0 ||
+        strcmp(setlocale(LC_CTYPE, NULL), "POSIX") == 0)
+      setlocale(LC_CTYPE, "C.UTF-8");
+    if (x.XSupportsLocale()) {
+      x.XSetLocaleModifiers("");
+      im = x.XOpenIM(dpy, NULL, NULL, NULL);
+      if (!im) {
+        x.XSetLocaleModifiers("@im=none");
+        im = x.XOpenIM(dpy, NULL, NULL, NULL);
+      }
+    }
+    setlocale(LC_CTYPE, before.c_str());
+    if (!im) return;
+    // The input method's server may go; its contexts go with it.
+    XIMCallback destroyed = {(XPointer)this, (XIMProc)ImDestroyed};
+    x.XSetIMValues(im, XNDestroyCallback, &destroyed, NULL);
+    XIMStyles* styles = NULL;
+    if (x.XGetIMValues(im, XNQueryInputStyle, &styles, NULL) || !styles) {
+      x.XCloseIM(im);
+      im = NULL;
+      return;
+    }
+    const XIMStyle prefer[] = {XIMPreeditCallbacks | XIMStatusNothing, XIMPreeditCallbacks | XIMStatusNone,
+                               XIMPreeditPosition | XIMStatusNothing, XIMPreeditPosition | XIMStatusNone,
+                               XIMPreeditNothing | XIMStatusNothing,  XIMPreeditNothing | XIMStatusNone,
+                               XIMPreeditNone | XIMStatusNone};
+    for (XIMStyle want : prefer) {
+      for (unsigned short i = 0; i < styles->count_styles && !imStyle; i++)
+        if (styles->supported_styles[i] == want) imStyle = want;
+      if (imStyle) break;
+    }
+    x.XFree(styles);
+    if (!imStyle) {
+      x.XCloseIM(im);
+      im = NULL;
+    }
+  }
+  static void ImDestroyed(XIM, XPointer data, XPointer) { ((X11Backend*)data)->im = NULL; }
+
+  void CreateIC(Native* n) {
+    if (!im) return;
+    if (imStyle & XIMPreeditCallbacks) {
+      XIMCallback start = {(XPointer)n, (XIMProc)PreeditStart};
+      XIMCallback done = {(XPointer)n, (XIMProc)PreeditDone};
+      XIMCallback draw = {(XPointer)n, (XIMProc)PreeditDraw};
+      XIMCallback caret = {(XPointer)n, (XIMProc)PreeditCaret};
+      XPoint spot = {0, 0};
+      XVaNestedList attrs = x.XVaCreateNestedList(0, XNPreeditStartCallback, &start, XNPreeditDoneCallback, &done,
+                                                  XNPreeditDrawCallback, &draw, XNPreeditCaretCallback, &caret,
+                                                  XNSpotLocation, &spot, NULL);
+      n->ic = x.XCreateIC(im, XNInputStyle, imStyle, XNClientWindow, n->xid, XNFocusWindow, n->xid,
+                          XNPreeditAttributes, attrs, NULL);
+      x.XFree(attrs);
+    } else if (imStyle & XIMPreeditPosition) {
+      XPoint spot = {0, 0};
+      XVaNestedList attrs = x.XVaCreateNestedList(0, XNSpotLocation, &spot, NULL);
+      n->ic = x.XCreateIC(im, XNInputStyle, imStyle, XNClientWindow, n->xid, XNFocusWindow, n->xid,
+                          XNPreeditAttributes, attrs, NULL);
+      x.XFree(attrs);
+    } else {
+      n->ic = x.XCreateIC(im, XNInputStyle, imStyle, XNClientWindow, n->xid, XNFocusWindow, n->xid, NULL);
+    }
+  }
+
+  static int PreeditStart(XIC, XPointer data, XPointer) {
+    ((Native*)data)->preedit.clear();
+    return -1;  // no limit on its length
+  }
+  static void PreeditDone(XIC, XPointer data, XPointer) {
+    Native* n = (Native*)data;
+    if (!n->preedit.empty()) ImePreedit(n->w, L"", 0);
+    n->preedit.clear();
+  }
+  static void PreeditDraw(XIC, XPointer data, XIMPreeditDrawCallbackStruct* d) {
+    Native* n = (Native*)data;
+    if (!d) return;
+    std::wstring text;
+    if (d->text) {
+      if (d->text->encoding_is_wchar) {
+        if (d->text->string.wide_char) text.assign(d->text->string.wide_char, d->text->length);
+      } else if (d->text->string.multi_byte) {
+        // In the locale the input method was opened in, UTF-8.
+        text = Widen(d->text->string.multi_byte);
+      }
+    }
+    int first = std::max(0, std::min(d->chg_first, (int)n->preedit.size()));
+    int count = std::max(0, std::min(d->chg_length, (int)n->preedit.size() - first));
+    n->preedit.replace(first, count, text);
+    n->caret = std::max(0, std::min(d->caret, (int)n->preedit.size()));
+    ImePreedit(n->w, n->preedit, n->caret);
+  }
+  static void PreeditCaret(XIC, XPointer data, XIMPreeditCaretCallbackStruct* c) {
+    Native* n = (Native*)data;
+    if (!c) return;
+    switch (c->direction) {
+      case XIMForwardChar: n->caret++; break;
+      case XIMBackwardChar: n->caret--; break;
+      case XIMLineStart: n->caret = 0; break;
+      case XIMLineEnd: n->caret = (int)n->preedit.size(); break;
+      case XIMAbsolutePosition: n->caret = c->position; break;
+      default: break;
+    }
+    n->caret = std::max(0, std::min(n->caret, (int)n->preedit.size()));
+    c->position = n->caret;
+    ImePreedit(n->w, n->preedit, n->caret);
+  }
+
+  // Where the input method's candidates (or its composition, at the
+  // caret) go: XNSpotLocation is the text's baseline.
+  void ImeCursorMoved(Window* top) override {
+    RECT r;
+    if (!im || !ImeCursorRect(top, &r)) return;
+    std::lock_guard<std::recursive_mutex> g(lock);
+    Native* n = NativeOf(top);
+    if (!n || !n->ic || !(imStyle & (XIMPreeditPosition | XIMPreeditCallbacks))) return;
+    XPoint spot = {(short)r.left, (short)r.bottom};
+    XVaNestedList attrs = x.XVaCreateNestedList(0, XNSpotLocation, &spot, NULL);
+    x.XSetICValues(n->ic, XNPreeditAttributes, attrs, NULL);
+    x.XFree(attrs);
+    x.XFlush(dpy);
+  }
+  void ImeReset(Window* top) override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    Native* n = NativeOf(top);
+    if (!n || !n->ic || !im) return;
+    if (char* left = x.Xutf8ResetIC(n->ic)) x.XFree(left);
+    n->preedit.clear();
+    x.XFlush(dpy);
   }
 
   void Drain() {
@@ -1038,6 +1246,8 @@ struct X11Backend : Backend {
         std::lock_guard<std::recursive_mutex> g(lock);
         if (!dpy || !x.XPending(dpy)) return;
         x.XNextEvent(dpy, &e);
+        // The input method takes the keys it composes with.
+        if (im && x.XFilterEvent(&e, None)) continue;
       }
       Handle(e);
     }

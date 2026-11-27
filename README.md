@@ -201,6 +201,21 @@ input as a real mouse and keyboard would, and mouse messages go to the
 window under the pointer, passing through controls that answer
 `WM_NCHITTEST` with `HTTRANSPARENT` (such as group boxes).
 
+Text comes from the desktop's input methods as well as from the keys:
+an IBus or Fcitx engine through Wayland's text-input protocol or X's
+XIM, or macOS's input sources. What one is composing reaches the window
+with the focus as `WM_IME_STARTCOMPOSITION`, `WM_IME_COMPOSITION` and
+`WM_IME_ENDCOMPOSITION`, with the text from `ImmGetCompositionString`;
+`DefWindowProc` shows it in a small window at the caret (or where
+`ImmSetCompositionWindow` puts it) and turns the finished text into
+`WM_IME_CHAR` and then `WM_CHAR`, so a program that knows nothing of
+input methods still gets the characters. The input method's candidates
+appear by the caret, or where `ImmSetCandidateWindow` says. Dead keys and
+the Compose key work as in the desktop's other programs (xkbcommon's
+compose tables on Wayland, Xlib's on X11). A window given no input
+context (`ImmAssociateContext` with `NULL`) gets the finished text as
+plain characters.
+
 Kernel objects go further than events, mutexes and semaphores: named
 ones, shared with the user's other processes through POSIX shared memory
 (a mutex whose owner's process ends is abandoned to the next waiter;
@@ -510,8 +525,8 @@ when there is no display. For a Linux or macOS target it builds `core`,
 `docobtest`, `linktest`, `bindtest`, `richtest`, `richsrvtest`,
 `autotest`, `srvtest`, `atlwintest`, `atltest`, `conntest`, `ctltest`,
 `wltest`, `dragtest`, `daotest`, `dvtest`, `htmltest`, `atlctltest`,
-`atlutiltest`, `cdlgtest`, `vistatest`, `iotest`, `audiotest`, `wtltest`,
-`sstest` and `hlptest` against
+`atlutiltest`, `cdlgtest`, `vistatest`, `iotest`, `dpitest`, `imetest`, `audiotest`,
+`wtltest`, `sstest` and `hlptest` against
 the portable layer, and `exttest`, `core`, `sditest`,
 `dlgtest` and `dlltest` again with the shared libraries
 (`SHARED_TESTS`), and runs them directly; `NATIVE_TESTS` names others to
@@ -719,6 +734,15 @@ try.
   return at once, wait, or end when the line goes quiet, a command out
   and a reply in, and WaitCommEvent overlapped, ended by data, by
   SetCommMask and by CancelIo.
+* `imetest` (Linux and macOS only): input methods, with the text handed
+  in as a backend would: a composition begun, changed, finished, taken
+  back and ended by ImmNotifyIME; ImmGetCompositionString's strings,
+  attributes, clauses and cursor (in bytes for ANSI); DefWindowProc's
+  composition window and its WM_IME_CHAR and WM_CHAR (UTF-8 bytes for an
+  ANSI window); a window with no input context or a closed one getting
+  plain characters; a context of the program's own; the composition and
+  candidate windows' places and the caret as where candidates go; and
+  the composition font.
 * `audiotest`: voice audio, on the console: ACM format details,
   enumeration and suggestion, and streams through mu-law, IMA ADPCM and
   a rate change; a WAVE file written and read through mmio, its buffer
