@@ -26,6 +26,7 @@
 #include <vector>
 #ifdef __APPLE__
 #include <mach/mach_time.h>
+#include <mach/mach.h>
 #endif
 
 namespace winport {
@@ -314,7 +315,17 @@ struct Thread : Object {
   DWORD exitCode = STILL_ACTIVE;
   LPTHREAD_START_ROUTINE start = NULL;
   LPVOID param = NULL;
-  bool suspended = false;
+  // SuspendThread's count. A thread made suspended waits at its start
+  // (on resume); a running one is stopped by the system (Mach on macOS,
+  // a signal it waits in elsewhere: parked says it is there).
+  std::atomic<int> suspends{0};
+  std::atomic<bool> started{false};  // past the wait at its start
+  std::atomic<bool> parked{false};
+  std::atomic<bool> killed{false};  // TerminateThread: it never runs again
+  std::atomic<bool> exited{false};  // ExitThread under way: no more signals
+  std::atomic<bool> gone{false};    // ended at its start, terminated before it ran
+  int machSuspends = 0;             // thread_suspend calls to undo
+  pthread_mutex_t control = PTHREAD_MUTEX_INITIALIZER;  // the fields above, for other threads
   pthread_cond_t resume = PTHREAD_COND_INITIALIZER;
   int priority = THREAD_PRIORITY_NORMAL;
   Thread() : Object(kThread) {}
@@ -1112,13 +1123,100 @@ BOOL WINAPI GetQueuedCompletionStatusEx(HANDLE h, LPOVERLAPPED_ENTRY entries, UL
 }
 
 // Threads
+
+// Stopping a running thread from another: Mach's thread_suspend on
+// macOS; elsewhere a signal, whose handler waits while the count is above
+// zero (or for ever, when the thread was terminated). The cooperative
+// threads of DOS and the classic Mac OS can only be held at their start.
+#if defined(__APPLE__)
+#define WINPORT_MACH_SUSPEND 1
+#elif !defined(__MSDOS__) && !defined(macintosh)
+#define WINPORT_SIGNAL_SUSPEND 1
+static int SuspendSignal() { return SIGRTMIN + 4; }
+static void SuspendHandler(int) {
+  Thread* t = t_thread;
+  if (t == NULL) return;
+  int saved = errno;
+  sigset_t mask;
+  pthread_sigmask(SIG_SETMASK, NULL, &mask);
+  sigdelset(&mask, SuspendSignal());
+  if (t->killed) {
+    // Terminated: the thread's code never runs again. Its stack stays,
+    // as nothing it holds is let go on Windows either.
+    sigset_t none;
+    sigfillset(&none);
+    t->parked = true;
+    for (;;) sigsuspend(&none);
+  }
+  if (t->suspends > 0) {
+    t->parked = true;
+    // ResumeThread sends the signal again to end the wait.
+    while (t->suspends > 0 && !t->killed) sigsuspend(&mask);
+    t->parked = false;
+    if (t->killed) SuspendHandler(0);
+  }
+  errno = saved;
+}
+static void InstallSuspendHandler() {
+  static pthread_once_t once = PTHREAD_ONCE_INIT;
+  pthread_once(&once, [] {
+    struct sigaction sa = {};
+    sa.sa_handler = SuspendHandler;
+    sa.sa_flags = SA_RESTART;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SuspendSignal(), &sa, NULL);
+  });
+}
+#endif
+
+// Stops a running thread, with its control lock held; then, without it,
+// waits until it has stopped.
+// The thread itself lets the lock go first, as it stops at once.
+static void StopThread(Thread* t) {
+  bool self = t == t_thread;
+#if WINPORT_MACH_SUSPEND
+  mach_port_t port = pthread_mach_thread_np(t->thread);
+  t->machSuspends++;
+  if (self) pthread_mutex_unlock(&t->control);
+  if (thread_suspend(port) != KERN_SUCCESS && !self) t->machSuspends--;
+  if (!self) pthread_mutex_unlock(&t->control);
+#elif WINPORT_SIGNAL_SUSPEND
+  if (self) {
+    pthread_mutex_unlock(&t->control);
+    pthread_kill(t->thread, SuspendSignal());
+    return;
+  }
+  pthread_kill(t->thread, SuspendSignal());
+  pthread_mutex_unlock(&t->control);
+  while (!t->parked && !t->exited && !t->gone) sched_yield();
+#else
+  pthread_mutex_unlock(&t->control);
+#endif
+}
+
 static void* ThreadMain(void* p) {
   Thread* t = (Thread*)p;
   t_thread = t;
   t_threadId = t->id;
   pthread_mutex_lock(WaitLock());
-  while (t->suspended) pthread_cond_wait(&t->resume, WaitLock());
+  while (t->suspends > 0 && !t->killed) pthread_cond_wait(&t->resume, WaitLock());
+  t->started = true;
   pthread_mutex_unlock(WaitLock());
+  // Terminated before it began: TerminateThread does the rest.
+  if (t->killed) {
+#if WINPORT_SIGNAL_SUSPEND
+    sigset_t block;
+    sigemptyset(&block);
+    sigaddset(&block, SuspendSignal());
+    pthread_sigmask(SIG_BLOCK, &block, NULL);
+#endif
+    pthread_mutex_lock(&t->control);  // after any signal being sent
+    t->gone = true;
+    pthread_mutex_unlock(&t->control);
+    pthread_exit(NULL);
+  }
+  // A SuspendThread that came as it started and found it not yet
+  // running is held here by the signal it sent.
   DWORD code = t->start(t->param);
   ExitThread(code);
 }
@@ -1129,7 +1227,10 @@ HANDLE WINAPI CreateThread(LPSECURITY_ATTRIBUTES, SIZE_T dwStackSize, LPTHREAD_S
   t->start = lpStartAddress;
   t->param = lpParameter;
   t->id = g_nextThreadId.fetch_add(1);
-  t->suspended = (dwCreationFlags & CREATE_SUSPENDED) != 0;
+  t->suspends = (dwCreationFlags & CREATE_SUSPENDED) != 0 ? 1 : 0;
+#if WINPORT_SIGNAL_SUSPEND
+  InstallSuspendHandler();
+#endif
   t->refs.fetch_add(1);  // the thread's own reference, dropped when it ends
   pthread_attr_t attr;
   pthread_attr_init(&attr);
@@ -1150,6 +1251,16 @@ HANDLE WINAPI CreateThread(LPSECURITY_ATTRIBUTES, SIZE_T dwStackSize, LPTHREAD_S
 void WINAPI ExitThread(DWORD dwExitCode) {
   Thread* t = t_thread;
   if (t != NULL) {
+#if WINPORT_SIGNAL_SUSPEND
+    // No SuspendThread from here on: its signal would find the thread gone.
+    sigset_t block;
+    sigemptyset(&block);
+    sigaddset(&block, SuspendSignal());
+    pthread_sigmask(SIG_BLOCK, &block, NULL);
+#endif
+    pthread_mutex_lock(&t->control);
+    t->exited = true;
+    pthread_mutex_unlock(&t->control);
     pthread_mutex_lock(WaitLock());
     t->exitCode = dwExitCode;
     t->done = true;
@@ -1161,9 +1272,45 @@ void WINAPI ExitThread(DWORD dwExitCode) {
   pthread_exit((void*)(uintptr_t)dwExitCode);
 }
 
-BOOL WINAPI TerminateThread(HANDLE, DWORD) {
-  SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-  return FALSE;
+// The thread is stopped where it is and never runs again; as on
+// Windows, what it holds stays held and its stack is not unwound.
+BOOL WINAPI TerminateThread(HANDLE h, DWORD dwExitCode) {
+  if (h == GetCurrentThread() || (t_thread && FromHandle(h, kThread) == t_thread)) ExitThread(dwExitCode);
+  Thread* t = (Thread*)FromHandle(h, kThread);
+  if (t == NULL) {
+    SetLastError(ERROR_INVALID_HANDLE);
+    return FALSE;
+  }
+#if !WINPORT_MACH_SUSPEND && !WINPORT_SIGNAL_SUSPEND
+  if (t->started) {
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+  }
+#endif
+  pthread_mutex_lock(&t->control);
+  if (t->exited || t->killed) {
+    pthread_mutex_unlock(&t->control);
+    return TRUE;
+  }
+  t->killed = true;
+  if (t->started) {
+    StopThread(t);
+  } else {
+    pthread_mutex_unlock(&t->control);
+    pthread_mutex_lock(WaitLock());
+    pthread_cond_broadcast(&t->resume);
+    pthread_mutex_unlock(WaitLock());
+    // It sees the flag as it starts, and ends there.
+    while (!t->gone) sched_yield();
+  }
+  if (t->exited) return TRUE;  // it was ending of itself
+  pthread_mutex_lock(WaitLock());
+  t->exitCode = dwExitCode;
+  t->done = true;
+  SignalChange();
+  pthread_mutex_unlock(WaitLock());
+  Release(t);  // the thread's own reference
+  return TRUE;
 }
 
 BOOL WINAPI GetExitCodeThread(HANDLE h, LPDWORD lpExitCode) {
@@ -1182,24 +1329,81 @@ BOOL WINAPI GetExitCodeThread(HANDLE h, LPDWORD lpExitCode) {
   return TRUE;
 }
 
-// Only threads made suspended can be resumed; other threads cannot be
-// stopped from outside with POSIX threads.
-DWORD WINAPI SuspendThread(HANDLE) {
-  SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-  return (DWORD)-1;
+static Thread* ThreadOf(HANDLE h) {
+  if (h == GetCurrentThread()) return t_thread;
+  return (Thread*)FromHandle(h, kThread);
 }
-DWORD WINAPI ResumeThread(HANDLE h) {
-  Thread* t = (Thread*)FromHandle(h, kThread);
+
+// Returns the count before; at 0 a running thread is stopped. The
+// cooperative threads of DOS and the classic Mac OS can be held only
+// before they start.
+DWORD WINAPI SuspendThread(HANDLE h) {
+  Thread* t = ThreadOf(h);
   if (t == NULL) {
     SetLastError(ERROR_INVALID_HANDLE);
     return (DWORD)-1;
   }
-  pthread_mutex_lock(WaitLock());
-  DWORD was = t->suspended ? 1 : 0;
-  t->suspended = false;
-  pthread_cond_signal(&t->resume);
-  pthread_mutex_unlock(WaitLock());
-  return was;
+#if !WINPORT_MACH_SUSPEND && !WINPORT_SIGNAL_SUSPEND
+  if (t->started) {
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return (DWORD)-1;
+  }
+#endif
+  pthread_mutex_lock(&t->control);
+  if (t->exited) {
+    pthread_mutex_unlock(&t->control);
+    SetLastError(ERROR_ACCESS_DENIED);
+    return (DWORD)-1;
+  }
+  if (t->suspends >= MAXIMUM_SUSPEND_COUNT) {
+    pthread_mutex_unlock(&t->control);
+    SetLastError(ERROR_SIGNAL_REFUSED);
+    return (DWORD)-1;
+  }
+  int was = t->suspends.fetch_add(1);
+  // A thread not yet started holds at its start; one that is starting
+  // as the count goes up is stopped as a running one.
+  if (t->started) {
+#if WINPORT_MACH_SUSPEND
+    StopThread(t);
+#else
+    if (was == 0)
+      StopThread(t);
+    else
+      pthread_mutex_unlock(&t->control);
+#endif
+  } else {
+    pthread_mutex_unlock(&t->control);
+  }
+  return (DWORD)was;
+}
+
+DWORD WINAPI ResumeThread(HANDLE h) {
+  Thread* t = ThreadOf(h);
+  if (t == NULL) {
+    SetLastError(ERROR_INVALID_HANDLE);
+    return (DWORD)-1;
+  }
+  pthread_mutex_lock(&t->control);
+  int was = t->suspends;
+  if (was > 0 && !t->exited) {
+    t->suspends = was - 1;
+#if WINPORT_MACH_SUSPEND
+    if (t->machSuspends > 0 && !t->killed) {
+      thread_resume(pthread_mach_thread_np(t->thread));
+      t->machSuspends--;
+    }
+#elif WINPORT_SIGNAL_SUSPEND
+    if (was == 1 && t->started) pthread_kill(t->thread, SuspendSignal());
+#endif
+  }
+  pthread_mutex_unlock(&t->control);
+  if (was == 1) {
+    pthread_mutex_lock(WaitLock());
+    pthread_cond_broadcast(&t->resume);
+    pthread_mutex_unlock(WaitLock());
+  }
+  return (DWORD)was;
 }
 
 BOOL WINAPI SetThreadPriority(HANDLE h, int nPriority) {
