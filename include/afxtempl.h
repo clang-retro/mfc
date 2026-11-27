@@ -38,17 +38,29 @@ template <class TYPE> struct _AfxSerializer<TYPE, true> {
       ar.EnsureRead((void*)p, (UINT)(n * sizeof(TYPE)));
   }
 };
-template <class TYPE> struct _AfxSerializer<TYPE, false> {
-  static void Do(CArchive& ar, TYPE* p, INT_PTR n) {
-    if (ar.IsStoring())
-      for (; n--; p++) ar << *p;
-    else
-      for (; n--; p++) ar >> *p;
-  }
-};
 template <class TYPE> struct _AfxIsObPtr { enum { value = 0 }; };
 template <class T> struct _AfxIsObPtr<T*> {
   enum { value = std::is_base_of<CObject, T>::value };
+};
+template <class TYPE> struct _AfxSerializer<TYPE, false> {
+  static void Do(CArchive& ar, TYPE* p, INT_PTR n) {
+    if constexpr (_AfxIsObPtr<TYPE>::value) {
+      // Pointers to a class derived from CObject: as CObject pointers.
+      for (; n--; p++) {
+        if (ar.IsStoring()) {
+          ar << (const CObject*)*p;
+        } else {
+          CObject* pOb = NULL;
+          ar >> pOb;
+          *p = (TYPE)pOb;
+        }
+      }
+    } else if (ar.IsStoring()) {
+      for (; n--; p++) ar << *p;
+    } else {
+      for (; n--; p++) ar >> *p;
+    }
+  }
 };
 
 template <class TYPE>
