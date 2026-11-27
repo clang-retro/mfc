@@ -20,7 +20,7 @@ CXX=${BIN:+$BIN/}clang++
 RC=${RC:-${BIN:+$BIN/}llvm-windres}
 LDFLAGS=${LDFLAGS:-}
 SHARED_TESTS=${SHARED_TESTS-"exttest core sditest dlgtest dlltest"}
-TESTS=${TESTS:-"core memtest wintest disptest isapitest daotest socktest inettest dlgtest sditest mditest docktest splittest richtest dbtest rvtest dvtest autotest conntest dragtest oletest srvtest linktest richsrvtest iptest docobtest occtest htmltest ctltest cmntest wltest bindtest dlltest atltest atlwintest atlctltest atlutiltest wtltest cdlgtest vistatest oledbtest atldbtest atlnettest atlsnaptest atlperftest iotest audiotest"}
+TESTS=${TESTS:-"core memtest wintest disptest isapitest daotest socktest inettest dlgtest sditest mditest docktest splittest richtest dbtest rvtest dvtest autotest conntest dragtest oletest srvtest linktest richsrvtest iptest docobtest occtest htmltest ctltest cmntest wltest bindtest dlltest atltest atlwintest atlctltest atlutiltest wtltest cdlgtest vistatest oledbtest atldbtest atlnettest atlsnaptest atlperftest comdeftest iotest audiotest"}
 
 if [ -z "${DISPLAY:-}" ] && [ -z "${MFC_TEST_NO_XVFB:-}" ] && command -v xvfb-run >/dev/null 2>&1; then
   MFC_TEST_NO_XVFB=1 exec xvfb-run -a -s "-screen 0 1024x768x24" "$0" "$@"
@@ -35,7 +35,7 @@ esac
 # WTL's headers, for wtltest (tools/fetch-wtl.sh puts them here).
 WTL_INCLUDE=${WTL_INCLUDE:-build/wtl/include}
 if [ $NATIVE = 1 ]; then
-  TESTS=${NATIVE_TESTS:-"core memtest wintest disptest isapitest dlgtest sditest mditest cmntest splittest docktest dbtest odbctest rvtest socktest occtest dlltest inettest oletest iptest docobtest linktest bindtest richtest richsrvtest autotest srvtest atlwintest atltest conntest ctltest wltest dragtest daotest dvtest htmltest atlctltest atlutiltest atlnettest cdlgtest vistatest iotest dpitest imetest audiotest wtltest sstest hlptest"}
+  TESTS=${NATIVE_TESTS:-"core memtest wintest disptest isapitest dlgtest sditest mditest cmntest splittest docktest dbtest odbctest rvtest socktest occtest dlltest inettest oletest iptest docobtest linktest bindtest richtest richsrvtest autotest srvtest atlwintest atltest conntest ctltest wltest dragtest daotest dvtest htmltest atlctltest atlutiltest atlnettest comdeftest cdlgtest vistatest iotest dpitest imetest audiotest wtltest sstest hlptest"}
   T=$OUT/tests
   mkdir -p "$T/a" "$T/u"
   python3 tests/gen-toolbar-bmp.py "$T/toolbar.bmp" 6 || exit 1
@@ -316,6 +316,16 @@ build_and_run() {  # name label exe outdir shared ldflags
     fi
     extra="-isystem $WTL_INCLUDE -fms-compatibility -fgnuc-version=4.2.1"
     rcextra="-I $WTL_INCLUDE"
+  fi
+  # comdeftest links MinGW's comsupp library, which not every MinGW-w64
+  # (Ubuntu's, for one) has.
+  if [ $name = comdeftest ]; then
+    # shellcheck disable=SC2086
+    p=$("$CXX" $CXXFLAGS -print-file-name=libcomsuppw.a 2>/dev/null)
+    if [ ! -f "$p" ]; then
+      echo "skip   $label-$v (no libcomsuppw.a)"
+      return
+    fi
   fi
   dllflags=
   [ $shared = 1 ] && dllflags=-D_AFXDLL
