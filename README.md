@@ -839,6 +839,17 @@ try.
   loopback address: messages and their encodings, mail sent with a
   dot-stuffed line and a refused recipient, and requests with each kind
   of body, POST, redirects, Basic authentication and a proxy.
+* `atlsnaptest`: an MMC snap-in made with `atlsnap.h` against a console
+  of the test's own: its nodes' data object formats and display info,
+  notifications, the context menu from a menu resource and its commands,
+  a toolbar from a TOOLBAR resource with button states, a property page
+  applied with OK, and an extension snap-in's node map.
+* `atlperftest`: performance counters made with `atlperf.h`, registered
+  (the service's Performance key and the Perflib names, or only their
+  indexes where Perflib's text is not in the registry), published from
+  instances in shared memory and collected as the performance DLL would:
+  all, by index, too small a buffer, instances released, and
+  unregistered.
 * `atlutiltest`: ATL's utility headers in a program without MFC: CString
   from `atlstr.h` (formatting, string resources, conversions, errors as
   CAtlException); CSimpleArray and CSimpleMap; CAtlArray, CAtlList,
@@ -1181,7 +1192,18 @@ request with the stock MinGW-w64 toolchain.
   IColumnsInfoImpl, IConvertTypeImpl, IRowsetImpl, IRowsetChangeImpl,
   IRowsetIdentityImpl, IRowsetInfoImpl, CRowsetImpl, and schema rowsets
   over BEGIN_SCHEMA_MAP with CSchemaRowsetImpl and the TABLES, COLUMNS and
-  PROVIDER_TYPES rows; Windows only); `atlimage.h` (CImage: DIB sections made, attached and
+  PROVIDER_TYPES rows; Windows only); `atlsnap.h` (MMC snap-ins:
+  CSnapInItemImpl with menus from SNAPINMENUID, toolbars from
+  BEGIN_SNAPINTOOLBARID_MAP, commands from BEGIN_SNAPINCOMMAND_MAP,
+  IComponentDataImpl, IComponentImpl, IExtendContextMenuImpl,
+  IExtendPropertySheetImpl, IExtendControlbarImpl, extension snap-ins
+  over BEGIN_EXTENSION_SNAPIN_NODEINFO_MAP and CSnapInPropertyPageImpl;
+  Windows only); `atlperf.h` (performance counters: CPerfObject
+  categories with DECLARE_PERF_CATEGORY and BEGIN_COUNTER_MAP, CPerfMon
+  with BEGIN_PERF_MAP, instances by number or name, CPerfLock,
+  Register through Perflib or lodctr, Collect, and PERFREG_ENTRY with
+  the OpenPerfMon, CollectPerfMon and ClosePerfMon exports; Windows
+  only); `atlimage.h` (CImage: DIB sections made, attached and
   drawn with BitBlt, StretchBlt, AlphaBlend, TransparentBlt, MaskBlt and
   PlgBlt, and BMP, GIF, JPEG, PNG and TIFF read and written through
   GDI+, which starts on first use; an image with an alpha channel keeps
