@@ -1486,6 +1486,15 @@ static int stbtt_InitFont_internal(stbtt_fontinfo *info, unsigned char *data, in
             break;
       }
    }
+   // clang-retro: the TrueType fonts of System 7 have only a Mac Roman
+   // cmap (platform 1, encoding 0). Use it when there is no Unicode cmap.
+   // The caller gives Mac Roman codes for such a font.
+   for (i=0; i < numTables && info->index_map == 0; ++i) {
+      stbtt_uint32 encoding_record = cmap + 4 + 8 * i;
+      if (ttUSHORT(data+encoding_record) == STBTT_PLATFORM_ID_MAC &&
+          ttUSHORT(data+encoding_record+2) == STBTT_MAC_EID_ROMAN)
+         info->index_map = cmap + ttULONG(data+encoding_record+4);
+   }
    if (info->index_map == 0)
       return 0;
 
