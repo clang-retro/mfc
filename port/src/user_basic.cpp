@@ -4,6 +4,7 @@
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
+#include "theme.h"
 #include "user.h"
 
 #include <stdio.h>
@@ -324,7 +325,10 @@ struct Theme {
   int scrollWidth = Scale96(16), scrollHeight = Scale96(16);
   LOGFONTW captionFont = ClassicFont(true), smCaptionFont = ClassicFont(true), menuFont = ClassicFont(false),
            statusFont = ClassicFont(false), messageFont = ClassicFont(false), iconFont = ClassicFont(false);
-  Theme() { memcpy(colors, kClassicColors, sizeof colors); }
+  Theme() {
+    // With visual styles, the flat look's faces and borders (theme.cpp).
+    for (int i = 0; i < kNumColors; i++) colors[i] = winport::theme::SysColor(i, kClassicColors[i]);
+  }
 };
 
 std::wstring RegText(HKEY k, const wchar_t* name, DWORD* type, std::vector<BYTE>* raw) {

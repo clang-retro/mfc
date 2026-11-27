@@ -1,6 +1,9 @@
-// uxtheme.h - visual styles. The portable layer draws the classic look,
-// as Windows does with visual styles off: no theme opens, and the
-// drawing calls fail for want of one.
+// uxtheme.h - visual styles. A program that asks for version 6 of the
+// common controls in its manifest (or runs with WINPORT_VISUAL_STYLES=1)
+// gets the portable layer's own theme; otherwise the controls draw the
+// classic look, as Windows does with visual styles off: no theme opens,
+// and the drawing calls fail for want of one. The parts and states are in
+// vsstyle.h, the properties in vssym32.h.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -11,6 +14,9 @@
 #include <commctrl.h>
 
 typedef HANDLE HTHEME;
+#ifndef E_PROP_ID_UNSUPPORTED
+#define E_PROP_ID_UNSUPPORTED ((HRESULT)0x80070490L)
+#endif
 
 #define ETDT_DISABLE 0x00000001
 #define ETDT_ENABLE 0x00000002
@@ -54,6 +60,7 @@ extern "C" {
 
 HTHEME WINAPI OpenThemeData(HWND, LPCWSTR);
 HTHEME WINAPI OpenThemeDataEx(HWND, LPCWSTR, DWORD);
+HTHEME WINAPI OpenThemeDataForDpi(HWND, LPCWSTR, UINT);
 HRESULT WINAPI CloseThemeData(HTHEME);
 HTHEME WINAPI GetWindowTheme(HWND);
 HRESULT WINAPI SetWindowTheme(HWND, LPCWSTR, LPCWSTR);

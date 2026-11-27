@@ -5,6 +5,9 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "comctl.h"
+#include "theme.h"
+
+#include <vssym32.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -67,12 +70,35 @@ struct Progress {
   int lo = 0, hi = 100, pos = 0, step = 10;
   COLORREF bar = CLR_DEFAULT, bk = CLR_DEFAULT;
   int marquee = 0;  // the marquee's offset
+  int state = PBST_NORMAL;
 };
 
 void PaintProgress(Progress* p, HDC dc) {
   RECT r;
   GetClientRect(p->hwnd, &r);
   DWORD style = StyleOf(p->hwnd);
+  if (winport::theme::Themed(p->hwnd)) {
+    // The visual style: one smooth fill in the state's color.
+    using namespace winport::theme;
+    bool vertical = (style & PBS_VERTICAL) != 0;
+    DrawPart(kProgress, dc, vertical ? PP_BARVERT : PP_BAR, 1, r, NULL);
+    RECT in = ContentRect(kProgress, PP_BAR, 1, r);
+    int len = vertical ? in.bottom - in.top : in.right - in.left;
+    int span = std::max(1, p->hi - p->lo);
+    int a = 0, b = (int)((long long)(std::min(std::max(p->pos, p->lo), p->hi) - p->lo) * len / span);
+    if (style & PBS_MARQUEE) {
+      a = p->marquee % std::max(1, len + len / 4) - len / 4;
+      b = a + len / 4;
+      a = std::max(a, 0);
+      b = std::min(b, len);
+    }
+    if (b > a) {
+      RECT f = vertical ? RECT{in.left, in.bottom - b, in.right, in.bottom - a} : RECT{in.left + a, in.top, in.left + b, in.bottom};
+      int fillState = p->state == PBST_ERROR ? PBFS_ERROR : p->state == PBST_PAUSED ? PBFS_PAUSED : PBFS_NORMAL;
+      DrawPart(kProgress, dc, vertical ? PP_FILLVERT : PP_FILL, fillState, f, NULL);
+    }
+    return;
+  }
   FillSolid(dc, r, p->bk == CLR_DEFAULT ? GetSysColor(COLOR_BTNFACE) : p->bk);
   DrawEdge(dc, &r, BDR_SUNKENOUTER, BF_RECT | BF_ADJUST);
   InflateRect(&r, -1, -1);
@@ -190,6 +216,22 @@ LRESULT CALLBACK ProgressProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       InvalidateRect(h, NULL, FALSE);
       return old;
     }
+    case PBM_SETSTATE: {
+      int old = p->state;
+      if (wp >= PBST_NORMAL && wp <= PBST_PAUSED) {
+        p->state = (int)wp;
+        InvalidateRect(h, NULL, FALSE);
+      }
+      return old;
+    }
+    case PBM_GETSTATE:
+      return p->state;
+    case PBM_GETSTEP:
+      return p->step;
+    case PBM_GETBARCOLOR:
+      return p->bar;
+    case PBM_GETBKCOLOR:
+      return p->bk;
     case PBM_SETMARQUEE:
       if (wp)
         SetTimer(h, 1, lp ? (UINT)lp : 30, NULL);
@@ -361,8 +403,14 @@ void PaintTrack(Track* t, HDC dc) {
   bool v = Vertical(t);
   RECT ch = Channel(t);
   RECT edge = ch;
-  DrawEdge(dc, &edge, EDGE_SUNKEN, BF_RECT | BF_ADJUST);
-  FillSolid(dc, edge, GetSysColor(COLOR_WINDOW));
+  bool themed = winport::theme::Themed(t->hwnd);
+  if (themed) {
+    winport::theme::DrawPart(winport::theme::kTrackBar, dc, v ? TKP_TRACKVERT : TKP_TRACK, TRS_NORMAL, ch, NULL);
+    InflateRect(&edge, -1, -1);
+  } else {
+    DrawEdge(dc, &edge, EDGE_SUNKEN, BF_RECT | BF_ADJUST);
+    FillSolid(dc, edge, GetSysColor(COLOR_WINDOW));
+  }
   if ((style & TBS_ENABLESELRANGE) && t->selEnd > t->selStart) {
     int a = PosToPixel(t, t->selStart), b = PosToPixel(t, t->selEnd);
     RECT sel = v ? RECT{edge.left, a, edge.right, b} : RECT{a, edge.top, b, edge.bottom};
@@ -370,7 +418,8 @@ void PaintTrack(Track* t, HDC dc) {
   }
   RECT th = Thumb(t);
   if (!(style & TBS_NOTICKS)) {
-    HBRUSH tb = GetSysColorBrush(COLOR_BTNTEXT);
+    // The visual style's tics are gray.
+    HBRUSH tb = CreateSolidBrush(themed ? RGB(140, 140, 140) : GetSysColor(COLOR_BTNTEXT));
     std::vector<int> tics = TicPositions(t);
     tics.push_back(t->lo);
     tics.push_back(t->hi);
@@ -385,8 +434,16 @@ void PaintTrack(Track* t, HDC dc) {
       if (before) mark((v ? th.left : th.top) - len - 2);
       if (after) mark((v ? th.right : th.bottom) + 2);
     }
+    DeleteObject(tb);
   }
-  if (!(style & TBS_NOTHUMB)) {
+  if (!(style & TBS_NOTHUMB) && themed) {
+    using namespace winport::theme;
+    int part = (style & TBS_BOTH) ? (v ? TKP_THUMBVERT : TKP_THUMB)
+               : v ? ((style & TBS_LEFT) ? TKP_THUMBLEFT : TKP_THUMBRIGHT)
+                   : ((style & TBS_TOP) ? TKP_THUMBTOP : TKP_THUMBBOTTOM);
+    int state = (style & WS_DISABLED) ? TUS_DISABLED : t->dragging ? TUS_PRESSED : t->focus ? TUS_FOCUSED : TUS_NORMAL;
+    DrawPart(kTrackBar, dc, part, state, th, NULL);
+  } else if (!(style & TBS_NOTHUMB)) {
     bool checker = t->dragging || (style & WS_DISABLED);
     if (style & TBS_BOTH) {
       FillRect(dc, &th, ThumbFaceBrush(dc, checker));
@@ -395,7 +452,7 @@ void PaintTrack(Track* t, HDC dc) {
       DrawPointedThumb(dc, th, v, (style & TBS_TOP) != 0, checker);
     }
   }
-  if (t->focus && !(GetWindowLongW(t->hwnd, GWL_STYLE) & WS_DISABLED)) {
+  if (t->focus && !(GetWindowLongW(t->hwnd, GWL_STYLE) & WS_DISABLED) && !themed) {
     RECT f = c;
     DrawFocusRect(dc, &f);
   }
@@ -830,6 +887,14 @@ void PaintSpin(Spin* s, HDC dc) {
     a.bottom = b.top = (c.top + c.bottom) / 2;
   }
   bool enabled = IsWindowEnabled(s->hwnd) != 0;
+  if (winport::theme::Themed(s->hwnd)) {
+    using namespace winport::theme;
+    FillRect(dc, &c, ParentBrush(s->hwnd, dc));
+    auto state = [&](int which) { return !enabled ? UPS_DISABLED : s->pressed == which ? UPS_PRESSED : UPS_NORMAL; };
+    DrawPart(kSpin, dc, horz ? SPNP_DOWNHORZ : SPNP_UP, state(1), a, NULL);
+    DrawPart(kSpin, dc, horz ? SPNP_UPHORZ : SPNP_DOWN, state(-1), b, NULL);
+    return;
+  }
   UINT inactive = enabled ? 0 : DFCS_INACTIVE;
   // a: up (or left), b: down (or right).
   DrawFrameControl(dc, &a, DFC_SCROLL, (horz ? DFCS_SCROLLLEFT : DFCS_SCROLLUP) | inactive | (s->pressed == 1 ? DFCS_PUSHED : 0));
@@ -1107,7 +1172,8 @@ std::wstring HeadText(Header* hd, int i) {
 void PaintHeader(Header* hd, HDC dc) {
   RECT c;
   GetClientRect(hd->hwnd, &c);
-  FillRect(dc, &c, GetSysColorBrush(COLOR_BTNFACE));
+  bool themed = winport::theme::Themed(hd->hwnd);
+  FillRect(dc, &c, GetSysColorBrush(themed ? COLOR_WINDOW : COLOR_BTNFACE));
   HGDIOBJ old = SelectObject(dc, hd->font ? hd->font : ControlFont());
   SetBkMode(dc, TRANSPARENT);
   SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
@@ -1121,7 +1187,12 @@ void PaintHeader(Header* hd, HDC dc) {
     HeadItem& it = hd->items[idx];
     bool down = buttons && hd->pressed == idx && hd->pressedInside;
     RECT e = r;
-    DrawEdge(dc, &e, down ? BDR_SUNKENOUTER : EDGE_RAISED, BF_RECT | BF_SOFT | BF_ADJUST);
+    if (themed) {
+      winport::theme::DrawPart(winport::theme::kHeader, dc, HP_HEADERITEM, down ? HIS_PRESSED : HIS_NORMAL, r, NULL);
+      InflateRect(&e, -1, -1);
+    } else {
+      DrawEdge(dc, &e, down ? BDR_SUNKENOUTER : EDGE_RAISED, BF_RECT | BF_SOFT | BF_ADJUST);
+    }
     if (it.fmt & HDF_OWNERDRAW) {
       DRAWITEMSTRUCT di = {};
       di.CtlType = ODT_HEADER;
@@ -1162,11 +1233,17 @@ void PaintHeader(Header* hd, HDC dc) {
     if (it.fmt & (HDF_SORTUP | HDF_SORTDOWN)) {
       // A small triangle at the right.
       int ax = in.right - 8, ay = (in.top + in.bottom) / 2;
-      HBRUSH sb = GetSysColorBrush(COLOR_BTNSHADOW);
-      for (int k = 0; k < 4; k++) {
-        int y = (it.fmt & HDF_SORTUP) ? ay - 2 + k : ay + 1 - k;
-        RECT line = {ax + 3 - k, y, ax + 4 + k, y + 1};
-        FillRect(dc, &line, sb);
+      if (themed) {
+        RECT ar = {ax, ay - 4, ax + 8, ay + 4};
+        winport::theme::DrawPart(winport::theme::kHeader, dc, HP_HEADERSORTARROW,
+                                 (it.fmt & HDF_SORTUP) ? HSAS_SORTEDUP : HSAS_SORTEDDOWN, ar, NULL);
+      } else {
+        HBRUSH sb = GetSysColorBrush(COLOR_BTNSHADOW);
+        for (int k = 0; k < 4; k++) {
+          int y = (it.fmt & HDF_SORTUP) ? ay - 2 + k : ay + 1 - k;
+          RECT line = {ax + 3 - k, y, ax + 4 + k, y + 1};
+          FillRect(dc, &line, sb);
+        }
       }
       in.right -= 12;
     }
@@ -1180,7 +1257,10 @@ void PaintHeader(Header* hd, HDC dc) {
   }
   if (right < c.right) {
     RECT rest = {right, 0, c.right, c.bottom};
-    DrawEdge(dc, &rest, EDGE_RAISED, BF_RECT | BF_SOFT);
+    if (themed)
+      winport::theme::DrawPart(winport::theme::kHeader, dc, HP_HEADERITEM, HIS_NORMAL, rest, NULL);
+    else
+      DrawEdge(dc, &rest, EDGE_RAISED, BF_RECT | BF_SOFT);
   }
   SelectObject(dc, old);
 }
@@ -1585,9 +1665,14 @@ void PaintTabs(Tabs* t, HDC dc) {
   HGDIOBJ old = SelectObject(dc, t->font ? t->font : ControlFont());
   SetBkMode(dc, TRANSPARENT);
   bool buttons = Buttons(t);
+  // The visual style draws tabs along the top; the others stay classic.
+  bool themed = !buttons && !Bottom(t) && !(StyleOf(t->hwnd) & TCS_VERTICAL) && winport::theme::Themed(t->hwnd);
   if (!buttons) {
     RECT body = TabBody(t);
-    DrawEdge(dc, &body, EDGE_RAISED, BF_RECT | BF_SOFT);
+    if (themed)
+      winport::theme::DrawPart(winport::theme::kTab, dc, TABP_PANE, 0, body, NULL);
+    else
+      DrawEdge(dc, &body, EDGE_RAISED, BF_RECT | BF_SOFT);
   }
   for (int i = 0; i < (int)t->items.size(); i++) {
     TabItem& it = t->items[i];
@@ -1596,6 +1681,13 @@ void PaintTabs(Tabs* t, HDC dc) {
     bool sel = i == t->sel;
     if (buttons) {
       DrawEdge(dc, &r, sel ? EDGE_SUNKEN : EDGE_RAISED, BF_RECT | BF_SOFT);
+    } else if (themed) {
+      if (sel) {
+        InflateRect(&r, 2, 0);
+        r.top -= 2;
+      }
+      int state = !IsWindowEnabled(t->hwnd) ? TIS_DISABLED : sel ? TIS_SELECTED : TIS_NORMAL;
+      winport::theme::DrawPart(winport::theme::kTab, dc, TABP_TABITEM, state, r, NULL);
     } else {
       if (sel) InflateRect(&r, 2, 0);
       if (sel) {

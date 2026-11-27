@@ -3760,9 +3760,10 @@ static void TestDisplayAndDrawing() {
   CHECK(::GetEnhMetaFilePaletteEntries(hemf, 0, NULL) == 0);
   ::DeleteEnhMetaFile(hemf);
 
-  // No visual styles. OpenGL is over CGL on Mac OS X and over the
-  // generic implementation (port/softgl) on the other systems: both give
-  // the single-buffered format for this request.
+  // No visual styles, since no manifest asks for them. OpenGL is over
+  // CGL on Mac OS X and over the generic implementation (port/softgl) on
+  // the other systems: both give the single-buffered format for this
+  // request.
   CHECK(!::IsThemeActive() && !::IsAppThemed());
   CHECK(::OpenThemeData(NULL, L"BUTTON") == NULL);
   CHECK(::GetThemeSysColor(NULL, COLOR_WINDOW) == ::GetSysColor(COLOR_WINDOW));

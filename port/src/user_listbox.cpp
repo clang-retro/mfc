@@ -8,6 +8,9 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "gdi.h"
+#include <vssym32.h>
+
+#include "theme.h"
 #include "user.h"
 
 #include <string.h>
@@ -1064,12 +1067,34 @@ void PaintCombo(Combo* c, HDC dc) {
   HBRUSH br = parent ? (HBRUSH)SendMessageW(parent, ctl, (WPARAM)dc, (LPARAM)c->hwnd) : NULL;
   if (!br) br = (HBRUSH)DefWindowProcW(c->hwnd, ctl, (WPARAM)dc, (LPARAM)c->hwnd);
   RECT inner = frame;
-  DrawEdge(dc, &inner, EDGE_SUNKEN, BF_RECT | BF_ADJUST);
-  FillRect(dc, &inner, br);
+  bool themed = winport::theme::Themed(c->hwnd);
+  if (themed) {
+    // The visual style: a drop-down list looks like a button; the others
+    // have the edit's flat border.
+    using namespace winport::theme;
+    if (c->Kind() == CBS_DROPDOWNLIST) {
+      int state = !enabled ? CBRO_DISABLED : c->pressed || c->dropped ? CBRO_PRESSED : CBRO_NORMAL;
+      DrawPart(kCombo, dc, CP_READONLY, state, frame, NULL);
+      InflateRect(&inner, -kFrame, -kFrame);
+    } else {
+      int state = !enabled ? CBB_DISABLED : c->focus ? CBB_FOCUSED : CBB_NORMAL;
+      DrawPart(kCombo, dc, CP_BORDER, state, frame, NULL);
+      InflateRect(&inner, -kFrame, -kFrame);
+      FillRect(dc, &inner, br);
+    }
+  } else {
+    DrawEdge(dc, &inner, EDGE_SUNKEN, BF_RECT | BF_ADJUST);
+    FillRect(dc, &inner, br);
+  }
   if (c->Kind() != CBS_SIMPLE) {
     RECT b = ButtonRect(c);
-    DrawFrameControl(dc, &b, DFC_SCROLL,
-                     DFCS_SCROLLCOMBOBOX | (c->pressed ? DFCS_PUSHED | DFCS_FLAT : 0) | (enabled ? 0 : DFCS_INACTIVE));
+    if (themed)
+      winport::theme::DrawPart(winport::theme::kCombo, dc, CP_DROPDOWNBUTTON,
+                               !enabled ? CBXS_DISABLED : c->pressed ? CBXS_PRESSED : CBXS_NORMAL, b, NULL);
+    else
+      DrawFrameControl(dc, &b, DFC_SCROLL,
+                       DFCS_SCROLLCOMBOBOX | (c->pressed ? DFCS_PUSHED | DFCS_FLAT : 0) |
+                           (enabled ? 0 : DFCS_INACTIVE));
   }
   if (c->edit) return;
   // A drop-down list shows its selection itself.

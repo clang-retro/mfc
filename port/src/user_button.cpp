@@ -7,9 +7,11 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "gdi.h"
+#include "theme.h"
 #include "user.h"
 
 #include <commctrl.h>
+#include <vssym32.h>
 #include <string.h>
 
 #include <algorithm>
@@ -430,6 +432,106 @@ void DropDown(HWND h, ButtonState* s) {
   }
 }
 
+// The themed look of a push button, check box, radio button or group
+// box (theme.cpp). False for the others, which draw as in the classic
+// look.
+bool PaintThemed(HWND h, HDC dc, ButtonState* s, RECT rc, DWORD style, bool enabled) {
+  using namespace winport::theme;
+  UINT type = style & BS_TYPEMASK;
+  bool pushLike = (style & BS_PUSHLIKE) && (IsCheck(type) || IsRadio(type));
+  if (type == BS_GROUPBOX) {
+    HBRUSH br = CtlColor(h, dc, WM_CTLCOLORSTATIC);
+    TEXTMETRICW tm;
+    GetTextMetricsW(dc, &tm);
+    RECT frame = rc;
+    frame.top += tm.tmHeight / 2;
+    // The frame's line, its inside left as the parent drew it.
+    int saved = SaveDC(dc);
+    ExcludeClipRect(dc, frame.left + 1, frame.top + 1, frame.right - 1, frame.bottom - 1);
+    DrawPart(kButton, dc, BP_GROUPBOX, enabled ? GBS_NORMAL : GBS_DISABLED, frame, NULL);
+    RestoreDC(dc, saved);
+    std::wstring text = TextOf(h);
+    if (!text.empty()) {
+      RECT t = {rc.left + 8, rc.top, rc.right - 8, rc.top + tm.tmHeight};
+      RECT calc = t;
+      DrawTextW(dc, text.c_str(), (int)text.size(), &calc, DT_SINGLELINE | DT_CALCRECT);
+      if ((style & BS_CENTER) == BS_CENTER) OffsetRect(&calc, (t.right - calc.right) / 2, 0);
+      else if ((style & BS_CENTER) == BS_RIGHT) OffsetRect(&calc, t.right - calc.right, 0);
+      RECT bg = calc;
+      InflateRect(&bg, 2, 0);
+      FillRect(dc, &bg, br ? br : GetSysColorBrush(COLOR_BTNFACE));
+      COLORREF c = GetTextColor(dc);
+      Color(kButton, BP_GROUPBOX, enabled ? GBS_NORMAL : GBS_DISABLED, TMT_TEXTCOLOR, &c);
+      SetTextColor(dc, c);
+      SetBkMode(dc, TRANSPARENT);
+      DrawTextW(dc, text.c_str(), (int)text.size(), &calc, DT_SINGLELINE | DT_LEFT | DT_TOP);
+    }
+    return true;
+  }
+  if (IsPush(type) || pushLike) {
+    HBRUSH br = CtlColor(h, dc, WM_CTLCOLORBTN);
+    FillRect(dc, &rc, br ? br : GetSysColorBrush(COLOR_BTNFACE));
+    bool down = s->pushed || (pushLike && s->check == BST_CHECKED);
+    int state = !enabled ? PBS_DISABLED : down ? PBS_PRESSED : s->hot ? PBS_HOT
+                : (type == BS_DEFPUSHBUTTON || (s->focus && !pushLike)) ? PBS_DEFAULTED : PBS_NORMAL;
+    DrawPart(kButton, dc, BP_PUSHBUTTON, state, rc, NULL);
+    RECT content = ContentRect(kButton, BP_PUSHBUTTON, state, rc);
+    content.left += s->margin.left - 1;
+    content.top += s->margin.top - 1;
+    content.right -= s->margin.right - 1;
+    content.bottom -= s->margin.bottom - 1;
+    DrawImages(h, dc, s, &content);
+    if (s->shield) {
+      DrawShield(dc, content.left, (content.top + content.bottom - 16) / 2);
+      content.left += 18;
+    }
+    COLORREF c = GetSysColor(COLOR_BTNTEXT);
+    Color(kButton, BP_PUSHBUTTON, state, TMT_TEXTCOLOR, &c);
+    SetTextColor(dc, c);
+    DrawContent(h, dc, s, content, style, true);
+    if (s->focus && !(GetWindowLongW(h, GWL_STYLE) & BS_FLAT)) {
+      RECT f = rc;
+      InflateRect(&f, -Scale96(3), -Scale96(3));
+      DrawFocusRect(dc, &f);
+    }
+    return true;
+  }
+  if (!IsCheck(type) && !IsRadio(type)) return false;
+  HBRUSH br = CtlColor(h, dc, WM_CTLCOLORSTATIC);
+  FillRect(dc, &rc, br ? br : GetSysColorBrush(COLOR_BTNFACE));
+  SIZE box = {13, 13};
+  PartSize(kButton, IsRadio(type) ? BP_RADIOBUTTON : BP_CHECKBOX, 1, NULL, TS_TRUE, &box);
+  RECT b, text = rc;
+  bool right = (style & BS_LEFTTEXT) != 0;
+  int top;
+  switch (style & BS_VCENTER) {
+    case BS_TOP: top = rc.top; break;
+    case BS_BOTTOM: top = rc.bottom - box.cy; break;
+    default: top = (rc.top + rc.bottom - box.cy) / 2; break;
+  }
+  if (right) {
+    b = MakeRect(rc.right - box.cx, top, rc.right, top + box.cy);
+    text.right = b.left - Scale96(4);
+  } else {
+    b = MakeRect(rc.left, top, rc.left + box.cx, top + box.cy);
+    text.left = b.right + Scale96(4);
+  }
+  int look = !enabled ? 4 : s->pushed ? 3 : s->hot ? 2 : 1;
+  int kind = s->check == BST_CHECKED ? 1 : s->check == BST_INDETERMINATE ? 2 : 0;
+  int state = IsRadio(type) ? (kind ? 4 : 0) + look : kind * 4 + look;
+  DrawPart(kButton, dc, IsRadio(type) ? BP_RADIOBUTTON : BP_CHECKBOX, state, b, NULL);
+  COLORREF c = GetTextColor(dc);
+  Color(kButton, IsRadio(type) ? BP_RADIOBUTTON : BP_CHECKBOX, state, TMT_TEXTCOLOR, &c);
+  if (!enabled) SetTextColor(dc, c);
+  RECT where = DrawContent(h, dc, s, text, style, false);
+  if (s->focus) {
+    InflateRect(&where, 1, 1);
+    IntersectRect(&where, &where, &rc);
+    DrawFocusRect(dc, &where);
+  }
+  return true;
+}
+
 void PaintButton(HWND h, HDC dc) {
   ButtonState* s = StateOf<ButtonState>(h);
   if (!s) return;
@@ -447,6 +549,11 @@ void PaintButton(HWND h, HDC dc) {
     if (!enabled) dis.itemState |= ODS_DISABLED;
     CtlColor(h, dc, WM_CTLCOLORBTN);
     SendMessageW(GetParent(h), WM_DRAWITEM, dis.CtlID, (LPARAM)&dis);
+    SelectObject(dc, oldFont);
+    return;
+  }
+
+  if (winport::theme::Themed(h) && PaintThemed(h, dc, s, rc, style, enabled)) {
     SelectObject(dc, oldFont);
     return;
   }
@@ -739,7 +846,7 @@ LRESULT CALLBACK ButtonProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_MOUSELEAVE:
       if (s->hot) {
         s->hot = false;
-        if (IsLink(TypeOf(h))) Redraw(h);
+        if (IsLink(TypeOf(h)) || winport::theme::Themed(h)) Redraw(h);
       }
       return 0;
     case WM_MOUSEMOVE:
@@ -747,7 +854,7 @@ LRESULT CALLBACK ButtonProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         s->hot = true;
         TRACKMOUSEEVENT tme = {sizeof tme, TME_LEAVE, h, 0};
         TrackMouseEvent(&tme);
-        if (IsLink(TypeOf(h))) Redraw(h);
+        if (IsLink(TypeOf(h)) || winport::theme::Themed(h)) Redraw(h);
       }
       if (s->tracking) {
         RECT rc;
@@ -1225,7 +1332,7 @@ LRESULT CALLBACK ScrollProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         // The parent gives the trough's brush, as on Windows.
         HWND parent = GetParent(h);
         HBRUSH br = parent ? (HBRUSH)SendMessageW(parent, WM_CTLCOLORSCROLLBAR, (WPARAM)dc, (LPARAM)h) : NULL;
-        PaintScrollBar(dc, rc, Vertical(h), &s->bar, br);
+        PaintScrollBar(dc, rc, Vertical(h), &s->bar, br, winport::theme::Themed(h));
       }
       if (!wp) EndPaint(h, &ps);
       return 0;

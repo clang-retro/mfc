@@ -370,11 +370,22 @@ format, so shortcuts made on Windows open here and the other way round;
 a folder shows a `.lnk` file as a link (`SFGAO_LINK`), `Resolve` finds a
 moved target by the shortcut's relative path, and `ShellExecute` opens
 what a shortcut points to. `SHBrowseForFolder` shows a tree of the
-folders below its root and answers the `BFFM_` messages. There are no
-visual styles: the controls draw the classic look, as Windows does with
-styles turned off (scroll bar troughs in a checker, trackbar thumbs with
-a point, tabs with cut corners), so `OpenThemeData` opens nothing and
-`IsThemeActive` is false.
+folders below its root and answers the `BFFM_` messages.
+
+A program that asks for version 6 of the common controls in its
+manifest, as on Windows, draws with a built-in visual style of
+clang-retro's own: flat parts with one-pixel borders and slightly
+rounded corners, in grays with the highlight color as accent.
+`WINPORT_VISUAL_STYLES=1` turns it on for any program and `=0` turns it
+off. Buttons, edits, combo boxes, scroll bars, progress bars, trackbars,
+spins, headers, tabs, toolbars, status bars and tree buttons draw with
+it, and `OpenThemeData`, `DrawThemeBackground`, `GetThemePartSize`,
+`GetThemeColor` and the other uxtheme calls answer for the classes and
+parts of `vssym32.h`, so that owner-drawn controls can match.
+`SetWindowTheme(h, L"", L"")` turns it off for one window. Without it the
+controls draw the classic look, as Windows does with styles turned off
+(scroll bar troughs in a checker, trackbar thumbs with a point, tabs with
+cut corners), `OpenThemeData` opens nothing and `IsThemeActive` is false.
 
 Every monitor shows up as one: RandR's monitors (or Xinerama's screens)
 on X11, the outputs on Wayland and the `NSScreen`s on macOS, the primary

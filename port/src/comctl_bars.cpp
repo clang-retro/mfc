@@ -3,6 +3,9 @@
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
 #include "comctl.h"
+#include "theme.h"
+
+#include <vssym32.h>
 
 #include <string.h>
 
@@ -771,7 +774,20 @@ void InvalidatePart(Status* s, int i) {
     InvalidateRect(s->hwnd, NULL, TRUE);
 }
 
-void PaintPart(Status* s, HDC dc, const Part& p, int index, RECT r) {
+void PaintPart(Status* s, HDC dc, const Part& p, int index, RECT r, bool themed) {
+  if (themed) {
+    // The visual style separates the parts with a line instead of edges.
+    if (!(p.type & SBT_NOBORDERS) && !(p.type & SBT_OWNERDRAW) && index != SB_SIMPLEID &&
+        index + 1 < (int)s->parts.size())
+      winport::theme::DrawPart(winport::theme::kStatus, dc, SP_PANE, 0, r, NULL);
+    Part q = p;
+    q.type |= SBT_NOBORDERS;
+    q.type &= ~SBT_POPOUT;
+    if (!(p.type & SBT_OWNERDRAW)) {
+      PaintPart(s, dc, q, index, r, false);
+      return;
+    }
+  }
   if (p.type & SBT_OWNERDRAW) {
     RECT inner = r;
     if (!(p.type & SBT_NOBORDERS)) InflateRect(&inner, -1, -1);
@@ -809,20 +825,24 @@ void PaintStatus(Status* s, HDC dc) {
   if (s->bk != CLR_DEFAULT) DeleteObject(back);
   HGDIOBJ old = SelectObject(dc, s->font ? s->font : ControlFont());
   SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
+  bool themed = winport::theme::Themed(s->hwnd);
   if (s->simple) {
     RECT r;
     PartRect(s, 0, &r);
-    PaintPart(s, dc, s->simplePart, SB_SIMPLEID, r);
+    PaintPart(s, dc, s->simplePart, SB_SIMPLEID, r, themed);
   } else {
     for (int i = 0; i < (int)s->parts.size(); i++) {
       RECT r;
-      if (PartRect(s, i, &r) && r.right > r.left) PaintPart(s, dc, s->parts[i], i, r);
+      if (PartRect(s, i, &r) && r.right > r.left) PaintPart(s, dc, s->parts[i], i, r, themed);
     }
   }
   if (HasGrip(s)) {
     int g = GetSystemMetrics(SM_CXVSCROLL);
     RECT gr = {c.right - g, c.bottom - g, c.right, c.bottom};
-    DrawFrameControl(dc, &gr, DFC_SCROLL, DFCS_SCROLLSIZEGRIP);
+    if (themed)
+      winport::theme::DrawPart(winport::theme::kStatus, dc, SP_GRIPPER, 0, gr, NULL);
+    else
+      DrawFrameControl(dc, &gr, DFC_SCROLL, DFCS_SCROLLSIZEGRIP);
   }
   SelectObject(dc, old);
 }
@@ -1316,8 +1336,11 @@ void PaintButton(Bar* b, HDC dc, int i) {
   RECT r = btn.rect;
   if (btn.state & TBSTATE_HIDDEN || IsRectEmpty(&r)) return;
   bool flat = Flat(b);
+  bool themed = winport::theme::Themed(b->hwnd);
   if (btn.Separator()) {
-    if (flat && !(btn.state & TBSTATE_WRAP)) {
+    if (themed && !(btn.state & TBSTATE_WRAP)) {
+      winport::theme::DrawPart(winport::theme::kToolBar, dc, TP_SEPARATOR, TS_NORMAL, r, NULL);
+    } else if (flat && !(btn.state & TBSTATE_WRAP)) {
       int mx = (r.left + r.right) / 2;
       RECT line = {mx - 1, r.top + 2, mx + 1, r.bottom - 2};
       DrawEdge(dc, &line, EDGE_ETCHED, BF_LEFT);
@@ -1332,42 +1355,62 @@ void PaintButton(Bar* b, HDC dc, int i) {
   bool arrow = DropArrow(b, btn);
   RECT face = r;
   if (arrow && !(btn.style & BTNS_WHOLEDROPDOWN)) face.right -= kArrowWidth;
-  if (checked && !pressed) {
-    // A checked button's face is dithered with the highlight color.
-    WORD pat[8];
-    for (int k = 0; k < 8; k++) pat[k] = (k & 1) ? 0x55 : 0xAA;
-    HBITMAP pb = CreateBitmap(8, 8, 1, 1, pat);
-    HBRUSH br = CreatePatternBrush(pb);
-    COLORREF ot = SetTextColor(dc, GetSysColor(COLOR_BTNFACE)), ob = SetBkColor(dc, GetSysColor(COLOR_BTNHIGHLIGHT));
-    RECT in = r;
-    InflateRect(&in, -1, -1);
-    FillRect(dc, &in, br);
-    SetTextColor(dc, ot);
-    SetBkColor(dc, ob);
-    DeleteObject(br);
-    DeleteObject(pb);
-  }
-  if (flat) {
-    if (pressed || checked)
-      DrawEdge(dc, &face, BDR_SUNKENOUTER, BF_RECT);
-    else if (hot)
-      DrawEdge(dc, &face, BDR_RAISEDINNER, BF_RECT);
+  if (themed) {
+    int state = !enabled ? TS_DISABLED
+                : pressed ? TS_PRESSED
+                : checked ? (hot ? TS_HOTCHECKED : TS_CHECKED)
+                : hot     ? TS_HOT
+                          : TS_NORMAL;
+    using namespace winport::theme;
+    if (arrow && (btn.style & BTNS_WHOLEDROPDOWN)) {
+      DrawPart(kToolBar, dc, TP_DROPDOWNBUTTON, state, r, NULL);
+      RECT ar = {r.right - kArrowWidth, r.top, r.right, r.bottom};
+      DrawPart(kToolBar, dc, TP_DROPDOWNBUTTONGLYPH, state, ar, NULL);
+    } else if (arrow) {
+      DrawPart(kToolBar, dc, TP_SPLITBUTTON, state, face, NULL);
+      RECT ar = {face.right, r.top, r.right, r.bottom};
+      DrawPart(kToolBar, dc, TP_SPLITBUTTONDROPDOWN, hot || pressed ? state : (enabled ? TS_NORMAL : TS_DISABLED), ar, NULL);
+    } else {
+      DrawPart(kToolBar, dc, TP_BUTTON, state, face, NULL);
+    }
   } else {
-    DrawEdge(dc, &face, (pressed || checked) ? EDGE_SUNKEN : EDGE_RAISED, BF_RECT | BF_SOFT);
-  }
-  if (arrow) {
-    RECT ar = {face.right, r.top, r.right, r.bottom};
-    if (btn.style & BTNS_WHOLEDROPDOWN) ar.left = r.right - kArrowWidth;
-    if (!(btn.style & BTNS_WHOLEDROPDOWN) && (!flat || hot || pressed))
-      DrawEdge(dc, &ar, flat ? BDR_RAISEDINNER : EDGE_RAISED, BF_RECT | BF_SOFT);
-    int ax = (ar.left + ar.right) / 2 - 2, ay = (ar.top + ar.bottom) / 2 - 1;
-    HBRUSH tb = GetSysColorBrush(enabled ? COLOR_BTNTEXT : COLOR_GRAYTEXT);
-    for (int k = 0; k < 3; k++) {
-      RECT line = {ax + k, ay + k, ax + 5 - k, ay + k + 1};
-      FillRect(dc, &line, tb);
+    if (checked && !pressed) {
+      // A checked button's face is dithered with the highlight color.
+      WORD pat[8];
+      for (int k = 0; k < 8; k++) pat[k] = (k & 1) ? 0x55 : 0xAA;
+      HBITMAP pb = CreateBitmap(8, 8, 1, 1, pat);
+      HBRUSH br = CreatePatternBrush(pb);
+      COLORREF ot = SetTextColor(dc, GetSysColor(COLOR_BTNFACE)), ob = SetBkColor(dc, GetSysColor(COLOR_BTNHIGHLIGHT));
+      RECT in = r;
+      InflateRect(&in, -1, -1);
+      FillRect(dc, &in, br);
+      SetTextColor(dc, ot);
+      SetBkColor(dc, ob);
+      DeleteObject(br);
+      DeleteObject(pb);
+    }
+    if (flat) {
+      if (pressed || checked)
+        DrawEdge(dc, &face, BDR_SUNKENOUTER, BF_RECT);
+      else if (hot)
+        DrawEdge(dc, &face, BDR_RAISEDINNER, BF_RECT);
+    } else {
+      DrawEdge(dc, &face, (pressed || checked) ? EDGE_SUNKEN : EDGE_RAISED, BF_RECT | BF_SOFT);
+    }
+    if (arrow) {
+      RECT ar = {face.right, r.top, r.right, r.bottom};
+      if (btn.style & BTNS_WHOLEDROPDOWN) ar.left = r.right - kArrowWidth;
+      if (!(btn.style & BTNS_WHOLEDROPDOWN) && (!flat || hot || pressed))
+        DrawEdge(dc, &ar, flat ? BDR_RAISEDINNER : EDGE_RAISED, BF_RECT | BF_SOFT);
+      int ax = (ar.left + ar.right) / 2 - 2, ay = (ar.top + ar.bottom) / 2 - 1;
+      HBRUSH tb = GetSysColorBrush(enabled ? COLOR_BTNTEXT : COLOR_GRAYTEXT);
+      for (int k = 0; k < 3; k++) {
+        RECT line = {ax + k, ay + k, ax + 5 - k, ay + k + 1};
+        FillRect(dc, &line, tb);
+      }
     }
   }
-  int shift = (pressed || checked) ? 1 : 0;
+  int shift = !themed && (pressed || checked) ? 1 : 0;
   HIMAGELIST il = Images(b);
   std::wstring text = ShowsText(b, btn) ? ButtonText(b, btn) : L"";
   int imgX, imgY;
@@ -1401,8 +1444,8 @@ void PaintButton(Bar* b, HDC dc, int i) {
     UINT f = (List(b) ? DT_LEFT | DT_VCENTER : DT_CENTER | DT_TOP) | DT_SINGLELINE | DT_END_ELLIPSIS;
     if (btn.style & TBSTYLE_NOPREFIX) f |= DT_NOPREFIX;
     f = (f & ~b->drawTextMask) | (b->drawTextFlags & b->drawTextMask);
-    if (enabled) {
-      SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
+    if (enabled || themed) {
+      SetTextColor(dc, GetSysColor(enabled ? COLOR_BTNTEXT : COLOR_GRAYTEXT));
       DrawTextW(dc, text.c_str(), (int)text.size(), &tr, f);
     } else {
       RECT t2 = tr;
