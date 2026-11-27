@@ -415,6 +415,17 @@ The ANSI code page there is UTF-8, `WCHAR` is the system's 32-bit
 `LONG*` needs `LONG`; in dispatch maps `long` remains the type of
 `VT_I4`, as MFC documents.
 
+The compiler COM support of `comdef.h` (`_bstr_t`, `_variant_t`,
+`_com_ptr_t` with `_COM_SMARTPTR_TYPEDEF` and the system's `IFooPtr`
+types, `_com_error`, and the `_com_dispatch_` helpers that `#import`
+wrappers call) is in the portable layer's `comdef.h`, `comutil.h` and
+`comip.h`, header only: what Windows has in `comsupp.lib` is inline
+there, and `_com_raise_error` is weak, so a program can define its own.
+As `LONG` is `int` there, a `_variant_t` made from an `int` is `VT_I4`
+(not `VT_INT`) and one from an `unsigned int` is `VT_UI4`; a `long` is
+`VT_I4` too. A property put of an object tries `DISPATCH_PROPERTYPUTREF`
+and then `DISPATCH_PROPERTYPUT`.
+
 ### 16-bit Windows
 
 `make TARGET=i8086-pc-win16` builds the core classes and the window
@@ -850,6 +861,13 @@ try.
   instances in shared memory and collected as the performance DLL would:
   all, by index, too small a buffer, instances released, and
   unregistered.
+* `comdeftest` (Windows, Linux and macOS): `comdef.h`'s `_bstr_t`,
+  `_variant_t`, `_com_ptr_t` and `_com_error`, and the dispatch helpers
+  against an IDispatch of the test's own (methods with values,
+  `VARIANT`s and references, properties by value and by reference, and
+  a dispatch exception raised and left for GetErrorInfo); on Windows
+  against MinGW's headers and comsupp library, elsewhere the portable
+  layer's.
 * `atlutiltest`: ATL's utility headers in a program without MFC: CString
   from `atlstr.h` (formatting, string resources, conversions, errors as
   CAtlException); CSimpleArray and CSimpleMap; CAtlArray, CAtlList,
