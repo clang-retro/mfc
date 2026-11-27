@@ -180,6 +180,13 @@ SOFTGL_CFLAGS = $(TARGET_FLAGS) $(CXXFLAGS) -DSGL_LAYER_FLUSH -Iport/softgl/incl
   $(if $(MACOS_CLASSIC),$(if $(findstring m68k,$(TARGET)),-mcmodel=large) -ffunction-sections -fdata-sections \
   -isystem $(MACSDK_LIB)/include -I$(MACSDK)/include,$(if $(DOS32),$(DOS32_FLAGS) -isystem port/compat/dos,-fPIC))
 ALL_CXXFLAGS += -Iport/softgl/include
+# The names of the entries of softgl's dispatch table, in order, for the
+# table that points at the system's OpenGL on Linux (opengl_egl.cpp).
+$(OUT)/port/opengl_egl.o: $(OUT)/gl_names.inc
+$(OUT)/port/opengl_egl.o: ALL_CXXFLAGS += -I$(OUT)
+$(OUT)/gl_names.inc: port/softgl/src/dispatch.h
+	@mkdir -p $(dir $@)
+	sed -n 's/^.*(APIENTRY \*\([A-Za-z0-9_]*\))(.*$$/  "gl\1",/p' $< > $@
 endif
 endif
 # 16-bit Windows (make TARGET=i8086-pc-win16): the core classes in the
