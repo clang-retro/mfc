@@ -3520,6 +3520,144 @@ static int CALLBACK BrowseCallback(HWND h, UINT msg, LPARAM lp, LPARAM data) {
   return 0;
 }
 
+// Shortcuts: IShellLink's fields kept through IPersistFile and
+// IPersistStream in Windows' .lnk format, read back, resolved by their
+// relative path, and opened through ShellExecute.
+static void TestShellLink() {
+  ::CoInitialize(NULL);
+  char tmpl[] = "/tmp/wintest-link-XXXXXX";
+  CHECK(mkdtemp(tmpl) != NULL);
+  std::string dir = tmpl;
+  std::wstring wdir(dir.begin(), dir.end());
+  FILE* fp = fopen((dir + "/target.txt").c_str(), "w");
+  fputs("target", fp);
+  fclose(fp);
+  IShellLinkW* link = NULL;
+  CHECK(SUCCEEDED(::CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLinkW,
+                                     (void**)&link)));
+  if (!link) return;
+  std::wstring target = wdir + L"/target.txt";
+  CHECK(SUCCEEDED(link->SetPath(target.c_str())));
+  CHECK(SUCCEEDED(link->SetDescription(L"A \x00E9t\x00E9 note \x4E2D")));
+  CHECK(SUCCEEDED(link->SetArguments(L"-x \"two words\"")));
+  CHECK(SUCCEEDED(link->SetWorkingDirectory(wdir.c_str())));
+  CHECK(SUCCEEDED(link->SetIconLocation(L"/usr/share/icons/app.ico", 3)));
+  CHECK(SUCCEEDED(link->SetShowCmd(SW_SHOWMAXIMIZED)));
+  CHECK(SUCCEEDED(link->SetHotkey(MAKEWORD('K', HOTKEYF_CONTROL | HOTKEYF_ALT))));
+  CHECK(SUCCEEDED(link->SetRelativePath(L".\\target.txt", 0)));
+  WIN32_FIND_DATAW fd;
+  WCHAR buf[MAX_PATH];
+  CHECK(link->GetPath(buf, MAX_PATH, &fd, 0) == S_OK && target == buf);
+  CHECK(wcscmp(fd.cFileName, L"target.txt") == 0 && fd.nFileSizeLow == 6);
+  IPersistFile* pf = NULL;
+  CHECK(SUCCEEDED(link->QueryInterface(IID_IPersistFile, (void**)&pf)));
+  CLSID clsid;
+  CHECK(SUCCEEDED(pf->GetClassID(&clsid)) && IsEqualCLSID(clsid, CLSID_ShellLink));
+  CHECK(pf->IsDirty() == S_OK);
+  std::wstring file = wdir + L"/Note.lnk";
+  CHECK(SUCCEEDED(pf->Save(file.c_str(), TRUE)));
+  CHECK(pf->IsDirty() == S_FALSE);
+  LPOLESTR cur = NULL;
+  CHECK(pf->GetCurFile(&cur) == S_OK && file == cur);
+  ::CoTaskMemFree(cur);
+  pf->Release();
+  link->Release();
+
+  // The file is a .lnk: its header, flags and the target's path in the
+  // LinkInfo, as Windows writes them.
+  fp = fopen((dir + "/Note.lnk").c_str(), "rb");
+  std::vector<unsigned char> bytes;
+  int c;
+  while (fp && (c = fgetc(fp)) != EOF) bytes.push_back((unsigned char)c);
+  if (fp) fclose(fp);
+  CHECK(bytes.size() > 0x4C && bytes[0] == 0x4C && bytes[4] == 0x01 && bytes[5] == 0x14 && bytes[6] == 0x02);
+  if (bytes.size() > 0x4C) {
+    DWORD flags;
+    memcpy(&flags, &bytes[0x14], 4);
+    CHECK(flags == 0xFE);  // LinkInfo, the five strings, Unicode
+    CHECK(bytes[0x3C] == SW_SHOWMAXIMIZED && bytes[0x40] == 'K');
+    std::string all(bytes.begin(), bytes.end());
+    CHECK(all.find(dir + "/target.txt") != std::string::npos);
+  }
+
+  // Read back, by another object.
+  IShellLinkA* a = NULL;
+  CHECK(SUCCEEDED(::CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLinkA, (void**)&a)));
+  CHECK(SUCCEEDED(a->QueryInterface(IID_IPersistFile, (void**)&pf)));
+  CHECK(SUCCEEDED(pf->Load(file.c_str(), STGM_READ)));
+  char abuf[MAX_PATH];
+  CHECK(a->GetPath(abuf, MAX_PATH, NULL, SLGP_RAWPATH) == S_OK && dir + "/target.txt" == abuf);
+  CHECK(SUCCEEDED(a->GetDescription(abuf, MAX_PATH)) && strcmp(abuf, "A \xC3\xA9t\xC3\xA9 note \xE4\xB8\xAD") == 0);
+  CHECK(SUCCEEDED(a->GetArguments(abuf, MAX_PATH)) && strcmp(abuf, "-x \"two words\"") == 0);
+  CHECK(SUCCEEDED(a->GetWorkingDirectory(abuf, MAX_PATH)) && dir == abuf);
+  int icon = 0;
+  CHECK(SUCCEEDED(a->GetIconLocation(abuf, MAX_PATH, &icon)) && icon == 3 &&
+        strcmp(abuf, "/usr/share/icons/app.ico") == 0);
+  int show = 0;
+  WORD hotkey = 0;
+  CHECK(SUCCEEDED(a->GetShowCmd(&show)) && show == SW_SHOWMAXIMIZED);
+  CHECK(SUCCEEDED(a->GetHotkey(&hotkey)) && hotkey == MAKEWORD('K', HOTKEYF_CONTROL | HOTKEYF_ALT));
+  CHECK(a->Resolve(NULL, SLR_NO_UI) == S_OK);
+  PIDLIST_ABSOLUTE pidl = NULL;
+  CHECK(a->GetIDList(&pidl) == S_OK && ::SHGetPathFromIDListW(pidl, buf) && target == buf);
+  ::ILFree(pidl);
+
+  // Moved together with its target: found by the relative path.
+  CHECK(::CreateDirectoryA((dir + "/moved").c_str(), NULL));
+  CHECK(::MoveFileA((dir + "/target.txt").c_str(), (dir + "/moved/target.txt").c_str()));
+  CHECK(::MoveFileA((dir + "/Note.lnk").c_str(), (dir + "/moved/Note.lnk").c_str()));
+  CHECK(SUCCEEDED(pf->Load((wdir + L"/moved/Note.lnk").c_str(), STGM_READ)));
+  CHECK(a->Resolve(NULL, SLR_NO_UI) == S_OK);
+  CHECK(a->GetPath(abuf, MAX_PATH, NULL, 0) == S_OK && dir + "/moved/target.txt" == abuf);
+  CHECK(pf->IsDirty() == S_OK);
+  CHECK(::DeleteFileA((dir + "/moved/target.txt").c_str()));
+  CHECK(FAILED(a->Resolve(NULL, SLR_NO_UI)));
+  pf->Release();
+
+  // Through a stream, and its size.
+  IPersistStream* ps = NULL;
+  CHECK(SUCCEEDED(a->QueryInterface(IID_IPersistStream, (void**)&ps)));
+  IStream* stream = NULL;
+  CHECK(SUCCEEDED(::CreateStreamOnHGlobal(NULL, TRUE, &stream)));
+  ULARGE_INTEGER max;
+  CHECK(SUCCEEDED(ps->GetSizeMax(&max)));
+  CHECK(SUCCEEDED(ps->Save(stream, TRUE)));
+  ULARGE_INTEGER end;
+  LARGE_INTEGER zero = {};
+  CHECK(SUCCEEDED(stream->Seek(zero, STREAM_SEEK_CUR, &end)) && end.QuadPart == max.QuadPart);
+  CHECK(SUCCEEDED(stream->Seek(zero, STREAM_SEEK_SET, NULL)));
+  IShellLinkW* b = NULL;
+  CHECK(SUCCEEDED(::CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLinkW, (void**)&b)));
+  IPersistStream* bs = NULL;
+  CHECK(SUCCEEDED(b->QueryInterface(IID_IPersistStream, (void**)&bs)));
+  CHECK(SUCCEEDED(bs->Load(stream)));
+  CHECK(SUCCEEDED(b->GetArguments(buf, MAX_PATH)) && wcscmp(buf, L"-x \"two words\"") == 0);
+  CHECK(SUCCEEDED(b->GetDescription(buf, 4)) && wcscmp(buf, L"A \x00E9") == 0);
+  bs->Release();
+  b->Release();
+  stream->Release();
+  // A folder shows a shortcut as a link.
+  IShellFolder* desktop = NULL;
+  CHECK(SUCCEEDED(::SHGetDesktopFolder(&desktop)));
+  LPITEMIDLIST item = NULL;
+  ULONG attrs = SFGAO_LINK;
+  std::wstring moved = wdir + L"/moved/Note.lnk";
+  CHECK(SUCCEEDED(desktop->ParseDisplayName(NULL, NULL, (LPWSTR)moved.c_str(), NULL, &item, &attrs)));
+  CHECK(attrs == SFGAO_LINK);
+  ::ILFree(item);
+  desktop->Release();
+  // Not a shortcut.
+  fp = fopen((dir + "/bad.lnk").c_str(), "w");
+  fputs("not a shortcut at all, but long enough to read a header from it...........", fp);
+  fclose(fp);
+  CHECK(SUCCEEDED(a->QueryInterface(IID_IPersistFile, (void**)&pf)));
+  CHECK(FAILED(pf->Load((wdir + L"/bad.lnk").c_str(), STGM_READ)));
+  pf->Release();
+  ps->Release();
+  a->Release();
+  ::CoUninitialize();
+}
+
 static void TestShellNamespace() {
   char tmpl[] = "/tmp/wintest-shell-XXXXXX";
   CHECK(mkdtemp(tmpl) != NULL);
@@ -4448,6 +4586,7 @@ int main() {
 #endif
   TestDecimal();
   TestShellNamespace();
+  TestShellLink();
   TestOleBits();
 #endif
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);

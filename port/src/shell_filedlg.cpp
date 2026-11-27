@@ -1094,6 +1094,7 @@ HRESULT GetShellClassObject(REFCLSID clsid, REFIID riid, void** out) {
   *out = NULL;
   if (IsEqualCLSID(clsid, CLSID_FileOpenDialog)) return open.QueryInterface(riid, out);
   if (IsEqualCLSID(clsid, CLSID_FileSaveDialog)) return save.QueryInterface(riid, out);
+  if (IsEqualCLSID(clsid, CLSID_ShellLink)) return GetShellLinkClassObject(riid, out);
   return REGDB_E_CLASSNOTREG;
 }
 
