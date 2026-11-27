@@ -386,12 +386,9 @@ bool Start() {
 
 // The screen's backingScaleFactor (Mac OS X 10.7), else its
 // userSpaceScaleFactor (10.4), else 1.
-double DesktopScale() {
-  if (g_yield) return 1;
-  NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+// A screen's pixels to a point.
+double ScaleOf(NSScreen* screen) {
   double scale = 1;
-  NSArray* screens = [NSScreen screens];
-  NSScreen* screen = [screens count] ? (NSScreen*)[screens objectAtIndex:0] : nil;
   SEL sel = NULL;
   if ([screen respondsToSelector:@selector(backingScaleFactor)]) sel = @selector(backingScaleFactor);
   else if ([screen respondsToSelector:@selector(userSpaceScaleFactor)]) sel = @selector(userSpaceScaleFactor);
@@ -403,8 +400,40 @@ double DesktopScale() {
     [call getReturnValue:&v];
     if (v >= 1 && v <= 8) scale = v;
   }
+  return scale;
+}
+
+double DesktopScale() {
+  if (g_yield) return 1;
+  NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+  NSArray* screens = [NSScreen screens];
+  double scale = [screens count] ? ScaleOf((NSScreen*)[screens objectAtIndex:0]) : 1;
   [pool release];
   return scale;
+}
+
+std::vector<Screen> Screens() {
+  NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+  std::vector<Screen> out;
+  NSArray* screens = [NSScreen screens];
+  double top = MainScreen().size.height;
+  for (NSUInteger i = 0; i < [screens count]; i++) {
+    NSScreen* screen = (NSScreen*)[screens objectAtIndex:i];
+    NSRect f = [screen frame], v = [screen visibleFrame];
+    Screen s;
+    s.x = Px(f.origin.x);
+    s.y = Px(top - f.origin.y - f.size.height);
+    s.width = Px(f.size.width);
+    s.height = Px(f.size.height);
+    s.workX = Px(v.origin.x);
+    s.workY = Px(top - v.origin.y - v.size.height);
+    s.workWidth = Px(v.size.width);
+    s.workHeight = Px(v.size.height);
+    s.scale = g_yield ? 1 : ScaleOf(screen);
+    out.push_back(s);
+  }
+  [pool release];
+  return out;
 }
 
 void SetUnits(double unitsPerPoint) {

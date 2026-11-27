@@ -320,7 +320,8 @@ NT\CurrentVersion\AppCompatFlags\Layers`, `"~ HIGHDPIAWARE"` or
 `SetProcessDpiAwarenessContext` called before the first window; a
 program that says nothing is aware. Per-monitor awareness is taken as
 system awareness: the DPI is the same on every screen and does not
-change while the program runs.
+change while the program runs (`GetDpiForMonitor` gives each monitor's
+own DPI as `MDT_RAW_DPI`).
 
 Each program watches the registry file (with inotify on Linux, kqueue on
 macOS), so saving it in an editor, or another program changing these
@@ -368,7 +369,20 @@ folders below its root and answers the `BFFM_` messages. There are no
 visual styles: the controls draw the classic look, as Windows does with
 styles turned off (scroll bar troughs in a checker, trackbar thumbs with
 a point, tabs with cut corners), so `OpenThemeData` opens nothing and
-`IsThemeActive` is false. There is one monitor, the screen. OpenGL programs draw through
+`IsThemeActive` is false.
+
+Every monitor shows up as one: RandR's monitors (or Xinerama's screens)
+on X11, the outputs on Wayland and the `NSScreen`s on macOS, the primary
+one first. `MonitorFromPoint`, `MonitorFromRect` and `MonitorFromWindow`
+pick the one a point is on or a rectangle covers most, `GetMonitorInfo`
+gives each one's rectangle and work area, `EnumDisplayMonitors`,
+`EnumDisplayDevices` and `EnumDisplaySettingsEx` list them
+(`\\.\DISPLAY1` and on), and the virtual screen's metrics hold them
+all. A window maximizes on the monitor it is on. Wayland does not say
+where windows are, so there the outputs sit side by side as the
+compositor arranges them, with the first at the origin.
+
+OpenGL programs draw through
 the OpenGL framework on macOS, and elsewhere through the generic
 implementation, a software renderer for OpenGL 1.1 in `libwinport.a`
 (see [docs/software-opengl.md](docs/software-opengl.md)).
@@ -596,7 +610,8 @@ try.
   driven through their hooks; a window shaped by SetWindowRgn (hit
   testing and clipping) and files dropped on a window (WM_DROPFILES,
   DragQueryFile and DragQueryPoint); a CWnd with a message map; and,
-  on Linux and macOS, the monitor, layered windows, PrintWindow, scroll
+  on Linux and macOS, the monitors (three of them, from
+  `WINPORT_MONITORS`, the headless backend's), layered windows, PrintWindow, scroll
   bar and cursor information, flat scroll bars, GradientFill, shadowed
   text, glyph indices and fractional widths, a metafile's description,
   themes (absent), the classic look (the checker of a scroll bar's

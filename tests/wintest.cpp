@@ -3267,6 +3267,114 @@ static void TestLayeredWindows() {
 }
 #endif
 
+#ifdef _WINPORT
+// More than one monitor: the headless backend takes them from
+// WINPORT_MONITORS, as a test sets it.
+struct MonitorSeen {
+  HMONITOR mon[4];
+  RECT rect[4];
+  int n;
+};
+static BOOL CALLBACK CountMonitor(HMONITOR m, HDC, LPRECT r, LPARAM data) {
+  MonitorSeen* s = (MonitorSeen*)data;
+  if (s->n < 4) {
+    s->mon[s->n] = m;
+    s->rect[s->n] = *r;
+  }
+  s->n++;
+  return TRUE;
+}
+
+static void TestMonitors() {
+  const char* backend = getenv("WINPORT_BACKEND");
+  if (!backend || strcmp(backend, "headless") != 0) return;
+  setenv("WINPORT_MONITORS", "1024x768+0+0,800x600+1024+100,640x480-640+0", 1);
+  CHECK(::GetSystemMetrics(SM_CMONITORS) == 3);
+  CHECK(::GetSystemMetrics(SM_XVIRTUALSCREEN) == -640 && ::GetSystemMetrics(SM_YVIRTUALSCREEN) == 0);
+  CHECK(::GetSystemMetrics(SM_CXVIRTUALSCREEN) == 640 + 1024 + 800);
+  CHECK(::GetSystemMetrics(SM_CYVIRTUALSCREEN) == 768);
+
+  POINT onFirst = {10, 10}, onSecond = {1100, 200}, onThird = {-100, 50}, gap = {1100, 50}, beyond = {5000, 650};
+  HMONITOR first = ::MonitorFromPoint(onFirst, MONITOR_DEFAULTTONULL);
+  HMONITOR second = ::MonitorFromPoint(onSecond, MONITOR_DEFAULTTONULL);
+  HMONITOR third = ::MonitorFromPoint(onThird, MONITOR_DEFAULTTONULL);
+  CHECK(first && second && third && first != second && second != third && first != third);
+  // Above the second monitor, which starts lower: no monitor, the nearest
+  // is the second, and the primary is the first.
+  CHECK(::MonitorFromPoint(gap, MONITOR_DEFAULTTONULL) == NULL);
+  CHECK(::MonitorFromPoint(gap, MONITOR_DEFAULTTONEAREST) == second);
+  CHECK(::MonitorFromPoint(gap, MONITOR_DEFAULTTOPRIMARY) == first);
+  CHECK(::MonitorFromPoint(beyond, MONITOR_DEFAULTTONEAREST) == second);
+  // A rectangle goes to the monitor it covers most.
+  RECT across = {900, 200, 1200, 300};
+  CHECK(::MonitorFromRect(&across, MONITOR_DEFAULTTONULL) == second);
+  RECT mostlyFirst = {700, 200, 1100, 300};
+  CHECK(::MonitorFromRect(&mostlyFirst, MONITOR_DEFAULTTONULL) == first);
+
+  MONITORINFOEXA mi;
+  mi.cbSize = sizeof mi;
+  CHECK(::GetMonitorInfoA(second, &mi));
+  CHECK(mi.rcMonitor.left == 1024 && mi.rcMonitor.top == 100 && mi.rcMonitor.right == 1824 &&
+        mi.rcMonitor.bottom == 700);
+  CHECK(mi.dwFlags == 0);
+  CHECK(strcmp(mi.szDevice, "\\\\.\\DISPLAY2") == 0);
+  CHECK(::GetMonitorInfoA(first, &mi) && (mi.dwFlags & MONITORINFOF_PRIMARY));
+
+  MonitorSeen seen = {};
+  CHECK(::EnumDisplayMonitors(NULL, NULL, CountMonitor, (LPARAM)&seen));
+  CHECK(seen.n == 3 && seen.mon[0] == first && seen.mon[1] == second && seen.mon[2] == third);
+  RECT clip = {1000, 0, 1100, 768};
+  seen.n = 0;
+  CHECK(::EnumDisplayMonitors(NULL, &clip, CountMonitor, (LPARAM)&seen));
+  CHECK(seen.n == 2 && seen.rect[0].left == 1000 && seen.rect[0].right == 1024 && seen.rect[1].left == 1024 &&
+        seen.rect[1].top == 100);
+
+  // The display devices: an adapter for each, and its monitor.
+  DISPLAY_DEVICEW dd;
+  dd.cb = sizeof dd;
+  CHECK(::EnumDisplayDevicesW(NULL, 1, &dd, 0));
+  CHECK(wcscmp(dd.DeviceName, L"\\\\.\\DISPLAY2") == 0);
+  CHECK((dd.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) && !(dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE));
+  CHECK(::EnumDisplayDevicesW(NULL, 0, &dd, 0) && (dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE));
+  CHECK(!::EnumDisplayDevicesW(NULL, 3, &dd, 0));
+  DISPLAY_DEVICEA da;
+  da.cb = sizeof da;
+  CHECK(::EnumDisplayDevicesA("\\\\.\\DISPLAY3", 0, &da, 0));
+  CHECK(strcmp(da.DeviceName, "\\\\.\\DISPLAY3\\Monitor0") == 0);
+  CHECK(!::EnumDisplayDevicesA("\\\\.\\DISPLAY3", 1, &da, 0));
+
+  // Each one's mode, at its place.
+  DEVMODEW dm;
+  dm.dmSize = sizeof dm;
+  dm.dmDriverExtra = 0;
+  CHECK(::EnumDisplaySettingsW(L"\\\\.\\DISPLAY2", ENUM_CURRENT_SETTINGS, &dm));
+  CHECK(dm.dmPelsWidth == 800 && dm.dmPelsHeight == 600 && dm.dmPosition.x == 1024 && dm.dmPosition.y == 100);
+  CHECK((dm.dmFields & DM_POSITION) != 0);
+  CHECK(::EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &dm) && dm.dmPelsWidth == 1024);
+  CHECK(!::EnumDisplaySettingsW(L"\\\\.\\DISPLAY9", ENUM_CURRENT_SETTINGS, &dm));
+  DEVMODEA dma;
+  dma.dmSize = sizeof dma;
+  dma.dmDriverExtra = 0;
+  CHECK(::EnumDisplaySettingsExA("\\\\.\\DISPLAY3", ENUM_CURRENT_SETTINGS, &dma, 0));
+  CHECK(dma.dmPelsWidth == 640 && dma.dmPosition.x == -640);
+  CHECK(strcmp((const char*)dma.dmDeviceName, "\\\\.\\DISPLAY3") == 0);
+
+  // A window maximized on the second monitor fills that one.
+  HWND w = ::CreateWindowW(L"STATIC", L"wide", WS_OVERLAPPEDWINDOW, 1100, 200, 300, 200, NULL, NULL, NULL, NULL);
+  CHECK(::MonitorFromWindow(w, MONITOR_DEFAULTTONULL) == second);
+  ::ShowWindow(w, SW_SHOWMAXIMIZED);
+  RECT client;
+  ::GetClientRect(w, &client);
+  POINT corner = {0, 0};
+  ::ClientToScreen(w, &corner);
+  CHECK(corner.x >= 1024 && corner.x < 1024 + 20 && client.right > 760 && client.right <= 800);
+  ::DestroyWindow(w);
+
+  unsetenv("WINPORT_MONITORS");
+  CHECK(::GetSystemMetrics(SM_CMONITORS) == 1);
+}
+#endif
+
 static void TestDisplayAndDrawing() {
   // One monitor: the screen, with its work area.
   POINT origin = {0, 0}, away = {100000, 100000};
@@ -4581,6 +4689,9 @@ int main() {
   TestWinHelp();
   TestPlgBlt();
   TestDisplayAndDrawing();
+#ifdef _WINPORT
+  TestMonitors();
+#endif
 #ifdef _WINPORT
   TestLayeredWindows();
 #endif

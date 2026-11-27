@@ -507,6 +507,21 @@ struct WaylandBackend : Backend {
   void* outputManager = NULL;  // zxdg_output_manager_v1
   int outputScale = 1;         // the output's integer scale
   SIZE logical = {0, 0};       // the output's size in surface units, from xdg-output
+  // Every output, the first (whose are the fields above) as the primary
+  // monitor: its mode, scale, and place and size in surface units.
+  struct Output {
+    WaylandBackend* b = NULL;
+    wl_output* output = NULL;
+    uint32_t name = 0;  // the global's
+    void* xdg = NULL;
+    SIZE mode = {0, 0};
+    int scale = 1;
+    POINT at = {0, 0};       // from wl_output's geometry, else xdg-output
+    SIZE logical = {0, 0};
+    bool xdgPlace = false;   // at is xdg-output's
+  };
+  std::vector<Output*> outputs;
+  bool registryDone = false;  // the globals at the start have been bound
   double units = 0;            // the program's pixels in a surface unit, once known
   void* decorationManager = NULL;  // zxdg_decoration_manager_v1, likewise
   void* iconManager = NULL;  // xdg_toplevel_icon_manager_v1, when the compositor has it
@@ -589,13 +604,8 @@ struct WaylandBackend : Backend {
       dpy = NULL;
       return false;
     }
-    if (outputManager && output) {
-      void* xo = Req(outputManager, XDG_OUTPUT_MANAGER_GET_XDG_OUTPUT, &zxdg_output_iface, NULL, output);
-      static void (*const xl[])(void) = {(void (*)(void))XdgOutPosition, (void (*)(void))XdgOutSize,
-                                         (void (*)(void))XdgOutDone, (void (*)(void))XdgOutName,
-                                         (void (*)(void))XdgOutName};
-      winport_wl_proxy_add_listener((wl_proxy*)xo, (void (**)(void))xl, this);
-    }
+    for (Output* o : outputs) WatchXdgOutput(o);
+    registryDone = true;
     wl.wl_display_roundtrip(dpy);  // the seat's devices, the output's mode and scale
     if (textManager && seat) {
       textInput = Req(textManager, TEXT_INPUT_MANAGER_GET_TEXT_INPUT, &zwp_text_input_iface, NULL, seat);
@@ -667,6 +677,37 @@ struct WaylandBackend : Backend {
   }
   int ToSurface(int v) { return (int)(v / Units() + (v >= 0 ? 0.5 : -0.5)); }
   int FromSurface(double v) { return (int)(v * Units() + (v >= 0 ? 0.5 : -0.5)); }
+  // The monitors: the outputs at their places, the first one's at the
+  // origin, in the program's pixels.
+  std::vector<Monitor> Monitors() override {
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (outputs.empty()) return Backend::Monitors();
+    double u = Units();
+    std::vector<Monitor> m;
+    POINT origin = outputs[0]->at;
+    for (Output* o : outputs) {
+      SIZE size = o->logical;
+      double scale = o->scale;
+      if (size.cx <= 0 && o->mode.cx > 0) size = SIZE{o->mode.cx / o->scale, o->mode.cy / o->scale};
+      if (size.cx <= 0) continue;
+      if (viewporter && o->logical.cx > 0 && o->mode.cx > 0) {
+        double s = (double)o->mode.cx / o->logical.cx;
+        scale = std::max(1.0, (int)(s * 120 + 0.5) / 120.0);
+      }
+      int x = (int)((o->at.x - origin.x) * u), y = (int)((o->at.y - origin.y) * u);
+      RECT r = {x, y, x + (int)(size.cx * u + 0.5), y + (int)(size.cy * u + 0.5)};
+      m.push_back(Monitor{r, r, scale});
+    }
+    if (m.empty()) return Backend::Monitors();
+    // The first is the screen, as ScreenSize has it.
+    SIZE s = ScreenSize();
+    m[0].rect.right = m[0].rect.left + s.cx;
+    m[0].rect.bottom = m[0].rect.top + s.cy;
+    m[0].work = m[0].rect;
+    m[0].scale = DesktopScale();
+    return m;
+  }
+
   // The screen in the program's pixels.
   SIZE ScreenSize() override {
     double s = DesktopScale(), u = Units();
@@ -706,13 +747,30 @@ struct WaylandBackend : Backend {
       b->viewporter = wl_registry_bind(r, name, &wp_viewporter_iface, 1);
     } else if (strcmp(iface, "zxdg_output_manager_v1") == 0 && !b->outputManager && version >= 2) {
       b->outputManager = wl_registry_bind(r, name, &zxdg_output_manager_iface, 2);
-    } else if (strcmp(iface, "wl_output") == 0 && !b->output && version >= 2) {
-      b->output = (wl_output*)wl_registry_bind(r, name, &wl_output_interface, 2);
+    } else if (strcmp(iface, "wl_output") == 0 && version >= 2) {
+      Output* o = new Output;
+      o->b = b;
+      o->output = (wl_output*)wl_registry_bind(r, name, &wl_output_interface, 2);
+      o->name = name;
+      if (!b->output) b->output = o->output;
       static const wl_output_listener ol = {OutGeometry, OutMode, OutDone, OutScale, NULL, NULL};
-      wl_output_add_listener(b->output, &ol, b);
+      wl_output_add_listener(o->output, &ol, o);
+      b->outputs.push_back(o);
+      // One that comes later is watched at once.
+      if (b->dpy && b->outputManager && b->registryDone) b->WatchXdgOutput(o);
     }
   }
-  static void GlobalRemove(void*, wl_registry*, uint32_t) {}
+  // An output unplugged stops being a monitor; the first one's fields
+  // stay as they were.
+  static void GlobalRemove(void* data, wl_registry*, uint32_t name) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    std::lock_guard<std::recursive_mutex> g(b->lock);
+    for (size_t i = 1; i < b->outputs.size(); i++)
+      if (b->outputs[i]->name == name) {
+        b->outputs.erase(b->outputs.begin() + (long)i);
+        return;
+      }
+  }
   // The mode the compositor chose. It may insist on drawing the frame
   // itself; the window's caption is then drawn beneath its title bar.
   static void DecorationConfigure(void*, void*, uint32_t) {}
@@ -723,18 +781,43 @@ struct WaylandBackend : Backend {
     (void)data;
     Req(base, XDG_WM_BASE_PONG, NULL, serial);
   }
-  static void OutGeometry(void*, wl_output*, int32_t, int32_t, int32_t, int32_t, int32_t, const char*, const char*,
-                          int32_t) {}
+  // Each output's events; the first one's also set the screen's fields.
+  static void OutGeometry(void* data, wl_output*, int32_t x, int32_t y, int32_t, int32_t, int32_t, const char*,
+                          const char*, int32_t) {
+    Output* o = (Output*)data;
+    if (!o->xdgPlace) o->at = POINT{x, y};
+  }
   static void OutMode(void* data, wl_output*, uint32_t flags, int32_t width, int32_t height, int32_t) {
-    if ((flags & WL_OUTPUT_MODE_CURRENT) && width > 0 && height > 0) ((WaylandBackend*)data)->screen = {width, height};
+    Output* o = (Output*)data;
+    if (!(flags & WL_OUTPUT_MODE_CURRENT) || width <= 0 || height <= 0) return;
+    o->mode = {width, height};
+    if (o->output == o->b->output) o->b->screen = {width, height};
   }
   static void OutDone(void*, wl_output*) {}
   static void OutScale(void* data, wl_output*, int32_t scale) {
-    if (scale >= 1) ((WaylandBackend*)data)->outputScale = scale;
+    Output* o = (Output*)data;
+    if (scale < 1) return;
+    o->scale = scale;
+    if (o->output == o->b->output) o->b->outputScale = scale;
   }
-  static void XdgOutPosition(void*, void*, int32_t, int32_t) {}
+  void WatchXdgOutput(Output* o) {
+    if (!outputManager || o->xdg) return;
+    o->xdg = Req(outputManager, XDG_OUTPUT_MANAGER_GET_XDG_OUTPUT, &zxdg_output_iface, NULL, o->output);
+    static void (*const xl[])(void) = {(void (*)(void))XdgOutPosition, (void (*)(void))XdgOutSize,
+                                       (void (*)(void))XdgOutDone, (void (*)(void))XdgOutName,
+                                       (void (*)(void))XdgOutName};
+    winport_wl_proxy_add_listener((wl_proxy*)o->xdg, (void (**)(void))xl, o);
+  }
+  static void XdgOutPosition(void* data, void*, int32_t x, int32_t y) {
+    Output* o = (Output*)data;
+    o->at = POINT{x, y};
+    o->xdgPlace = true;
+  }
   static void XdgOutSize(void* data, void*, int32_t width, int32_t height) {
-    if (width > 0 && height > 0) ((WaylandBackend*)data)->logical = {width, height};
+    Output* o = (Output*)data;
+    if (width <= 0 || height <= 0) return;
+    o->logical = {width, height};
+    if (o->output == o->b->output) o->b->logical = {width, height};
   }
   static void XdgOutDone(void*, void*) {}
   static void XdgOutName(void*, void*, const char*) {}

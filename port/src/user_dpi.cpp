@@ -207,6 +207,7 @@ bool NotASize(int index) {
     case SM_CXVIRTUALSCREEN: case SM_CYVIRTUALSCREEN: case SM_CXMAXIMIZED: case SM_CYMAXIMIZED:
     case SM_CXBORDER: case SM_CYBORDER: case SM_CMOUSEBUTTONS: case SM_MOUSEPRESENT:
     case SM_MOUSEWHEELPRESENT: case SM_CMONITORS: case SM_SAMEDISPLAYFORMAT:
+    case SM_XVIRTUALSCREEN: case SM_YVIRTUALSCREEN:
       return true;
     default:
       return false;
@@ -308,7 +309,11 @@ UINT WINAPI GetDpiForWindow(HWND h) {
 
 HRESULT WINAPI GetDpiForMonitor(HMONITOR m, MONITOR_DPI_TYPE type, UINT* x, UINT* y) {
   if (!m || !x || !y || type < MDT_EFFECTIVE_DPI || type > MDT_RAW_DPI) return E_INVALIDARG;
-  *x = *y = (UINT)SystemDpi();
+  double scale = MonitorScale(m);
+  if (scale <= 0) return E_INVALIDARG;
+  // The program draws at one DPI on every monitor (the system's); the
+  // raw DPI is the monitor's own.
+  *x = *y = type == MDT_RAW_DPI ? (UINT)(scale * 96 + 0.5) : (UINT)SystemDpi();
   return S_OK;
 }
 

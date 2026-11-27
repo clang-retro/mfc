@@ -133,6 +133,11 @@ Region VisibleRegion(Window* w, bool client);
 // when it has none); the caller checks the rectangle.
 bool InShape(Window* w, POINT screen);
 
+// The bounds of all the monitors (user_extra.cpp).
+RECT VirtualScreen();
+// A monitor's scale, or 0 for no such monitor.
+double MonitorScale(HMONITOR m);
+
 // Files dropped from the desktop (shell_drop.cpp). MakeDrop makes the
 // HDROP of WM_DROPFILES; DropTarget is the window at a screen point that
 // takes files (WS_EX_ACCEPTFILES), or NULL; DropFiles posts the drop to
@@ -435,6 +440,17 @@ struct Backend {
   // Waits up to timeout ms for input, handing what comes to the input
   // functions above; returns early when WakeBackend is called. Called
   // without the lock.
+  // The monitors, the primary one first: each one's rectangle and work
+  // area in screen coordinates, and its scale (as DesktopScale). The
+  // default is the one screen of ScreenSize and WorkArea.
+  struct Monitor {
+    RECT rect, work;
+    double scale;
+  };
+  virtual std::vector<Monitor> Monitors() {
+    SIZE s = ScreenSize();
+    return std::vector<Monitor>{Monitor{RECT{0, 0, s.cx, s.cy}, WorkArea(), DesktopScale()}};
+  }
   virtual void Wait(DWORD timeout) = 0;
   virtual void Wake() = 0;
 };

@@ -1316,7 +1316,13 @@ BOOL WINAPI ShowWindow(HWND h, int cmd) {
           target = MakeRect(0, 0, w->parent->client.right - w->parent->client.left,
                             w->parent->client.bottom - w->parent->client.top);
         } else {
-          target = GetBackend()->WorkArea();
+          // The work area of the monitor the window is on.
+          MONITORINFO mi = {sizeof mi};
+          RECT r = w->rect;
+          if (GetMonitorInfoW(MonitorFromRect(&r, MONITOR_DEFAULTTONEAREST), &mi))
+            target = mi.rcWork;
+          else
+            target = GetBackend()->WorkArea();
         }
         RECT in = FrameInsets(w->style, w->exStyle, false);
         target.left -= in.left;

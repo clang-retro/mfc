@@ -46,6 +46,24 @@ struct HeadlessBackend : Backend {
   }
   const char* Name() override { return "headless"; }
   SIZE ScreenSize() override { return size; }
+  // WINPORT_MONITORS gives more monitors than the one screen, for tests:
+  // "1024x768+0+0,800x600+1024+0", each one's size and place, the
+  // primary one first. It is read each time.
+  std::vector<Monitor> Monitors() override {
+    std::vector<Monitor> m;
+    const char* s = getenv("WINPORT_MONITORS");
+    while (s && *s) {
+      int w, h, x, y, n = 0;
+      if (sscanf(s, "%dx%d%d%d%n", &w, &h, &x, &y, &n) != 4 || w <= 0 || h <= 0) break;
+      RECT r = {x, y, x + w, y + h};
+      m.push_back(Monitor{r, r, scale});
+      s += n;
+      if (*s != ',') break;
+      s++;
+    }
+    if (m.empty()) return Backend::Monitors();
+    return m;
+  }
   double DesktopScale() override { return scale; }
   void Wait(DWORD timeout) override {
     std::unique_lock<std::mutex> g(lock);

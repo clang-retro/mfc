@@ -197,6 +197,16 @@ struct CocoaBackend : Backend {
     return RECT{x, y, x + w, y + h};
   }
 
+  std::vector<Monitor> Monitors() override {
+    Units();
+    std::vector<Monitor> m;
+    for (const cocoa::Screen& s : cocoa::Screens())
+      m.push_back(Monitor{RECT{s.x, s.y, s.x + s.width, s.y + s.height},
+                          RECT{s.workX, s.workY, s.workX + s.workWidth, s.workY + s.workHeight}, s.scale});
+    if (m.empty()) return Backend::Monitors();
+    return m;
+  }
+
   // Menus, drop-downs and tooltips float; windows with a caption, or
   // shown in the Dock, are ordinary windows.
   static bool IsPopup(Window* w) {
