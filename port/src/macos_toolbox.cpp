@@ -219,7 +219,8 @@ enum { kAppleMenu = 128, kFileMenu = 129, kExitItem = 1 };
 void MakeMenuBar() {
   static const unsigned char apple[] = {1, 0x14};  // the Apple symbol
   static const unsigned char file[] = {4, 'F', 'i', 'l', 'e'};
-  static const unsigned char exitItem[] = {4, 'E', 'x', 'i', 't'};
+  // "/Q" gives Exit the key Command-Q, as Quit has in Mac programs.
+  static const unsigned char exitItem[] = {6, 'E', 'x', 'i', 't', '/', 'Q'};
   // The program's name (CurApName), or "File" if it is not there.
   const unsigned char* name = LMGetCurApName();
   if (name[0] == 0 || name[0] > 31) name = file;
@@ -274,6 +275,16 @@ void Handle(EventRecord& ev) {
       }
       break;
     case keyDown:
+      // A Command key of the Mac menu bar (Command-Q) chooses its item.
+      // Other Command keys go to the program as Control keys.
+      if (ev.modifiers & cmdKey) {
+        long choice = MenuKey((CharParameter)(ev.message & charCodeMask));
+        if ((choice >> 16) != 0) {
+          Choose(choice);
+          break;
+        }
+      }
+      // fall through
     case autoKey:
     case keyUp:
       OnKey(KeyOwner(), ev.what != keyUp, (unsigned)(ev.message & keyCodeMask) >> 8,
