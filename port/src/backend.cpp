@@ -133,6 +133,7 @@ void RegisterSystemClasses() {
   RegisterListClasses();
   RegisterMdiClass();
   RegisterCommonControls();
+  RegisterImeClass();
 }
 
 }  // namespace winport

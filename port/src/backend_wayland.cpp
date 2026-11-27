@@ -59,6 +59,7 @@
 #undef wl_proxy_get_user_data
 
 #include <xkbcommon/xkbcommon.h>
+#include <xkbcommon/xkbcommon-compose.h>
 
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -111,6 +112,13 @@ namespace {
   F(xkb_state_update_mask) F(xkb_state_key_get_one_sym) F(xkb_state_key_get_utf32)                         \
   F(xkb_state_mod_name_is_active) F(xkb_keymap_key_get_syms_by_level) F(xkb_keymap_key_repeats)
 
+// Compose sequences (a dead key and a letter, or the Compose key), when
+// libxkbcommon has them.
+#define COMPOSE_FUNCTIONS(F)                                                                   \
+  F(xkb_compose_table_new_from_locale) F(xkb_compose_table_unref) F(xkb_compose_state_new)   \
+  F(xkb_compose_state_unref) F(xkb_compose_state_feed) F(xkb_compose_state_reset)           \
+  F(xkb_compose_state_get_status) F(xkb_compose_state_get_utf8)
+
 #define CURSOR_FUNCTIONS(F) F(wl_cursor_theme_load) F(wl_cursor_theme_get_cursor) F(wl_cursor_image_get_buffer)
 
 void* Open(const char* a, const char* b) {
@@ -123,8 +131,10 @@ struct WlLib {
   WL_FUNCTIONS(F)
   XKB_FUNCTIONS(F)
   CURSOR_FUNCTIONS(F)
+  COMPOSE_FUNCTIONS(F)
 #undef F
   bool cursors = false;
+  bool compose = false;
   bool Load() {
     void* lib = Open("libwayland-client.so.0", "libwayland-client.so");
     void* xkb = Open("libxkbcommon.so.0", "libxkbcommon.so");
@@ -148,6 +158,12 @@ struct WlLib {
   name = (decltype(&::name))dlsym(xkb, #name); \
   if (!name) return false;
     XKB_FUNCTIONS(F)
+#undef F
+    compose = true;
+#define F(name)                                \
+  name = (decltype(&::name))dlsym(xkb, #name); \
+  if (!name) compose = false;
+    COMPOSE_FUNCTIONS(F)
 #undef F
     // Without libwayland-cursor the compositor's own pointer shows.
     if (void* cur = Open("libwayland-cursor.so.0", "libwayland-cursor.so")) {
@@ -236,6 +252,7 @@ wl_interface xdg_popup_iface = {"xdg_popup", 1, 2, kPopupRequests, 2, kPopupEven
 
 extern const wl_interface* iconTypes[6];
 extern const wl_interface* scaleTypes[8];
+extern const wl_interface* textTypes[7];
 
 void FillXdgTypes() {
   xdgTypes[6] = &wl_surface_interface;
@@ -247,6 +264,8 @@ void FillXdgTypes() {
   iconTypes[4] = &wl_buffer_interface;
   scaleTypes[5] = &wl_surface_interface;
   scaleTypes[7] = &wl_output_interface;
+  textTypes[5] = &wl_seat_interface;
+  textTypes[6] = &wl_surface_interface;
 }
 
 // ---------------------------------------------------------------
@@ -323,6 +342,38 @@ wl_interface wp_viewporter_iface = {"wp_viewporter", 1, 2, kViewporterRequests, 
 wl_interface wp_viewport_iface = {"wp_viewport", 1, 3, kViewportRequests, 0, NULL};
 wl_interface zxdg_output_manager_iface = {"zxdg_output_manager_v1", 2, 2, kOutputManagerRequests, 0, NULL};
 wl_interface zxdg_output_iface = {"zxdg_output_v1", 2, 1, kXdgOutputRequests, 5, kXdgOutputEvents};
+
+// text-input, unstable version 3: the desktop's input method. It sends
+// the text it is composing and the text it has finished for the surface
+// with the keyboard, and places its candidates by the cursor rectangle.
+
+enum { TEXT_INPUT_MANAGER_DESTROY, TEXT_INPUT_MANAGER_GET_TEXT_INPUT };
+enum {
+  TEXT_INPUT_DESTROY, TEXT_INPUT_ENABLE, TEXT_INPUT_DISABLE, TEXT_INPUT_SET_SURROUNDING_TEXT,
+  TEXT_INPUT_SET_TEXT_CHANGE_CAUSE, TEXT_INPUT_SET_CONTENT_TYPE, TEXT_INPUT_SET_CURSOR_RECTANGLE, TEXT_INPUT_COMMIT
+};
+
+extern wl_interface zwp_text_input_manager_iface, zwp_text_input_iface;
+extern const wl_interface* textTypes[7];
+const wl_interface* textTypes[7] = {
+    NULL, NULL, NULL, NULL,             // 0: untyped arguments
+    &zwp_text_input_iface, NULL,        // 4: get_text_input (wl_seat)
+    NULL,                               // 6: enter and leave (wl_surface)
+};
+const wl_message kTextManagerRequests[] = {{"destroy", "", textTypes}, {"get_text_input", "no", textTypes + 4}};
+const wl_message kTextRequests[] = {{"destroy", "", textTypes},
+                                    {"enable", "", textTypes},
+                                    {"disable", "", textTypes},
+                                    {"set_surrounding_text", "sii", textTypes},
+                                    {"set_text_change_cause", "u", textTypes},
+                                    {"set_content_type", "uu", textTypes},
+                                    {"set_cursor_rectangle", "iiii", textTypes},
+                                    {"commit", "", textTypes}};
+const wl_message kTextEvents[] = {{"enter", "o", textTypes + 6},       {"leave", "o", textTypes + 6},
+                                  {"preedit_string", "?sii", textTypes}, {"commit_string", "?s", textTypes},
+                                  {"delete_surrounding_text", "uu", textTypes}, {"done", "u", textTypes}};
+wl_interface zwp_text_input_manager_iface = {"zwp_text_input_manager_v3", 1, 2, kTextManagerRequests, 0, NULL};
+wl_interface zwp_text_input_iface = {"zwp_text_input_v3", 1, 8, kTextRequests, 6, kTextEvents};
 
 // A request on an xdg object; iface is the new object's, if it makes one.
 template <typename... A>
@@ -496,6 +547,16 @@ struct WaylandBackend : Backend {
   int repeatRate = 25, repeatDelay = 400;
   uint32_t repeatKey = 0;
   ULONGLONG repeatNext = 0;
+  xkb_compose_state* compose = NULL;
+  // The input method: the text-input object, the surface it is for, and
+  // what the next done event applies.
+  void* textManager = NULL;
+  void* textInput = NULL;
+  Native* textIn = NULL;
+  std::string pendingPreedit, pendingCommit;
+  int pendingCursor = -1;
+  std::wstring shownPreedit;
+  int shownCursor = 0;
 
   bool Start() {
     if (!wl.Load()) return false;
@@ -521,6 +582,13 @@ struct WaylandBackend : Backend {
       winport_wl_proxy_add_listener((wl_proxy*)xo, (void (**)(void))xl, this);
     }
     wl.wl_display_roundtrip(dpy);  // the seat's devices, the output's mode and scale
+    if (textManager && seat) {
+      textInput = Req(textManager, TEXT_INPUT_MANAGER_GET_TEXT_INPUT, &zwp_text_input_iface, NULL, seat);
+      static void (*const tl[])(void) = {(void (*)(void))TextEnter,  (void (*)(void))TextLeave,
+                                         (void (*)(void))TextPreedit, (void (*)(void))TextCommit,
+                                         (void (*)(void))TextDelete, (void (*)(void))TextDone};
+      winport_wl_proxy_add_listener((wl_proxy*)textInput, (void (**)(void))tl, this);
+    }
     if (dataManager && seat) {
       dataDevice = wl_data_device_manager_get_data_device(dataManager, seat);
       static const wl_data_device_listener dl = {DataOffer, DataEnter, DataLeave, DataMotion, DataDrop, DataSelection};
@@ -531,6 +599,18 @@ struct WaylandBackend : Backend {
       fcntl(wakePipe[1], F_SETFL, O_NONBLOCK);
     }
     xkbCtx = wl.xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    if (xkbCtx && wl.compose) {
+      // The compose sequences of the locale's language, as other programs
+      // have them.
+      const char* locale = getenv("LC_ALL");
+      if (!locale || !*locale) locale = getenv("LC_CTYPE");
+      if (!locale || !*locale) locale = getenv("LANG");
+      if (!locale || !*locale) locale = "C";
+      if (xkb_compose_table* t = wl.xkb_compose_table_new_from_locale(xkbCtx, locale, XKB_COMPOSE_COMPILE_NO_FLAGS)) {
+        compose = wl.xkb_compose_state_new(t, XKB_COMPOSE_STATE_NO_FLAGS);
+        wl.xkb_compose_table_unref(t);
+      }
+    }
     if (wl.cursors) {
       // The theme's cursors at the output's scale, shown at that buffer
       // scale so that they keep their size in surface units.
@@ -605,6 +685,8 @@ struct WaylandBackend : Backend {
     } else if (strcmp(iface, "wl_data_device_manager") == 0 && !b->dataManager) {
       b->dataManager = (wl_data_device_manager*)wl_registry_bind(r, name, &wl_data_device_manager_interface,
                                                                  std::min<uint32_t>(version, 3));
+    } else if (strcmp(iface, "zwp_text_input_manager_v3") == 0 && !b->textManager) {
+      b->textManager = wl_registry_bind(r, name, &zwp_text_input_manager_iface, 1);
     } else if (strcmp(iface, "wp_viewporter") == 0 && !b->viewporter) {
       b->viewporter = wl_registry_bind(r, name, &wp_viewporter_iface, 1);
     } else if (strcmp(iface, "zxdg_output_manager_v1") == 0 && !b->outputManager && version >= 2) {
@@ -862,6 +944,7 @@ struct WaylandBackend : Backend {
     natives.erase(n);
     if (kbdIn == n) kbdIn = NULL;
     if (ptrIn == n) ptrIn = NULL;
+    if (textIn == n) textIn = NULL;
     w->native = NULL;
     delete n;
     if (dpy) wl.wl_display_flush(dpy);
@@ -1512,16 +1595,133 @@ struct WaylandBackend : Backend {
     if (!vk) vk = VkOf(sym, &ext);
     LPARAM lp = 1 | ((LPARAM)(key & 0xFF) << 16) | (ext ? (1 << 24) : 0);
     wchar_t ch = 0;
-    if (down) {
+    std::wstring composed;
+    bool swallowed = false;
+    if (down && compose && wl.xkb_compose_state_feed(compose, sym) == XKB_COMPOSE_FEED_ACCEPTED) {
+      switch (wl.xkb_compose_state_get_status(compose)) {
+        case XKB_COMPOSE_COMPOSING:
+          swallowed = true;  // a dead key: the next key finishes it
+          break;
+        case XKB_COMPOSE_COMPOSED: {
+          char buf[64];
+          int len = wl.xkb_compose_state_get_utf8(compose, buf, sizeof buf);
+          if (len > 0 && len < (int)sizeof buf) composed = Widen(buf, len);
+          wl.xkb_compose_state_reset(compose);
+          swallowed = true;
+          break;
+        }
+        case XKB_COMPOSE_CANCELLED:
+          wl.xkb_compose_state_reset(compose);
+          swallowed = true;
+          break;
+        default:
+          break;
+      }
+    }
+    if (down && !swallowed) {
       uint32_t u = wl.xkb_state_key_get_utf32(xkbState, code);
       if (sym == XKB_KEY_KP_Enter) u = '\r';
       if (u && u != 0x7F && u < 0x110000) ch = (wchar_t)u;
     }
+    if (swallowed) lp |= 0x02000000;  // TranslateMessage makes nothing of it either
     // The key's text comes from xkbcommon, with its layout, rather than
     // from TranslateMessage (bit 25 tells it so).
     if (ch) lp |= 0x02000000;
     if (vk) KeyInput(n->w, down ? WM_KEYDOWN : WM_KEYUP, vk, lp);
     if (ch) CharInput(n->w, ch);
+    for (wchar_t c : composed) CharInput(n->w, c);
+  }
+
+  // ---------------------------------------------------------------
+  // The input method
+
+  // Tells the input method where the candidates go: by the caret of the
+  // window with the focus.
+  void SendCursorRect() {
+    Native* n = textIn;
+    RECT r;
+    if (textInput && n && ImeCursorRect(n->w, &r)) SendCursorRect(r);
+  }
+  void SendCursorRect(const RECT& r) {
+    Req(textInput, TEXT_INPUT_SET_CURSOR_RECTANGLE, NULL, ToSurface(r.left), ToSurface(r.top),
+        std::max(1, ToSurface(r.right - r.left)), std::max(1, ToSurface(r.bottom - r.top)));
+  }
+  void EnableText() {
+    Req(textInput, TEXT_INPUT_ENABLE, NULL);
+    Req(textInput, TEXT_INPUT_SET_CONTENT_TYPE, NULL, 0u, 0u);
+    SendCursorRect();
+    Req(textInput, TEXT_INPUT_COMMIT, NULL);
+  }
+  static void TextEnter(void* data, void*, wl_surface* s) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    b->textIn = Of(s);
+    if (b->textIn) b->EnableText();
+  }
+  static void TextLeave(void* data, void*, wl_surface*) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    if (b->textIn && !b->shownPreedit.empty()) ImePreedit(b->textIn->w, L"", 0);
+    b->shownPreedit.clear();
+    b->textIn = NULL;
+    Req(b->textInput, TEXT_INPUT_DISABLE, NULL);
+    Req(b->textInput, TEXT_INPUT_COMMIT, NULL);
+  }
+  static void TextPreedit(void* data, void*, const char* text, int32_t begin, int32_t) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    b->pendingPreedit = text ? text : "";
+    b->pendingCursor = begin;
+  }
+  static void TextCommit(void* data, void*, const char* text) {
+    ((WaylandBackend*)data)->pendingCommit = text ? text : "";
+  }
+  // Around the cursor: the program does not tell the input method its
+  // text, so there is none to delete.
+  static void TextDelete(void*, void*, uint32_t, uint32_t) {}
+  static void TextDone(void* data, void*, uint32_t) {
+    WaylandBackend* b = (WaylandBackend*)data;
+    Native* n = b->textIn;
+    std::string commit, preedit;
+    commit.swap(b->pendingCommit);
+    preedit.swap(b->pendingPreedit);
+    int cursor = b->pendingCursor;
+    b->pendingCursor = -1;
+    if (!n) return;
+    if (!commit.empty()) {
+      ImeCommit(n->w, Widen(commit.c_str(), (int)commit.size()));
+      b->shownPreedit.clear();
+    }
+    std::wstring p = Widen(preedit.c_str(), (int)preedit.size());
+    // The cursor is a byte in the UTF-8; -1 hides it.
+    int at = cursor < 0 || cursor > (int)preedit.size() ? (int)p.size() : (int)Widen(preedit.c_str(), cursor).size();
+    if (p != b->shownPreedit || at != b->shownCursor) {
+      if (!p.empty() || !b->shownPreedit.empty()) ImePreedit(n->w, p, at);
+      b->shownPreedit = p;
+      b->shownCursor = at;
+    }
+  }
+  // Called by the program's threads, which may not take the lock while
+  // asking where the caret is.
+  void ImeCursorMoved(Window* top) override {
+    RECT r;
+    if (!textInput || !ImeCursorRect(top, &r)) return;
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (!textIn || textIn->w != top) return;
+    SendCursorRect(r);
+    Req(textInput, TEXT_INPUT_COMMIT, NULL);
+    Wake();
+  }
+  void ImeReset(Window* top) override {
+    RECT r;
+    bool have = textInput && ImeCursorRect(top, &r);
+    std::lock_guard<std::recursive_mutex> g(lock);
+    if (compose) wl.xkb_compose_state_reset(compose);
+    if (!textInput || !textIn || textIn->w != top) return;
+    // Enabling again starts the input method afresh.
+    shownPreedit.clear();
+    Req(textInput, TEXT_INPUT_ENABLE, NULL);
+    Req(textInput, TEXT_INPUT_SET_CONTENT_TYPE, NULL, 0u, 0u);
+    if (have) SendCursorRect(r);
+    Req(textInput, TEXT_INPUT_COMMIT, NULL);
+    Wake();
   }
   static void KbdKey(void* data, wl_keyboard*, uint32_t serial, uint32_t, uint32_t key, uint32_t state) {
     WaylandBackend* b = (WaylandBackend*)data;
