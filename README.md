@@ -412,7 +412,11 @@ shows nothing until it has attributes or a picture; and once
 `SetWindowRgn` cuts a top-level window's shape on the screen the same
 way. On X11 a translucent window gets a 32-bit visual when a compositing
 manager runs; without one, its color key and region become a shape
-(SHAPE extension) and its alpha is not shown. Its input shape follows
+(SHAPE extension), and its alpha blends with a picture of what the
+screen showed under it, taken before the window is shown and, for the
+newly covered part, when it moves. That picture does not follow a
+window underneath that changes later; X11 itself cannot blend without a
+compositing manager. Its input shape follows
 the transparent pixels either way. On Wayland it is an ARGB buffer with
 an input region, and on macOS a window that is not opaque. The desktop's
 DC (`GetDC(NULL)`) reads the screen with translucent windows blended.

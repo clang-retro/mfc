@@ -9,9 +9,12 @@
 //
 // A translucent window (layered, or with a window region) gets a 32-bit
 // visual with premultiplied alpha when a compositing manager runs, and
-// otherwise a bounding shape of its visible pixels; either way its input
-// shape lets the mouse through where it is fully transparent. Shapes take
-// libXext's SHAPE extension, loaded when there is one.
+// otherwise a bounding shape of its visible pixels, blended with a
+// picture of what the screen showed under it, taken from the root window
+// before it is shown and, for the part that is new, when it moves;
+// either way its input shape lets the mouse through where it is fully
+// transparent. Shapes take libXext's SHAPE extension, loaded when there
+// is one.
 //
 // Part of clang-retro MFC, an independent implementation of the MFC API.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -49,7 +52,8 @@ namespace {
   F(XCreateFontCursor) F(XRaiseWindow) F(XSetInputFocus) F(XWarpPointer) F(XGetWindowAttributes)               \
   F(XTranslateCoordinates) F(XSync) F(XFreeCursor) F(XSetSelectionOwner) F(XGetSelectionOwner)          \
   F(XConvertSelection) F(XGetWindowProperty) F(XFree) F(XDeleteProperty) F(XSendEvent) F(XCheckTypedWindowEvent) F(XCheckTypedEvent) \
-  F(XMatchVisualInfo) F(XCreateColormap) F(XResourceManagerString) F(XQueryPointer) F(XChangeActivePointerGrab)
+  F(XMatchVisualInfo) F(XCreateColormap) F(XResourceManagerString) F(XQueryPointer) F(XChangeActivePointerGrab) \
+  F(XGetImage)
 
 // The input method (XIM), when libX11 has it.
 #define XIM_FUNCTIONS(F)                                                                                 \
@@ -230,6 +234,10 @@ struct Native {
   bool managed = true;  // by the window manager, rather than override-redirect
   int width = 0, height = 0;
   bool argb = false;  // a 32-bit visual with alpha
+  // Without a compositing manager, what the screen showed under a
+  // translucent window, in screen coordinates, for blending.
+  std::vector<DWORD> under;
+  RECT underRect = {0, 0, 0, 0};
   // The shapes last given the server, and whether any were.
   bool shaped = false;
   std::vector<RECT> input, bounding;
@@ -598,6 +606,44 @@ struct X11Backend : Backend {
     return n;
   }
 
+  // Takes what the screen shows under rect for a translucent window
+  // without a compositing manager: from the old picture where the window
+  // was (the screen there shows the window itself), from the root window
+  // elsewhere. Outside the screen it is black.
+  void Grab(Native* n, const RECT& rect) {
+    int w = rect.right - rect.left, h = rect.bottom - rect.top;
+    if (w <= 0 || h <= 0) return;
+    std::vector<DWORD> px((size_t)w * h, 0);
+    RECT screenRect = {0, 0, DisplayWidth(dpy, screen), DisplayHeight(dpy, screen)};
+    RECT grab;
+    if (IntersectRect(&grab, &rect, &screenRect)) {
+      XImage* img = x.XGetImage(dpy, root, grab.left, grab.top, (unsigned)(grab.right - grab.left),
+                                (unsigned)(grab.bottom - grab.top), AllPlanes, ZPixmap);
+      if (img) {
+        if (img->bits_per_pixel == 32 && img->byte_order == LSBFirst)
+          for (int y = grab.top; y < grab.bottom; y++) {
+            const DWORD* src = (const DWORD*)(img->data + (size_t)(y - grab.top) * img->bytes_per_line);
+            DWORD* dst = px.data() + (size_t)(y - rect.top) * w + (grab.left - rect.left);
+            for (int i = 0; i < grab.right - grab.left; i++) dst[i] = src[i] & 0xFFFFFF;
+          }
+        XDestroyImage(img);
+      }
+    }
+    RECT keep;
+    if (n->mapped && !n->under.empty() && IntersectRect(&keep, &rect, &n->underRect)) {
+      int ow = n->underRect.right - n->underRect.left;
+      for (int y = keep.top; y < keep.bottom; y++)
+        memcpy(px.data() + (size_t)(y - rect.top) * w + (keep.left - rect.left),
+               n->under.data() + (size_t)(y - n->underRect.top) * ow + (keep.left - n->underRect.left),
+               (size_t)(keep.right - keep.left) * 4);
+    }
+    n->under.swap(px);
+    n->underRect = rect;
+  }
+
+  // Whether a window blends with the picture under it.
+  bool Blends(Native* n) { return !n->argb && Translucent(n->w); }
+
   // Whether a window shows with alpha: translucent, with a compositing
   // manager to blend it.
   bool WantArgb(Window* w) {
@@ -668,6 +714,8 @@ struct X11Backend : Backend {
       n = Create(w);
     }
     if (show) {
+      // The screen under the window, before the window covers it.
+      if (Blends(n) && !n->mapped) Grab(n, w->rect);
       x.XMapRaised(dpy, n->xid);
       n->mapped = true;
       if (n->managed && !(w->style & WS_DISABLED)) x.XSetInputFocus(dpy, n->xid, RevertToParent, CurrentTime);
@@ -699,7 +747,10 @@ struct X11Backend : Backend {
     n->width = std::max(1, (int)(w->rect.right - w->rect.left));
     n->height = std::max(1, (int)(w->rect.bottom - w->rect.top));
     if (n->managed) SetSizeHints(n);
+    bool regrab = Blends(n) && n->mapped && !EqualRect(&n->underRect, &w->rect);
+    if (regrab) Grab(n, w->rect);
     x.XMoveResizeWindow(dpy, n->xid, w->rect.left, w->rect.top, n->width, n->height);
+    if (regrab && w->surface) Put(n, RECT{0, 0, w->surface->width, w->surface->height});
     x.XFlush(dpy);
   }
 
@@ -739,6 +790,45 @@ struct X11Backend : Backend {
       img.blue_mask = 0x0000FF;
       if (!x.XInitImage(&img)) return;
       x.XPutImage(dpy, n->xid, argbGc, &img, 0, 0, r.left, r.top, w, h);
+      return;
+    }
+    if (Blends(n) && !n->under.empty()) {
+      // No compositing manager: the window's premultiplied pixels over
+      // the picture of what is under it.
+      int w = r.right - r.left, h = r.bottom - r.top;
+      std::vector<DWORD> px((size_t)w * h);
+      Composite(n->w, r, px.data(), w);
+      int uw = n->underRect.right - n->underRect.left, uh = n->underRect.bottom - n->underRect.top;
+      for (int y = 0; y < h; y++)
+        for (int i = 0; i < w; i++) {
+          DWORD& p = px[(size_t)y * w + i];
+          DWORD a = p >> 24;
+          if (a == 255) continue;
+          int ux = r.left + i, uy = r.top + y;
+          DWORD b = ux < uw && uy < uh ? n->under[(size_t)uy * uw + ux] : 0;
+          DWORD k = 255 - a;
+          DWORD red = ((p >> 16) & 0xFF) + (((b >> 16) & 0xFF) * k + 127) / 255;
+          DWORD green = ((p >> 8) & 0xFF) + (((b >> 8) & 0xFF) * k + 127) / 255;
+          DWORD blue = (p & 0xFF) + ((b & 0xFF) * k + 127) / 255;
+          p = std::min<DWORD>(red, 255) << 16 | std::min<DWORD>(green, 255) << 8 | std::min<DWORD>(blue, 255);
+        }
+      XImage img = {};
+      img.width = w;
+      img.height = h;
+      img.format = ZPixmap;
+      img.data = (char*)px.data();
+      img.byte_order = LSBFirst;
+      img.bitmap_unit = 32;
+      img.bitmap_bit_order = LSBFirst;
+      img.bitmap_pad = 32;
+      img.depth = depth;
+      img.bytes_per_line = w * 4;
+      img.bits_per_pixel = 32;
+      img.red_mask = 0xFF0000;
+      img.green_mask = 0x00FF00;
+      img.blue_mask = 0x0000FF;
+      if (!x.XInitImage(&img)) return;
+      x.XPutImage(dpy, n->xid, gc, &img, 0, 0, r.left, r.top, w, h);
       return;
     }
     XImage img = {};
