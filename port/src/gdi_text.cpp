@@ -1323,6 +1323,187 @@ BOOL WINAPI GrayStringA(HDC hdc, HBRUSH brush, GRAYSTRINGPROC proc, LPARAM data,
 }
 
 // ---------------------------------------------------------------------
+// DrawState: an icon, bitmap, text or the callback's drawing, as it is
+// or embossed (disabled), in one color (mono) or dithered (union).
+
+namespace {
+
+// Draws the image into dc at (0, 0).
+BOOL StateDraw(HDC dc, DRAWSTATEPROC proc, LPARAM data, WPARAM wData, int w, int h, UINT kind, UINT flags) {
+  switch (kind) {
+    case DST_ICON:
+      return DrawIconEx(dc, 0, 0, (HICON)data, w, h, 0, NULL, DI_NORMAL);
+    case DST_BITMAP: {
+      HDC src = CreateCompatibleDC(dc);
+      HGDIOBJ old = SelectObject(src, (HBITMAP)data);
+      BOOL ok = BitBlt(dc, 0, 0, w, h, src, 0, 0, SRCCOPY);
+      SelectObject(src, old);
+      DeleteDC(src);
+      return ok;
+    }
+    case DST_TEXT:
+    case DST_PREFIXTEXT: {
+      const wchar_t* s = (const wchar_t*)data;
+      int n = wData ? (int)wData : (int)wcslen(s);
+      RECT r = {0, 0, w, h};
+      UINT dt = DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOCLIP;
+      if (kind == DST_TEXT) dt |= DT_NOPREFIX;
+      if (flags & DSS_HIDEPREFIX) dt |= DT_HIDEPREFIX;
+      if (flags & DSS_PREFIXONLY) dt |= DT_PREFIXONLY;
+      DrawTextW(dc, s, n, &r, dt);
+      return TRUE;
+    }
+    default:
+      return proc ? proc(dc, data, wData, w, h) : FALSE;
+  }
+}
+
+BOOL StateCore(HDC hdc, HBRUSH brush, DRAWSTATEPROC proc, LPARAM data, WPARAM wData, int x, int y, int w, int h,
+               UINT flags) {
+  UINT kind = flags & 0x000F;
+  if (!DCOf(hdc)) return FALSE;
+  // The size, where the caller left it out.
+  if (w <= 0 || h <= 0) {
+    SIZE size = {0, 0};
+    if (kind == DST_ICON) {
+      ICONINFO ii;
+      if (GetIconInfo((HICON)data, &ii)) {
+        BITMAP bm;
+        if (ii.hbmColor && GetObject(ii.hbmColor, sizeof bm, &bm)) {
+          size.cx = bm.bmWidth;
+          size.cy = bm.bmHeight;
+        } else if (ii.hbmMask && GetObject(ii.hbmMask, sizeof bm, &bm)) {
+          size.cx = bm.bmWidth;
+          size.cy = bm.bmHeight / 2;
+        }
+        if (ii.hbmColor) DeleteObject(ii.hbmColor);
+        if (ii.hbmMask) DeleteObject(ii.hbmMask);
+      }
+    } else if (kind == DST_BITMAP) {
+      BITMAP bm;
+      if (GetObject((HBITMAP)data, sizeof bm, &bm)) {
+        size.cx = bm.bmWidth;
+        size.cy = bm.bmHeight;
+      }
+    } else if (kind == DST_TEXT || kind == DST_PREFIXTEXT) {
+      const wchar_t* s = (const wchar_t*)data;
+      if (!s) return FALSE;
+      RECT r = {0, 0, 0, 0};
+      DrawTextW(hdc, s, wData ? (int)wData : (int)wcslen(s), &r,
+                DT_CALCRECT | DT_SINGLELINE | (kind == DST_TEXT ? DT_NOPREFIX : 0));
+      size.cx = r.right;
+      size.cy = r.bottom;
+    }
+    if (w <= 0) w = size.cx;
+    if (h <= 0) h = size.cy;
+  }
+  if (w <= 0 || h <= 0) return FALSE;
+  // Plain: straight onto the DC.
+  if (!(flags & (DSS_DISABLED | DSS_MONO | DSS_UNION))) {
+    if (kind == DST_TEXT || kind == DST_PREFIXTEXT || kind == DST_COMPLEX) {
+      POINT org;
+      SetViewportOrgEx(hdc, 0, 0, &org);
+      SetViewportOrgEx(hdc, org.x + x, org.y + y, NULL);
+      int mode = SetBkMode(hdc, TRANSPARENT);
+      BOOL ok = StateDraw(hdc, proc, data, wData, w, h, kind, flags);
+      SetBkMode(hdc, mode);
+      SetViewportOrgEx(hdc, org.x, org.y, NULL);
+      return ok;
+    }
+    if (kind == DST_ICON) return DrawIconEx(hdc, x, y, (HICON)data, w, h, 0, NULL, DI_NORMAL);
+    HDC src = CreateCompatibleDC(hdc);
+    HGDIOBJ old = SelectObject(src, (HBITMAP)data);
+    BOOL ok = BitBlt(hdc, x, y, w, h, src, 0, 0, SRCCOPY);
+    SelectObject(src, old);
+    DeleteDC(src);
+    return ok;
+  }
+  // Otherwise the image's shape: what it draws over white and over black.
+  HDC mem = CreateCompatibleDC(hdc);
+  BITMAPINFO bmi = {};
+  bmi.bmiHeader.biSize = sizeof bmi.bmiHeader;
+  bmi.bmiHeader.biWidth = w;
+  bmi.bmiHeader.biHeight = -h;
+  bmi.bmiHeader.biPlanes = 1;
+  bmi.bmiHeader.biBitCount = 32;
+  std::vector<DWORD> onWhite((size_t)w * h), onBlack((size_t)w * h);
+  BOOL ok = TRUE;
+  for (int pass = 0; pass < 2; pass++) {
+    void* bits = NULL;
+    HBITMAP bm = CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (!bm || !bits) {
+      if (bm) DeleteObject(bm);
+      DeleteDC(mem);
+      return FALSE;
+    }
+    HGDIOBJ oldBm = SelectObject(mem, bm);
+    HGDIOBJ oldFont = SelectObject(mem, GetCurrentObject(hdc, OBJ_FONT));
+    RECT all = {0, 0, w, h};
+    FillRect(mem, &all, (HBRUSH)GetStockObject(pass == 0 ? WHITE_BRUSH : BLACK_BRUSH));
+    SetTextColor(mem, pass == 0 ? RGB(0, 0, 0) : RGB(255, 255, 255));
+    SetBkMode(mem, TRANSPARENT);
+    ok = StateDraw(mem, proc, data, wData, w, h, kind, flags);
+    GdiFlush();
+    memcpy(pass == 0 ? onWhite.data() : onBlack.data(), bits, (size_t)w * h * 4);
+    SelectObject(mem, oldFont);
+    SelectObject(mem, oldBm);
+    DeleteObject(bm);
+  }
+  DeleteDC(mem);
+  auto inShape = [&](int xx, int yy) {
+    size_t i = (size_t)yy * w + xx;
+    return (onWhite[i] & 0xFFFFFF) != 0xFFFFFF || (onBlack[i] & 0xFFFFFF) != 0;
+  };
+  auto dark = [&](int xx, int yy) {
+    // Disabled: the image's darker pixels make the embossed shape (text and
+    // line drawings are all of the shape).
+    size_t i = (size_t)yy * w + xx;
+    DWORD c = onWhite[i];
+    int lum = (int)(((c >> 16) & 0xFF) * 30 + ((c >> 8) & 0xFF) * 59 + (c & 0xFF) * 11) / 100;
+    return inShape(xx, yy) && lum < 192;
+  };
+  if (flags & DSS_DISABLED) {
+    COLORREF hilite = GetSysColor(COLOR_BTNHIGHLIGHT), shadow = GetSysColor(COLOR_BTNSHADOW);
+    for (int yy = 0; yy < h; yy++)
+      for (int xx = 0; xx < w; xx++)
+        if (dark(xx, yy)) SetPixelV(hdc, x + xx + 1, y + yy + 1, hilite);
+    for (int yy = 0; yy < h; yy++)
+      for (int xx = 0; xx < w; xx++)
+        if (dark(xx, yy)) SetPixelV(hdc, x + xx, y + yy, shadow);
+    return ok;
+  }
+  COLORREF mono = GetTextColor(hdc);
+  if (brush)
+    if (BrushObj* b = GdiAs<BrushObj>(brush, OBJ_BRUSH)) mono = b->lb.lbColor;
+  for (int yy = 0; yy < h; yy++)
+    for (int xx = 0; xx < w; xx++) {
+      if (!inShape(xx, yy)) continue;
+      if ((flags & DSS_UNION) && ((xx + yy) & 1)) continue;  // every other pixel
+      COLORREF c = (flags & DSS_MONO) ? mono : (COLORREF)(onWhite[(size_t)yy * w + xx] & 0xFFFFFF);
+      if (!(flags & DSS_MONO)) c = RGB(GetBValue(c), GetGValue(c), GetRValue(c));  // the DIB is BGR
+      SetPixelV(hdc, x + xx, y + yy, c);
+    }
+  return ok;
+}
+
+}  // namespace
+
+BOOL WINAPI DrawStateW(HDC hdc, HBRUSH brush, DRAWSTATEPROC proc, LPARAM data, WPARAM wData, int x, int y, int w,
+                       int h, UINT flags) {
+  return StateCore(hdc, brush, proc, data, wData, x, y, w, h, flags);
+}
+BOOL WINAPI DrawStateA(HDC hdc, HBRUSH brush, DRAWSTATEPROC proc, LPARAM data, WPARAM wData, int x, int y, int w,
+                       int h, UINT flags) {
+  UINT kind = flags & 0x000F;
+  if ((kind == DST_TEXT || kind == DST_PREFIXTEXT) && data) {
+    const char* s = (const char*)data;
+    AnsiText t = FromAnsi(hdc, s, wData ? (int)wData : (int)strlen(s));
+    return StateCore(hdc, brush, proc, (LPARAM)t.w.c_str(), (WPARAM)t.w.size(), x, y, w, h, flags);
+  }
+  return StateCore(hdc, brush, proc, data, wData, x, y, w, h, flags);
+}
+
+// ---------------------------------------------------------------------
 // Glyph indices and fractional widths
 //
 // A glyph index here is the UTF-16 code unit it draws (and ExtTextOut

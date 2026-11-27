@@ -245,6 +245,25 @@ public:
   void Pop() { ::SendMessage(m_hWnd, TTM_POP, 0, 0); }
   void Update() { ::SendMessage(m_hWnd, TTM_UPDATE, 0, 0); }
   void FillInToolInfo(TOOLINFO& ti, CWnd* pWnd, UINT_PTR nIDTool) const;
+  void SetToolInfo(LPTOOLINFO lpToolInfo) { ::SendMessage(m_hWnd, TTM_SETTOOLINFO, 0, (LPARAM)lpToolInfo); }
+  BOOL GetToolInfo(LPTOOLINFO lpToolInfo) const {
+    return (BOOL)::SendMessage(m_hWnd, TTM_GETTOOLINFO, 0, (LPARAM)lpToolInfo);
+  }
+  void SetToolRect(CWnd* pWnd, UINT_PTR nIDTool, LPCRECT lpRect) {
+    TOOLINFO ti;
+    FillInToolInfo(ti, pWnd, nIDTool);
+    ti.rect = *lpRect;
+    ::SendMessage(m_hWnd, TTM_NEWTOOLRECT, 0, (LPARAM)&ti);
+  }
+  int GetDelayTime(DWORD dwDuration) const { return (int)::SendMessage(m_hWnd, TTM_GETDELAYTIME, dwDuration, 0); }
+  int GetMaxTipWidth() const { return (int)::SendMessage(m_hWnd, TTM_GETMAXTIPWIDTH, 0, 0); }
+  COLORREF GetTipBkColor() const { return (COLORREF)::SendMessage(m_hWnd, TTM_GETTIPBKCOLOR, 0, 0); }
+  COLORREF GetTipTextColor() const { return (COLORREF)::SendMessage(m_hWnd, TTM_GETTIPTEXTCOLOR, 0, 0); }
+  void SetTipBkColor(COLORREF clr) { ::SendMessage(m_hWnd, TTM_SETTIPBKCOLOR, clr, 0); }
+  void SetTipTextColor(COLORREF clr) { ::SendMessage(m_hWnd, TTM_SETTIPTEXTCOLOR, clr, 0); }
+  BOOL SetTitle(UINT uIcon, LPCTSTR lpstrTitle) {
+    return (BOOL)::SendMessage(m_hWnd, TTM_SETTITLE, uIcon, (LPARAM)lpstrTitle);
+  }
 };
 
 // ---------------------------------------------------------------------
