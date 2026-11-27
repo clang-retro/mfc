@@ -75,7 +75,11 @@ BOOL CPictureHolder::CreateFromIcon(UINT idResource) {
   HICON hIcon = ::LoadIcon(hInst, MAKEINTRESOURCE(idResource));
   if (hIcon == NULL) return FALSE;
   // A loaded icon is shared; the picture gets its own copy.
+  #ifdef _AFX_WIN16
+  HICON hCopy = ::CopyIcon(AfxGetInstanceHandle(), hIcon);
+#else
   HICON hCopy = ::CopyIcon(hIcon);
+#endif
   if (hCopy == NULL) return FALSE;
   if (CreateFromIcon(hCopy, TRUE)) return TRUE;
   ::DestroyIcon(hCopy);

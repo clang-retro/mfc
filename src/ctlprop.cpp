@@ -37,7 +37,7 @@ void CFontHolder::InitializeFont(const FONTDESC* pFontDesc, LPDISPATCH pFontDisp
     if (pFontDesc == NULL) {
       memset(&fd, 0, sizeof(fd));
       fd.cbSizeofstruct = sizeof(fd);
-      fd.lpstrName = (LPOLESTR)L"MS Sans Serif";
+      fd.lpstrName = (LPOLESTR)OLESTR("MS Sans Serif");
       fd.cySize.Lo = 80000;  // 8 points
       fd.sWeight = FW_NORMAL;
       fd.sCharset = DEFAULT_CHARSET;
@@ -281,6 +281,17 @@ HGLOBAL BlobFromObject(LPUNKNOWN pUnk) {
 const BYTE kObjectPresent = 0;
 const BYTE kObjectNull = 0xFF;
 
+// The buffer of IStream::Read and Write: a huge pointer in 16-bit OLE 2.
+#ifdef _AFX_WIN16
+#define _AFX_HUGEP HUGEP
+typedef void HUGEP* _AFX_STREAM_PV;
+typedef const void HUGEP* _AFX_STREAM_CPV;
+#else
+#define _AFX_HUGEP
+typedef void* _AFX_STREAM_PV;
+typedef const void* _AFX_STREAM_CPV;
+#endif
+
 // A stream that reads and writes through a CArchive, for an archive on a
 // file that is not an OLE stream. It lives on the caller's stack.
 class CArchiveIStream : public IStream {
@@ -288,7 +299,12 @@ public:
   explicit CArchiveIStream(CArchive* pArchive) : m_pArchive(pArchive) {}
 
   STDMETHOD(QueryInterface)(REFIID iid, void** ppv) override {
+#ifdef _AFX_WIN16
+    // 16-bit OLE 2 has no ISequentialStream: IStream has Read and Write.
+    if (iid == IID_IUnknown || iid == IID_IStream) {
+#else
     if (iid == IID_IUnknown || iid == IID_IStream || iid == IID_ISequentialStream) {
+#endif
       *ppv = this;
       return S_OK;
     }
@@ -297,10 +313,17 @@ public:
   }
   STDMETHOD_(ULONG, AddRef)() override { return 1; }
   STDMETHOD_(ULONG, Release)() override { return 1; }
-  STDMETHOD(Read)(void* pv, ULONG cb, ULONG* pcbRead) override {
+  // Reads cb bytes, in parts that CArchive::Read takes (a UINT count).
+  STDMETHOD(Read)(_AFX_STREAM_PV pv, ULONG cb, ULONG* pcbRead) override {
     ULONG n = 0;
     try {
-      n = m_pArchive->Read(pv, cb);
+      BYTE _AFX_HUGEP* p = (BYTE _AFX_HUGEP*)pv;
+      while (n < cb) {
+        UINT nPart = (UINT)(cb - n > 0x4000 ? 0x4000 : cb - n);
+        UINT nGot = m_pArchive->Read((void*)(p + n), nPart);
+        n += nGot;
+        if (nGot < nPart) break;
+      }
     } catch (CException* e) {
       e->Delete();
       return STG_E_READFAULT;
@@ -308,9 +331,15 @@ public:
     if (pcbRead != NULL) *pcbRead = n;
     return S_OK;
   }
-  STDMETHOD(Write)(const void* pv, ULONG cb, ULONG* pcbWritten) override {
+  // Writes cb bytes, in parts that CArchive::Write takes (a UINT count).
+  STDMETHOD(Write)(_AFX_STREAM_CPV pv, ULONG cb, ULONG* pcbWritten) override {
     try {
-      m_pArchive->Write(pv, cb);
+      const BYTE _AFX_HUGEP* p = (const BYTE _AFX_HUGEP*)pv;
+      for (ULONG n = 0; n < cb;) {
+        UINT nPart = (UINT)(cb - n > 0x4000 ? 0x4000 : cb - n);
+        m_pArchive->Write((const void*)(p + n), nPart);
+        n += nPart;
+      }
     } catch (CException* e) {
       e->Delete();
       return STG_E_WRITEFAULT;
@@ -438,7 +467,11 @@ protected:
     m_ar >> bFlag;
     if (bFlag != kObjectPresent) return TRUE;
     CArchiveIStream wrap(&m_ar);
+#ifdef _AFX_WIN16
+    HRESULT hr = _AfxW16LoadFromStream(ArchiveStream(wrap), iid, (void**)ppUnk);
+#else
     HRESULT hr = ::OleLoadFromStream(ArchiveStream(wrap), iid, (void**)ppUnk);
+#endif
     if (FAILED(hr)) {
       *ppUnk = NULL;
       AfxThrowArchiveException(CArchiveException::badClass);
@@ -530,7 +563,7 @@ public:
 
   virtual BOOL ExchangeProp(LPCTSTR pszPropName, VARTYPE vtProp, void* pvProp,
                             const void* pvDefault) {
-    CStringW strName(pszPropName);
+    CStringOle strName(pszPropName);
     // Unsigned values go in the bag as their signed types.
     VARTYPE vt = vtProp == VT_UI2 ? VT_I2 : vtProp == VT_UI4 ? VT_I4 : vtProp;
     if (m_bLoading) {
@@ -586,7 +619,7 @@ public:
   // A blob is an object in the bag (CBlobObject). A byte array is taken
   // too.
   virtual BOOL ExchangeBlobProp(LPCTSTR pszPropName, HGLOBAL* phBlob, HGLOBAL hBlobDefault) {
-    CStringW strName(pszPropName);
+    CStringOle strName(pszPropName);
     if (m_bLoading) {
       // The bag is handed an empty blob object to load, as Visual C++
       // MFC does; it may answer with another object or a byte array.
@@ -636,7 +669,7 @@ public:
   // A font is an object in the bag.
   virtual BOOL ExchangeFontProp(LPCTSTR pszPropName, CFontHolder& font,
                                 const FONTDESC* pFontDesc, LPFONTDISP pFontDispAmbient) {
-    CStringW strName(pszPropName);
+    CStringOle strName(pszPropName);
     if (m_bLoading) {
       VARIANT var;
       ::VariantInit(&var);
@@ -668,7 +701,7 @@ public:
 
   virtual BOOL ExchangePersistentProp(LPCTSTR pszPropName, LPUNKNOWN* ppUnk, REFIID iid,
                                       LPUNKNOWN pUnkDefault) {
-    CStringW strName(pszPropName);
+    CStringOle strName(pszPropName);
     if (m_bLoading) {
       VARIANT var;
       ::VariantInit(&var);
@@ -979,7 +1012,7 @@ STDMETHODIMP COleControl::XPersistStreamInit::InitNew() {
 
 CTL_IUNKNOWN(PersistStorage)
 
-static const WCHAR kContents[] = L"Contents";
+static const OLECHAR kContents[] = OLESTR("Contents");
 
 STDMETHODIMP COleControl::XPersistStorage::GetClassID(LPCLSID pClassID) {
   METHOD_PROLOGUE(COleControl, PersistStorage);

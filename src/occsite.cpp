@@ -19,15 +19,15 @@ const _AFX_OCC_BIND_HOOKS* _afxOccBindHooks = NULL;
 namespace {
 
 struct ExtProp {
-  const WCHAR* pszName;
+  LPCOLESTR pszName;
   DISPID dispid;
 };
 const ExtProp kExtProps[] = {
-    {L"Name", DISPID_NAME},          {L"Object", DISPID_OBJECT},
-    {L"Parent", DISPID_PARENT},      {L"Left", AFX_DISPID_EXT_LEFT},
-    {L"Top", AFX_DISPID_EXT_TOP},    {L"Width", AFX_DISPID_EXT_WIDTH},
-    {L"Height", AFX_DISPID_EXT_HEIGHT}, {L"Visible", AFX_DISPID_EXT_VISIBLE},
-    {L"ID", AFX_DISPID_EXT_ID},
+    {OLESTR("Name"), DISPID_NAME},          {OLESTR("Object"), DISPID_OBJECT},
+    {OLESTR("Parent"), DISPID_PARENT},      {OLESTR("Left"), AFX_DISPID_EXT_LEFT},
+    {OLESTR("Top"), AFX_DISPID_EXT_TOP},    {OLESTR("Width"), AFX_DISPID_EXT_WIDTH},
+    {OLESTR("Height"), AFX_DISPID_EXT_HEIGHT}, {OLESTR("Visible"), AFX_DISPID_EXT_VISIBLE},
+    {OLESTR("ID"), AFX_DISPID_EXT_ID},
 };
 
 class CExtendedControl final : public IDispatch {
@@ -61,7 +61,7 @@ public:
                            DISPID* rgDispId) {
     if (cNames == 1) {
       for (const ExtProp& prop : kExtProps)
-        if (::lstrcmpiW(rgszNames[0], prop.pszName) == 0) {
+        if (_AfxOleStrCmpi(rgszNames[0], prop.pszName) == 0) {
           rgDispId[0] = prop.dispid;
           return S_OK;
         }
@@ -186,16 +186,16 @@ static void PixelsToHimetric(const SIZE& sizePix, SIZEL* pSizeHm) {
   HDC hDC = ::GetDC(NULL);
   int cxPerInch = ::GetDeviceCaps(hDC, LOGPIXELSX), cyPerInch = ::GetDeviceCaps(hDC, LOGPIXELSY);
   ::ReleaseDC(NULL, hDC);
-  pSizeHm->cx = ::MulDiv(sizePix.cx, 2540, cxPerInch);
-  pSizeHm->cy = ::MulDiv(sizePix.cy, 2540, cyPerInch);
+  pSizeHm->cx = _AfxMulDiv(sizePix.cx, 2540, cxPerInch);
+  pSizeHm->cy = _AfxMulDiv(sizePix.cy, 2540, cyPerInch);
 }
 
 static void HimetricToPixels(const SIZEL& sizeHm, SIZE* pSizePix) {
   HDC hDC = ::GetDC(NULL);
   int cxPerInch = ::GetDeviceCaps(hDC, LOGPIXELSX), cyPerInch = ::GetDeviceCaps(hDC, LOGPIXELSY);
   ::ReleaseDC(NULL, hDC);
-  pSizePix->cx = ::MulDiv(sizeHm.cx, cxPerInch, 2540);
-  pSizePix->cy = ::MulDiv(sizeHm.cy, cyPerInch, 2540);
+  pSizePix->cx = _AfxMulDiv(sizeHm.cx, cxPerInch, 2540);
+  pSizePix->cy = _AfxMulDiv(sizeHm.cy, cyPerInch, 2540);
 }
 
 // =====================================================================
@@ -326,7 +326,7 @@ HRESULT COleControlSite::CreateControl(CWnd* pWndCtrl, REFCLSID clsid, LPCTSTR l
                                               (dwStyle & (dwMask & ~WS_VISIBLE))));
     if (dwStyle & WS_DISABLED) EnableWindow(FALSE);
     ::ShowWindow(m_hWnd, (dwStyle & WS_VISIBLE) ? SW_SHOWNA : SW_HIDE);
-    m_pCtrlCont->m_siteMap.SetAt(m_hWnd, this);
+    m_pCtrlCont->m_siteMap.SetAt((void*)(DWORD_PTR)m_hWnd, this);
     AttachWindow();
   } else if (m_pWndCtrl != NULL) {
     m_pWndCtrl->m_pCtrlSite = this;
@@ -437,7 +437,7 @@ HRESULT COleControlSite::CreateOrLoad(REFCLSID clsid, CFile* pPersist, BOOL bSto
   if (FAILED(hr)) return hr;
 
   if (!bSiteFirst) m_pObject->SetClientSite(&m_xOleClientSite);
-  m_pObject->SetHostNames(L"Container", NULL);
+  m_pObject->SetHostNames(OLESTR("Container"), NULL);
   SetExtent();
   return S_OK;
 }
@@ -544,7 +544,7 @@ BOOL COleControlSite::DestroyControl() {
   _AfxReleaseExtendedControl(this);
   if (_afxOccBindHooks != NULL) _afxOccBindHooks->pfnRelease(this);
   DetachWindow();
-  if (m_hWnd != NULL) m_pCtrlCont->m_siteMap.RemoveKey(m_hWnd);
+  if (m_hWnd != NULL) m_pCtrlCont->m_siteMap.RemoveKey((void*)(DWORD_PTR)m_hWnd);
   if (m_pCtrlCont->m_pSiteUIActive == this) m_pCtrlCont->m_pSiteUIActive = NULL;
   if (m_pCtrlCont->m_pSiteFocus == this) m_pCtrlCont->m_pSiteFocus = NULL;
   if (m_pCtrlCont->m_pSiteCapture == this) {
@@ -788,7 +788,7 @@ BOOL COleControlSite::ShowPropertyFrame() {
       ::CoTaskMemFree(pszType);
     }
   }
-  CStringW strNameW(strName);
+  CStringOle strNameW(strName);
   HWND hWndParent = m_pCtrlCont->m_pWnd->GetSafeHwnd();
   // The stock pages, where the system has none.
   CDWordArray cookies;
@@ -1226,7 +1226,9 @@ STDMETHODIMP COleControlSite::XOleControlSite::TransformCoords(POINTL* pptlHimet
     pptfContainer->x = (float)size.cx;
     pptfContainer->y = (float)size.cy;
   } else if (dwFlags & XFORMCOORDS_CONTAINERTOHIMETRIC) {
-    SIZE size = {(LONG)pptfContainer->x, (LONG)pptfContainer->y};
+    SIZE size;
+    size.cx = (int)pptfContainer->x;
+    size.cy = (int)pptfContainer->y;
     SIZEL sizeHm;
     PixelsToHimetric(size, &sizeHm);
     pptlHimetric->x = sizeHm.cx;
@@ -1686,7 +1688,7 @@ BOOL COleControlContainer::GetAmbientProp(COleControlSite* pSite, DISPID dispid,
       return TRUE;
     case DISPID_AMBIENT_DISPLAYNAME:
       pvarResult->vt = VT_BSTR;
-      pvarResult->bstrVal = ::SysAllocString(L"");
+      pvarResult->bstrVal = ::SysAllocString(OLESTR(""));
       return TRUE;
     case DISPID_AMBIENT_LOCALEID:
       pvarResult->vt = VT_I4;
@@ -1743,10 +1745,10 @@ void COleControlContainer::CreateOleFont(CFont* pFont) {
   int cyPerInch = ::GetDeviceCaps(hDC, LOGPIXELSY);
   ::ReleaseDC(NULL, hDC);
   long cyPoints = lf.lfHeight < 0 ? -lf.lfHeight : lf.lfHeight;
-  CStringW strFace(lf.lfFaceName);
+  CStringOle strFace(lf.lfFaceName);
   FONTDESC fd;
   fd.cbSizeofstruct = sizeof(fd);
-  fd.lpstrName = (LPOLESTR)(LPCWSTR)strFace;
+  fd.lpstrName = (LPOLESTR)(LPCOLESTR)strFace;
   fd.cySize.int64 = (LONGLONG)::MulDiv(cyPoints, 72, cyPerInch) * 10000;
   fd.sWeight = (short)lf.lfWeight;
   fd.sCharset = lf.lfCharSet;

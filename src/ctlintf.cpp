@@ -153,10 +153,10 @@ public:
     ULONG n = 0;
     while (n < celt && m_nNext < (ULONG)m_verbs.GetSize()) {
       rgelt[n] = m_verbs[m_nNext];
-      CStringW strName(m_names[m_nNext]);
-      SIZE_T cb = (strName.GetLength() + 1) * sizeof(WCHAR);
+      CStringOle strName(m_names[m_nNext]);
+      SIZE_T cb = (strName.GetLength() + 1) * sizeof(OLECHAR);
       rgelt[n].lpszVerbName = (LPOLESTR)::CoTaskMemAlloc(cb);
-      if (rgelt[n].lpszVerbName != NULL) memcpy(rgelt[n].lpszVerbName, (LPCWSTR)strName, cb);
+      if (rgelt[n].lpszVerbName != NULL) memcpy(rgelt[n].lpszVerbName, (LPCOLESTR)strName, cb);
       n++;
       m_nNext++;
     }
@@ -234,11 +234,11 @@ STDMETHODIMP COleControl::XOleObject::GetUserType(DWORD dwFormOfType, LPOLESTR* 
   CString str;
   UINT nID = pThis->GetUserTypeNameID();
   if (nID == 0 || !str.LoadString(nID)) return OLE_S_USEREG;
-  CStringW strW(str);
-  size_t cb = (size_t)(strW.GetLength() + 1) * sizeof(WCHAR);
+  CStringOle strW(str);
+  size_t cb = (size_t)(strW.GetLength() + 1) * sizeof(OLECHAR);
   *pszUserType = (LPOLESTR)::CoTaskMemAlloc(cb);
   if (*pszUserType == NULL) return E_OUTOFMEMORY;
-  memcpy(*pszUserType, (LPCWSTR)strW, cb);
+  memcpy(*pszUserType, (LPCOLESTR)strW, cb);
   return S_OK;
 }
 
@@ -432,7 +432,7 @@ CTL_IUNKNOWN(ViewObject)
 STDMETHODIMP COleControl::XViewObject::Draw(DWORD dwDrawAspect, LONG, void* pvAspect,
                                            DVTARGETDEVICE*, HDC, HDC hdcDraw,
                                            LPCRECTL lprcBounds, LPCRECTL,
-                                           BOOL(STDMETHODCALLTYPE*)(ULONG_PTR), ULONG_PTR) {
+                                           _AFX_VIEWCONTINUEPROC, _AFX_VIEWCONTINUEARG) {
   METHOD_PROLOGUE(COleControl, ViewObject);
   if (dwDrawAspect != DVASPECT_CONTENT) return DV_E_DVASPECT;
   if (hdcDraw == NULL) return E_INVALIDARG;
@@ -732,10 +732,10 @@ STDMETHODIMP COleControl::XPerPropertyBrowsing::GetPredefinedStrings(DISPID disp
     return E_OUTOFMEMORY;
   }
   for (ULONG i = 0; i < n; i++) {
-    CStringW str(strings[i]);
-    SIZE_T cb = (str.GetLength() + 1) * sizeof(WCHAR);
+    CStringOle str(strings[i]);
+    SIZE_T cb = (str.GetLength() + 1) * sizeof(OLECHAR);
     lpcaStringsOut->pElems[i] = (LPOLESTR)::CoTaskMemAlloc(cb);
-    if (lpcaStringsOut->pElems[i] != NULL) memcpy(lpcaStringsOut->pElems[i], (LPCWSTR)str, cb);
+    if (lpcaStringsOut->pElems[i] != NULL) memcpy(lpcaStringsOut->pElems[i], (LPCOLESTR)str, cb);
     lpcaCookiesOut->pElems[i] = cookies[i];
   }
   lpcaStringsOut->cElems = n;

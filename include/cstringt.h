@@ -689,6 +689,17 @@ public:
     ::SysReAllocStringLen(pbstr, w.GetString(), w.GetLength());
     return *pbstr;
   }
+#elif defined(_DISPATCH_H_)
+  // 16-bit OLE 2 (dispatch.h): a BSTR is an ANSI string.
+  BSTR AllocSysString() const {
+    CStringT<char, typename Tr::template Rebind<char>> a(*this);
+    return ::SysAllocStringLen(a.GetString(), a.GetLength());
+  }
+  BSTR SetSysString(BSTR FAR *pbstr) const {
+    CStringT<char, typename Tr::template Rebind<char>> a(*this);
+    ::SysReAllocStringLen(pbstr, a.GetString(), a.GetLength());
+    return *pbstr;
+  }
 #endif
 
   // Concatenation and comparison

@@ -162,8 +162,13 @@ BOOL AFXAPI AfxVerifyLicFile(HINSTANCE hInstance, LPCTSTR pszLicFileName,
   lstrcpy(pszName, pszLicFileName);
 
   // License files are plain ANSI text.
-  UINT cchContents = (UINT)wcslen(pszLicFileContents);
+  UINT cchContents = (UINT)_AfxOleStrLen(pszLicFileContents);
   if (cch == (UINT)-1 || cch > cchContents) cch = cchContents;
+#ifdef _AFX_WIN16
+  // 16-bit OLE 2: the contents are ANSI already.
+  int cbExpect = (int)cch;
+  CStringA strExpect(pszLicFileContents, (int)cch);
+#else
   int cbExpect = ::WideCharToMultiByte(CP_ACP, 0, pszLicFileContents, (int)cch, NULL, 0, NULL, NULL);
   if (cch != 0 && cbExpect <= 0) return FALSE;
   CStringA strExpect;
@@ -172,6 +177,7 @@ BOOL AFXAPI AfxVerifyLicFile(HINSTANCE hInstance, LPCTSTR pszLicFileName,
                           cbExpect, NULL, NULL);
     strExpect.ReleaseBuffer(cbExpect);
   }
+#endif
 
   HANDLE hFile = ::CreateFile(szPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
                               FILE_ATTRIBUTE_NORMAL, NULL);

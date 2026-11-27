@@ -19,6 +19,8 @@
 #   win16auto dispatch maps, IDispatch and connection points
 #   win16oledoc  OLE data transfer and the OLE dialogs; containers, servers
 #             and drag and drop are linked, not run
+#   win16ctl  the stock font and picture objects and OleTranslateColor; a
+#             control, its container and its property frame are linked, not run
 set -u
 : "${BIN:?set BIN}" "${SYSROOT:?set SYSROOT}"
 OUT=${OUT:-build/i8086-pc-win16}
@@ -82,6 +84,7 @@ test1 win16bar tests/win16bar.cpp "$T/win16bar.res"
 test1 win16cmn tests/win16cmn.cpp
 test1 win16auto tests/win16auto.cpp
 test1 win16oledoc tests/win16oledoc.cpp
+test1 win16ctl tests/win16ctl.cpp
 
 echo "$npass passed, $nfail failed"
 [ $nfail = 0 ]

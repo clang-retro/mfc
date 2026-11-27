@@ -158,7 +158,8 @@ LPCLSID COleControl::GetPropPageIDs(ULONG& cPropPages) {
 
 REFIID COleControl::XEventConnPt::GetIID() {
   COleControl* pCtl = (COleControl*)m_pContainer;
-  return pCtl != NULL && pCtl->m_piidEvents != NULL ? *pCtl->m_piidEvents : IID_IDispatch;
+  if (pCtl != NULL && pCtl->m_piidEvents != NULL) return *pCtl->m_piidEvents;
+  return IID_IDispatch;
 }
 
 void COleControl::XEventConnPt::OnAdvise(BOOL) {}
@@ -1258,7 +1259,12 @@ CWnd* COleControl::SetCapture() {
 
 BOOL COleControl::ReleaseCapture() {
   if (m_bInPlaceSiteWndless) return SUCCEEDED(m_pInPlaceSiteWndless->SetCapture(FALSE));
+#ifdef _AFX_WIN16
+  ::ReleaseCapture();  // 16-bit ReleaseCapture gives no result
+  return TRUE;
+#else
   return ::ReleaseCapture();
+#endif
 }
 
 CWnd* COleControl::GetCapture() {
@@ -1371,7 +1377,7 @@ BOOL COleControl::OnProperties(LPMSG, HWND hWndParent, LPCRECT) {
     UINT nID = GetUserTypeNameID();
     if (nID != 0) strName.LoadString(nID);
   }
-  CStringW strNameW(strName);
+  CStringOle strNameW(strName);
   // The stock pages, where the system has none.
   CDWordArray cookies;
   cookies.SetSize(cPages);
@@ -1450,8 +1456,8 @@ void AFXAPI _AfxCtlPixelsToHimetric(int cx, int cy, SIZEL* pSizeL) {
   int nX = ::GetDeviceCaps(hdc, LOGPIXELSX);
   int nY = ::GetDeviceCaps(hdc, LOGPIXELSY);
   ::ReleaseDC(NULL, hdc);
-  pSizeL->cx = ::MulDiv(cx, 2540, nX);
-  pSizeL->cy = ::MulDiv(cy, 2540, nY);
+  pSizeL->cx = _AfxMulDiv(cx, 2540, nX);
+  pSizeL->cy = _AfxMulDiv(cy, 2540, nY);
 }
 
 void AFXAPI _AfxCtlHimetricToPixels(long cx, long cy, SIZE* pSize) {
@@ -1459,6 +1465,6 @@ void AFXAPI _AfxCtlHimetricToPixels(long cx, long cy, SIZE* pSize) {
   int nX = ::GetDeviceCaps(hdc, LOGPIXELSX);
   int nY = ::GetDeviceCaps(hdc, LOGPIXELSY);
   ::ReleaseDC(NULL, hdc);
-  pSize->cx = ::MulDiv(cx, nX, 2540);
-  pSize->cy = ::MulDiv(cy, nY, 2540);
+  pSize->cx = _AfxMulDiv(cx, nX, 2540);
+  pSize->cy = _AfxMulDiv(cy, nY, 2540);
 }

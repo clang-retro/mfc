@@ -18,6 +18,7 @@
 // OLE 2's COMPOBJ header has WCHAR, LARGE_INTEGER, FILETIME, HRESULT and
 // the other types that the 16-bit OLE DLLs share with Win32.
 #include <compobj.h>
+#include <dispatch.h>  // the BSTR functions of CString
 
 #ifdef _UNICODE
 #error 16-bit Windows has no Unicode: build without _UNICODE
