@@ -2706,7 +2706,9 @@ static void TestModalFocus() {
   ::DestroyWindow(owner);
 }
 
-// What TallBoxTimer saw of the message box.
+#ifdef _WINPORT
+// What TallBoxTimer saw of the message box. (The portable layer only:
+// the message box of Windows does not scroll.)
 static bool g_tallBoxSeen, g_tallBoxFits, g_tallBoxScrolls;
 
 // Checks that the tall message box and its OK button are inside the work
@@ -2747,6 +2749,7 @@ static void TestTallMessageBox() {
   CHECK(g_tallBoxFits);
   CHECK(g_tallBoxScrolls);
 }
+#endif
 
 static void TestCWnd() {
   CTestWnd wnd;
@@ -4425,7 +4428,9 @@ int main() {
   TestPrinting();
   TestShapesAndDrops();
   TestModalFocus();
+#ifdef _WINPORT
   TestTallMessageBox();
+#endif
   TestSymbolFont();
 #ifdef _WINPORT
   TestCaptionIcon();
