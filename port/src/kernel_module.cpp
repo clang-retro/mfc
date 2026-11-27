@@ -11,6 +11,9 @@
 #include "winport.h"
 #include <shellapi.h>
 
+#include "winhelp.h"
+
+#include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -19,6 +22,7 @@
 #include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -1277,22 +1281,49 @@ extern "C" HINSTANCE WINAPI ShellExecuteW(HWND, LPCWSTR verb, LPCWSTR file, LPCW
   return ShellExecuteCore(verb ? Narrow(verb) : std::string(), file ? Narrow(file) : std::string());
 }
 
-// WinHelp: there is no WinHelp viewer here, so the help is a document
-// next to the .hlp file the program names (the same name, as .html, .htm,
-// .pdf or .txt, or a folder of that name with an index.html), opened with
-// the desktop's opener, or with the command WINPORT_HELP names (given the
-// document as its argument). A context (HELP_CONTEXT, HELP_CONTEXTPOPUP)
-// is the HTML page's anchor: help.html#131072. Closing the viewer
-// (HELP_QUIT) and placing it are left to the viewer.
+// WinHelp: the layer's viewer shows the .hlp file (winhelp_view.cpp).
+// Without one, the help is a document next to the .hlp file the program
+// names (the same name, as .html, .htm, .pdf or .txt, or a folder of
+// that name with an index.html), opened with the desktop's opener. The
+// command WINPORT_HELP names (given the document as its argument) takes
+// the place of both. A context (HELP_CONTEXT, HELP_CONTEXTPOPUP) is the
+// HTML page's anchor: help.html#131072. Closing that viewer (HELP_QUIT)
+// and placing it are left to it.
+
+// Whether a path names a regular file.
 static bool IsFile(const std::string& p) {
   struct stat st;
   return stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode);
 }
 
-static std::string HelpDocument(std::string file) {
-  size_t window = file.find('>');
-  if (window != std::string::npos) file.resize(window);
-  std::string path = PosixPath(file.c_str());
+// Finds a file by its path, or else in its directory by the name
+// without regard to case (as Windows programs name them). Returns the
+// path found, or an empty string.
+static std::string FindFileNoCase(const std::string& path) {
+  if (IsFile(path)) return path;
+  size_t slash = path.rfind('/');
+  std::string dir = slash == std::string::npos ? "." : (slash == 0 ? "/" : path.substr(0, slash));
+  std::string leaf = slash == std::string::npos ? path : path.substr(slash + 1);
+  DIR* d = opendir(dir.c_str());
+  if (!d) return std::string();
+  std::string found;
+  while (struct dirent* e = readdir(d)) {
+    if (strcasecmp(e->d_name, leaf.c_str()) == 0) {
+      std::string p = (slash == std::string::npos ? std::string() : path.substr(0, slash + 1)) + e->d_name;
+      if (IsFile(p)) {
+        found = p;
+        break;
+      }
+    }
+  }
+  closedir(d);
+  return found;
+}
+
+// Finds the document that stands for a help file: the file itself when
+// it is not a .hlp or .chm, else one of the same name as HTML, PDF or
+// text.
+static std::string HelpDocument(const std::string& path) {
   size_t dot = path.rfind('.');
   size_t slash = path.rfind('/');
   std::string ext = dot != std::string::npos && (slash == std::string::npos || dot > slash) ? path.substr(dot) : "";
@@ -1305,9 +1336,39 @@ static std::string HelpDocument(std::string file) {
   return std::string();
 }
 
-static BOOL WinHelpCore(const char* file, UINT cmd, ULONG_PTR data) {
+// Runs a WinHelp command: in the layer's viewer when the file is a help
+// file, else by opening the document that stands for it.
+static BOOL WinHelpCore(HWND caller, const char* file, UINT cmd, ULONG_PTR data, bool wide) {
+  const char* custom = getenv("WINPORT_HELP");
+  bool external = custom && *custom;
+  std::string name = file ? file : "";
+  std::wstring window;
+  size_t gt = name.find('>');
+  if (gt != std::string::npos) {
+    window = Widen(name.c_str() + gt + 1);
+    name.resize(gt);
+  }
+  std::string path = name.empty() ? std::string() : PosixPath(name.c_str());
+  if (cmd == HELP_QUIT) {
+    if (!external) {
+      std::string hlp = path.empty() ? std::string() : FindFileNoCase(path);
+      help::Command(caller, hlp, window, cmd, data, wide);
+    }
+    return TRUE;
+  }
+  if (path.empty()) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
+  }
+  if (!external) {
+    std::string hlp = FindFileNoCase(path);
+    if (!hlp.empty()) {
+      SetLastError(0);
+      BOOL ok = help::Command(caller, hlp, window, cmd, data, wide);
+      if (ok || GetLastError() != ERROR_BAD_FORMAT) return ok;
+    }
+  }
   switch (cmd) {
-    case HELP_QUIT:
     case HELP_SETWINPOS:
     case HELP_SETPOPUP_POS:
     case HELP_SETINDEX:
@@ -1315,11 +1376,7 @@ static BOOL WinHelpCore(const char* file, UINT cmd, ULONG_PTR data) {
     case HELP_TCARD_OTHER_CALLER:
       return TRUE;
   }
-  if (!file || !*file) {
-    SetLastError(ERROR_INVALID_PARAMETER);
-    return FALSE;
-  }
-  std::string doc = HelpDocument(file);
+  std::string doc = HelpDocument(path);
   if (doc.empty()) {
     SetLastError(ERROR_FILE_NOT_FOUND);
     return FALSE;
@@ -1330,10 +1387,9 @@ static BOOL WinHelpCore(const char* file, UINT cmd, ULONG_PTR data) {
   for (char& c : ext) c = (char)tolower((unsigned char)c);
   if ((cmd == HELP_CONTEXT || cmd == HELP_CONTEXTPOPUP) && (ext == ".html" || ext == ".htm"))
     target = "file://" + doc + "#" + std::to_string((unsigned long)data);
-  const char* custom = getenv("WINPORT_HELP");
   std::vector<char*> argv;
   std::string script;
-  if (custom && *custom) {
+  if (external) {
     script = std::string(custom) + " \"$1\"";
     argv = {(char*)"sh", (char*)"-c", (char*)script.c_str(), (char*)"sh", (char*)target.c_str(), NULL};
   } else {
@@ -1353,11 +1409,13 @@ static BOOL WinHelpCore(const char* file, UINT cmd, ULONG_PTR data) {
   return TRUE;
 }
 
-extern "C" BOOL WINAPI WinHelpA(HWND, LPCSTR file, UINT cmd, ULONG_PTR data) {
-  return WinHelpCore(file, cmd, data);
+// WinHelp, with the file's name in the ANSI code page (UTF-8).
+extern "C" BOOL WINAPI WinHelpA(HWND caller, LPCSTR file, UINT cmd, ULONG_PTR data) {
+  return WinHelpCore(caller, file, cmd, data, false);
 }
 
-extern "C" BOOL WINAPI WinHelpW(HWND, LPCWSTR file, UINT cmd, ULONG_PTR data) {
+// WinHelp, with the file's name and the command's strings in Unicode.
+extern "C" BOOL WINAPI WinHelpW(HWND caller, LPCWSTR file, UINT cmd, ULONG_PTR data) {
   std::string f = file ? Narrow(file) : std::string();
-  return WinHelpCore(file ? f.c_str() : NULL, cmd, data);
+  return WinHelpCore(caller, file ? f.c_str() : NULL, cmd, data, true);
 }

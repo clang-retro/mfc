@@ -2304,6 +2304,47 @@ typedef struct tagACCEL {
 #define HELP_TCARD 0x8000
 #define HELP_TCARD_DATA 0x0010
 #define HELP_TCARD_OTHER_CALLER 0x0011
+// HELP_MULTIKEY: a keyword of another index (the K-footnote's letter).
+typedef struct tagMULTIKEYHELPA {
+  DWORD mkSize;
+  CHAR mkKeylist;
+  CHAR szKeyphrase[1];
+} MULTIKEYHELPA, *PMULTIKEYHELPA, *LPMULTIKEYHELPA;
+typedef struct tagMULTIKEYHELPW {
+  DWORD mkSize;
+  WCHAR mkKeylist;
+  WCHAR szKeyphrase[1];
+} MULTIKEYHELPW, *PMULTIKEYHELPW, *LPMULTIKEYHELPW;
+// HELP_SETWINPOS: the place of a help window (0 to 1023 of the screen).
+typedef struct tagHELPWININFOA {
+  int wStructSize;
+  int x;
+  int y;
+  int dx;
+  int dy;
+  int wMax;
+  CHAR rgchMember[2];
+} HELPWININFOA, *PHELPWININFOA, *LPHELPWININFOA;
+typedef struct tagHELPWININFOW {
+  int wStructSize;
+  int x;
+  int y;
+  int dx;
+  int dy;
+  int wMax;
+  WCHAR rgchMember[2];
+} HELPWININFOW, *PHELPWININFOW, *LPHELPWININFOW;
+#ifdef UNICODE
+typedef MULTIKEYHELPW MULTIKEYHELP;
+typedef LPMULTIKEYHELPW LPMULTIKEYHELP;
+typedef HELPWININFOW HELPWININFO;
+typedef LPHELPWININFOW LPHELPWININFO;
+#else
+typedef MULTIKEYHELPA MULTIKEYHELP;
+typedef LPMULTIKEYHELPA LPMULTIKEYHELP;
+typedef HELPWININFOA HELPWININFO;
+typedef LPHELPWININFOA LPHELPWININFO;
+#endif
 
 // Window functions
 ATOM WINAPI RegisterClassA(const WNDCLASSA*);
