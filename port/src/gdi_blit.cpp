@@ -159,19 +159,49 @@ BrushPaint PaintFor(DCObj* dc, HBRUSH h) {
   return p;
 }
 
+namespace {
+
+// Gives a modulo b (b > 0) from 0 to b - 1, also for a negative a.
+int Wrap(int a, int b) {
+  int m = a % b;
+  return m < 0 ? m + b : m;
+}
+
+}  // namespace
+
 void FillDevice(DCObj* dc, const RECT& device, const BrushPaint& paint, DWORD rop) {
   bool usesPat = (((rop >> 16) & 0xFF) >> 4) != (((rop >> 16) & 0xFF) & 0x0F);
   if (usesPat && paint.null) return;
   DrawScope ds(dc);
   if (!ds.ok) return;
   bool mono = IsMonoDC(dc);
+  bool patCopy = ((rop >> 16) & 0xFF) == 0xF0;
+  // A pattern brush: each row reads one row of the pattern from a
+  // column that moves on by one. A division for each pixel (BrushPaint::At)
+  // is slow on a CPU that divides in software, such as the 68000.
+  const BrushObj* b = paint.brush;
+  bool pattern = usesPat && !paint.null && !paint.solid && b && b->lb.lbStyle != BS_HATCHED &&
+                 b->patWidth > 0 && b->patHeight > 0 &&
+                 b->pattern.size() >= (size_t)b->patWidth * (size_t)b->patHeight;
   for (const RECT& c : ds.clip.Rects()) {
     RECT r = Intersect(c, device);
     if (RectEmpty(r)) continue;
     for (int y = r.top; y < r.bottom; y++) {
       DWORD* row = ds.px.Row(y + ds.origin.y) + ds.origin.x;
-      if (paint.solid && !paint.transparentHatch && ((rop >> 16) & 0xFF) == 0xF0) {
+      if (paint.solid && !paint.transparentHatch && patCopy) {
         for (int x = r.left; x < r.right; x++) row[x] = paint.color;
+        continue;
+      }
+      if (pattern) {
+        const DWORD* pat = b->pattern.data() + (size_t)Wrap(y - paint.oy, b->patHeight) * (size_t)b->patWidth;
+        int px = Wrap(r.left - paint.ox, b->patWidth);
+        for (int x = r.left; x < r.right; x++) {
+          DWORD p = pat[px];
+          if (b->monoPattern) p = p ? paint.back : paint.fore;
+          DWORD v = patCopy ? (p & 0xFFFFFF) : Rop3(rop, row[x] & 0xFFFFFF, 0, p);
+          row[x] = mono ? ToMono(v) : v;
+          if (++px == b->patWidth) px = 0;
+        }
         continue;
       }
       for (int x = r.left; x < r.right; x++) {

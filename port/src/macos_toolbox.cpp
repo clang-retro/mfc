@@ -504,6 +504,13 @@ void Wait(long ms, volatile bool* woken) {
     // Sleep a tick at most, so that the program's other threads run.
     if (WaitNextEvent(everyEvent, &ev, 1, NULL)) {
       Handle(ev);
+      // Take the other events that wait too. The Event Manager queue is
+      // small: when a slow program takes one key at a time, keys typed fast
+      // are lost. The program then also draws once for all of them.
+      for (int i = 0; i < 32 && EventAvail(everyEvent, &ev); i++) {
+        if (!GetNextEvent(everyEvent, &ev)) break;
+        Handle(ev);
+      }
       return;
     }
     // The Event Manager gives no event for a mouse that moves.
