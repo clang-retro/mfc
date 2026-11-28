@@ -51,6 +51,12 @@
 extern char** environ;
 #endif
 extern "C" void _WinportAddResources(const void* anchor, const void* data, size_t size);
+#ifdef __HAIKU__
+#include "haiku.h"
+// libroot keeps main's arguments here.
+extern "C" int __libc_argc;
+extern "C" char** __libc_argv;
+#endif
 
 using namespace winport;
 
@@ -112,6 +118,11 @@ std::string ExecutablePath() {
     if (p.empty() || p.back() != '/') p += '/';
     p.append((const char*)app + 1, app[0] > 31 ? 31 : app[0]);
     return p;
+#elif defined(__HAIKU__)
+    // The path of the program's image, from the kernel.
+    std::string p;
+    if (haiku::ImagePath(&p)) return RealPath(p.c_str());
+    return std::string();
 #elif defined(__MSDOS__)
     // DOS gives the program's path after the environment (argv[0]).
     std::string p = __argc > 0 && __argv[0] ? __argv[0] : "";
@@ -826,6 +837,9 @@ std::vector<std::string> Argv() {
     if (i == 0 || strncmp(argv[i], "-psn_", 5) != 0) v.push_back(argv[i]);
 #elif defined(__MSDOS__)
   for (int i = 0; i < __argc; i++) v.push_back(__argv[i]);
+#elif defined(__HAIKU__)
+  // libroot keeps the arguments that main got.
+  for (int i = 0; i < __libc_argc; i++) v.push_back(__libc_argv[i]);
 #else
   FILE* f = fopen("/proc/self/cmdline", "rb");
   if (f) {

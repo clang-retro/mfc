@@ -9,6 +9,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#ifdef __HAIKU__
+#include <sys/sockio.h>  // SIOCATMARK
+#endif
 #include <signal.h>
 #include <map>
 #include <set>
@@ -60,7 +63,9 @@ const ErrnoMap kErrors[] = {
     {EISCONN, WSAEISCONN},
     {ENOTCONN, WSAENOTCONN},
     {ESHUTDOWN, WSAESHUTDOWN},
+#ifdef ETOOMANYREFS
     {ETOOMANYREFS, WSAETOOMANYREFS},
+#endif
     {ETIMEDOUT, WSAETIMEDOUT},
     {ECONNREFUSED, WSAECONNREFUSED},
     {ELOOP, WSAELOOP},

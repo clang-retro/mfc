@@ -465,6 +465,7 @@ Backend* NewWaylandBackend();  // NULL when there is no Wayland compositor
 Backend* NewCocoaBackend();  // NULL except on macOS
 Backend* NewMacBackend();  // the Toolbox, on the classic Mac OS only
 Backend* NewDosBackend();  // VESA or VGA, on 32-bit DOS only
+Backend* NewHaikuBackend();  // app_server, on Haiku only; NULL without it
 
 }  // namespace winport
 

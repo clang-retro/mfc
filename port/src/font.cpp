@@ -350,6 +350,12 @@ std::vector<std::string> FontDirs() {
   }
   if (const char* windir = getenv("WINDIR")) dirs.push_back(std::string(windir) + "/FONTS");
   dirs.push_back("C:/WINDOWS/FONTS");
+#elif defined(__HAIKU__)
+  // The user's fonts, then those of packages and the system's.
+  if (home) dirs.push_back(std::string(home) + "/config/non-packaged/data/fonts");
+  if (home) dirs.push_back(std::string(home) + "/config/data/fonts");
+  dirs.push_back("/boot/system/non-packaged/data/fonts");
+  dirs.push_back("/boot/system/data/fonts");
 #elif defined(__APPLE__)
   dirs.push_back("/System/Library/Fonts");
   dirs.push_back("/Library/Fonts");
@@ -401,7 +407,8 @@ const wchar_t* const kSerif[] = {L"Times New Roman", L"Liberation Serif", L"Time
 const wchar_t* const kMono[] = {L"Courier New", L"Liberation Mono", L"Courier", L"Cousine", L"DejaVu Sans Mono",
                                 L"FreeMono", L"Menlo", L"Monaco", L"Noto Sans Mono", NULL};
 const wchar_t* const kUi[] = {L"Tahoma", L"Microsoft Sans Serif", L"Arial", L"Liberation Sans", L"Helvetica",
-                              L"Arimo", L"DejaVu Sans", L"FreeSans", L"Geneva", L"Lucida Grande", NULL};
+                              L"Arimo", L"DejaVu Sans", L"FreeSans", L"Geneva", L"Lucida Grande", L"Noto Sans",
+                              NULL};
 
 enum Kind { kKindSans, kKindSerif, kKindMono, kKindUi };
 

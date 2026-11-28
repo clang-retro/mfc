@@ -1,0 +1,73 @@
+// showcase.rc - resources for the showcase sample.
+#include <windows.h>
+#include <afxres.h>
+#include "showcase.h"
+
+IDR_MAINFRAME MENU
+BEGIN
+  POPUP "&File"
+  BEGIN
+    MENUITEM "&New\tCtrl+N", ID_FILE_NEW
+    MENUITEM SEPARATOR
+    MENUITEM "E&xit", ID_APP_EXIT
+  END
+  POPUP "&View"
+  BEGIN
+    MENUITEM "&Toolbar", ID_VIEW_TOOLBAR
+    MENUITEM "&Status Bar", ID_VIEW_STATUS_BAR
+    MENUITEM SEPARATOR
+    MENUITEM "Se&ttings...", ID_VIEW_SETTINGS
+  END
+  POPUP "&Help"
+  BEGIN
+    MENUITEM "&About Showcase...", ID_APP_ABOUT
+  END
+END
+
+IDR_MAINFRAME ACCELERATORS
+BEGIN
+  "N", ID_FILE_NEW, VIRTKEY, CONTROL
+END
+
+// The toolbar: version, image width, image height, count, command IDs.
+IDR_MAINFRAME 241
+BEGIN
+  1, 16, 15, 8,
+  ID_FILE_NEW, ID_FILE_OPEN, ID_FILE_SAVE, 0,
+  ID_EDIT_CUT, ID_EDIT_COPY, ID_EDIT_PASTE, 0
+END
+IDR_MAINFRAME BITMAP "toolbar.bmp"
+
+STRINGTABLE
+BEGIN
+  IDR_MAINFRAME "Showcase\n\nShowcase\n\n\nShowcase.Document\nShowcase Document"
+  AFX_IDS_IDLEMESSAGE "Ready"
+END
+
+IDD_ABOUTBOX DIALOGEX 0, 0, 220, 70
+STYLE DS_MODALFRAME | DS_SHELLFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "About Showcase"
+FONT 8, "MS Shell Dlg"
+BEGIN
+  LTEXT "Showcase, an MFC program", -1, 10, 10, 200, 10
+  LTEXT "Built with clang-retro MFC.", -1, 10, 24, 200, 10
+  DEFPUSHBUTTON "OK", IDOK, 160, 48, 50, 14
+END
+
+IDD_SETTINGS DIALOGEX 0, 0, 230, 130
+STYLE DS_MODALFRAME | DS_SHELLFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Settings"
+FONT 8, "MS Shell Dlg"
+BEGIN
+  LTEXT "&Title:", -1, 10, 12, 40, 10
+  EDITTEXT IDC_NAME, 55, 10, 165, 13, ES_AUTOHSCROLL
+  LTEXT "&Shape:", -1, 10, 32, 40, 10
+  COMBOBOX IDC_SHAPE, 55, 30, 100, 60, CBS_DROPDOWNLIST | WS_TABSTOP
+  AUTOCHECKBOX "&Filled", IDC_FILLED, 165, 31, 55, 12
+  LTEXT "Si&ze:", -1, 10, 52, 40, 10
+  CONTROL "", IDC_SHAPESIZE, "msctls_trackbar32", TBS_AUTOTICKS | WS_TABSTOP, 52, 49, 170, 16
+  LTEXT "&Colors:", -1, 10, 72, 40, 10
+  LISTBOX IDC_COLORS, 55, 70, 100, 34, LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP
+  DEFPUSHBUTTON "OK", IDOK, 115, 110, 50, 14
+  PUSHBUTTON "Cancel", IDCANCEL, 170, 110, 50, 14
+END

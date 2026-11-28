@@ -98,6 +98,10 @@ clang++ -std=c++17 -Ipath/to/mfc/port/include -Ipath/to/mfc/include app.cpp \
 On macOS the system libraries are `-framework Cocoa -framework OpenGL -lpthread` instead
 of `-ldl -lpthread`.
 
+The libraries also build for Haiku (`TARGET=x86_64-unknown-haiku` or
+`i586-pc-haiku`, with a sysroot from clang-retro/unix-sdk), where the
+windows show with the Be API. See [Haiku](docs/haiku.md).
+
 `make install` (to `/usr/local`, or `PREFIX=dir`; `DESTDIR` works too)
 puts the headers in `include/libmfc` (the portable layer's in
 `include/libmfc/winport`), the static libraries in `lib`, the shared
