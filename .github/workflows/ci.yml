@@ -225,3 +225,33 @@ jobs:
           path: |
             build/arm64-apple-macos11/tests/a
             build/arm64-apple-macos11/tests/u
+
+  # Mac OS X 10.4 on PowerPC and Intel: builds the libraries against the
+  # macosx10.4 sysroot of the nightly (libc++ and the builtins) and Apple's
+  # MacOSX10.4u.sdk. This libc++ does not declare std::abs and other
+  # functions through unrelated headers, so the job finds a missing
+  # #include that the native builds do not find. It does not link or run
+  # programs: that needs Apple's ld64 and a Mac OS X guest.
+  cross-macosx:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [i386, powerpc]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      # Unpacks the nightly, puts its bin on PATH and sets $CLANG_DOS.
+      - uses: clang-retro/dos-sdk/.github/actions/setup-toolchain@main
+      # Adds the sysroot and Apple's SDK as $CLANG_DOS/macosx10.4.
+      - uses: clang-retro/dos-sdk/.github/actions/setup-toolchain@main
+        with:
+          sysroots: macosx10.4
+          path: ${{ runner.temp }}/clang-dos
+      - name: Build
+        run: |
+          s="$CLANG_DOS/macosx10.4"
+          make -j"$(nproc)" TARGET=${{ matrix.arch }}-apple-macosx10.4 BIN="$CLANG_DOS/bin" \
+            SDK="$s/MacOSX10.4u.sdk" LIBCXX="$s" AR="$CLANG_DOS/bin/llvm-ar" static

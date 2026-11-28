@@ -21,6 +21,7 @@
 #include <wctype.h>
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace winport {
 namespace help {
