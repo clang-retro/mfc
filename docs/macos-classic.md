@@ -45,7 +45,9 @@ The backend gives the input to the program as Windows does:
 - The Finder's Quit Application command asks the active window to close.
 
 The event loop calls `WaitNextEvent` with a sleep of one tick, and then
-lets the other threads run.
+lets the other threads run. When it gets an event, it also takes the other
+events that wait (32 at most). The Event Manager queue is small, and a slow
+program loses keys that you type fast if it takes one event each time.
 
 The backend starts the Toolbox (`InitGraf` to `InitCursor`) before it
 shows the first window. A program that starts the Toolbox itself sets

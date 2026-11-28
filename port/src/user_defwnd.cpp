@@ -411,13 +411,42 @@ void SetBarShown(Window* w, int bar, bool show) {
                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-void RedrawBars(Window* w) {
+// Draws the window scroll bars again: SB_BOTH, or SB_HORZ or SB_VERT only.
+void RedrawBars(Window* w, int bar = SB_BOTH) {
   if (!ReallyVisible(w)) return;
   HDC dc = GetWindowDC(w->hwnd);
   Frame f = Layout(w);
-  DrawScrollBar(w, dc, f.vscroll, true);
-  DrawScrollBar(w, dc, f.hscroll, false);
+  if (bar != SB_HORZ) DrawScrollBar(w, dc, f.vscroll, true);
+  if (bar != SB_VERT) DrawScrollBar(w, dc, f.hscroll, false);
   ReleaseDC(w->hwnd, dc);
+}
+
+// What a window scroll bar shows: the thumb's offset and length in
+// pixels, -1 for both when it shows no thumb, and whether it is enabled.
+struct BarLook {
+  int pos = -1, len = -1;
+  bool enabled = false;
+  bool operator==(const BarLook& o) const { return pos == o.pos && len == o.len && enabled == o.enabled; }
+};
+
+// Gives what the SB_HORZ or SB_VERT scroll bar of w shows.
+BarLook LookOf(Window* w, int bar) {
+  BarLook look;
+  const ScrollBar* sb = BarOf(w, bar);
+  look.enabled = sb->enabled;
+  Frame f = Layout(w);
+  const RECT& r = bar == SB_VERT ? f.vscroll : f.hscroll;
+  bool vertical = bar == SB_VERT;
+  int a = vertical ? r.right - r.left : r.bottom - r.top;
+  int length = vertical ? r.bottom - r.top : r.right - r.left;
+  if (a * 2 > length) a = length / 2;
+  int pos, len;
+  ThumbOf(sb->info, length - 2 * a, &pos, &len);
+  if (sb->enabled && len > 0 && sb->info.nMax > sb->info.nMin) {
+    look.pos = pos;
+    look.len = len;
+  }
+  return look;
 }
 
 LRESULT HitTest(Window* w, POINT screen) {
@@ -1311,6 +1340,8 @@ int WINAPI SetScrollInfo(HWND h, int bar, LPCSCROLLINFO si, BOOL redraw) {
   if (!w || !si || (bar != SB_HORZ && bar != SB_VERT)) return 0;
   ScrollBar* sb = BarOf(w, bar);
   SCROLLINFO& s = sb->info;
+  const BarLook was = LookOf(w, bar);
+  const DWORD wasStyle = w->style;
   if (si->fMask & SIF_RANGE) {
     s.nMin = si->nMin;
     s.nMax = si->nMax;
@@ -1333,7 +1364,12 @@ int WINAPI SetScrollInfo(HWND h, int bar, LPCSCROLLINFO si, BOOL redraw) {
       SetBarShown(w, bar, needed);
     }
   }
-  if (redraw) RedrawBars(w);
+  // An edit control sets its scroll bars after each key. Draw only the bar
+  // that looks different: drawing is slow on a 68000.
+  if (redraw) {
+    if (w->style != wasStyle) RedrawBars(w);
+    else if (!(LookOf(w, bar) == was)) RedrawBars(w, bar);
+  }
   return s.nPos;
 }
 

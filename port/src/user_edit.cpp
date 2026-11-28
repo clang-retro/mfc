@@ -313,6 +313,16 @@ void PlaceCaret(Edit* e) {
 
 void Redraw(Edit* e) { InvalidateRect(e->hwnd, NULL, FALSE); }
 
+// Makes lines first to last - 1 draw again (last -1: to the bottom of the
+// control). A line that is not shown does not draw.
+void RedrawLines(Edit* e, int first, int last) {
+  RECT rc;
+  GetClientRect(e->hwnd, &rc);
+  if (first > e->firstLine) rc.top = e->fmt.top + (first - e->firstLine) * e->lineHeight;
+  if (last >= 0) rc.bottom = std::min(rc.bottom, (LONG)(e->fmt.top + (last - e->firstLine) * e->lineHeight));
+  if (rc.top < rc.bottom) InvalidateRect(e->hwnd, &rc, FALSE);
+}
+
 // Scrolls so that the caret shows; returns whether anything moved.
 bool ScrollToCaret(Edit* e) {
   bool moved = false;
@@ -418,11 +428,35 @@ bool Replace(Edit* e, std::wstring ins, bool undo, bool typed) {
   e->anchor = e->caret = start + (int)ins.size();
   e->modified = true;
   e->typing = typed;
+  // Only the lines that change draw again: a draw of all the control for
+  // each key is slow on a 68000. With word wrap, a change can also move a
+  // word to the line before.
+  std::vector<Line> was = e->lines;
+  int first = LineOf(e, start);
+  if (e->Wraps() && first > 0) first--;
+  int firstWas = e->firstLine;
   Layout(e);
   int maxFirst = std::max(0, (int)e->lines.size() - 1);
   if (e->firstLine > maxFirst) e->firstLine = maxFirst;
   UpdateScrollBars(e);
-  Redraw(e);
+  if (!e->Multi() || e->firstLine != firstWas) {
+    Redraw(e);
+  } else {
+    // The lines after the old selection that only moved along by delta
+    // did not change.
+    int last = -1;
+    if (was.size() == e->lines.size()) {
+      int delta = (int)ins.size() - (end - start);
+      last = (int)was.size();
+      while (last > first + 1) {
+        const Line& a = was[last - 1];
+        const Line& b = e->lines[last - 1];
+        if (a.start < end || b.start != a.start + delta || b.len != a.len || b.brk != a.brk || b.width != a.width) break;
+        last--;
+      }
+    }
+    RedrawLines(e, first, last);
+  }
   ScrollToCaret(e);
   Notify(e, EN_UPDATE);
   Notify(e, EN_CHANGE);
