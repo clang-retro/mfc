@@ -121,7 +121,8 @@ fi
 if [ -z "${HAIKU_VM_RUNNING:-}" ]; then
   python3 "$HAIKU_VM" serve "$HAIKU_IMAGE" --files "$T" --shots "$T/shots" --port "$PORT" > "$T/vm.log" 2>&1 &
   vm=$!
-  trap 'python3 "$HAIKU_VM" stop --port "$PORT" 2>/dev/null; wait $vm 2>/dev/null' EXIT
+  # A "serve" that is still starting does not take "stop": kill it then.
+  trap 'python3 "$HAIKU_VM" stop --port "$PORT" 2>/dev/null || kill $vm 2>/dev/null; wait $vm 2>/dev/null' EXIT
 fi
 # Runs a shell command in Haiku and writes its output; the status is the
 # command's.
