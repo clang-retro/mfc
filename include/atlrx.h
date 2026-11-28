@@ -36,8 +36,8 @@ enum REParseError {
 class CAtlRECharTraitsA {
 public:
   typedef char RECHAR;
-  static RECHAR ToLower(RECHAR ch) { return (RECHAR)::tolower((unsigned char)ch); }
-  static RECHAR ToUpper(RECHAR ch) { return (RECHAR)::toupper((unsigned char)ch); }
+  static RECHAR ToLower(RECHAR ch) { return (RECHAR)(::tolower)((unsigned char)ch); }
+  static RECHAR ToUpper(RECHAR ch) { return (RECHAR)(::toupper)((unsigned char)ch); }
   static size_t Length(const RECHAR* psz) { return ::strlen(psz); }
 };
 

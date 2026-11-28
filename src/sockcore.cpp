@@ -449,6 +449,12 @@ BOOL CAsyncSocket::GetPeerName(CString& rPeerAddress, UINT& rPeerPort) {
   memset(&sa, 0, sizeof(sa));
   int nLen = sizeof(sa);
   if (!GetPeerName((SOCKADDR*)&sa, &nLen)) return FALSE;
+  // Windows's SOCKADDR_IN cannot hold an IPv6 address, and the call
+  // fails. Some systems (Haiku) have a larger sockaddr_in that can.
+  if (sa.sin_family != AF_INET) {
+    ::WSASetLastError(WSAEFAULT);
+    return FALSE;
+  }
   AddressToString(sa, rPeerAddress, rPeerPort);
   return TRUE;
 }
@@ -462,6 +468,12 @@ BOOL CAsyncSocket::GetSockName(CString& rSocketAddress, UINT& rSocketPort) {
   memset(&sa, 0, sizeof(sa));
   int nLen = sizeof(sa);
   if (!GetSockName((SOCKADDR*)&sa, &nLen)) return FALSE;
+  // Windows's SOCKADDR_IN cannot hold an IPv6 address, and the call
+  // fails. Some systems (Haiku) have a larger sockaddr_in that can.
+  if (sa.sin_family != AF_INET) {
+    ::WSASetLastError(WSAEFAULT);
+    return FALSE;
+  }
   AddressToString(sa, rSocketAddress, rSocketPort);
   return TRUE;
 }

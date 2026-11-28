@@ -520,6 +520,24 @@ void WatchFile() {
       if (r > 0) FileChanged();
     }
   }).detach();
+#elif defined(__HAIKU__)
+  // Haiku's node monitor needs a BLooper; looking at the file four times
+  // a second is enough for an editor that saves it.
+  std::thread([file] {
+    struct stat was;
+    bool had = stat(file.c_str(), &was) == 0;
+    for (;;) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(250));
+      struct stat now;
+      bool has = stat(file.c_str(), &now) == 0;
+      if (has != had || (has && (now.st_ino != was.st_ino || now.st_size != was.st_size ||
+                                 now.st_mtim.tv_sec != was.st_mtim.tv_sec ||
+                                 now.st_mtim.tv_nsec != was.st_mtim.tv_nsec)))
+        FileChanged();
+      had = has;
+      was = now;
+    }
+  }).detach();
 #endif
 }
 

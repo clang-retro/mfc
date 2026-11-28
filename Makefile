@@ -25,7 +25,7 @@ TARGET ?= i586-pc-windows5.1-gnu
 # Linux and macOS targets (make TARGET=x86_64-linux-gnu, or
 # TARGET=arm64-apple-macos11) build over the portable Win32 layer in
 # port/, which goes into libwinport.a beside the MFC libraries.
-ifneq ($(findstring linux,$(TARGET))$(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
+ifneq ($(findstring linux,$(TARGET))$(findstring darwin,$(TARGET))$(findstring apple,$(TARGET))$(findstring haiku,$(TARGET)),)
 PORTABLE = 1
 endif
 # The classic Mac OS (make TARGET=m68k-apple-macos or
@@ -87,6 +87,12 @@ TARGET_FLAGS = --config=$(CFG)
 else
 OUT ?= build/$(TARGET)
 TARGET_FLAGS = --target=$(TARGET) $(if $(SYSROOT),--sysroot=$(SYSROOT),)
+endif
+# Haiku (make TARGET=x86_64-unknown-haiku SYSROOT=...): its BSD
+# functions (timegm, dl_iterate_phdr) need _DEFAULT_SOURCE and libbsd.
+ifneq ($(findstring haiku,$(TARGET)),)
+HAIKU = 1
+TARGET_FLAGS += -D_DEFAULT_SOURCE
 endif
 ifeq ($(PORTABLE)$(SYSROOT),1)
 PREFIX ?= /usr/local
@@ -250,6 +256,10 @@ ifneq ($(findstring darwin,$(TARGET))$(findstring apple,$(TARGET)),)
 SHLIB_EXT = dylib
 SHLIB_SYSLIBS = -framework Cocoa -framework OpenGL -lpthread
 SHLIB_FLAGS = -dynamiclib -Wl,-install_name,@rpath/$(notdir $@) -Wl,-rpath,@loader_path
+else ifeq ($(HAIKU),1)
+SHLIB_EXT = so
+SHLIB_SYSLIBS = -lbe -lnetwork -lbsd
+SHLIB_FLAGS = -shared -Wl,-soname,$(notdir $@)
 else
 SHLIB_EXT = so
 SHLIB_SYSLIBS = -ldl -lpthread
@@ -435,6 +445,8 @@ else ifeq ($(MACOS_CLASSIC),1)
 	BIN=$(BIN) MACSDK=$(MACSDK) TARGET=$(TARGET) OUT=$(OUT) sh tests/run-macos-tests.sh
 else ifeq ($(WIN16),1)
 	BIN=$(BIN) SYSROOT=$(SYSROOT) OUT=$(OUT) sh tests/run-win16-tests.sh
+else ifeq ($(HAIKU),1)
+	BIN=$(BIN) SYSROOT=$(SYSROOT) TARGET=$(TARGET) OUT=$(OUT) sh tests/run-haiku-tests.sh
 else
 	BIN=$(BIN) STDLIB="$(STDLIB)" RC="$(TEST_RC)" LDFLAGS="$(LDFLAGS)" CFG=$(CFG) SYSROOT=$(SYSROOT) TARGET=$(TARGET) OUT=$(OUT) sh tests/run-tests.sh
 endif

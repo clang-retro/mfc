@@ -6,7 +6,8 @@
 // "headless" keeps every window in memory, which suits tests and
 // programs run without a display. Without it macOS uses Cocoa; elsewhere
 // the compositor is used when WAYLAND_DISPLAY names one, then the X
-// display when DISPLAY names one, and headless otherwise. On the classic
+// display when DISPLAY names one, and headless otherwise. On Haiku the
+// Haiku backend (backend_haiku.cpp) shows the windows. On the classic
 // Mac OS the Toolbox shows the windows, and on 32-bit DOS the DOS backend
 // (backend_dos.cpp). WINPORT_SCREEN=WIDTHxHEIGHT sets the headless
 // screen's size, and on DOS the screen mode's.
@@ -92,6 +93,18 @@ Backend* GetBackend() {
     const char* name = getenv("WINPORT_BACKEND");
     Backend* b = NULL;
     if (!name || strcmp(name, "headless") != 0) b = NewDosBackend();
+    return b ? b : NewHeadlessBackend();
+  }();
+  return b;
+}
+#elif defined(__HAIKU__)
+// Haiku: app_server shows the windows (backend_haiku.cpp), unless
+// WINPORT_BACKEND is "headless" or there is no app_server.
+Backend* GetBackend() {
+  static Backend* b = [] {
+    const char* name = getenv("WINPORT_BACKEND");
+    Backend* b = NULL;
+    if (!name || strcmp(name, "headless") != 0) b = NewHaikuBackend();
     return b ? b : NewHeadlessBackend();
   }();
   return b;

@@ -590,12 +590,17 @@ BOOL WINAPI GetCommState(HANDLE h, LPDCB d) {
   d->DCBlength = sizeof(DCB);
   d->fBinary = 1;
   d->BaudRate = BaudOf(cfgetospeed(&t));
+#ifdef __HAIKU__
+  // Haiku has 7 and 8 bits only: CS5, CS6 and CS7 are all 0.
+  d->ByteSize = (t.c_cflag & CSIZE) == CS8 ? 8 : 7;
+#else
   switch (t.c_cflag & CSIZE) {
     case CS5: d->ByteSize = 5; break;
     case CS6: d->ByteSize = 6; break;
     case CS7: d->ByteSize = 7; break;
     default: d->ByteSize = 8; break;
   }
+#endif
   d->Parity = NOPARITY;
   if (t.c_cflag & PARENB) {
 #ifdef CMSPAR

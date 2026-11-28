@@ -226,6 +226,81 @@ jobs:
             build/arm64-apple-macos11/tests/a
             build/arm64-apple-macos11/tests/u
 
+  # Haiku: the libraries over the portable layer with the Haiku backend,
+  # built with the runner's clang 18 against a sysroot made from Haiku's
+  # own packages (clang-retro/unix-sdk's haiku/build-sysroot.sh). For
+  # x86_64, the tests and the showcase sample run in the newest nightly
+  # image of Haiku in QEMU with KVM, and the screenshots of the sample are
+  # kept. For 32-bit x86 the tests are only built.
+  haiku:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, triple: x86_64-unknown-haiku, image: x86_64, run: true }
+          - { arch: x86, triple: i586-pc-haiku, image: x86_gcc2h, run: false }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/checkout@v4
+        with:
+          repository: clang-retro/unix-sdk
+          path: unix-sdk
+          persist-credentials: false
+      - name: Install the tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends clang lld llvm python3-zstandard \
+            ${{ matrix.run && 'qemu-system-x86' || '' }}
+      - name: Restore the sysroot packages
+        uses: actions/cache@v4
+        with:
+          path: ~/haiku-packages
+          key: haiku-packages-v1-${{ matrix.arch }}-${{ github.run_id }}
+          restore-keys: haiku-packages-v1-${{ matrix.arch }}-
+      - name: Build the sysroot
+        run: |
+          rm -f ~/haiku-packages/*.repo
+          ARCH=${{ matrix.arch }} WORK=$HOME/haiku-packages unix-sdk/haiku/build-sysroot.sh $RUNNER_TEMP/sysroot
+      - name: Build
+        run: make -j"$(nproc)" TARGET=${{ matrix.triple }} SYSROOT=$RUNNER_TEMP/sysroot STDLIB= AR=llvm-ar
+      - name: Find the newest Haiku image
+        if: matrix.run
+        id: image
+        run: echo "name=$(LIST=1 unix-sdk/haiku/tools/fetch-image.sh ${{ matrix.image }})" >> "$GITHUB_OUTPUT"
+      - name: Restore the Haiku image
+        if: matrix.run
+        uses: actions/cache@v4
+        with:
+          path: ~/haiku-images
+          key: ${{ steps.image.outputs.name }}
+      # The runner has KVM, but only for the group kvm; a udev rule opens it.
+      - name: Enable KVM
+        if: matrix.run
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Test
+        run: |
+          if [ "${{ matrix.run }}" = true ]; then
+            export HAIKU_IMAGE=$(unix-sdk/haiku/tools/fetch-image.sh ${{ matrix.image }} ~/haiku-images)
+          fi
+          make check TARGET=${{ matrix.triple }} SYSROOT=$RUNNER_TEMP/sysroot STDLIB= AR=llvm-ar \
+            HAIKU_VM=unix-sdk/haiku/tools/haiku-vm.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-output-haiku-${{ matrix.arch }}
+          path: |
+            build/${{ matrix.triple }}/tests/a
+            build/${{ matrix.triple }}/tests/u
+            build/${{ matrix.triple }}/tests/shots
+            build/${{ matrix.triple }}/tests/*.log
+
   # Mac OS X 10.4 on PowerPC and Intel: builds the libraries against the
   # macosx10.4 sysroot of the nightly (libc++ and the builtins) and Apple's
   # MacOSX10.4u.sdk. This libc++ does not declare std::abs and other
