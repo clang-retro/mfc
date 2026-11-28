@@ -4243,6 +4243,26 @@ static IPicture* RoundTrip(IPicture* pic, LONG* pcbSaved) {
   return out;
 }
 
+// Checks that a multiline edit control scrolls to the thumb position that
+// WM_VSCROLL gives, also from a position that is not the top.
+static void TestEditThumbScroll() {
+  HWND host = ::CreateWindowExW(0, L"STATIC", L"", WS_POPUP, 0, 0, 300, 200, NULL, NULL, NULL, NULL);
+  HWND edit = ::CreateWindowExW(0, L"Edit", L"", WS_CHILD | WS_VISIBLE | WS_HSCROLL | WS_VSCROLL | ES_AUTOHSCROLL | ES_AUTOVSCROLL | ES_MULTILINE, 0, 0, 200, 80,
+                                host, NULL, NULL, NULL);
+  std::wstring text = L"line1";
+  for (int i = 2; i <= 25; i++) text += L"\r\nline" + std::to_wstring(i);
+  ::SetWindowTextW(edit, text.c_str());
+  ::SendMessageW(edit, EM_LINESCROLL, 0, 4);
+  CHECK(::SendMessageW(edit, EM_GETFIRSTVISIBLELINE, 0, 0) == 4);
+  CHECK(::GetScrollPos(edit, SB_VERT) == 4);
+  for (int pos = 5; pos <= 7; pos++) ::SendMessageW(edit, WM_VSCROLL, MAKEWPARAM(SB_THUMBTRACK, pos), 0);
+  ::SendMessageW(edit, WM_VSCROLL, MAKEWPARAM(SB_THUMBPOSITION, 7), 0);
+  ::SendMessageW(edit, WM_VSCROLL, SB_ENDSCROLL, 0);
+  CHECK(::SendMessageW(edit, EM_GETFIRSTVISIBLELINE, 0, 0) == 7);
+  CHECK(::GetScrollPos(edit, SB_VERT) == 7);
+  ::DestroyWindow(host);
+}
+
 static void TestOleBits() {
   CHECK(SUCCEEDED(::OleInitialize(NULL)));
 
@@ -4908,6 +4928,7 @@ int main() {
   TestShellLink();
   TestOleBits();
 #endif
+  TestEditThumbScroll();
   printf("%s: %d failure(s)\n", g_failures ? "FAIL" : "PASS", g_failures);
   return g_failures ? 1 : 0;
 }
